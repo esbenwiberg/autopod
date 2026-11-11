@@ -50,6 +50,10 @@ and selected by ordinary approval without repeating preparation. An admission
 without a certified candidate remains reconciliation-required, not replayable.
 A failed checks-only invocation requires its exact execution/retry evidence;
 ordinary Rework/Resume cannot bypass the rewrite selection or restart an agent.
+Fix validation and Retry checks eligibility must report that custody before
+accepting a request; a request receipt is not proof that execution started.
+Fresh validation must recreate its declared dependencies, not inherit a coding
+worker's temporary installations; see [fresh validation setup](fresh-validation-setup.md).
 For a settled failed sandbox selection with immutable execution ownership, use the
 [rewrite-owned repair continuation](approval-rewrite-repair.md). It preserves both
 originals and requires manual checkout access, separate retry permission, fresh

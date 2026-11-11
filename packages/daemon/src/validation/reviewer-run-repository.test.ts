@@ -47,8 +47,9 @@ it.each([
     expect(ledger.snapshot('acceptance').recordedTotalTokens).toBe(100);
     if (mode === 'hard') {
       expect(() => runs.reserve('in-flight', pod, config, config.ai.main)).toThrow(
-        'Reconcile task usage',
+        'Task token accounting incomplete',
       );
+      expect(runs.list('acceptance')).toEqual([]);
     } else {
       runs.reserve('in-flight', pod, config, config.ai.main);
       expect(db.prepare('SELECT state FROM isolated_reviewer_runs').get()).toEqual({
@@ -164,6 +165,91 @@ it('refuses to reconcile active, uncleaned or unknown reviewer runs', async () =
     const active = 'review-00000000-0000-4000-8000-000000000002';
     runs.reserve(active, pod, config, config.ai.main);
     expect(() => runs.reconcile('stuck', active, 'operator', 'x')).toThrow('still active');
+  } finally {
+    db.close();
+  }
+});
+
+it.each([
+  { policy: 'hard', limit: 120000, status: 'below_recorded_limit', tokens: 100, admitted: true },
+  { policy: 'hard', limit: 120000, status: 'unavailable', tokens: 100, admitted: false },
+  { policy: 'soft', limit: 120000, status: 'unavailable', tokens: 100, admitted: true },
+  { policy: 'hard', limit: null, status: 'unlimited', tokens: 100, admitted: true },
+  { policy: 'hard', limit: 120000, status: 'exhausted', tokens: 120000, admitted: false },
+  { policy: 'soft', limit: 120000, status: 'exhausted', tokens: 120000, admitted: true },
+  { policy: 'hard', limit: null, status: 'unavailable', tokens: 100, admitted: false },
+] as const)('explains admission for $policy/$status at $limit', async (scenario) => {
+  const db = createTestDb();
+  try {
+    const { services } = createTestConfiguration(db);
+    const config = await resolveLaunch(
+      {
+        repositoryId: 'repo-a',
+        task: 'Review',
+        overrides: {
+          workflow: { tokenBudget: scenario.limit, tokenBudgetPolicy: scenario.policy },
+        },
+      },
+      services,
+    );
+    insertConfigurationTestPod(db, 'diagnostic');
+    const repo = createPodRepository(db);
+    const ledger = repo.taskExecutions;
+    if (!ledger) throw new Error('Missing task ledger');
+    ledger.register('diagnostic');
+    const reason =
+      scenario.limit === null
+        ? 'Task budget source unavailable.'
+        : 'Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.';
+    const runs = new ReviewerRunRepository(db, () => ({
+      ...ledger.snapshot('diagnostic'),
+      tokenBudget: scenario.limit,
+      recordedTotalTokens: scenario.tokens,
+      budgetCheck: { status: scenario.status, reason },
+    }));
+    const pod = repo.getOrThrow('diagnostic');
+    const reserve = () => runs.reserve('first-review', pod, config, config.ai.main);
+    if (scenario.admitted) {
+      reserve();
+      expect(runs.list(pod.id)).toHaveLength(1);
+      expect(() => runs.reserve('second-review', pod, config, config.ai.main)).toThrow(
+        /previous reviewer.*Inspect reviewer runs/,
+      );
+    } else {
+      try {
+        reserve();
+        throw new Error('Expected admission refusal');
+      } catch (error) {
+        if (scenario.status === 'exhausted') {
+          expect(error).toMatchObject({ code: 'REVIEWER_BUDGET_EXHAUSTED' });
+          expect(String(error)).toContain('120000 recorded tokens');
+        } else {
+          expect(error).toMatchObject({ code: 'REVIEWER_RECONCILIATION_REQUIRED' });
+          expect(String(error)).toContain(reason);
+          expect(String(error)).toContain('Reviewer not started');
+          expect(String(error)).not.toContain('previous reviewer');
+          if (scenario.limit !== null)
+            expect(String(error)).toContain('hard task token limit 120000');
+        }
+      }
+      expect(runs.list(pod.id)).toEqual([]);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+it('explains an exhausted reviewer cap independently of unlimited task tokens', async () => {
+  const { db, config, runs, ledger, pod, id } = await timedOutReview('soft');
+  try {
+    ledger.raiseBudget(pod.id, null, 100000, 'operator');
+    runs.reconcile(pod.id, id, 'operator', 'Measured usage', { inputTokens: 80, outputTokens: 20 });
+    config.workflow.reviewerTokenBudget = 100;
+    config.workflow.tokenBudget = null;
+    expect(() => runs.reserve('next', pod, config, config.ai.main)).toThrow(
+      'Reviewer token limit 100 exhausted (100 recorded tokens)',
+    );
+    expect(runs.list(pod.id)).toHaveLength(1);
   } finally {
     db.close();
   }

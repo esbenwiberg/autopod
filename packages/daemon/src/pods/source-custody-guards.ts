@@ -6,6 +6,10 @@ import {
   assertArtifactChecksResourceAvailable,
 } from './artifact-checks-recovery-repository.js';
 import {
+  assertRecoveryForkResourceAvailable,
+  createRecoveryForkRepository,
+} from './recovery-fork-repository.js';
+import {
   checkpointHash,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
@@ -15,6 +19,7 @@ import { assertValidationResourceReleasable } from './validation-execution-evide
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
   assertArtifactChecksResourceAvailable(db, containerId);
+  assertRecoveryForkResourceAvailable(db, containerId);
   assertValidationResourceReleasable(db, containerId);
   if (
     db
@@ -42,8 +47,11 @@ export function assertSourceAvailable(
   db: Database.Database,
   podId: string,
   owner = sourceOwnerScope(db).getStore(),
+  initialInsert = false,
 ): void {
   assertArtifactChecksAvailable(db, podId);
+  createRecoveryForkRepository(db).assertOriginalAvailable(podId);
+  if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
   assertStalledRecoveryAvailable(db, podId, true);
   createRetainedCheckpointRepository(db).assertAvailable(podId);
   const blocked = db
@@ -78,8 +86,52 @@ export function assertSourceAvailable(
     );
 }
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
-export function assertSourceDeliveryAllowed(db: Database.Database, podId: string): void {
+function assertSourceDeliveryEligibility(
+  db: Database.Database,
+  podId: string,
+  initialInsert = false,
+  approvalEntry = false,
+): void {
   assertArtifactChecksAvailable(db, podId);
+  createRecoveryForkRepository(db).assertOriginalAvailable(podId);
+  if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
+  const fork = createRecoveryForkRepository(db).child(podId);
+  if (fork) {
+    const row = db
+      .prepare(
+        'SELECT skip_validation,validation_waiver,validation_overrides,last_validation_result,readiness_review FROM pods WHERE id=?',
+      )
+      .get(podId) as
+      | {
+          skip_validation: number;
+          validation_waiver: string | null;
+          validation_overrides: string | null;
+          last_validation_result: string | null;
+          readiness_review: string | null;
+        }
+      | undefined;
+    const result = row?.last_validation_result ? JSON.parse(row.last_validation_result) : null;
+    createRecoveryForkRepository(db).checked(podId, !approvalEntry);
+    const settled =
+      fork.facts.worker &&
+      db
+        .prepare(
+          "SELECT 1 FROM retained_task_agent_runs WHERE id=? AND ended_at IS NOT NULL AND outcome='completed' AND failure_category IS NOT 'execution_termination_unverified'",
+        )
+        .get(fork.facts.worker.runId);
+    if (
+      !settled ||
+      row?.skip_validation ||
+      row?.validation_waiver ||
+      (row?.validation_overrides && JSON.parse(row.validation_overrides).length) ||
+      result?.overall !== 'pass' ||
+      result?.taskReview?.status !== 'pass'
+    )
+      sourceAdoptionError(
+        'Recovery fork requires settled coding, fresh enabled checks, independent review and separate human approval; waivers or inherited passes cannot authorize delivery.',
+        'RECOVERY_FORK_DELIVERY_HELD',
+      );
+  }
   const recovery = createRetainedCheckpointRepository(db).latest(podId);
   if (recovery?.binding.continuation) {
     const current = db
@@ -134,4 +186,17 @@ export function assertSourceDeliveryAllowed(db: Database.Database, podId: string
       'Source adoption authorizes checks only; original delivery constraints and source/report custody remain held.',
       'SOURCE_ADOPTION_DELIVERY_HELD',
     );
+}
+
+/** Entry permits recording a first human decision; it grants no publication capability. */
+export function assertSourceApprovalEntryAllowed(db: Database.Database, podId: string): void {
+  assertSourceDeliveryEligibility(db, podId, false, true);
+}
+/** Publication always requires the durable source/check-bound human decision. */
+export function assertSourceDeliveryAllowed(
+  db: Database.Database,
+  podId: string,
+  initialInsert = false,
+): void {
+  assertSourceDeliveryEligibility(db, podId, initialInsert, false);
 }

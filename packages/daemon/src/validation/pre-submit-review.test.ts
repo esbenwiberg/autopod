@@ -8,11 +8,60 @@ vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
 });
 
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
-import { hashDiff, runPreSubmitReview } from './pre-submit-review.js';
+import { buildPrompt, hashDiff, runPreSubmitReview } from './pre-submit-review.js';
 
 const mockRunClaudeCli = vi.mocked(runClaudeCli);
 
 describe('runPreSubmitReview', () => {
+  it('includes prompt framing overhead in the byte ceiling and supports packet-only Codex', async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValue({ stdout: '{"status":"pass","reasoning":"Complete","issues":[]}' });
+    const opts = {
+      task: 'Synthetic task',
+      diff: '',
+      reviewerModel: 'codex',
+      reviewerProvider: 'openai' as const,
+      reviewerExecutor: executor,
+    };
+    const available = 1_000_000 - Buffer.byteLength(buildPrompt(opts), 'utf8');
+    expect(
+      (await runPreSubmitReview({ ...opts, diff: 'x'.repeat(available + 1) })).skipReason,
+    ).toBe('incomplete-input');
+    expect(executor).not.toHaveBeenCalled();
+    expect((await runPreSubmitReview({ ...opts, diff: 'x'.repeat(available) })).status).toBe(
+      'pass',
+    );
+    expect(executor).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    'truncated',
+    'utf8',
+    'task',
+    'summary',
+    'deviations',
+  ])('does not execute an incomplete %s packet', async (kind) => {
+    const executor = vi
+      .fn()
+      .mockResolvedValue({ stdout: '{"status":"pass","reasoning":"partial","issues":[]}' });
+    const huge = 'é'.repeat(500_000);
+    const result = await runPreSubmitReview({
+      task: kind === 'task' ? huge : 'Review synthetic code',
+      diff:
+        kind === 'truncated'
+          ? 'diff --git a/a b/a\n⚠ DIFF TRUNCATED: missing files'
+          : kind === 'utf8'
+            ? huge
+            : 'diff --git a/a b/a\n+ok',
+      plannedSummary: kind === 'summary' ? huge : undefined,
+      plannedDeviations:
+        kind === 'deviations' ? [{ step: '1', planned: '', actual: huge, reason: '' }] : undefined,
+      reviewerExecutor: executor,
+      reviewerModel: 'sonnet',
+    });
+    expect(result).toMatchObject({ status: 'skipped', skipReason: 'incomplete-input' });
+    expect(executor).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     mockRunClaudeCli.mockReset();
   });

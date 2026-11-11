@@ -11,6 +11,11 @@ export type ReviewerExecutor = ((input: {
 }) => Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage; model?: string }>) & {
   /** Why another reviewer would be refused right now (e.g. unreconciled usage), else null. */
   retryBlocker?: () => string | null;
+  /** Freeze and bound the final packet (including references) without paid inference. */
+  prepare?: (input: Parameters<ReviewerExecutor>[0]) => Promise<{
+    inputHash: string;
+    execute: () => ReturnType<ReviewerExecutor>;
+  }>;
 };
 
 /** Prefix of the skip-reason suffix written when the infrastructure retry was refused. */

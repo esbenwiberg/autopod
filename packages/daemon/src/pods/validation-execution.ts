@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { ExecutionTarget, Pod, TaskRetryIdentity, ValidationResult } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { configurationDigest } from '../configuration/configuration-digest.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
@@ -14,10 +15,12 @@ import type {
 import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import type { PodRepository } from './pod-repository.js';
+import { observeRecoveryCheckSource } from './recovery-fork-checks.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
 import { requiresValidationSettlement } from './validation-recovery-policy.js';
+import { captureDockerValidationResourceScope } from './validation-resource-scope.js';
 
 interface ValidationExecutionDependencies {
   logger: Logger;
@@ -32,6 +35,8 @@ interface ValidationExecutionDependencies {
     | 'validationExecutions'
     | 'retainedCheckpoints'
     | 'retainedCoding'
+    | 'approvalRewrites'
+    | 'recoveryForks'
     | 'atomically'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
@@ -206,12 +211,35 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           }
         };
         await verifyRepair();
+        const dispatchPod = ownership.assertCurrent();
+        const rewrite = podRepo.approvalRewrites?.latest(dispatchPod);
+        const dockerRewrite =
+          dispatchPod.executionTarget === 'local' && !!rewrite?.activated && !rewrite.checked;
+        const containerId = dispatchPod.containerId;
+        if (
+          dockerRewrite &&
+          (rewrite?.activated?.generation !== dispatchPod.lifecycleGeneration ||
+            rewrite?.prepared?.worktreePath !== dispatchPod.worktreePath ||
+            !containerId)
+        )
+          throw new TaskRetryBlockedError('Docker rewrite checks source selection changed');
+        const resourceScope =
+          dockerRewrite && containerId
+            ? await captureDockerValidationResourceScope(cm, containerId)
+            : undefined;
+        ownership.assertCurrent();
+        if (dockerRewrite && validationController.signal.aborted)
+          throw new TaskRetryBlockedError('Validation cancelled before admission');
         const admission =
           retryLedger && identity
             ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
                 ...infrastructureBackoffs,
               ])
             : null;
+        if (dockerRewrite && !admission)
+          throw new TaskRetryBlockedError(
+            'Docker rewrite checks require a durable validation admission',
+          );
         let dispatchId: string | null | undefined = null;
         if (admission && retryLedger) {
           try {
@@ -224,6 +252,19 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             await verifyRepair();
             if (validationController.signal.aborted)
               throw new TaskRetryBlockedError('Validation admission cancelled before execution');
+            if (
+              dockerRewrite &&
+              containerId &&
+              (await captureDockerValidationResourceScope(cm, containerId)) !== resourceScope
+            )
+              throw new TaskRetryBlockedError(
+                'Docker engine/resource changed before validation dispatch',
+              );
+            ownership.assertCurrent();
+            if (validationController.signal.aborted)
+              throw new TaskRetryBlockedError(
+                'Validation admission cancelled during resource observation',
+              );
             atomicPodChange(podRepo, () => {
               if (
                 recoveryBudget &&
@@ -253,8 +294,12 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 ownership.assertCurrent(),
                 admission.id,
                 attempt,
-                cm.executionResourceScope,
+                dockerRewrite ? resourceScope : cm.executionResourceScope,
               );
+              if (dockerRewrite && !dispatchId)
+                throw new TaskRetryBlockedError(
+                  'Exact Docker rewrite validation dispatch is unavailable',
+                );
               if (recoveryBudget) {
                 if (!dispatchId)
                   throw new TaskRetryBlockedError(
@@ -267,6 +312,21 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             retryLedger.finish(admission.id, 'cancelled', null);
             throw err;
           }
+        }
+        const recovery = podRepo.recoveryForks?.child(podId);
+        let recoverySource = null;
+        try {
+          recoverySource = recovery
+            ? await observeRecoveryCheckSource(
+                cm,
+                ownership.assertCurrent(),
+                recovery.facts.prepared,
+              )
+            : null;
+          ownership.assertCurrent();
+        } catch (error) {
+          if (admission && retryLedger) retryLedger.finish(admission.id, 'cancelled', null);
+          throw error;
         }
         const started = performance.now();
         let result: ValidationResult;
@@ -292,6 +352,30 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           };
         }
         if (dispatchId) result.executionDispatchId = dispatchId;
+        if (recoverySource && result.overall === 'pass') {
+          try {
+            const after = await observeRecoveryCheckSource(
+              cm,
+              ownership.assertCurrent(),
+              recovery?.facts.prepared,
+            );
+            ownership.assertCurrent();
+            if (configurationDigest(after) !== configurationDigest(recoverySource))
+              throw new TaskRetryBlockedError('Recovery source changed during checks');
+          } catch {
+            result = {
+              ...result,
+              overall: 'fail',
+              infrastructureFailure: {
+                phase: 'build',
+                code: 'RECOVERY_FORK_CHECK_SOURCE_UNVERIFIED',
+                message:
+                  'Recovery source could not be verified unchanged after checks; retain evidence for investigation.',
+                retryable: false,
+              },
+            };
+          }
+        }
         atomicPodChange(podRepo, () => {
           if (dispatchId) podRepo.validationExecutions?.recordOutcome(result, dispatchId);
           if (admission && retryLedger)
@@ -309,6 +393,16 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                       : 'nonretryable',
               Math.round(performance.now() - started),
             );
+          if (
+            recoverySource &&
+            result.overall === 'pass' &&
+            !validationController.signal.aborted &&
+            !requiresValidationSettlement({ lastValidationResult: result })
+          ) {
+            if (!admission)
+              throw new TaskRetryBlockedError('Recovery checks require durable retry admission');
+            podRepo.recoveryForks!.recordChecks(podId, recoverySource, result, admission.id);
+          }
         });
         // Publish measured, completed dispatch evidence before any downstream
         // checkpoint/source operation. Logical history/completion stays with the caller.

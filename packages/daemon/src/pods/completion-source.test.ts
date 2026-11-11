@@ -292,7 +292,8 @@ describe('completion source material boundary', () => {
     'changed',
     'unchanged',
     'net-zero',
-    'excluded-only',
+    'lockfile-only',
+    'cache-only',
     'mode-only',
   ] as const)('classifies real sandbox Git state %s and returns matching checkpoint/host proof', async (mode) => {
     const f = await fixture('sandbox');
@@ -304,17 +305,23 @@ describe('completion source material boundary', () => {
           await writeFile(path.join(f.source, 'base.txt'), 'original\n');
           await git(f.source, ['commit', '-am', 'restore tree']);
         }
-      } else if (mode === 'excluded-only') {
+      } else if (mode === 'lockfile-only') {
         await writeFile(path.join(f.source, 'pnpm-lock.yaml'), 'new lock\n');
         await git(f.source, ['commit', '-am', 'lock only']);
+      } else if (mode === 'cache-only') {
+        await mkdir(path.join(f.source, '.serena'));
+        await writeFile(path.join(f.source, '.serena', 'state.json'), '{}\n');
+        await git(f.source, ['add', '.serena']);
+        await git(f.source, ['commit', '-m', 'injected cache only']);
       } else if (mode === 'mode-only') {
         await chmod(path.join(f.source, 'base.txt'), 0o755);
         await git(f.source, ['commit', '-am', 'mode only']);
       }
       const before = await f.snapshot();
       const prepared = await f.prepare();
+      const sourceChanged = mode === 'changed' || mode === 'lockfile-only';
       expect(prepared).toMatchObject({
-        sandboxCanonicalOutcome: mode === 'changed' ? 'changed' : 'unchanged',
+        sandboxCanonicalOutcome: sourceChanged ? 'changed' : 'unchanged',
         sandboxCheckpoint: { snapshotCommit: before.head, snapshotTree: before.tree },
         sandboxHostProof: { head: before.head, tree: before.tree },
       });
@@ -329,9 +336,9 @@ describe('completion source material boundary', () => {
       expect(await f.snapshot()).toEqual(before);
       expect(f.reopen().getOrThrow('worker')).toMatchObject({
         status: 'running',
-        filesChanged: mode === 'changed' ? 1 : 0,
-        linesAdded: mode === 'changed' ? 1 : 0,
-        linesRemoved: mode === 'changed' ? 1 : 0,
+        filesChanged: sourceChanged ? 1 : 0,
+        linesAdded: sourceChanged ? 1 : 0,
+        linesRemoved: sourceChanged ? 1 : 0,
       });
     } finally {
       await f.close();

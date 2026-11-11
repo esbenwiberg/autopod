@@ -10,7 +10,11 @@ import {
   verifyArtifactSnapshot,
   writeArtifactSnapshotReceipt,
 } from '../pods/artifact-snapshot-receipt.js';
-import { inspectAdoptionGit, safeAdoptionGit } from './source-adoption-git.js';
+import {
+  inspectAdoptionGit,
+  inspectSupplementalAdoptionGit,
+  safeAdoptionGit,
+} from './source-adoption-git.js';
 
 const exec = promisify(execFile);
 function fail(message: string): never {
@@ -53,6 +57,7 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   generation: number;
   cycle: number;
   assertCurrent(): void;
+  allowSupplementalFiles?: true;
 }) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
@@ -68,6 +73,7 @@ export async function prepareRetainedCheckpointWorkspace(options: {
           GIT_CONFIG_GLOBAL: '/dev/null',
           GIT_TERMINAL_PROMPT: '0',
           GIT_OPTIONAL_LOCKS: '0',
+          GIT_NO_LAZY_FETCH: '1',
         },
         timeout: 120_000,
         maxBuffer: 16 * 1024 * 1024,
@@ -86,7 +92,10 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   const physicalRoot = path.join(parent, path.basename(root));
   if (contains(source, physicalRoot) || contains(physicalRoot, source))
     fail('Recovery and original source namespaces must be disjoint');
-  const original = await inspectAdoptionGit(git(source), options.branch);
+  const inspect = options.allowSupplementalFiles
+    ? inspectSupplementalAdoptionGit
+    : inspectAdoptionGit;
+  const original = await inspect(git(source), options.branch);
   if (original.head !== options.head) fail('Selected checkpoint is not the retained host HEAD');
   options.assertCurrent();
   await mkdir(root, { mode: 0o700 }); // Exclusive; an uncertain prior attempt is not replayed.
@@ -135,7 +144,7 @@ export async function prepareRetainedCheckpointWorkspace(options: {
     '\n/.autopod/evidence/\n/.autopod/screenshots/\n',
   );
   const materialized = await inspectAdoptionGit(git(worktree), options.branch);
-  const retained = await inspectAdoptionGit(git(source), options.branch);
+  const retained = await inspect(git(source), options.branch);
   if (
     materialized.head !== original.head ||
     materialized.tree !== original.tree ||

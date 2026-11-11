@@ -20,11 +20,21 @@ export function safeAdoptionGit(run: AdoptionGit): AdoptionGit {
       ...args,
     ]);
 }
-async function inspectSourceGit(run: AdoptionGit, branch: string, allowDirty: boolean) {
+async function inspectSourceGit(
+  run: AdoptionGit,
+  branch: string,
+  allowDirty: boolean,
+  allowUntracked = false,
+) {
   const git = safeAdoptionGit(run);
   const config = (await git(['config', '--null', '--list'])).stdout.split('\0');
   if (
-    config.some((value) => /^filter\./i.test(value) || /^core\.sparsecheckout\ntrue$/i.test(value))
+    config.some(
+      (value) =>
+        /^filter\./i.test(value) ||
+        /^core\.sparsecheckout\ntrue$/i.test(value) ||
+        /^(extensions\.partialclone|remote\..*\.promisor)\n/i.test(value),
+    )
   )
     sourceAdoptionError('Executable filters/sparse source need explicit materialization policy');
   const name = (await git(['symbolic-ref', '--short', 'HEAD'])).stdout.trim();
@@ -40,7 +50,7 @@ async function inspectSourceGit(run: AdoptionGit, branch: string, allowDirty: bo
       'status',
       '--porcelain=v1',
       '-z',
-      '--untracked-files=normal',
+      allowUntracked ? '--untracked-files=no' : '--untracked-files=normal',
       '--ignore-submodules=none',
     ])
   ).stdout;
@@ -70,6 +80,11 @@ async function inspectSourceGit(run: AdoptionGit, branch: string, allowDirty: bo
 }
 export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
   const { head, tree } = await inspectSourceGit(run, branch, false);
+  return { head, tree };
+}
+/** Recovery-fork checkpoint: tracked bytes must be clean; supplements are separately inventoried. */
+export async function inspectSupplementalAdoptionGit(run: AdoptionGit, branch: string) {
+  const { head, tree } = await inspectSourceGit(run, branch, false, true);
   return { head, tree };
 }
 /** Same executable-config/sparse/submodule safeguards, without claiming dirty source is clean. */

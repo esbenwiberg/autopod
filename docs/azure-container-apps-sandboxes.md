@@ -94,6 +94,45 @@ needed. The exec-stream WebSocket accepts the Bearer token via undici's `headers
 the upgrade, against the regional `management.<region>.azuredevcompute.io` endpoint, with no
 `api-version` query parameter.
 
+### Missing exec-stream exit evidence
+
+A WebSocket close, including code 1000, does not prove that the remote invocation
+exited. `execStream` keeps `AZURE_SANDBOX_EXEC_STREAM` and unknown-exit behavior
+when no valid `exit_code` arrives. It retains a bounded `transport` diagnostic on
+the error and logs unexpected closure with the same operation ID, sandbox ID,
+start-dispatch flag, error-event flag, close code and close source (local/remote).
+Native Goal streams also identify the recorded native exec ID. These are transport
+correlation fields, not an execution-settlement receipt.
+
+Close reasons are untrusted. Only an exact, case-normalized fixed vocabulary
+(empty, `normal closure`, `going away`, `idle timeout`, `service restart`,
+`internal error`) is retained; everything else, including reasons over 64 characters,
+is `[redacted]`. Codes must be integers from 1000 through 4999. Errors never include
+WebSocket URLs, headers, commands, environment, raw error frames or JSON parse
+snippets. A close following an error event augments the first transport error rather
+than discarding its close details. Late close details may appear in the structured
+close log after the caller has already received an error.
+
+For a Native Goal invocation that already has a private root-owned supervisor and
+persisted exec identity, transport loss first reads that invocation's existing exit
+receipt through the files channel. Only a matching exec ID with observed child exit
+can supply the actual exit code (including failure/signal exits), without sending a
+stop request. If absent or invalid, the existing owned-process termination path
+still requires a valid private receipt; inability to prove termination stays unknown.
+This does not recover stream output lost in transit.
+
+Ordinary runtime/validation wrappers record PID and process start identity for
+cancellation, but have no durable child-exit receipt. PID absence, an empty process
+group, sandbox status and cleanup-command success cannot establish their exit code.
+There is no non-destructive settlement API for those lost-delivery invocations today.
+A future path would need a durable private receipt created by the original invocation,
+bound to immutable execution identity and read without stopping/restarting work.
+Existing incidents cannot be backfilled with such receipts. Do not infer success,
+respawn work or delete a sandbox to settle an unknown exit.
+
+These adapter regressions are local protocol/receipt tests. They do not qualify
+native process behavior or transport reliability against the live Azure service.
+
 ## Native Port Exposure
 
 The data plane can expose an in-sandbox port on a public URL, an alternative to the daemon-side

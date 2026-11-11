@@ -49,10 +49,11 @@ export default defineConfig({
   test: {
     globals: true,
     passWithNoTests: true,
-    // SQLite migration and real-Git/native-process fixtures compete for CPU/I/O.
-    // Four concurrent workers oversubscribe these fixtures; two keeps their
-    // existing per-test deadlines intact rather than extending or bypassing them.
-    maxWorkers: 2,
+    // Real-Git/native-process fixtures still miss their unchanged deadlines with
+    // two workers under full-suite I/O load. Default to one; Vitest's supported
+    // VITEST_MAX_WORKERS override remains available for capacity-qualified runners.
+    // Keep every test and its individual deadline instead of retrying into green.
+    maxWorkers: 1,
     exclude: [
       '**/node_modules/**',
       '**/.turbo/**',

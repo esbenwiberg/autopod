@@ -258,6 +258,7 @@ export interface WorktreeManager {
   inspectSourceAdoption?(
     worktreePath: string,
     branch: string,
+    options?: { allowSupplementalFiles: true },
   ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
   prepareSourceAdoption?(
     config: PrepareSourceAdoption,
@@ -309,12 +310,15 @@ export interface WorktreeManager {
    */
   getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
   mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> | Promise<void>;
-  /** Get raw diff between current HEAD and a base branch (or a specific commit). */
+  /** Net unified diff against the base, including lockfile hunks by default.
+   * Only explicit display previews may omit noisy source files.
+   */
   getDiff(
     worktreePath: string,
     baseBranch: string,
     maxLength?: number,
     sinceCommit?: string,
+    purpose?: 'review' | 'preview',
   ): Promise<string>;
   /**
    * Read a committed branch diff directly from the repo cache. Used after a

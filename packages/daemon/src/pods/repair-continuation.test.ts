@@ -381,7 +381,7 @@ describe('conditional retained coding continuation', () => {
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
     expect(f.cm.stop).not.toHaveBeenCalled();
   });
-  it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs', async () => {
+  it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs (validated)', async () => {
     const f = await fixture();
     // Real producer hashing/serialization must preserve slash, controls, Unicode
     // composition and astral characters in the actual resource identity.
@@ -428,6 +428,30 @@ describe('conditional retained coding continuation', () => {
       checks: 'passed',
     });
     expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    // Explicit opt-in capture is used by the native regression. Normal tests never rewrite fixtures.
+    const capture = process.env.REPAIR_CLIENT_PRODUCER_FIXTURE;
+    if (capture)
+      await writeFile(
+        capture,
+        JSON.stringify(
+          {
+            inspection,
+            preview,
+            request,
+            claimed,
+            qualified,
+            validated,
+            restartedValidated: restarted.observed,
+            restartedValidatedInspection: restarted.inspection,
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+  });
+  // Keep independent successful and failed workflows inside their unchanged
+  // per-test deadlines. Their common name prefix preserves producer selection.
+  it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs (failed)', async () => {
     // A failed actual-source probe produces immutable failed evidence without a worker.
     const failedFixture = await fixture();
     const failedRequest = await failedFixture.request('failed-external-request');
@@ -466,27 +490,7 @@ describe('conditional retained coding continuation', () => {
     expect(failed.qualification?.binding.custodyId).toBe(failed.operationId);
     expect(repairOperation(failed, failed.podId, failedRequest.id, failedRequest)).toEqual(failed);
     expect(failedFixture.ctx.runtime.spawn).not.toHaveBeenCalled();
-    // Explicit opt-in capture is used by the native regression. Normal tests never rewrite fixtures.
-    const capture = process.env.REPAIR_CLIENT_PRODUCER_FIXTURE;
-    if (capture)
-      await writeFile(
-        capture,
-        JSON.stringify(
-          {
-            inspection,
-            preview,
-            request,
-            claimed,
-            qualified,
-            failed,
-            validated,
-            restartedValidated: restarted.observed,
-            restartedValidatedInspection: restarted.inspection,
-          },
-          null,
-          2,
-        ) + '\n',
-      );
+    await captureClientProjection({ failed });
   });
   it('retains proven consumed admission after sealing while restarted checks remain unknown', async () => {
     const f = await fixture();
@@ -1229,6 +1233,10 @@ describe('typed retained worker active-question replies', () => {
     const proceed = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let questionConsumed = () => {};
+    const questionReady = new Promise<void>((resolve) => {
+      questionConsumed = resolve;
+    });
     const question = {
       id: 'typed-worker-question',
       podId: f.podId,
@@ -1246,6 +1254,9 @@ describe('typed retained worker active-question replies', () => {
         escalationType: 'ask_human',
         payload: question,
       } as const;
+      // Resuming the iterator proves the consumer handled the question. Real
+      // Git preparation under suite load need not fit vi.waitFor's 1s default.
+      questionConsumed();
       await proceed;
       const guidance = f.ctx.nudgeRepo.readPending(f.podId);
       if (acknowledge && guidance)
@@ -1260,7 +1271,13 @@ describe('typed retained worker active-question replies', () => {
       (error: unknown) => error,
     );
     try {
-      await vi.waitFor(() => expect(f.pod().status).toBe('awaiting_input'));
+      await Promise.race([
+        questionReady,
+        result.then((error) => {
+          throw error ?? new Error('Worker settled before consuming its question');
+        }),
+      ]);
+      expect(f.pod().status).toBe('awaiting_input');
     } catch (error) {
       release();
       await result;

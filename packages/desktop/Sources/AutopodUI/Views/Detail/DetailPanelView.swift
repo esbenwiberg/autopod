@@ -347,29 +347,12 @@ public struct DetailPanelView: View {
             // Pod header
             detailHeader
 
-            if actions.sandboxRecovery.available &&
-                [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
-                SandboxRecoveryCard(podId: pod.id, actions: actions.sandboxRecovery)
-                    .id(actions.sandboxRecovery.scope + ":" + pod.id)
-            }
-
-            if actions.retainedFinalization.available && !pod.isWorkspace &&
-                [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
-                RetainedFinalizationCard(podId: pod.id, actions: actions.retainedFinalization)
-                    .id(actions.retainedFinalization.scope + ":" + pod.id)
-            }
-
-            if actions.repairContinuation.available && !pod.isWorkspace &&
-                [.failed, .reviewRequired, .validated].contains(pod.status) {
-                RepairContinuationCard(podId: pod.id, actions: actions.repairContinuation)
-                    .id(actions.repairContinuation.scope + ":" + pod.id)
-            }
-
-            if actions.stalledWorkerRecovery.available && !pod.isWorkspace &&
-                [.running, .failed, .reviewRequired].contains(pod.status) {
-                StalledWorkerRecoveryCard(podId: pod.id, actions: actions.stalledWorkerRecovery,
-                    onOpenValidation: { selectedTab = .validation })
-                    .id(actions.stalledWorkerRecovery.scope + ":" + pod.id)
+            if RecoveryHubModel.available(actions, workspace: pod.isWorkspace) &&
+                [.running, .failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
+                RecoveryHubCard(pod: pod, actions: actions,
+                    onOpenValidation: { selectedTab = .validation },
+                    onOpenEvidence: isEvidenceAvailable ? { selectedTab = .evidence } : nil)
+                    .id(RecoveryHubModel.scope(actions) + ":" + pod.id)
             }
 
             // Tab bar

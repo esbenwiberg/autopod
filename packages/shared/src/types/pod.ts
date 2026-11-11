@@ -15,6 +15,8 @@ export interface PreSubmitReviewSnapshot {
   status: 'pass' | 'fail' | 'uncertain' | 'skipped';
   /** Hash of the diff this verdict applies to. Cache keyed by this. */
   diffHash: string;
+  /** Final complete packet identity, including task, summary and reference context. */
+  inputHash?: string;
   /** Where the diff was read from when the verdict was produced. */
   diffSource?: 'container' | 'worktree' | 'none';
   /** Scope counters for the reviewed diff. Used to reject stale cache hits. */

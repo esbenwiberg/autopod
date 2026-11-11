@@ -14,6 +14,16 @@ export interface StoredEvent {
 }
 
 export interface EventRepository {
+  /** Bounded scalar-only visible history. Never loads tool/reasoning/credential bodies. */
+  getVisibleRecoveryText?(podId: string): {
+    messages: Array<{
+      eventId: number;
+      role: 'human' | 'assistant';
+      text: string;
+      timestamp: string;
+    }>;
+    truncated: boolean;
+  };
   insert(event: SystemEvent): number; // returns auto-increment id
   getSince(lastId: number, limit?: number): StoredEvent[];
   countForSession(podId: string, type: string): number;
@@ -52,6 +62,33 @@ function rowToStoredEvent(row: Record<string, unknown>): StoredEvent {
 
 export function createEventRepository(db: Database.Database): EventRepository {
   return {
+    getVisibleRecoveryText(podId) {
+      const rows = db
+        .prepare(`WITH visible AS (
+        SELECT id AS eventId,created_at AS timestamp,
+        CASE WHEN type='pod.escalation_resolved' THEN 'human' ELSE 'assistant' END AS role,
+        CASE WHEN type='pod.escalation_resolved' THEN json_extract(payload,'$.response.response')
+          WHEN json_extract(payload,'$.event.type')='complete' THEN json_extract(payload,'$.event.result')
+          ELSE json_extract(payload,'$.event.message') END AS text
+        FROM events e WHERE e.pod_id=? AND json_valid(e.payload) AND (
+          (e.type='pod.agent_activity' AND json_extract(e.payload,'$.event.type') IN ('complete','status'))
+          OR (e.type='pod.escalation_resolved' AND json_extract(e.payload,'$.response.respondedBy')='human'
+            AND EXISTS(SELECT 1 FROM events q WHERE q.pod_id=e.pod_id AND q.type='pod.escalation_created'
+              AND json_valid(q.payload) AND json_extract(q.payload,'$.escalation.type')='ask_human'
+              AND json_extract(q.payload,'$.escalation.id')=json_extract(e.payload,'$.escalationId')))))
+        SELECT eventId,timestamp,role,substr(text,1,4001) AS text FROM visible
+        WHERE typeof(text)='text' ORDER BY eventId DESC LIMIT 201`)
+        .all(podId) as Array<{
+        eventId: number;
+        role: 'human' | 'assistant';
+        text: string;
+        timestamp: string;
+      }>;
+      return {
+        messages: rows.slice(0, 200).reverse(),
+        truncated: rows.length > 200 || rows.some((r) => r.text.length > 4000),
+      };
+    },
     insert(event: SystemEvent): number {
       const podId = extractSessionId(event);
       const result = db

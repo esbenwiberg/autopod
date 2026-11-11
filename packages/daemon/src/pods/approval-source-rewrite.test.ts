@@ -1,6 +1,11 @@
 import path from 'node:path';
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { errorHandler } from '../api/error-handler.js';
+import { authPlugin } from '../api/plugins/auth.js';
+import { validationRecoveryRoutes } from '../api/routes/validation-recovery.js';
 import { createDeliveryFixture, pendingStatus } from '../test-utils/delivery-helpers.js';
+import { terminationAuth } from '../test-utils/termination-reconciliation-helpers.js';
 import { publishSource } from '../worktrees/durable-source-publication.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
@@ -104,6 +109,78 @@ describe('approval source rewrite custody', () => {
     );
     const next = f.reopen();
     expect(next.pods.approvalRewrites?.latest(next.pods.getOrThrow('prepare'))).toEqual(row);
+  });
+
+  it.each([
+    'preparing',
+    'checks-held',
+    'aborted',
+  ] as const)('reports ordinary recovery eligibility consistently with %s rewrite custody', async (phase) => {
+    const f = fixture();
+    if (phase !== 'checks-held') {
+      f.prepareRebase.mockImplementation(async (config) => {
+        config.onPrepared(base);
+        throw new Error('Preparation interrupted');
+      });
+      await expect(f.approve()).rejects.toThrow();
+    } else await f.approve();
+    const rewrite = f.podRepo.approvalRewrites?.latest(f.pod());
+    if (!rewrite) throw new Error('Missing rewrite');
+    if (phase === 'aborted')
+      f.podRepo.approvalRewrites?.append(rewrite.id, 'aborted', { reason: 'Preparation refused' });
+    f.podRepo.update('prepare', {
+      status: 'review_required',
+      containerId: 'checks-resource',
+      lastValidationResult: { ...f.passContext().result, overall: 'fail' },
+    });
+    const before = f.pod();
+    const manager = f.manager();
+    const repair = vi.spyOn(manager, 'triggerValidation').mockResolvedValue();
+    const retry = vi
+      .spyOn(manager, 'revalidateSession')
+      .mockResolvedValue({ newCommits: false, result: 'fail' });
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    authPlugin(app, terminationAuth());
+    validationRecoveryRoutes(app, manager);
+    const headers = { authorization: 'Bearer human-token' };
+    const url = '/pods/prepare/validation-recovery';
+    try {
+      const state = (await app.inject({ url, headers })).json();
+      for (const [action, availability] of [
+        ['fix-validation', state.fixValidation],
+        ['retry-checks', state.retryChecks],
+      ] as const) {
+        if (phase === 'aborted') {
+          expect(availability).toEqual({ allowed: true });
+          continue;
+        }
+        expect(availability).toMatchObject({
+          allowed: false,
+          code: 'DELIVERY_RECONCILIATION_REQUIRED',
+          reason: expect.stringContaining('ap source-recovery prepare --json'),
+        });
+        const response = await app.inject({
+          method: 'POST',
+          url,
+          headers,
+          payload: {
+            action,
+            expectedGeneration: before.lifecycleGeneration,
+            expectedValidationTimestamp: before.lastValidationResult?.timestamp,
+          },
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json().error).toBe(availability.code);
+      }
+      expect(repair).not.toHaveBeenCalled();
+      expect(retry).not.toHaveBeenCalled();
+      expect(f.pod()).toEqual(before);
+      expect(f.cm.kill).not.toHaveBeenCalled();
+      expect(f.provider.mergePr).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
   });
 
   it('retains an admitted preparation failure across retry without repeating the rebase', async () => {

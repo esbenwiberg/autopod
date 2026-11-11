@@ -6,6 +6,7 @@ import {
 } from '@autopod/shared';
 import type { PrMergeStatus } from '../interfaces/index.js';
 import { shellQuote } from '../util/shell-quote.js';
+import { recoveryFileExclusions } from '../worktrees/recovery-fork-source.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { renderPiHandoffFile } from './continuation-policy.js';
 import type { ContainerPrepared } from './provisioning-container.js';
@@ -134,6 +135,25 @@ export function createProvisioningWorkspacePopulation(
       if (repoint.exitCode !== 0) {
         throw new Error(`Git workspace setup failed (exit ${repoint.exitCode}): ${repoint.stderr}`);
       }
+      const recovery = podRepo.recoveryForks?.child(podId);
+      if (recovery) {
+        const prepared = recovery.facts.prepared;
+        if (!prepared || prepared.worktree !== worktreePath)
+          throw new Error('Server-owned recovery file inventory unavailable');
+        // Reconstruction intentionally drops the bare repo config/info. Install
+        // ONLY exact server-selected paths before restore/clean can remove them.
+        const info = await containerManager.execInContainer(
+          containerId,
+          ['mkdir', '-p', '/workspace/.git/info'],
+          { timeout: 5000 },
+        );
+        if (info.exitCode !== 0) throw new Error('Recovery exclusion directory unavailable');
+        await containerManager.writeFile(
+          containerId,
+          '/workspace/.git/info/exclude',
+          recoveryFileExclusions(prepared.files),
+        );
+      }
       // Restore any tracked files missing from the working tree (M/D status).
       // syncWorkspaceBack() clears + re-copies the host bind-mount; if it dies mid-flight
       // (OOM, Docker crash, Azure SMB error) the host worktree loses files while the git
@@ -215,6 +235,7 @@ export function createProvisioningWorkspacePopulation(
         ['git', '-C', '/workspace', 'clean', '-fd'],
         { timeout: 30_000 },
       );
+      if (clean.exitCode !== 0 && recovery) throw new Error('Recovery workspace cleanup failed');
       if (clean.exitCode !== 0) {
         // Non-fatal: a failure here means the agent may see stale untracked files,
         // which is the bug we are fixing — but it's still better than aborting

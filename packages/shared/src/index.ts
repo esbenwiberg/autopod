@@ -512,6 +512,7 @@ export type {
   ReadinessSourceRefKind,
   ReadinessStatus,
 } from './types/readiness.js';
+export * from './types/recovery-fork.js';
 export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
 export type {
   RetainedFinalizationMode,

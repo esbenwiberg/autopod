@@ -539,6 +539,84 @@ describe('held empty-workspace artifact checks through production manager/API', 
     ).toBe(409);
     expect(f.cm.stop).not.toHaveBeenCalled();
   });
+  it('rejects a competing recovery fork acquired after inspection before any artifact mutation', async () => {
+    const f = await fixture();
+    // Synthetic competing durable admission; no child or worker is launched.
+    f.ctx.db
+      .prepare('INSERT INTO recovery_forks VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(
+        'competing-fork',
+        f.podId,
+        'fork-request',
+        'operator-oid',
+        'request-hash',
+        '{}',
+        '{}',
+        'fixture-process',
+        new Date().toISOString(),
+      );
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(f.operation()).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+  it('admits only one of two concurrent request identities for the same source', async () => {
+    const f = await fixture();
+    const responses = await Promise.all(
+      [f.request, { ...f.request, id: 'other-request' }].map((payload) =>
+        f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([202, 409]);
+    await f.wait();
+    expect(f.cm.stop).toHaveBeenCalledOnce();
+    expect(f.cm.spawn).toHaveBeenCalledOnce();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+  });
+  it('does not replay an uncertain checks dispatch after reopening the controller', async () => {
+    const f = await fixture();
+    vi.mocked(f.ctx.validationEngine.validate).mockRejectedValue(new Error('Lost checks response'));
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    f.restart();
+    const response = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/reconcile`,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json().operation.events.checked).toBeUndefined();
+    expect(response.json().operation.events.blocked).toBeTruthy();
+    expect(f.cm.stop).toHaveBeenCalledOnce();
+    expect(f.cm.spawn).toHaveBeenCalledOnce();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(1);
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+  it('retains unknown original state without stopping, capturing or checking it', async () => {
+    const f = await fixture();
+    vi.mocked(f.cm.getStatus).mockResolvedValue('unknown');
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.manager().inspectArtifactChecksRecovery(f.podId);
+    await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/reconcile`,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(f.operation().events.checked).toBeUndefined();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
   it('rejects changed captured source even when a check boundary returns pass', async () => {
     const f = await fixture();
     const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;

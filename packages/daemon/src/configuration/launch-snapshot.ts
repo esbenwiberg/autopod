@@ -1,10 +1,15 @@
 import type { EffectiveLaunchConfig } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  createRecoveryForkRepository,
+  recoveryForkProcessEpoch,
+} from '../pods/recovery-fork-repository.js';
 import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
 import { assertLaunchRequirements } from './launch-requirement-preflight.js';
 import { assertFindingsWorkflow, configurationDigest } from './launch-resolver.js';
+import { recoveryForkLaunch } from './recovery-fork-launch.js';
 import {
   type RetainedExecutionSelection,
   retainedContinuationLaunch,
@@ -12,6 +17,11 @@ import {
 import { deriveScanRepair, readScanConfiguration } from './scan-repair-config.js';
 
 export interface LaunchSnapshotRepository {
+  admitRecoveryFork(
+    operationId: string,
+    createPod: (config: EffectiveLaunchConfig) => string,
+    initializePod: (podId: string, config: EffectiveLaunchConfig) => void,
+  ): { podId: string; created: boolean };
   get(podId: string): EffectiveLaunchConfig | null;
   getOriginal(podId: string): EffectiveLaunchConfig | null;
   getPendingWorker(podId: string): EffectiveLaunchConfig | null;
@@ -164,6 +174,98 @@ export function createLaunchSnapshotRepository(
     return config;
   }
   return {
+    admitRecoveryFork(operationId, createPod, initializePod) {
+      return db.transaction(() => {
+        const forks = createRecoveryForkRepository(db);
+        const operation = forks.get(operationId);
+        if (!operation)
+          configurationError('Recovery operation unavailable', 'CONFIG_SOURCE_MISSING', 409);
+        const admitted = operation.facts.admitted;
+        if (admitted) return { podId: admitted.childPodId, created: false };
+        if (
+          operation.processEpoch !== recoveryForkProcessEpoch ||
+          !operation.facts.prepared ||
+          operation.facts.failed ||
+          operation.facts.unknown
+        )
+          configurationError(
+            'Prepared recovery custody required',
+            'CONFIG_DERIVATION_INVALID',
+            409,
+          );
+        const parent = read(operation.parentPodId);
+        if (!parent || parent.digest !== operation.binding.originalLaunch.digest)
+          configurationError('Recovery parent configuration changed', 'CONFIG_SOURCE_CHANGED', 409);
+        const config = recoveryForkLaunch(
+          parent,
+          operation.parentPodId,
+          operation.binding.selection,
+          operation.request,
+        );
+        if (configurationDigest(config) !== configurationDigest(operation.binding.execution))
+          configurationError(
+            'Recovery derivation differs from frozen selection',
+            'CONFIG_DERIVATION_INVALID',
+            403,
+          );
+        assertFindingsWorkflow(config.workflow, config.intent);
+        assertLaunchRequirements(config);
+        const podId = createPod(config);
+        db.prepare(
+          `INSERT INTO pod_launch_snapshots(pod_id,digest,payload,request_id,request_digest,created_at) VALUES(?,?,?,?,?,?)`,
+        ).run(
+          podId,
+          config.digest,
+          JSON.stringify(config),
+          `recovery-fork:${operation.id}`,
+          operation.requestHash,
+          new Date().toISOString(),
+        );
+        const marked = db
+          .prepare(
+            'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest IS NULL',
+          )
+          .run(config.digest, podId).changes;
+        if (marked !== 1)
+          configurationError('Recovery child identity conflict', 'SNAPSHOT_CONFLICT', 409);
+        forks.append(operation.id, 'admitted', { childPodId: podId, digest: config.digest });
+        // The exact child identity is now available to custody guards, inside this
+        // still-uncommitted transaction. No queue/provider effect may run here.
+        const initialized: unknown = initializePod(podId, config);
+        if (initialized && typeof (initialized as { then?: unknown }).then === 'function')
+          configurationError(
+            'Recovery initialization must be synchronous',
+            'CONFIG_DERIVATION_INVALID',
+            409,
+          );
+        const owner = db
+          .prepare(`SELECT c.worktree_path,c.recovery_worktree_path,c.start_commit_sha,
+          c.linked_pod_id,c.pr_url,c.auto_approve,c.skip_validation,c.validation_attempts,c.max_validation_attempts,
+          p.validation_attempts AS original_attempts,p.max_validation_attempts AS original_max,e.task_id
+          FROM pods c JOIN retained_task_executions e ON e.pod_id=c.id JOIN pods p ON p.id=? WHERE c.id=?`)
+          .get(operation.parentPodId, podId) as Record<string, unknown> | undefined;
+        if (
+          !owner ||
+          owner.worktree_path !== operation.facts.prepared.worktree ||
+          owner.recovery_worktree_path !== owner.worktree_path ||
+          owner.start_commit_sha !== operation.binding.source.baseCommitSha ||
+          owner.linked_pod_id !== null ||
+          owner.pr_url !== null ||
+          owner.auto_approve ||
+          owner.skip_validation ||
+          owner.validation_attempts !== owner.original_attempts ||
+          Number(owner.max_validation_attempts) >
+            Math.min(Number(owner.original_max), config.workflow.maxValidationAttempts) ||
+          owner.task_id !== operation.binding.taskId
+        )
+          configurationError(
+            'Recovery child source/accounting initialization is incomplete',
+            'CONFIG_DERIVATION_INVALID',
+            409,
+          );
+        return { podId, created: true };
+      })();
+    },
     activateGoalRework(input) {
       db.transaction(() => {
         const source = input.config.derivation;
@@ -292,6 +394,12 @@ export function createLaunchSnapshotRepository(
     },
     admit(input) {
       return db.transaction(() => {
+        if (input.config.derivation?.kind === 'recovery-fork')
+          configurationError(
+            'Recovery forks require operation-owned admission',
+            'CONFIG_DERIVATION_INVALID',
+            403,
+          );
         if (input.config.derivation?.kind === 'goal-rework')
           configurationError(
             'Goal rework must be an achieved Goal phase',

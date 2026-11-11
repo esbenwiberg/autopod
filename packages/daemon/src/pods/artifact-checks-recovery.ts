@@ -67,7 +67,7 @@ interface Dependencies {
   podRepo: PodRepository;
   readLaunch(podId: string): EffectiveLaunchConfig | null;
   executionForPod(pod: Pod): PodExecutionSettings;
-  cm: ContainerManager;
+  cm(): ContainerManager;
   isIdle(podId: string): boolean;
   assertGuidanceCollected(podId: string): void;
   root: string;
@@ -86,7 +86,7 @@ interface Dependencies {
 }
 
 export function createArtifactChecksRecovery(deps: Dependencies) {
-  const { podRepo: pods, cm } = deps;
+  const { podRepo: pods } = deps;
   const store = pods.artifactChecks ?? artifactChecksError('Artifact checks ledger unavailable');
   const pending = new Map<string, Promise<void>>();
   function selection(podId: string, owned = false) {
@@ -148,6 +148,8 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
       );
     if (!deps.isIdle(podId) || !pods.taskExecutions?.hasSettledRun?.(pod, pod.finalization.cycle))
       artifactChecksError('Positive exact-resource worker settlement and idle execution required');
+    pods.recoveryForks?.assertOriginalAvailable(podId);
+    pods.recoveryForks?.assertTaskExecutionAllowed(podId);
     pods.taskExecutions.assertCanDelete(podId);
     if (!owned) pods.validationExecutions?.assertNoActiveTaskExecution(podId);
     pods.validationExecutions?.assertTaskSettled(podId);
@@ -176,6 +178,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
   }
   async function binding(podId: string, owned = false): Promise<ArtifactChecksBinding> {
     const selected = selection(podId, owned);
+    const cm = deps.cm();
     if (!cm.getResourceKey || !cm.getExecutionMetadata)
       artifactChecksError('Exact Docker provider identity unavailable');
     const resourceKey = await cm.getResourceKey(selected.pod.containerId!);
@@ -266,6 +269,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
     return current.pod;
   }
   async function run(record: ArtifactChecksRecord) {
+    const cm = deps.cm();
     const id = record.id;
     const events = () => store.get(id)!.events;
     const append = (kind: string, evidence: unknown) => store.append(id, kind, evidence);

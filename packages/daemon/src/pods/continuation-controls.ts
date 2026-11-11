@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { AutopodError } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import type {
@@ -120,6 +121,16 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
         'Retained continuation owns this source; select a retained candidate instead of legacy Rework or Retry checks.',
         'CONTINUATION_SOURCE_HELD',
         409,
+      );
+    const pod = podRepo.getOrThrow(podId);
+    const rewrite = podRepo.approvalRewrites?.latest(pod);
+    if (rewrite)
+      rewriteError(
+        `Rewrite ${rewrite.id} owns candidate checks/publication. Ordinary Fix validation and Retry checks are unavailable. ` +
+          `Inspect ap source-recovery ${podId} --json and ap approval-rewrite-repair ${podId} --json (read-only).` +
+          (pod.executionTarget === 'local'
+            ? ' Docker repair requires a maintained exact dispatch and an already-stopped original.'
+            : ''),
       );
   }
   function assertCanRetryValidation(podId: string): void {

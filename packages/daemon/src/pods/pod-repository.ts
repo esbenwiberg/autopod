@@ -73,6 +73,10 @@ import { displayRepository, repositoryDisplayColumns } from './pod-display-repos
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
 import {
+  createRecoveryForkRepository,
+  type RecoveryForkRepository,
+} from './recovery-fork-repository.js';
+import {
   checkpointError,
   createRetainedCheckpointRepository,
   type RetainedCheckpointRepository,
@@ -111,6 +115,8 @@ import {
 } from './validation-execution-ledger.js';
 
 export interface NewPod {
+  /** Server-only, insertion-only logical task lineage; never PR-fix semantics. */
+  executionParentPodId?: string;
   intentionalRerun?: IntentionalRerun;
   dispatchRepository?: string | null;
   rerunRequestHash?: string;
@@ -319,6 +325,7 @@ import { createTaskHistoryArchive } from './task-history-archive.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
   artifactChecks?: import('./artifact-checks-recovery-repository.js').ArtifactChecksRecoveryRepository;
+  recoveryForks?: RecoveryForkRepository;
   inputBundles?: InputBundleStore;
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
@@ -881,6 +888,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
     retainedCoding: createRetainedCodingRepository(db),
+    recoveryForks: createRecoveryForkRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
     workerRetries: createTaskRetryLedger(db, 'worker'),
@@ -997,9 +1005,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         autoApprove: pod.autoApprove ? 1 : 0,
         disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
-      taskExecutions.register(pod.id);
-      assertSourceAvailable(db, pod.id, '');
-      assertSourceDeliveryAllowed(db, pod.id);
+      taskExecutions.register(pod.id, pod.executionParentPodId);
+      // Metadata insertion precedes the atomic recovery admission fact. This does
+      // not grant execution/source effects: every later guard requires the exact child.
+      assertSourceAvailable(db, pod.id, '', true);
+      assertSourceDeliveryAllowed(db, pod.id, true);
       dispatchPreflight.registerRequest(pod.id, pod.dispatchRepository);
       if (pod.intentionalRerun)
         dispatchPreflight.registerRerun(
@@ -1047,6 +1057,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ).map((row) => JSON.parse(row.receipt) as NonNullable<Pod['researchFindings']>);
     },
     update(id: string, changes: PodUpdates): void {
+      createRecoveryForkRepository(db).assertOriginalAvailable(id);
       assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
       if (changes.containerId) {
@@ -1700,6 +1711,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      createRecoveryForkRepository(db).assertOriginalAvailable(id);
       assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
       if (createRetainedCheckpointRepository(db).latest(id))

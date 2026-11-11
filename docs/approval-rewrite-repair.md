@@ -4,10 +4,14 @@ This is a control-plane source selection, not execution of the held business tas
 It requires a release containing these routes. CLI help alone does not establish
 server support. No deployment or live recovery is authorized by this document.
 
-The recorded decision USlTDWJt limits this slice to sandbox rewrites with an exact,
-settled immutable checks dispatch and logical failed-result publication. Docker
-and historical unbound failures refuse admission. Ordinary checkpoint recovery,
-source adoption, Resume and Rework remain blocked while a rewrite owns source.
+Repair requires an exact, settled immutable checks dispatch and logical
+failed-result publication. Sandbox execution uses its maintained provider
+namespace. New Docker approval-rewrite checks additionally observe and record the
+exact Docker engine ID and full container ID before execution. Historical unbound
+failures still refuse admission: current container pointers, worker summaries and
+old provenance cannot retroactively supply dispatch evidence. Ordinary checkpoint
+recovery, source adoption, Resume and Rework remain blocked while a rewrite owns
+source.
 
 ## Preconditions
 
@@ -25,7 +29,12 @@ rewrite, repository, PR, branch, base, frozen configuration, failed dispatch and
 result. Its host HEAD/tree must still match the failed candidate. The immutable
 validation dispatch must bind that lifecycle, provider namespace and resource;
 no coding worker may have run in that lifecycle. The original resource must be
-known stopped. Active or unknown workers/checks/wakeups/publications/merges,
+known stopped. For Docker, the live engine/container key must match the exact key
+recorded before failed checks. A resource on another engine, a shortened ID,
+missing identity, or a running/unknown original refuses preparation and selection.
+These operations do not stop, wake or delete a resource; authorized operator
+access must establish the stopped state separately. Active or unknown
+workers/checks/wakeups/publications/merges,
 pending decisions/guidance, competing custody, compromised source, sidecars,
 Goals, interactive/artifact tasks, thin/off/waived review remain blockers.
 
@@ -154,19 +163,26 @@ Actor comes from authentication. Unknown fields (including paths, force, config,
 result/proof, budgets and execution overrides) fail. Old servers fail the new
 routes; the CLI has no Resume/approve/continuation fallback.
 
-This extends the append-only schema234 rewrite and schema235 checkpoint selection
-records using explicit rewrite bindings. Fresh migration237 adds a nullable exact
-repair target to existing retry authorizations and a storage-level use fence;
-historical grants retain their original authority. No historical migration changes.
+This uses the existing append-only schema234 rewrite and schema235 checkpoint
+selection records with explicit rewrite bindings. Migration237 added a nullable
+exact repair target to existing retry authorizations and a storage-level use
+fence; historical grants retain their original authority. Docker dispatches use
+the existing immutable dispatch/result/publication tables with a `local` target
+and observed engine/container key. No historical migration or dispatch is changed,
+and no past execution acquires inferred ownership.
 Check prefix uniqueness when integrating another branch before release. Back up and qualify a retention-aware release before use.
-Do not downgrade to a binary unaware of repair selection: it cannot interpret the
-current source projection. Roll forward with preserved database, sources,
+Do not downgrade to a binary unaware of repair selection or Docker dispatch
+handling: even an older retention-aware binary may not enforce the new target's
+execution evidence. This is a roll-forward-only operational boundary, not a claim
+that the existing schema version enforces safe binary downgrade. Roll forward with preserved database, sources,
 resources and reports. No hold release or historical-resource deletion protocol
 is provided, even after completion. They can continue consuming storage/capacity.
 
 Regression tests use actual temporary Git repositories, SQLite lifecycle facts
 and the real manager checks-only path with mocked provider/validation engines.
-They do not qualify live Azure capture, actual task checks/model review, native
-Docker recovery or desktop/macOS behavior. Release qualification and operator
+They cover Docker and sandbox dispatch/custody with mocked backend observations,
+including missing identity, changed engine/container, unpublished results and
+one-shot retry authority. They do not qualify live Docker/engine restart behavior,
+Azure capture, actual task checks/model review or desktop/macOS behavior. Release qualification and operator
 checkout access remain separate prerequisites. No live incident is mutated by
 these tests.

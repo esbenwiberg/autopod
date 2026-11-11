@@ -143,9 +143,14 @@ export function createApprovalReadiness(captured: ApprovalReadinessCaptured) {
 
   function assertApprovalCurrent(
     pod: Pod,
-    options: { allowRemovedContainer?: boolean; allowComplete?: boolean } = {},
+    options: {
+      allowRemovedContainer?: boolean;
+      allowComplete?: boolean;
+      approvalEntry?: boolean;
+    } = {},
   ): void {
-    podRepo.sourceAdoptions?.assertDeliveryAllowed(pod.id);
+    if (options.approvalEntry) podRepo.sourceAdoptions?.assertApprovalEntryAllowed(pod.id);
+    else podRepo.sourceAdoptions?.assertDeliveryAllowed(pod.id);
     assertExecutionTerminationVerified(pod.id);
     const current = podRepo.getOrThrow(pod.id);
     if (

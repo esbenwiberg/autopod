@@ -96,6 +96,32 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
       ).submit(podId, input, actor, reconcile);
     },
+    inspectRecoveryFork(podId: string) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).inspect(podId);
+    },
+    previewRecoveryFork(podId: string, input: import('@autopod/shared').RecoveryForkInput) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).preview(
+        podId,
+        input,
+      );
+    },
+    createRecoveryFork(
+      podId: string,
+      input: import('@autopod/shared').RecoveryForkRequest,
+      actor: OperatorActor,
+    ) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).create(
+        podId,
+        input,
+        actor,
+      );
+    },
+    getRecoveryFork(podId: string, requestId: string) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).get(
+        podId,
+        requestId,
+      );
+    },
     inspectStalledWorkerRecovery(podId: string) {
       return (
         captured.stalledWorkerRecovery ?? checkpointError('Stalled recovery unavailable')
@@ -154,6 +180,21 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     acceptFindings: captured.acceptFindings,
     ...captured.validationExecutionRecovery,
+    getRecoveryFiles(podId: string, includeOriginal = false) {
+      return (captured.sandboxRecovery ?? recoveryError('File recovery unavailable')).files.inspect(
+        podId,
+        includeOriginal,
+      );
+    },
+    readRecoveryFile(
+      podId: string,
+      selection: import('../interfaces/recovery-files.js').RecoveryFileSelection,
+    ) {
+      return (captured.sandboxRecovery ?? recoveryError('File recovery unavailable')).files.read(
+        podId,
+        selection,
+      );
+    },
     getSandboxRecovery(podId: string) {
       return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).inspect(
         podId,
@@ -379,7 +420,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     async processPod(podId: string): Promise<void> {
       const run = () => processWorkflow.processPod.call(this, podId);
-      return captured.checkpointRecovery ? captured.checkpointRecovery.process(podId, run) : run();
+      const checkpointRun = () =>
+        captured.checkpointRecovery ? captured.checkpointRecovery.process(podId, run) : run();
+      return captured.recoveryFork
+        ? captured.recoveryFork.process(podId, checkpointRun)
+        : checkpointRun();
     },
 
     async consumeAgentEvents(

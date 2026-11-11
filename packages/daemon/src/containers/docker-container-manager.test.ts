@@ -13,11 +13,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import tar from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import {
   DockerContainerManager,
   terminateStreamingProcessGroupScript,
@@ -28,13 +29,9 @@ import {
 const logger = pino({ level: 'silent' });
 const custodyDatabases: Database.Database[] = [];
 function emptyCustodyDatabase() {
-  const db = new Database(':memory:');
-  db.exec('CREATE TABLE retained_checkpoint_recoveries(container_id TEXT, binding TEXT)');
-  db.exec('CREATE TABLE retained_finalization_resources(container_id TEXT)');
-  db.exec('CREATE TABLE retained_coding_facts(kind TEXT,evidence TEXT)');
-  db.exec('CREATE TABLE stalled_worker_recoveries(container_id TEXT,receipt TEXT)');
-  db.exec('CREATE TABLE artifact_checks_recoveries(id TEXT,container_id TEXT)');
-  db.exec('CREATE TABLE artifact_checks_recovery_events(recovery_id TEXT,kind TEXT,evidence TEXT)');
+  // Exercise every production custody guard against the real current schema.
+  // A hand-written subset silently falls behind new retention migrations.
+  const db = createTestDb();
   custodyDatabases.push(db);
   return db;
 }

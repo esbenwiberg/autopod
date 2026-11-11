@@ -36,6 +36,7 @@ import { createPimPodLifecycle } from '../pim/pod-lifecycle.js';
 import { createPodGoalService } from '../pods/pod-goal-service.js';
 import type { PodManager, PodManagerDependencies } from '../pods/pod-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { RecoveryForkSelectionError } from '../pods/recovery-fork-rejection.js';
 import type { ProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { IsolatedReviewer, type IsolatedReviewerOptions } from '../validation/isolated-reviewer.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
@@ -301,12 +302,33 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     },
   });
   const launchConfiguration: NonNullable<PodManagerDependencies['launchConfiguration']> = {
+    assertRecoveryAdmissionReady() {
+      const ready = options.admissionReady();
+      if (!ready.ready)
+        throw new RecoveryForkSelectionError(
+          ready.reason ?? 'Configuration cutover is incomplete',
+          'CONFIG_CUTOVER_REQUIRED',
+        );
+    },
+    availableRecoveryProfiles: () =>
+      store.list('profile').map((p) => ({ id: p.id, label: p.name })),
+    async admitRecoveryFork(operationId, createPod, initializePod) {
+      const operation = options.pods.recoveryForks?.get(operationId);
+      if (!operation)
+        configurationError('Recovery operation unavailable', 'CONFIG_SOURCE_MISSING', 409);
+      launchConfiguration.assertRecoveryAdmissionReady!();
+      await assertCurrent(operation.binding.execution);
+      return atomicPodChange(options.pods, () => {
+        launchConfiguration.assertRecoveryAdmissionReady!();
+        return snapshots.admitRecoveryFork(operationId, createPod, initializePod);
+      });
+    },
     goals,
     read: snapshots.get,
     executionSettings: (config) =>
       resolveLaunchExecutionSettings(config, { image: config.resolvedEnvironment.pinnedBase }),
     assertCurrentCapabilities: assertCurrent,
-    async previewRetainedExecution(podId, profileId) {
+    async previewRetainedExecution(podId, profileId, previewOptions) {
       const parent = snapshots.get(podId);
       if (!parent?.repository)
         configurationError('Original task launch unavailable', 'CONFIG_SOURCE_MISSING', 409);
@@ -317,7 +339,13 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
           profileId,
           task: parent.task,
         },
-        resolution,
+        previewOptions?.readOnly
+          ? {
+              ...resolution,
+              resolveEnvironment: (environment, target, clis) =>
+                options.images.resolveEnvironment(environment, target, clis, { allowPull: false }),
+            }
+          : resolution,
       );
       if (
         template.requiredSidecarIds.length ||

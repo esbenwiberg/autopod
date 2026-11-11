@@ -118,7 +118,8 @@ export interface EffectiveLaunchConfig {
       | 'manual-fix'
       | 'follow-up'
       | 'goal-rework'
-      | 'spawn-worker';
+      | 'spawn-worker'
+      | 'recovery-fork';
   };
   intent: 'task' | 'goal';
   environment: EnvironmentPreset;

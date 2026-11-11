@@ -2218,6 +2218,54 @@ describe('validate() — hasWebUi gating', () => {
     ).toBe(false);
   });
 
+  it('replays dependency setup for fresh validation resources instead of inheriting worker state', async () => {
+    const prepared = new Set<string>();
+    const commands: Array<[string, string]> = [];
+    const cm = stubContainerManager();
+    vi.mocked(cm.execInContainer).mockImplementation(async (containerId, command) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('git reset --hard HEAD') || shell.includes('node_modules/.bin'))
+        return { stdout: '', stderr: '', exitCode: 0 };
+      commands.push([containerId, shell]);
+      if (shell === 'prepare-locked-sdk') {
+        prepared.add(containerId);
+        return { stdout: 'locked SDK prepared', stderr: '', exitCode: 0 };
+      }
+      if (shell === 'check-locked-sdk')
+        return {
+          stdout: '',
+          stderr: prepared.has(containerId) ? '' : 'required SDK unavailable',
+          exitCode: prepared.has(containerId) ? 0 : 1,
+        };
+      throw new Error(`Unexpected fixture command: ${shell}`);
+    });
+    const engine = createLocalValidationEngine(cm);
+    const config = baseConfig({
+      containerId: 'original-worker',
+      validationSetupCommand: 'prepare-locked-sdk',
+      testCommand: 'check-locked-sdk',
+      startCommand: '',
+      hasWebUi: false,
+      smokePages: [],
+      skipPhases: ['facts', 'review'],
+    });
+    expect((await engine.validate(config)).overall).toBe('pass');
+    const missing = await engine.validate({
+      ...config,
+      containerId: 'fresh-rebase',
+      validationSetupCommand: undefined,
+    });
+    expect(missing.test).toMatchObject({ status: 'fail', stderr: 'required SDK unavailable' });
+    expect(missing.overall).toBe('fail');
+    for (const containerId of ['fresh-rebase', 'fresh-retry', 'fresh-retry']) {
+      expect((await engine.validate({ ...config, containerId })).overall).toBe('pass');
+      expect(commands.slice(-2)).toEqual([
+        [containerId, 'prepare-locked-sdk'],
+        [containerId, 'check-locked-sdk'],
+      ]);
+    }
+  });
+
   it('uses buildTimeout for setup command execution', async () => {
     const { cm, commands, timeouts } = commandTrackingContainerManager();
     const engine = createLocalValidationEngine(cm);

@@ -48,6 +48,34 @@ public actor DaemonAPI {
     try await request("POST", "/pods/\(id)/sandbox-recovery", body: encode(body), timeout: 180)
   }
 
+  // MARK: - Source-bound continuation in a separate pod
+
+  public func inspectRecoveryFork(_ id: String) async throws -> RecoveryForkInspection {
+    let result: RecoveryForkInspection = try await request("GET", try recoveryForkPath(id))
+    try result.validate(podId: id); return result
+  }
+  public func previewRecoveryFork(_ id: String, input: RecoveryForkInput) async throws -> RecoveryForkPreview {
+    guard input.isValid else { throw DaemonError.badRequest("Review the source and continuation instructions first.") }
+    let result: RecoveryForkPreview = try await request("POST", try recoveryForkPath(id) + "/preview", body: encode(input))
+    try result.validate(podId: id, input: input); return result
+  }
+  public func createRecoveryFork(_ id: String, body: RecoveryForkRequest) async throws -> RecoveryForkOperation {
+    guard body.isValid else { throw DaemonError.badRequest("Recovery decision is invalid; nothing was sent.") }
+    let result: RecoveryForkOperation = try await request("POST", try recoveryForkPath(id), body: encode(body), timeout: 180, recoveryForkRejection: (id, body))
+    try result.validate(podId: id, request: body); return result
+  }
+  public func getRecoveryFork(_ id: String, requestId: String) async throws -> RecoveryForkOperation {
+    guard requestId.range(of: #"^[a-zA-Z0-9-]{1,64}$"#, options: .regularExpression) != nil else { throw DaemonError.badRequest("Invalid saved recovery decision.") }
+    let result: RecoveryForkOperation = try await request("GET", try recoveryForkPath(id) + "/" + requestId)
+    try result.validate(podId: id)
+    guard result.id == requestId else { throw URLError(.badServerResponse) }
+    return result
+  }
+  private func recoveryForkPath(_ id: String) throws -> String {
+    guard id.range(of: #"^[a-zA-Z0-9_-]{1,128}$"#, options: .regularExpression) != nil else { throw DaemonError.badRequest("Invalid source pod.") }
+    return "/pods/\(id)/recovery-fork"
+  }
+
   // MARK: - Health
 
   public func healthCheck() async throws -> Bool {
@@ -760,6 +788,19 @@ public actor DaemonAPI {
 
   // MARK: - Files (worktree browser)
 
+  public func getRecoveryFiles(_ id: String, includeOriginal: Bool = false) async throws -> RecoveryFilesSnapshot {
+    let value: RecoveryFilesSnapshot = try await request("GET", "/pods/\(id)/file-recovery", query: includeOriginal ? ["original": "1"] : [:])
+    try value.validate(podId: id)
+    return value
+  }
+
+  public func readRecoveryFile(_ id: String, selection: RecoveryFileSelection) async throws -> RecoveryFileContent {
+    try await request("GET", "/pods/\(id)/file-recovery/content", query: [
+      "sourceId": selection.sourceId, "binding": selection.binding, "generation": String(selection.generation),
+      "path": selection.path, "version": selection.version,
+    ])
+  }
+
   public func listSessionFiles(_ id: String, ext: String = "md") async throws -> [SessionFileEntry] {
     let res: SessionFilesResponse = try await request(
       "GET", "/pods/\(id)/files", query: ["ext": ext]
@@ -1315,7 +1356,8 @@ public actor DaemonAPI {
     query: [String: String] = [:],
     body: Data? = nil,
     timeout: TimeInterval = 30,
-    contentType: String = "application/json"
+    contentType: String = "application/json",
+    recoveryForkRejection: (podId: String, request: RecoveryForkRequest)? = nil
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1341,6 +1383,9 @@ public actor DaemonAPI {
     guard let http = response as? HTTPURLResponse else {
       throw DaemonError.networkError("Non-HTTP response")
     }
+    if [400, 409, 422].contains(http.statusCode), let expected = recoveryForkRejection,
+      let proof = try? decoder.decode(RecoveryForkRejection.self, from: data),
+      proof.matches(podId: expected.podId, request: expected.request) { throw proof }
 
     switch http.statusCode {
     case 200, 201:

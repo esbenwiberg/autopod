@@ -21,6 +21,12 @@ is admitted. Another recovery or active execution retains exclusive custody.
 Facts must name `create` or `touch` artifacts. Historical `update`/`delete` claims
 need a baseline this route cannot establish, so they remain unsupported.
 
+This retained execution route is separate from a fresh recovery fork. It does not
+import a repository into a new coding task or relax that route's source import
+policy. Both routes' custody fences apply; neither can select a task already owned
+by the other. Migration `248_artifact_checks_recovery.sql` adds this route's ledger
+after the recovery fork migrations `246` and `247`, preserving both histories.
+
 Every current-generation infrastructure report must be a complete typed launcher
 need referencing the original frozen v2 execution requirements. Legacy/free-text,
 mixed, builder, native platform, credential and unknown needs fail closed. This

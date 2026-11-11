@@ -434,6 +434,8 @@ private enum RepairWire {
 public struct RepairRetainedContext: Decodable, Sendable {
   public let inspection: Inspection?
   public struct Inspection: Decodable, Sendable {
+    /// Optional only for older observations. Missing identity cannot support a current preservation claim.
+    public let generation: Int?
     public let infrastructure: Infrastructure
     public let prerequisites: Prerequisites
   }

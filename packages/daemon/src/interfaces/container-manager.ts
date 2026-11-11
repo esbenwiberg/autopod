@@ -1,5 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
+import type { RecoveryFileContent, RecoveryFileListing } from './recovery-files.js';
 
 /** Fence retained-resource wakeup across asynchronous provider/auth observations. */
 export interface ContainerStartOptions {
@@ -173,6 +174,17 @@ export interface ContainerManager {
   readonly supportsExecRecovery?: boolean;
   /** Exact backend/engine/region/group/resource namespace, never an owner label. */
   getResourceKey?(containerId: string): Promise<string>;
+  /** Bounded descriptor-relative read-only browser. NEVER resumes or changes a resource. */
+  listRecoveryFiles?(
+    containerId: string,
+    options: ContainerStartOptions,
+  ): Promise<RecoveryFileListing>;
+  readRecoveryFile?(
+    containerId: string,
+    path: string,
+    version: string,
+    options: ContainerStartOptions,
+  ): Promise<RecoveryFileContent>;
   /** Verifies backend identity and observed exit; never treats a lost transport or PID file as exit. */
   terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Read actual backend identity; unsupported metadata remains unavailable. */

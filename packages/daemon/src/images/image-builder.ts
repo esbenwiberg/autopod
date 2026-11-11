@@ -58,6 +58,7 @@ export class ImageBuilder {
     environment: EnvironmentPreset,
     target: 'local' | 'sandbox',
     clis: CliTool[] = [],
+    options: { allowPull?: boolean } = {},
   ): Promise<ResolvedEnvironment> {
     const base = environment.baseImage ?? getConfiguredBaseImage(environment.template);
     let pinnedBase: string;
@@ -76,7 +77,11 @@ export class ImageBuilder {
       pinnedBase = `${tagSeparator > repository.lastIndexOf('/') ? repository.slice(0, tagSeparator) : repository}@${digest}`;
       platform = 'linux/amd64';
     } else {
-      const info = await this.inspectLocalBase(base, environment.template);
+      const info = await this.inspectLocalBase(
+        base,
+        environment.template,
+        options.allowPull !== false,
+      );
       if (info.Os !== 'linux' || !['amd64', 'arm64'].includes(info.Architecture))
         throw new Error('The environment base must be a supported Linux image');
       pinnedBase = info.Id;
@@ -103,6 +108,7 @@ export class ImageBuilder {
   private async inspectLocalBase(
     base: string,
     template: string,
+    allowPull = true,
   ): Promise<Dockerode.ImageInspectInfo> {
     const inspect = (reference: string) =>
       boundedDockerCall(this.docker.getImage(reference).inspect(), {
@@ -114,7 +120,7 @@ export class ImageBuilder {
     } catch (error) {
       if ((error as { statusCode?: number }).statusCode !== 404) throw error;
     }
-    if (!this.acr) {
+    if (!this.acr || !allowPull) {
       throw new AutopodError(
         `Environment base image "${base}" for template "${template}" is not present locally; build or pull it, or configure ACR`,
         'ENVIRONMENT_BASE_UNAVAILABLE',

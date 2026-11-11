@@ -832,6 +832,13 @@ export function generateSystemInstructions(
       '`validate_in_browser` remains available for browser-based self-checks.',
   );
   lines.push(
+    '- **Reproducible validation setup**: approval-time rebases and validation-only recovery can use a fresh container without a coding agent. ' +
+      'Dependencies installed only in this worker (including `/tmp`) are not carried over. ' +
+      'Required checks must be reproducible through the frozen project setup/build commands and declared environment. ' +
+      'If those commands cannot prepare a required dependency, call `report_blocker` with the missing prerequisite and exact failing check; ' +
+      'do not claim fresh validation readiness, change frozen configuration or weaken the check.',
+  );
+  lines.push(
     '- **Do not retry identical failing commands more than twice.** ' +
       'Diagnose the root cause or try a different approach.',
   );

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AutopodError,
   type CheckpointRecoveryRequest,
@@ -50,6 +50,10 @@ export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<
       (row) => row.pod_id,
     ),
   );
+  for (const row of db.prepare('SELECT parent_pod_id AS podId FROM recovery_forks').all() as {
+    podId: string;
+  }[])
+    identities.add(row.podId);
   for (const row of rows) {
     identities.add(row.podId);
     if (row.evidence)
@@ -170,7 +174,14 @@ export interface CheckpointRecoveryRecord {
   infrastructure?: {
     stopDispatched: boolean;
     stopped: boolean;
-    worker: { runId: string; generation: number; containerId: string; cycle: number } | null;
+    worker: {
+      runId: string;
+      generation: number;
+      containerId: string;
+      cycle: number;
+      /** Absent on historical runs; never lend a restarted daemon their live MCP scope. */
+      processEpoch?: string;
+    } | null;
     candidate: {
       head: string;
       tree: string;
@@ -219,7 +230,17 @@ export function ownsInfrastructureRecoveryStop(
       !record.blocked,
   );
 }
+const infrastructureWorkerProcessEpoch = randomUUID();
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
+const workerScopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
+function workerScope(db: Database.Database) {
+  let current = workerScopes.get(db);
+  if (!current) {
+    current = new AsyncLocalStorage<string>();
+    workerScopes.set(db, current);
+  }
+  return current;
+}
 function scope(db: Database.Database) {
   let current = scopes.get(db);
   if (!current) {
@@ -514,8 +535,44 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       'INSERT INTO retained_checkpoint_recovery_events(recovery_id,kind,evidence,created_at) VALUES(?,?,?,?)',
     ).run(id, kind, JSON.stringify(evidence), new Date().toISOString());
   }
+  function assertRepairWorker(id: string, podId: string) {
+    const record = get(id) ?? checkpointError('Repair worker custody unavailable');
+    const worker = record.infrastructure?.worker;
+    if (
+      record.podId !== podId ||
+      record.binding.continuation?.infrastructure?.mode !== 'rework' ||
+      !record.infrastructure?.stopped ||
+      !worker ||
+      worker.processEpoch !== infrastructureWorkerProcessEpoch ||
+      record.checked ||
+      record.blocked ||
+      record.infrastructure.candidate ||
+      record.activated?.generation !== worker.generation ||
+      record.checking?.generation !== worker.generation ||
+      !db
+        .prepare(`SELECT 1 FROM task_agent_runs r JOIN pods p ON p.id=r.pod_id
+        WHERE r.id=? AND r.pod_id=? AND r.ended_at IS NULL
+        AND r.failure_category IS NOT 'execution_termination_unverified'
+        AND r.generation=? AND r.cycle=? AND r.generation=p.lifecycle_generation
+        AND json_extract(r.binding,'$.resource.containerId')=?
+        AND p.container_id=? AND p.worktree_path=? AND p.status IN ('running','awaiting_input')`)
+        .get(
+          worker.runId,
+          podId,
+          worker.generation,
+          worker.cycle,
+          worker.containerId,
+          worker.containerId,
+          record.prepared?.worktree,
+        )
+    )
+      checkpointError('No current infrastructure repair worker owns this MCP request');
+    return record;
+  }
   function assertAvailable(podId: string) {
     assertArtifactChecksAvailable(db, podId);
+    const workerId = workerScope(db).getStore();
+    if (workerId) assertRepairWorker(workerId, podId);
     if (ownsRetainedFinalization(db, podId)) return;
     createRetainedFinalizationRepository(db).assertAvailable(podId);
     const rows = db
@@ -804,6 +861,13 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     owned<T>(id: string, operation: () => T): T {
       return scope(db).run(id, operation);
     },
+    /** MCP may borrow only the exact live repair run, never generic recovery authority. */
+    withWorkerScope<T>(podId: string, operation: () => T): T {
+      const record = latest(podId);
+      if (record?.binding.continuation?.infrastructure?.mode !== 'rework') return operation();
+      assertRepairWorker(record.id, podId);
+      return workerScope(db).run(record.id, () => scope(db).run(record.id, operation));
+    },
     selectionEvidence,
     completedChecksAdmission(pod: Pod): boolean {
       const row = db
@@ -1029,7 +1093,13 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       if (record?.binding.continuation?.infrastructure?.mode !== 'rework') return;
       if (!containerId || !db.inTransaction)
         checkpointError('Atomic resource-bound repair worker required');
-      infrastructureEvent(record.id, 'worker', { runId, generation, cycle, containerId });
+      infrastructureEvent(record.id, 'worker', {
+        runId,
+        generation,
+        cycle,
+        containerId,
+        processEpoch: infrastructureWorkerProcessEpoch,
+      });
     },
     assertWorkerAllowed(podId: string): boolean {
       const current = latest(podId);

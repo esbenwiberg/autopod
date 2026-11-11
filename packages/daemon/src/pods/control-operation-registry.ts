@@ -26,6 +26,8 @@ export function createControlOperationRegistry(
         if (
           typeof value !== 'function' ||
           key === 'recoverStalledWorker' ||
+          key === 'previewRecoveryFork' ||
+          key === 'createRecoveryFork' ||
           key === 'finalizeRetained' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||
@@ -43,6 +45,7 @@ export function createControlOperationRegistry(
           key === 'recoverSandbox' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||
+          key === 'readRecoveryFile' ||
           // This operation is permanently disabled and must reject before resource lookup.
           key === 'injectCredential' ||
           key === 'touchHeartbeat' ||

@@ -40,6 +40,7 @@ import { inspectContractBase } from './contract-base-preflight.js';
 import {
   DIFF_EXCLUDE_PATHSPECS,
   modeOnlyChangedPaths,
+  REVIEW_DIFF_EXCLUDE_PATHSPECS,
   stripModeOnlyChanges,
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
@@ -49,6 +50,7 @@ import {
   applyPinnedAdoption,
   inspectAdoptionGit,
   inspectPreservationGit,
+  inspectSupplementalAdoptionGit,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -126,6 +128,7 @@ const SOURCE_GIT_ENV: Record<string, string> = {
   GIT_NO_REPLACE_OBJECTS: '1',
   GIT_GRAFT_FILE: '/dev/null',
   GIT_OPTIONAL_LOCKS: '0',
+  GIT_NO_LAZY_FETCH: '1',
 };
 
 const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
@@ -598,8 +601,15 @@ export class LocalWorktreeManager implements WorktreeManager {
     };
   }
 
-  async inspectSourceAdoption(worktreePath: string, branch: string) {
-    const source = await inspectAdoptionGit(
+  async inspectSourceAdoption(
+    worktreePath: string,
+    branch: string,
+    options?: { allowSupplementalFiles: true },
+  ) {
+    const inspect = options?.allowSupplementalFiles
+      ? inspectSupplementalAdoptionGit
+      : inspectAdoptionGit;
+    const source = await inspect(
       (args) => git(args, { cwd: worktreePath, timeout: 30_000, env: SOURCE_GIT_ENV }),
       branch,
     );
@@ -1160,7 +1170,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     try {
-      await git(['diff', '--quiet', base, ...DIFF_EXCLUDE_PATHSPECS], { cwd: worktreePath });
+      await git(['diff', '--quiet', base, ...REVIEW_DIFF_EXCLUDE_PATHSPECS], { cwd: worktreePath });
       return false;
     } catch (err) {
       if ((err as { code?: unknown }).code === 1) {
@@ -1179,10 +1189,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     try {
-      const { stdout } = await git(['diff', '--name-only', '-z', base, ...DIFF_EXCLUDE_PATHSPECS], {
-        cwd: worktreePath,
-        maxBuffer: 10 * 1024 * 1024,
-      });
+      const { stdout } = await git(
+        ['diff', '--name-only', '-z', base, ...REVIEW_DIFF_EXCLUDE_PATHSPECS],
+        {
+          cwd: worktreePath,
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      );
       return stdout.split('\0').filter(Boolean);
     } catch (err) {
       throw sanitizeGitError(err);
@@ -1194,6 +1207,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     baseBranch: string,
     maxLength = 200_000,
     sinceCommit?: string,
+    purpose: 'review' | 'preview' = 'review',
   ): Promise<string> {
     const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch));
 
@@ -1230,7 +1244,11 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Untracked files are still excluded (matches prior behaviour) — they
       // require `--no-index` or `git status -uall` and are intentionally not
       // part of the reviewer's scope.
-      const { stdout: rawDiff } = await git(['diff', base, ...DIFF_EXCLUDE_PATHSPECS], bufOpts);
+      // Git supplies changed hunks, not entire lockfiles/generated assets. Keep the
+      // existing size bound; previews alone may apply additional noise filtering.
+      const excludes =
+        purpose === 'preview' ? DIFF_EXCLUDE_PATHSPECS : REVIEW_DIFF_EXCLUDE_PATHSPECS;
+      const { stdout: rawDiff } = await git(['diff', base, ...excludes], bufOpts);
 
       // If sinceCommit produced an empty diff, fall back to merge-base.
       // This handles the case where the worktree wasn't synced from the container
@@ -1238,10 +1256,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       if (!rawDiff.trim() && sinceCommit) {
         const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
         if (mergeBase && mergeBase !== sinceCommit) {
-          const { stdout: mbDiff } = await git(
-            ['diff', mergeBase, ...DIFF_EXCLUDE_PATHSPECS],
-            bufOpts,
-          );
+          const { stdout: mbDiff } = await git(['diff', mergeBase, ...excludes], bufOpts);
           return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbDiff), maxLength);
         }
       }
@@ -2702,16 +2717,19 @@ export class LocalWorktreeManager implements WorktreeManager {
     worktreePath: string,
     diffArgs: string[],
   ): Promise<DiffStats> {
-    const { stdout: stat } = await git(['diff', '--stat', ...diffArgs, ...DIFF_EXCLUDE_PATHSPECS], {
-      cwd: worktreePath,
-    });
+    const { stdout: stat } = await git(
+      ['diff', '--stat', ...diffArgs, ...REVIEW_DIFF_EXCLUDE_PATHSPECS],
+      {
+        cwd: worktreePath,
+      },
+    );
     const parsed = this.parseDiffStats(stat);
     if (parsed.filesChanged === 0 || parsed.linesAdded > 0 || parsed.linesRemoved > 0) {
       return parsed;
     }
 
     const { stdout: rawDiff } = await git(
-      ['diff', '--no-color', ...diffArgs, ...DIFF_EXCLUDE_PATHSPECS],
+      ['diff', '--no-color', ...diffArgs, ...REVIEW_DIFF_EXCLUDE_PATHSPECS],
       {
         cwd: worktreePath,
         maxBuffer: 10 * 1024 * 1024,

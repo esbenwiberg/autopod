@@ -55,6 +55,7 @@ import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../prev
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedFinalizationRoutes } from './retained-finalization.js';
 import { reworkRoutes } from './rework.js';
@@ -844,6 +845,7 @@ export function podRoutes(
   artifactChecksRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
+  recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);
   sandboxRecoveryRoutes(app, podManager);
 

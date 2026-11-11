@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
@@ -25,6 +26,7 @@ import {
 import { terminationAuth } from '../test-utils/termination-reconciliation-helpers.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
 import { createCompletionGuards } from './completion-guards.js';
+import { createSessionBridge } from './pod-bridge-impl.js';
 import { createPodManager } from './pod-manager.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import {
@@ -249,6 +251,168 @@ async function publishAndComplete(
 }
 
 describe('qualified infrastructure recovery from real incident shapes', () => {
+  function bridgeFor(f: Awaited<ReturnType<typeof fixture>>) {
+    return createSessionBridge({
+      podManager: f.manager,
+      podRepo: f.ctx.podRepo,
+      eventBus: f.ctx.eventBus,
+      escalationRepo: f.ctx.escalationRepo,
+      nudgeRepo: f.ctx.nudgeRepo,
+      profileStore: f.ctx.profileStore,
+      containerManagerFactory: f.ctx.deps.containerManagerFactory,
+      pendingRequestsByPod: new Map(),
+      logger: f.ctx.deps.logger,
+    });
+  }
+
+  it('lends MCP reporting only to the exact live infrastructure worker and revokes stale scopes', async () => {
+    const f = await fixture('rework');
+    qualifiedExecution(f);
+    delivery(f);
+    passingReview(f);
+    const bridge = bridgeFor(f);
+    const repo = f.ctx.podRepo.retainedCheckpoints!;
+    let finishLate: () => void = () => {};
+    const lateGate = new Promise<void>((resolve) => {
+      finishLate = resolve;
+    });
+    let lateReport: Promise<void> = Promise.resolve();
+    const requestScope = new AsyncResource('independent-worker-mcp');
+    vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* () {
+      // A different request does not inherit the manager's privileged async context.
+      requestScope.runInAsyncScope(() => {
+        expect(() => bridge.reportProgress(f.podId, 'Unowned', 'No borrowed scope', 1, 2)).toThrow(
+          'Checkpoint recovery owns',
+        );
+        repo.withWorkerScope(f.podId, () => {
+          bridge.reportPlan(f.podId, 'Integrate preserved source', ['Reconcile current base']);
+          bridge.reportProgress(f.podId, 'Integration', 'Current worker can report', 1, 2);
+          bridge.reportTaskSummary(f.podId, 'Current repair report', []);
+        });
+      });
+      expect(f.pod().plan?.summary).toBe('Integrate preserved source');
+      expect(f.pod().progress?.description).toBe('Current worker can report');
+      const record = repo.latest(f.podId)!;
+      const worker = record.infrastructure!.worker!;
+      // Reload the repository module to model a new daemon process without
+      // changing immutable worker evidence or granting the new process a scope.
+      vi.resetModules();
+      const restarted = (
+        await import('./retained-checkpoint-repository.js')
+      ).createRetainedCheckpointRepository(f.ctx.db);
+      expect(() => restarted.withWorkerScope(f.podId, () => {})).toThrow(
+        'No current infrastructure repair worker',
+      );
+      for (const column of ['container_id', 'worktree_path', 'lifecycle_generation'] as const) {
+        const prior = f.ctx.db
+          .prepare(`SELECT ${column} AS value FROM pods WHERE id=?`)
+          .get(f.podId) as { value: string | number };
+        f.ctx.db
+          .prepare(`UPDATE pods SET ${column}=? WHERE id=?`)
+          .run(column === 'lifecycle_generation' ? 99 : 'foreign', f.podId);
+        try {
+          expect(() => repo.withWorkerScope(f.podId, () => {})).toThrow(
+            'No current infrastructure repair worker',
+          );
+        } finally {
+          f.ctx.db.prepare(`UPDATE pods SET ${column}=? WHERE id=?`).run(prior.value, f.podId);
+        }
+      }
+      f.ctx.db
+        .prepare(
+          "UPDATE task_agent_runs SET failure_category='execution_termination_unverified' WHERE id=?",
+        )
+        .run(worker.runId);
+      try {
+        expect(() => repo.withWorkerScope(f.podId, () => {})).toThrow(
+          'No current infrastructure repair worker',
+        );
+      } finally {
+        f.ctx.db
+          .prepare('UPDATE task_agent_runs SET failure_category=NULL WHERE id=?')
+          .run(worker.runId);
+      }
+      repo.withWorkerScope(f.podId, () => {
+        lateReport = lateGate.then(() => {
+          f.ctx.podRepo.update(f.podId, {
+            progress: {
+              phase: 'Late',
+              description: 'Must not write',
+              currentPhase: 2,
+              totalPhases: 2,
+            },
+          });
+        });
+      });
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Reported; checks remain required',
+      };
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    await f.manager.processPod(f.podId).catch((error) => {
+      throw new Error(
+        JSON.stringify({ failure: f.pod().failureReason, finalization: f.pod().finalization }),
+        { cause: error },
+      );
+    });
+    expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
+    expect(() => repo.withWorkerScope(f.podId, () => {})).toThrow(
+      'No current infrastructure repair worker',
+    );
+    finishLate();
+    await expect(lateReport).rejects.toThrow('No current infrastructure repair worker');
+    expect(f.cm.kill).not.toHaveBeenCalledWith(f.containerId);
+    requestScope.emitDestroy();
+  });
+
+  it('preserves a reported blocked integration without sealing a candidate or running validation', async () => {
+    const f = await fixture('rework');
+    qualifiedExecution(f);
+    delivery(f);
+    const bridge = bridgeFor(f);
+    vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* () {
+      f.ctx.podRepo.retainedCheckpoints!.withWorkerScope(f.podId, () => {
+        bridge.reportPlan(f.podId, 'Attempt the owned integration', ['Inspect the supplied base']);
+        bridge.createEscalation({
+          id: 'current-repair-blocker',
+          podId: f.podId,
+          type: 'report_blocker',
+          timestamp: new Date().toISOString(),
+          response: null,
+          payload: {
+            kind: 'infrastructure',
+            owner: 'autopod',
+            phase: 'Integration',
+            requiresResponse: false,
+            description: 'The supplied integration authority could not complete',
+            attempted: ['Inspected without changing source'],
+            needs: 'The control-plane owner must resolve the exact failed capability',
+          },
+        });
+        bridge.reportTaskSummary(f.podId, 'Blocked; no integration or checks completed', []);
+      });
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Blocked; original source unchanged',
+      };
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    await expect(f.manager.processPod(f.podId)).rejects.toMatchObject({
+      code: 'CHECKPOINT_CHECKS_UNVERIFIED',
+    });
+    expect(f.pod().status).toBe('failed');
+    expect(f.pod().failureReason).toContain('Infrastructure blocked');
+    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(f.recovery.list(f.podId)[0]!.infrastructure?.candidate).toBeNull();
+    expect(f.recovery.list(f.podId)[0]!.checked).toBeNull();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+
   it('cannot route typed prerequisite coding through legacy infrastructure rework', async () => {
     const f = await fixture('rework');
     const report = f.ctx.db

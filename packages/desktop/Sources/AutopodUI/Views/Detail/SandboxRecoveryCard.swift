@@ -1,7 +1,7 @@
 import AutopodClient
 import SwiftUI
 
-/// Read-only observation on appearance; all mutations require an explicit human decision.
+/// Kept for standalone callers; pod detail uses the unified RecoveryHubCard.
 struct SandboxRecoveryCard: View {
   let podId: String
   let actions: SandboxRecoveryActions
@@ -11,25 +11,17 @@ struct SandboxRecoveryCard: View {
   @State private var showSheet = false
 
   var body: some View {
-    // An initially empty Group has no child to receive .task inside the detail
-    // stack. Keep a concrete lifecycle host even before the first observation.
     VStack(alignment: .leading, spacing: 0) {
       if let snapshot, !snapshot.resources.isEmpty {
         HStack {
-          Image(systemName: snapshot.resources.contains(where: { !$0.pendingIntentIds.isEmpty && $0.abandonment?.completedAt == nil })
-                ? "exclamationmark.lock" : "shippingbox")
-          Text(snapshot.resources.contains(where: { !$0.pendingIntentIds.isEmpty && $0.abandonment?.completedAt == nil })
-               ? "Sandbox retained — recovery required before deletion" : "Retained sandbox")
-            .font(.callout)
+          Label("Original environment retained", systemImage: "shippingbox")
           Spacer()
-          Button("Sandbox recovery…") { showSheet = true }
+          Button("Review recovery…") { showSheet = true }
             .accessibilityIdentifier("sandbox-recovery-open")
-        }
-        .padding(10)
-        .background(.orange.opacity(0.08))
+        }.padding(10).background(.orange.opacity(0.08))
       } else if let error {
         HStack {
-          Text(error).font(.caption).foregroundStyle(.secondary)
+          Text(error).font(.caption).foregroundStyle(RecoveryPalette.secondary)
           Spacer()
           Button("Check recovery status") { Task { await load() } }.disabled(loading)
         }.padding(8)
@@ -45,170 +37,177 @@ struct SandboxRecoveryCard: View {
     guard actions.available else { return }
     loading = true
     do { snapshot = try await actions.load(podId); error = nil }
-    catch DaemonError.notFound { error = "Sandbox recovery requires a newer daemon." }
-    catch { self.error = "Could not check sandbox recovery: \(error.localizedDescription)" }
+    catch { self.error = "Could not check retained environments: \(error.localizedDescription)" }
     loading = false
   }
 }
 
+enum SandboxRecoveryPurpose { case all, files, storage }
+
 struct SandboxRecoverySheet: View {
   let podId: String
   let actions: SandboxRecoveryActions
+  var purpose: SandboxRecoveryPurpose = .all
+  var embedded = false
+  var onOpenFiles: (() -> Void)?
   @Environment(\.dismiss) private var dismiss
-  @State private var snapshot: SandboxRecoveryState?
-  @State private var busy = false
-  @State private var error: String?
-  @State private var notice: String?
-  @State private var reason = ""
-  @State private var acknowledgeLoss = false
+  @State private var model: SandboxRecoveryModel
   @State private var confirmation: SandboxRecoveryResource?
-  @State private var savedRequest: SandboxRecoveryRequest?
+
+  init(podId: String, actions: SandboxRecoveryActions, purpose: SandboxRecoveryPurpose = .all,
+       embedded: Bool = false, model: SandboxRecoveryModel? = nil, onOpenFiles: (() -> Void)? = nil) {
+    self.podId = podId; self.actions = actions; self.purpose = purpose; self.embedded = embedded
+    self.onOpenFiles = onOpenFiles
+    _model = State(initialValue: model ?? SandboxRecoveryModel(podId: podId, actions: actions))
+  }
+
+  private var title: String {
+    purpose == .files ? "Recover files" : purpose == .storage ? "Free retained storage" : "Recover files or free storage"
+  }
+
+  private var selectedDecision: SandboxRecoveryRequest? {
+    purpose == .files ? model.pendingStart : purpose == .storage ? model.pendingAbandon : model.pending
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Text("Sandbox recovery").font(.title2.bold())
+        Text(title).font(.title3.weight(.semibold))
         Spacer()
-        Button("Check status") { Task { await refresh() } }.disabled(busy)
-        Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-      }
-      Text(podId).font(.caption.monospaced()).textSelection(.enabled)
-      Text("Starting the sandbox does not continue the coding agent, run validation, publish changes, or reopen a PR. Continue task remains a separate action with its existing checks.")
-        .font(.callout).foregroundStyle(.secondary)
-      if busy { ProgressView().controlSize(.small) }
-      if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-      if let notice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+        Button("Check status") { Task { await model.refresh(actions) } }.disabled(model.busy)
+        if !embedded { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.busy) }
+      }.controlSize(.small)
+      Text(purpose == .storage
+        ? "Deleting the original environment may lose files and reports that were never saved. This also attempts to remove the pod; cleanup can remain blocked."
+        : "Starting the selected retained environment lets you recover files. It does not resume coding, run checks or publish changes.")
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary)
+      if model.busy { ProgressView("Checking the recorded outcome…").controlSize(.small) }
+      if let error = model.error { RecoveryNotice(title: "Outcome needs a status check", message: error) }
+      if let notice = model.notice { RecoveryNotice(title: "Recorded outcome", message: notice, tone: .standard, symbol: "info.circle") }
       ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          if let snapshot {
-            if snapshot.resources.isEmpty { Text("No retained sandbox resources were found.") }
-            ForEach(snapshot.resources) { resource in
-              resourceCard(resource, snapshot: snapshot)
+        VStack(alignment: .leading, spacing: 14) {
+          if let pending = selectedDecision {
+            RecoveryNotice(title: "A decision is already saved", message: pending.action == "start"
+              ? "The start response may have been lost. Check status; another start will not be sent."
+              : "Continue this same deletion decision if needed. It will never target a replacement environment.", symbol: "clock")
+            if model.canDiscardRejected {
+              Button("Review a new decision after confirmed rejection") { Task { await model.discardRejected(actions) } }
             }
-            DisclosureGroup("Original wakeup evidence (\(snapshot.wakeups.count))") {
-              ForEach(snapshot.wakeups) { wakeup in
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(wakeup.id).font(.caption.monospaced())
-                  Text("Sandbox: \(wakeup.sandboxId)")
-                  Text("Requested: \(wakeup.startedAt)")
-                  Text("Outcome: \(wakeup.settledBy ?? "unresolved — not proved rejected")")
-                  if wakeup.evidence.isEmpty { Text("No transport response evidence recorded.") }
+          }
+          if selectedDecision == nil || purpose == .storage {
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: purpose == .storage ? "Deletion reason" : "Recovery reason",
+                subtitle: purpose == .storage && model.pendingAbandon != nil
+                  ? "This reason is for a new decision. Saved decisions are unchanged."
+                  : "10–4000 characters. Recorded only when you confirm an action.")
+              TextField("Describe why this action is needed", text: $model.reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy)
+                .accessibilityIdentifier("sandbox-recovery-reason")
+            }.recoverySurface()
+          }
+          if purpose != .files {
+            VStack(alignment: .leading, spacing: 12) {
+              Label("Deletion is permanent", systemImage: "exclamationmark.triangle")
+                .font(.callout.weight(.semibold)).foregroundStyle(RecoveryTone.destructive.color)
+              Text("This is a discard action, not verified archive-and-release. Recover anything you need first.")
+                .font(.callout).foregroundStyle(RecoveryPalette.secondary)
+              Toggle("I accept losing files and reports that have not been saved.", isOn: $model.acknowledgeLoss)
+                .disabled(model.busy).accessibilityIdentifier("sandbox-recovery-accept-loss")
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+              .background(RecoveryTone.destructive.color.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+              .overlay(RoundedRectangle(cornerRadius: 12).stroke(RecoveryTone.destructive.color.opacity(0.24)))
+          }
+          if let snapshot = model.snapshot {
+            if purpose == .storage && snapshot.operations.contains(where: { $0.action == "abandon" && $0.generation != snapshot.generation }) {
+              Text("Earlier deletion decisions belong to an older task state. Their evidence is retained. Deleting a current selection requires a new reason, loss acknowledgement and confirmation.")
+                .font(.callout).foregroundStyle(RecoveryPalette.secondary)
+            }
+            if snapshot.resources.isEmpty { Text("No retained sandbox environments were found.") }
+            ForEach(snapshot.resources) { resource in resourceCard(resource, snapshot: snapshot) }
+            DisclosureGroup("Technical details and recovery history") {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Pod: \(podId) · generation \(snapshot.generation)")
+                if let start = model.pendingStart { Text("Saved start: \(start.id)\nReason: \(start.reason)") }
+                ForEach(Array(model.pendingAbandons.values.sorted { $0.id < $1.id }.enumerated()), id: \.offset) { _, abandon in
+                  Text("Saved deletion: \(abandon.id)\nReason: \(abandon.reason)")
+                }
+                ForEach(snapshot.wakeups) { wakeup in
+                  Text("Start \(wakeup.id) · \(wakeup.startedAt)\nOutcome: \(wakeup.settledBy ?? "unresolved")")
                   ForEach(Array(wakeup.evidence.enumerated()), id: \.offset) { _, item in
                     Text("\(item.recordedAt): \(item.kind), \(item.status.map(String.init) ?? item.errorCode ?? "unknown")")
                   }
-                }.font(.caption).textSelection(.enabled).padding(.vertical, 6)
-              }
-            }
-            DisclosureGroup("Recovery decisions (\(snapshot.operations.count))") {
-              ForEach(snapshot.operations) { operation in
-                Text("\(operation.action) · \(operation.id)\n\(operation.userId) · \(operation.createdAt)\n\(operation.reason)\n\(operation.completedAt == nil ? "Completion unverified" : "Confirmed complete")")
-                  .font(.caption).textSelection(.enabled).padding(.vertical, 6)
-              }
+                }
+                ForEach(snapshot.operations) { operation in
+                  Text("\(operation.action) · \(operation.id) · \(operation.userId)\n\(operation.reason)\n\(operation.completedAt == nil ? "Completion unverified" : "Confirmed complete")")
+                }
+              }.font(.caption.monospaced()).textSelection(.enabled)
             }
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
-      TextField("Reason for recovery (at least 10 characters)", text: $reason, axis: .vertical)
-        .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(busy)
-      Toggle("I accept losing unpreserved files and reports when abandoning this sandbox.", isOn: $acknowledgeLoss)
-        .disabled(busy)
-      Text("A stopped sandbox can still incur storage charges. Deleting this sandbox does not claim to remove independent snapshots, images, or volumes.")
-        .font(.caption).foregroundStyle(.secondary)
+      Text("Stopped environments may still incur storage charges. Deleting this sandbox does not remove independent snapshots, images or volumes.")
+        .font(.caption).foregroundStyle(RecoveryPalette.secondary).fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 10).overlay(alignment: .top) { DesktopTheme.line.frame(height: 1) }
     }
-    .padding(20).frame(width: 680, height: 650)
-    .background(Color(nsColor: .windowBackgroundColor))
-    .task { await refresh() }
-    .confirmationDialog("Permanently abandon sandbox and delete pod?", isPresented: Binding(
+    .padding(embedded ? 0 : 20)
+    .frame(width: embedded ? nil : 680, height: embedded ? nil : 650)
+    .background(DesktopTheme.canvas).tint(DesktopTheme.accent)
+    .interactiveDismissDisabled(model.busy)
+    .task { await model.refresh(actions) }
+    .onChange(of: model.podDeleted) { _, deleted in if deleted { dismiss() } }
+    .confirmationDialog("Discard unsaved data and delete?", isPresented: Binding(
       get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible) {
         if let resource = confirmation {
-          Button("Abandon and delete", role: .destructive) {
+          Button("Discard data and delete", role: .destructive) {
             confirmation = nil
-            Task { await submit(resource, action: "abandon") }
+            Task { await model.submit(resource, action: "abandon", actions: actions) }
           }
         }
         Button("Cancel", role: .cancel) { confirmation = nil }
       } message: {
-        Text("Sandbox \(confirmation?.sandboxId ?? "") will be permanently deleted. Unpreserved files and reports may be lost. The pod is removed only if all other custody checks and cleanup succeed. Original wakeup and recovery audit evidence is retained.")
+        Text("Environment \(confirmation?.sandboxId ?? "") will be permanently deleted. Unsaved files and reports may be lost. Pod deletion is also attempted, but only if all other ownership checks and cleanup succeed. Audit evidence is retained.")
       }
   }
 
   @ViewBuilder private func resourceCard(_ resource: SandboxRecoveryResource, snapshot: SandboxRecoveryState) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("Azure state: \(resource.providerState)").font(.headline)
-      Text(resource.sandboxId).font(.caption.monospaced()).textSelection(.enabled)
-      Text(resource.resourceKey).font(.caption2).textSelection(.enabled)
-      Text("Observed: \(resource.observedAt)").font(.caption).foregroundStyle(.secondary)
-      if !resource.pendingIntentIds.isEmpty && resource.abandonment?.completedAt == nil {
-        Text("Resume outcome unknown. Elapsed time or Stopped state does not authorize another resume.").foregroundStyle(.orange)
-      }
-      if let observationError = resource.observationError {
-        Text("Provider observation: \(observationError)").font(.caption).foregroundStyle(.orange)
-      }
-      if let blocked = resource.startBlocked { Text("Start blocked: \(blocked)").font(.caption) }
-      if let blocked = resource.abandonBlocked { Text("Abandonment blocked: \(blocked)").font(.caption) }
+    VStack(alignment: .leading, spacing: 10) {
       HStack {
-        Button("Start sandbox for recovery") { Task { await submit(resource, action: "start") } }
-          .disabled(!SandboxRecoveryControlPolicy.canStart(resource, reason: reason, busy: busy))
-          .accessibilityIdentifier("sandbox-recovery-start")
+        Text("Retained environment").font(.headline)
         Spacer()
-        Button(resource.abandonment == nil ? "Abandon and delete…" : "Continue abandonment…", role: .destructive) {
-          confirmation = resource
+        Text(String(resource.sandboxId.prefix(8))).font(.caption.monospaced()).textSelection(.enabled)
+          .padding(.horizontal, 7).padding(.vertical, 4)
+          .background(DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 5))
+      }
+      Text(resource.providerState == "unknown" ? "Environment state could not be verified" : "Provider reports: \(resource.providerState)")
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary)
+      if !resource.pendingIntentIds.isEmpty && resource.abandonment?.completedAt == nil {
+        Text("An earlier start has an unknown outcome. Stopped does not mean that request failed; another start is blocked.")
+          .foregroundStyle(.orange)
+      }
+      if let error = resource.observationError { Text("Status check: \(error)").font(.callout).foregroundStyle(.orange) }
+      if purpose != .storage {
+        if let blocked = resource.startBlocked { Text("Cannot start yet: \(blocked)").font(.callout).foregroundStyle(RecoveryPalette.secondary) }
+        Button("Start environment for file recovery") {
+          Task { await model.submit(resource, action: "start", actions: actions) }
+        }.buttonStyle(.borderedProminent).controlSize(.small)
+          .disabled(!model.canStart(resource)).accessibilityIdentifier("sandbox-recovery-start")
+        if let onOpenFiles { Button("View files and saved evidence", action: onOpenFiles).disabled(model.busy) }
+      }
+      if purpose != .files {
+        if let saved = model.pendingAbandons[resource.resourceKey] {
+          Text("Saved deletion reason: \(saved.reason). Continuing uses this exact decision, not edited fields.")
+            .font(.callout).foregroundStyle(RecoveryPalette.secondary)
         }
-        .disabled(!SandboxRecoveryControlPolicy.canAbandon(resource, currentUserId: snapshot.currentUserId,
-          reason: reason, acceptsLoss: acknowledgeLoss, busy: busy))
-        .accessibilityIdentifier("sandbox-recovery-abandon")
+        if let blocked = resource.abandonBlocked { Text("Cannot delete yet: \(blocked)").font(.callout).foregroundStyle(RecoveryPalette.secondary) }
+        Button(resource.abandonment == nil ? "Discard unsaved data and delete…" : "Continue the recorded deletion…", role: .destructive) {
+          confirmation = resource
+        }.buttonStyle(.bordered).tint(RecoveryTone.destructive.color).controlSize(.small)
+          .disabled(!model.canAbandon(resource)).accessibilityIdentifier("sandbox-recovery-abandon")
       }
-    }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-  }
-
-  private func refresh() async {
-    busy = true; error = nil; snapshot = nil
-    do {
-      let refreshed = try await actions.load(podId)
-      snapshot = refreshed
-      if let savedRequest, savedRequest.action == "start",
-         refreshed.operations.contains(where: { $0.id == savedRequest.id }),
-         refreshed.resources.contains(where: { $0.sandboxId == savedRequest.sandboxId && $0.pendingIntentIds.isEmpty }) {
-        // A later explicit Start is a new decision only after fresh journal evidence.
-        self.savedRequest = nil
+      DisclosureGroup("Environment identity") {
+        Text("\(resource.sandboxId)\n\(resource.resourceKey)\nObserved: \(resource.observedAt)")
+          .font(.caption.monospaced()).textSelection(.enabled)
       }
-    }
-    catch DaemonError.notFound { error = "This daemon does not support sandbox recovery, or the pod was removed." }
-    catch { self.error = error.localizedDescription }
-    busy = false
-  }
-
-  private func submit(_ resource: SandboxRecoveryResource, action: String) async {
-    guard let snapshot, !busy else { return }
-    let proposed: SandboxRecoveryRequest
-    if action == "abandon", let abandonment = resource.abandonment,
-       abandonment.userId == snapshot.currentUserId {
-      proposed = SandboxRecoveryRequest(abandonment: abandonment)
-    } else {
-      proposed = SandboxRecoveryRequest(action: action, sandboxId: resource.sandboxId,
-        expectedGeneration: snapshot.generation, expectedResourceKey: resource.resourceKey,
-        reason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
-        acknowledgeDataLoss: action == "abandon" && acknowledgeLoss)
-    }
-    // A lost response keeps the exact submitted identity, not a fresh mutation request.
-    let request: SandboxRecoveryRequest
-    if let savedRequest, savedRequest.action == proposed.action && savedRequest.sandboxId == proposed.sandboxId && savedRequest.reason == proposed.reason && savedRequest.expectedGeneration == proposed.expectedGeneration && savedRequest.expectedResourceKey == proposed.expectedResourceKey {
-      request = savedRequest
-    } else { request = proposed; savedRequest = proposed }
-    busy = true; error = nil; notice = nil
-    do {
-      let result = try await actions.submit(podId, request)
-      savedRequest = nil
-      if result.podDeleted { dismiss(); return }
-      notice = result.cleanupError.map { "Sandbox deletion confirmed, but pod cleanup remains blocked: \($0)" }
-        ?? (action == "start" ? "Sandbox is running. The coding agent was not started; task status is unchanged." : "Abandonment recorded.")
-    } catch {
-      self.error = "\(error.localizedDescription) Check status before any further action; a lost response is not proof that the operation failed."
-    }
-    busy = false
-    // Refresh capabilities after both success and failure; never reuse a stale enabled action.
-    let priorError = error
-    await refresh()
-    if let priorError { error = priorError }
+    }.recoverySurface(inset: 16)
   }
 }

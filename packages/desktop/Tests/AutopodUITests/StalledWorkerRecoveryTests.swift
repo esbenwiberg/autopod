@@ -124,11 +124,11 @@ import Testing
     defer { window.close() }
     try await Task.sleep(for: .milliseconds(200)); view.layoutSubtreeIfNeeded()
     let nodes = stalledRecoveryNodes(view)
-    let identifier = sheet ? "stalled-worker-recovery-confirm" : "stalled-worker-recovery-open"
+    let identifier = sheet ? "stalled-worker-recovery-confirm" : "recovery-hub-open"
     let buttons = nodes.filter { stalledRecoveryValue($0, "accessibilityIdentifier") as? String == identifier }
     #expect(!buttons.isEmpty)
     if sheet { #expect(buttons.contains { stalledRecoveryValue($0, "accessibilityEnabled") as? Bool == false }) }
-    #expect(f.requests.isEmpty && f.loads == (sheet ? 1 : 0))
+    #expect(f.requests.isEmpty && f.loads == 1)
   }
 
   @Test func statusRequiresRecordedRecoveryEvidenceNotAge() {

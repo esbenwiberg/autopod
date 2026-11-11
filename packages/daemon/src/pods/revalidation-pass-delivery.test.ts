@@ -4,6 +4,39 @@ import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createRevalidationPassDelivery } from './revalidation-pass-delivery.js';
 
 describe('separate human revalidation delivery lifetime', () => {
+  it('holds recovery-fork publication on revalidation without suppressing advisory checks', async () => {
+    const f = createDeliveryFixture();
+    f.validating();
+    f.podRepo.update('prepare', { autoApprove: true });
+    f.db
+      .prepare('INSERT INTO recovery_forks VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(
+        'fork',
+        'retained-original',
+        'request',
+        'human',
+        'hash',
+        '{}',
+        '{"worktreePath":"/separate-original","sourceLocations":[]}',
+        'epoch',
+        'now',
+      );
+    f.db
+      .prepare('INSERT INTO recovery_fork_facts VALUES(?,?,?,?)')
+      .run('fork', 'admitted', '{"childPodId":"prepare"}', 'now');
+    await f.repass().completeRevalidationPass.call(f.calls, {
+      ...f.passContext(),
+      revalDefaultBranch: 'main',
+      newCommits: false,
+    });
+    expect(f.pod().status).toBe('validated');
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushArtifactBranch).not.toHaveBeenCalled();
+    expect(f.passCaptured.prManagerFactory).not.toHaveBeenCalled();
+    expect(f.passCaptured.runAdvisoryAfterValidation).toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+    expect(f.passCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+  });
   it.each([
     null,
     'https://github.com/org/repo/pull/27',

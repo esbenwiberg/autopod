@@ -75,9 +75,17 @@ export interface PodManagerDependencies {
     executionSettings(config: EffectiveLaunchConfig): PodExecutionSettings;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
+    assertRecoveryAdmissionReady?(): void;
+    availableRecoveryProfiles?(): Array<{ id: string; label: string }>;
+    admitRecoveryFork?(
+      operationId: string,
+      createPod: (config: EffectiveLaunchConfig) => string,
+      initializePod: (podId: string, config: EffectiveLaunchConfig) => void,
+    ): Promise<{ podId: string; created: boolean }>;
     previewRetainedExecution?(
       podId: string,
       profileId: string,
+      options?: { readOnly: true },
     ): Promise<RetainedExecutionSelection>;
     beginGoalRework?(
       podId: string,
@@ -435,6 +443,12 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  getRecoveryFiles: ReturnType<
+    typeof import('./sandbox-recovery.js').createSandboxRecovery
+  >['files']['inspect'];
+  readRecoveryFile: ReturnType<
+    typeof import('./sandbox-recovery.js').createSandboxRecovery
+  >['files']['read'];
   getSandboxRecovery: ReturnType<
     typeof import('./sandbox-recovery.js').createSandboxRecovery
   >['inspect'];

@@ -90,10 +90,26 @@ public struct PodRepairActions: Sendable {
     RetryAuthorizationDraft.clear(authorizationKey); authorizationPending = nil; authorizationRejected = false
   }
   var ordinaryRework = false
+  // Native Goal routing may turn off ordinary Rework, but cannot clear a lifecycle hold.
+  private let workerRepair: Bool
+  var ordinaryRecovery: Bool { (workerRepair || ordinaryRework) && [.rework, .revalidate, .resume].contains(kind) }
+  var recoveryBlock: String? {
+    guard ordinaryRecovery else { return nil }
+    if eligibilityLoading { return "Checking current recovery eligibility…" }
+    guard let eligibility else { return "Recovery eligibility unavailable. Refresh before continuing." }
+    if eligibility.code == "INFRASTRUCTURE_BLOCKED"
+      || eligibility.code == "DELIVERY_RECONCILIATION_REQUIRED"
+      || eligibility.code == "CONTINUATION_SOURCE_HELD" { return eligibility.reason }
+    if eligibility.code == nil && eligibility.status == "blocked" {
+      return "The daemon cannot identify this recovery restriction. Refresh using a compatible daemon before continuing."
+    }
+    return nil
+  }
   private var draftKey: String?
   private var authorizationKey: String?
-  var canSubmit: Bool {
-    !busy && !uncertain && receipt == nil && (!ordinaryRework || kind != .rework || (eligibility?.eligible == true && !eligibilityLoading && authorizationPending == nil))
+  var canSubmit: Bool { !busy && admissionAllowsSubmission }
+  private var admissionAllowsSubmission: Bool {
+    !uncertain && receipt == nil && recoveryBlock == nil && (!ordinaryRework || kind != .rework || (eligibility?.eligible == true && !eligibilityLoading && authorizationPending == nil))
   }
   func prepareRework(id: String, actions: PodRepairActions, draftScope: String) async {
     guard bind(actions) else { return }
@@ -118,10 +134,13 @@ public struct PodRepairActions: Sendable {
   }
   func refreshEligibility(id: String, actions: PodRepairActions) async {
     guard !busy, !eligibilityLoading, bind(actions) else { return }
-    eligibilityLoading = true; eligibility = nil
+    await loadEligibility(id: id, actions: actions)
+  }
+  private func loadEligibility(id: String, actions: PodRepairActions) async {
+    eligibilityLoading = true; eligibility = nil; error = nil
     defer { eligibilityLoading = false }
     do { eligibility = try await actions.loadReworkEligibility(id) }
-    catch { self.error = "Rework eligibility unavailable: \(error.localizedDescription). A compatible daemon is required." }
+    catch { self.error = "Recovery eligibility unavailable: \(error.localizedDescription). A compatible daemon is required." }
   }
   func authorize(id: String, actions: PodActions) async {
     guard ordinaryRework, kind == .rework, !busy, !eligibilityLoading, bind(actions.repair),
@@ -147,16 +166,28 @@ public struct PodRepairActions: Sendable {
   private(set) var receipt: PodRepairReceipt?
   private(set) var observation: PodRepairObservation?
   private(set) var error: String?
-  init(kind: PodRepairKind, scope: String? = nil, ordinaryRework: Bool = false) { self.kind = kind; self.scope = scope; self.ordinaryRework = ordinaryRework }
+  init(kind: PodRepairKind, scope: String? = nil, ordinaryRework: Bool = false) { self.kind = kind; self.scope = scope; self.ordinaryRework = ordinaryRework; self.workerRepair = ordinaryRework }
   func submit(id: String, actions: PodRepairActions) async {
     guard canSubmit else { return }
     guard bind(actions) else { return }
+    let submittedKind = kind
+    let submittedOrdinaryRework = ordinaryRework
+    let submittedRecovery = ordinaryRecovery
+    let submittedGuidance = guidance
+    let submittedFeedback = feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : feedback
+    // Own the handoff before the first suspension. Preflight must not leave the
+    // action selector/dismissal enabled or retarget a submitted action.
     busy = true; error = nil; observation = nil
     defer { busy = false }
+    if submittedRecovery {
+      await loadEligibility(id: id, actions: actions)
+      guard !Task.isCancelled, kind == submittedKind,
+        ordinaryRework == submittedOrdinaryRework, admissionAllowsSubmission else { return }
+    }
     do {
-      if ordinaryRework && kind == .rework {
+      if submittedOrdinaryRework && submittedKind == .rework {
         guard let eligibility, let draftKey else { throw URLError(.unsupportedURL) }
-        let draft = ReworkRequest(requestKey: UUID().uuidString, generation: eligibility.generation, guidance: guidance)
+        let draft = ReworkRequest(requestKey: UUID().uuidString, generation: eligibility.generation, guidance: submittedGuidance)
         UserDefaults.standard.set(try JSONEncoder().encode(draft), forKey: draftKey)
         reworkDraft = draft; reworkRejected = false
         UserDefaults.standard.removeObject(forKey: draftKey + ".rejected")
@@ -164,10 +195,11 @@ public struct PodRepairActions: Sendable {
         receipt = PodRepairReceipt(message: result.error.map { "Request recorded; dispatch failed: \($0). Guidance remains saved." } ?? "Rework request accepted. Inspect observed state for provisioning and worker execution. Guidance is saved and enters delivery with the fresh lifecycle. Worker receipt acknowledgment does not prove it was applied.")
         return
       }
-      receipt = try await actions.submit(id, kind, feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : feedback) }
+      receipt = try await actions.submit(id, submittedKind, submittedFeedback) }
     catch {
       uncertain = !FollowUpFailure.isDefiniteRejection(error)
-      if ordinaryRework && kind == .rework, let draftKey {
+      if submittedRecovery { eligibility = nil }
+      if submittedOrdinaryRework && submittedKind == .rework, let draftKey {
         reworkRejected = !uncertain
         eligibility = nil
         UserDefaults.standard.set(reworkRejected, forKey: draftKey + ".rejected")
