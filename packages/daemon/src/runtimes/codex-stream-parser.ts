@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
+import type { AgentErrorEvent, RuntimeEvent as AgentEvent } from '@autopod/shared';
 import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
@@ -50,6 +50,12 @@ export interface CodexUsageAccumulator {
   latestTotalUsage?: CodexTokenUsage;
   seenTokenCounts: Set<string>;
   callCount: number;
+  sessionId?: string;
+  nativeResponses: Map<string, CodexTokenUsage>;
+  nativeUsage: CodexTokenUsage;
+  nativeTurnId?: string;
+  nativeTurnUsage?: CodexTokenUsage;
+  usageIncomplete?: boolean;
 }
 
 export function createCodexUsageAccumulator(): CodexUsageAccumulator {
@@ -57,6 +63,23 @@ export function createCodexUsageAccumulator(): CodexUsageAccumulator {
     accumulatedLastUsage: {},
     seenTokenCounts: new Set<string>(),
     callCount: 0,
+    nativeResponses: new Map(),
+    nativeUsage: {},
+  };
+}
+
+export function checkedCodexUsage(value: unknown): CodexTokenUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const u = value as Record<string, unknown>;
+  const valid = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+  if (!valid(u.input_tokens) || !valid(u.output_tokens)) return undefined;
+  const cached = u.cached_input_tokens ?? 0;
+  if (!valid(cached) || cached > u.input_tokens) return undefined;
+  if (!Number.isSafeInteger(u.input_tokens + u.output_tokens)) return undefined;
+  return {
+    input_tokens: u.input_tokens,
+    output_tokens: u.output_tokens,
+    cached_input_tokens: cached,
   };
 }
 
@@ -76,6 +99,7 @@ function resetUsageAccumulator(state: CodexUsageAccumulator): void {
 }
 
 function accumulatedUsage(state: CodexUsageAccumulator): CodexTokenUsage | undefined {
+  if (state.nativeResponses.size > 0) return state.nativeUsage;
   return state.callCount > 0 ? state.accumulatedLastUsage : state.latestTotalUsage;
 }
 
@@ -85,7 +109,22 @@ export interface CodexTurnAbortedEvent extends AgentErrorEvent {
   codexTurnId?: string;
 }
 
-type CodexParserEvent = AgentEvent | CodexTurnAbortedEvent;
+export interface CodexUsageConflictEvent extends AgentErrorEvent {
+  codexUsageConflict: true;
+}
+
+type CodexParserEvent = AgentEvent | CodexTurnAbortedEvent | CodexUsageConflictEvent;
+function usageConflict(env: CodexEnvelope): CodexUsageConflictEvent {
+  return {
+    type: 'error',
+    timestamp: tsOf(env),
+    fatal: true,
+    codexUsageConflict: true,
+    usageIncomplete: true,
+    message:
+      'Native Codex usage evidence is missing, invalid or conflicting; stop and retain measured usage.',
+  };
+}
 
 const MAX_OUTPUT_LEN = 2000;
 const MAX_REASONING_LEN = 4000;
@@ -711,6 +750,23 @@ async function* parse(
       continue;
     }
 
+    const sessionId =
+      env.type === 'session_meta'
+        ? env.payload?.id
+        : env.type === 'thread.started'
+          ? env.thread_id
+          : undefined;
+    if (typeof sessionId === 'string' && sessionId) {
+      if (usageState.sessionId && usageState.sessionId !== sessionId) {
+        resetUsageAccumulator(usageState);
+        usageState.nativeResponses.clear();
+        usageState.nativeUsage = {};
+        usageState.nativeTurnId = undefined;
+        usageState.nativeTurnUsage = undefined;
+      }
+      usageState.sessionId = sessionId;
+    }
+
     if (env.type === 'turn_context' && typeof env.payload?.model === 'string') {
       latestModel = env.payload.model;
     }
@@ -718,11 +774,97 @@ async function* parse(
     const msg = unwrap(env);
     if (!msg || typeof msg.type !== 'string') continue;
 
+    if (msg.type === 'task_started') {
+      if (usageState.nativeResponses.size > 0) {
+        if (msg.turn_id !== usageState.nativeTurnId) {
+          yield usageConflict(env);
+          return;
+        }
+        // The final metadata drain can overtake the same turn's queued start.
+      } else {
+        resetUsageAccumulator(usageState);
+        usageState.nativeTurnId = typeof msg.turn_id === 'string' ? msg.turn_id : undefined;
+        usageState.nativeTurnUsage = undefined;
+      }
+    }
+
     if (msg.type === 'session_configured' && typeof msg.model === 'string') {
       latestModel = msg.model;
     }
 
+    if (env.type === 'token_usage_record') {
+      // Codex 0.160+ records each provider response BEFORE awaiting its tool calls.
+      // The later token_count is a compatibility projection of the same spend.
+      const record = env.payload;
+      const usage = checkedCodexUsage(record?.usage);
+      const responseId = record?.response_id;
+      const threadId = record?.thread_id;
+      if (
+        !usage ||
+        typeof responseId !== 'string' ||
+        !responseId ||
+        typeof threadId !== 'string' ||
+        threadId !== usageState.sessionId
+      ) {
+        usageState.usageIncomplete = true;
+        yield usageConflict(env);
+        return;
+      }
+      const turnId = record?.turn_id;
+      if (
+        typeof turnId !== 'string' ||
+        !turnId ||
+        (usageState.nativeTurnId && turnId !== usageState.nativeTurnId)
+      ) {
+        yield usageConflict(env);
+        return;
+      }
+      const prior = usageState.nativeResponses.get(responseId);
+      if (prior) {
+        if (JSON.stringify(prior) !== JSON.stringify(usage)) {
+          usageState.usageIncomplete = true;
+          yield usageConflict(env);
+          return;
+        }
+        continue;
+      }
+      usageState.nativeTurnId = turnId;
+      const declared = checkedCodexUsage(record?.turn_token_usage);
+      const priorDeclared = usageState.nativeTurnUsage;
+      if (
+        declared &&
+        (!priorDeclared ||
+          (['input_tokens', 'output_tokens', 'cached_input_tokens'] as const).every(
+            (key) => (declared[key] ?? 0) >= (priorDeclared[key] ?? 0),
+          ))
+      )
+        usageState.nativeTurnUsage = declared;
+      usageState.nativeResponses.set(responseId, usage);
+      addUsage(usageState.nativeUsage, usage);
+      const measured = checkedCodexUsage(usageState.nativeUsage);
+      if (!measured) {
+        yield usageConflict(env);
+        return;
+      }
+      yield {
+        type: 'usage',
+        timestamp: tsOf(env),
+        // CodexRuntime replaces this with its invocation-owned ID.
+        usageSegmentId: 'codex-parser',
+        usageSequence: usageState.nativeResponses.size,
+        sessionId: threadId,
+        totalInputTokens: measured.input_tokens ?? 0,
+        totalOutputTokens: measured.output_tokens ?? 0,
+        cachedInputTokens: measured.cached_input_tokens ?? 0,
+        ...(latestModel && canonicalModelKey(latestModel)
+          ? { costUsd: completionCostUsd(measured, latestModel, podId, logger) }
+          : {}),
+      };
+      continue;
+    }
+
     if (msg.type === 'token_count') {
+      if (usageState.nativeResponses.size > 0) continue;
       const info = msg.info as CodexTokenUsageInfo | undefined;
       if (info?.total_token_usage) usageState.latestTotalUsage = info.total_token_usage;
       if (info?.last_token_usage) {
@@ -822,7 +964,18 @@ async function* parse(
     }
 
     if (msg.type === 'task_complete') {
-      yield completeEventFromState(
+      if (
+        usageState.nativeResponses.size > 0 &&
+        (!usageState.nativeTurnId ||
+          !usageState.nativeTurnUsage ||
+          (['input_tokens', 'output_tokens', 'cached_input_tokens'] as const).some(
+            (key) => usageState.nativeTurnUsage?.[key] !== (usageState.nativeUsage[key] ?? 0),
+          ))
+      ) {
+        yield usageConflict(env);
+        return;
+      }
+      const complete = completeEventFromState(
         msg,
         env,
         accumulatedUsage(usageState),
@@ -830,6 +983,11 @@ async function* parse(
         podId,
         logger,
       );
+      yield {
+        ...complete,
+        ...(usageState.usageIncomplete ? { usageIncomplete: true } : {}),
+        ...(usageState.nativeResponses.size > 0 ? { usageSegmentId: 'codex-parser' } : {}),
+      };
       resetUsageAccumulator(usageState);
       continue;
     }

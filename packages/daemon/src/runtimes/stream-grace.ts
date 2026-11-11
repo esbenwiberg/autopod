@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@autopod/shared';
+import type { AgentErrorEvent, RuntimeEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 
@@ -43,10 +43,10 @@ export interface PostCompleteGraceOptions {
  * finished. The grace timer is the safety net that lets pod-manager reach
  * `handleCompletion` even when Docker (or the agent process) won't cooperate.
  */
-export async function* withPostCompleteGrace(
-  source: AsyncIterable<AgentEvent>,
+export async function* withPostCompleteGrace<T extends RuntimeEvent>(
+  source: AsyncIterable<T>,
   options: PostCompleteGraceOptions,
-): AsyncIterable<AgentEvent> {
+): AsyncIterable<T> {
   const gracePeriodMs = resolveGracePeriodMs(options.gracePeriodMs);
   let timer: ReturnType<typeof setTimeout> | null = null;
   let armed = false;
@@ -264,16 +264,16 @@ export interface IdleLivenessProbeOptions {
  * never emit those events at all (mid-tool hangs, dockerd freezes, copilot's
  * stream-end-only `complete`).
  */
-export async function* withIdleLivenessProbe(
-  source: AsyncIterable<AgentEvent>,
+export async function* withIdleLivenessProbe<T extends RuntimeEvent>(
+  source: AsyncIterable<T>,
   options: IdleLivenessProbeOptions,
-): AsyncIterable<AgentEvent> {
+): AsyncIterable<T | AgentErrorEvent> {
   const idleTimeoutMs = resolveIdleTimeoutMs(options.idleTimeoutMs);
   const probeTimeoutMs = resolveIdleProbeTimeoutMs(options.probeTimeoutMs);
   const probe = options.probe ?? buildDefaultProbe(options, probeTimeoutMs);
 
   const iterator = source[Symbol.asyncIterator]();
-  let pendingNext: Promise<IteratorResult<AgentEvent>> | null = null;
+  let pendingNext: Promise<IteratorResult<T>> | null = null;
 
   try {
     while (true) {
@@ -287,7 +287,7 @@ export async function* withIdleLivenessProbe(
 
       // Fresh promise each iteration — re-arms after every wake without caching a stale one.
       type RaceResult =
-        | { kind: 'next'; result: IteratorResult<AgentEvent> }
+        | { kind: 'next'; result: IteratorResult<T> }
         | { kind: 'idle' }
         | { kind: 'wake' };
 

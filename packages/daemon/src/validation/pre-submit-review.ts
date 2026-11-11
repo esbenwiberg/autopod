@@ -21,6 +21,7 @@ export type PreSubmitSkipReason =
   | 'no-task'
   | 'parse-failure'
   | 'cli-error'
+  | 'worker-usage-pending'
   | 'incomplete-input';
 
 export interface PreSubmitReviewOpts {
@@ -210,6 +211,9 @@ export async function runPreSubmitReview(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if ((err as { code?: string } | null)?.code === 'REVIEWER_WORKER_USAGE_PENDING') {
+      return skipped('worker-usage-pending', message);
+    }
     if (err instanceof CodexReviewError) runner = 'codex';
     log?.warn({ err: message, runner }, 'pre-submit review: reviewer CLI failed');
     const location = opts.containerId && opts.containerManager ? ' in pod container' : '';

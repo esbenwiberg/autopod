@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type {
   AgentErrorEvent,
-  AgentEvent,
+  RuntimeEvent as AgentEvent,
   AgentStatusEvent,
   SpawnConfig,
   SystemEvent,
@@ -1450,6 +1450,163 @@ describe('CodexRuntime', () => {
       }
     });
 
+    it.each([
+      'settle',
+      'fast',
+      'compacted',
+      'lagged',
+      'missing-final',
+      'conflict',
+      'unverified',
+    ] as const)('streams native per-response checkpoints safely (%s)', async (mode) => {
+      const root = await mkdtemp(join(tmpdir(), 'codex-live-response-'));
+      const previous = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPoll = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      process.env.AUTOPOD_CODEX_STATE_DIR = root;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '10';
+      const handle = createMockHandle();
+      if (mode === 'unverified')
+        vi.mocked(handle.kill).mockRejectedValueOnce(new Error('No termination proof'));
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      const session = '01a1cb85-db30-7561-99e5-ea0a4d74bde2';
+      const dir = join(root, 'pod-1', '2026', '11', '11');
+      const settling = mode !== 'conflict' && mode !== 'unverified';
+      const terminalLine = `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'Done' } })}\n`;
+      const usage = (id: string, input: number, output: number) => ({
+        type: 'token_usage_record',
+        timestamp: '2026-11-11T17:00:00.000Z',
+        payload: {
+          thread_id: session,
+          response_id: id,
+          turn_id: 'current-turn',
+          turn_token_usage: {
+            input_tokens: id === 'response-b' ? 300 : input,
+            cached_input_tokens: id === 'response-b' ? 160 : 80,
+            output_tokens: id === 'response-b' ? 20 : output,
+          },
+          usage: { input_tokens: input, cached_input_tokens: 80, output_tokens: output },
+        },
+      });
+      const remainder = async (stream: AsyncIterator<AgentEvent>) => {
+        const result: AgentEvent[] = [];
+        for (;;) {
+          const next = await withTimeout(stream.next(), 2000);
+          if (next.done) return result;
+          result.push(next.value);
+        }
+      };
+      try {
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          join(dir, `rollout-2026-11-11-${session}.jsonl`),
+          [
+            { type: 'session_meta', payload: { id: session } },
+            usage('response-a', 100, 10),
+            usage(settling ? 'response-b' : 'response-a', settling ? 200 : 101, 10),
+          ]
+            .map((r) => JSON.stringify(r))
+            .join('\n') + '\n',
+        );
+        if (mode === 'fast')
+          await appendFile(join(dir, `rollout-2026-11-11-${session}.jsonl`), terminalLine);
+        const stream = runtime
+          .spawn({
+            podId: 'pod-1',
+            containerId: 'container-123',
+            task: 'Measure usage',
+            model: 'gpt-6.1-sol',
+            reasoningEffort: 'auto',
+            workDir: '/workspace',
+            env: {},
+          })
+          [Symbol.asyncIterator]();
+        (handle.stdout as PassThrough).write(
+          JSON.stringify({ type: 'thread.started', thread_id: session }) + '\n',
+        );
+        if (mode === 'fast')
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 300, cached_input_tokens: 160, output_tokens: 20 } })}\n`,
+          );
+        expect((await withTimeout(stream.next(), 2000)).value).toMatchObject({
+          type: 'status',
+          sessionId: session,
+        });
+        const nextMeasured = async () => {
+          for (let i = 0; i < 10; i++) {
+            const next = await withTimeout(stream.next(), 2000);
+            if (next.value?.type !== 'status') return next.value;
+          }
+          throw new Error('Native usage did not arrive');
+        };
+        const first = await nextMeasured();
+        expect(first).toMatchObject({
+          type: 'usage',
+          totalInputTokens: 100,
+          totalOutputTokens: 10,
+        });
+        if (first?.type !== 'usage') throw new Error('Expected checkpoint');
+        expect(first.usageSegmentId).not.toBe('codex-parser');
+        const second = await nextMeasured();
+        if (settling) {
+          if (mode !== 'lagged' && mode !== 'missing-final' && mode !== 'fast')
+            await appendFile(join(dir, `rollout-2026-11-11-${session}.jsonl`), terminalLine);
+          expect(second).toMatchObject({
+            type: 'usage',
+            totalInputTokens: 300,
+            totalOutputTokens: 20,
+            usageSegmentId: first.usageSegmentId,
+          });
+          (handle.stdout as PassThrough).write(
+            JSON.stringify({
+              type: 'turn.completed',
+              usage: {
+                input_tokens: mode === 'compacted' ? 250 : 300,
+                cached_input_tokens: 160,
+                output_tokens: 20,
+              },
+            }) + '\n',
+          );
+          const pending = remainder(stream);
+          if (mode === 'lagged') {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            await appendFile(join(dir, `rollout-2026-11-11-${session}.jsonl`), terminalLine);
+          }
+          (handle as unknown as { finish(): void }).finish();
+          const rest = await pending;
+          if (mode === 'missing-final') {
+            expect(rest.some((e) => e.type === 'complete')).toBe(false);
+            expect(rest).toContainEqual(
+              expect.objectContaining({ type: 'error', codexUsageConflict: true }),
+            );
+            expect(handle.kill).toHaveBeenCalledOnce();
+            return;
+          }
+          expect(rest.filter((e) => e.type === 'complete')).toHaveLength(1);
+          expect(rest.find((e) => e.type === 'complete')).toMatchObject({
+            totalInputTokens: 300,
+            totalOutputTokens: 20,
+            usageSegmentId: first.usageSegmentId,
+          });
+          expect(handle.kill).not.toHaveBeenCalled();
+        } else {
+          expect(second).toMatchObject({ type: 'error', fatal: true, codexUsageConflict: true });
+          expect(handle.kill).toHaveBeenCalledOnce();
+          if (mode === 'unverified')
+            expect(second).toMatchObject({ executionTermination: 'unverified' });
+          else expect(second).not.toHaveProperty('executionTermination');
+          expect(await remainder(stream)).toEqual([]);
+          expect(cm.execStreaming).toHaveBeenCalledOnce();
+        }
+      } finally {
+        handle.stdout.destroy();
+        handle.stderr.destroy();
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previous);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPoll);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it('deduplicates usage across stdout and rollout recovery', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
@@ -1857,6 +2014,19 @@ describe('CodexRuntime', () => {
         await rm(tmpRoot, { recursive: true, force: true });
       }
     });
+  });
+
+  it('requires a tracked native handle for a live-usage stop', async () => {
+    const handle = createMockHandle();
+    const runtime = new CodexRuntime(
+      logger,
+      createMockContainerManager(handle),
+      createMockPodRepo(),
+    );
+    await expect(runtime.suspendForUsage('untracked')).rejects.toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+    });
+    expect(handle.kill).not.toHaveBeenCalled();
   });
 
   describe('resume', () => {

@@ -317,6 +317,34 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(bridge.execInContainer).not.toHaveBeenCalled();
   });
 
+  it('reports a budget-gated live-worker review as deferred, never passed or executed', async () => {
+    const bridge = makeBridge('');
+    bridge.generateBrowserValidationScript.mockRejectedValueOnce(
+      Object.assign(
+        new Error('Review deferred, NOT RUN; daemon review remains required after settlement.'),
+        { code: 'REVIEWER_WORKER_USAGE_PENDING' },
+      ),
+    );
+    const parsed = JSON.parse(
+      await validateInBrowser(
+        'sess-1',
+        { url: 'http://localhost:3000', checks: ['Has title'] },
+        bridge as never,
+      ),
+    );
+    expect(parsed).toMatchObject({ status: 'deferred', passed: false });
+    expect(parsed.results).toEqual([
+      {
+        check: 'Has title',
+        passed: false,
+        reasoning: expect.stringContaining('NOT RUN (deferred)'),
+      },
+    ]);
+    expect(bridge.writeFileInContainer).not.toHaveBeenCalled();
+    expect(bridge.execInContainer).not.toHaveBeenCalled();
+    expect(bridge.storeScreenshot).not.toHaveBeenCalled();
+  });
+
   it('calls bridge methods in correct order', async () => {
     const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
 [{ "check": "x", "passed": true, "reasoning": "ok" }]

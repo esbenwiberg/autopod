@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import type { AgentEvent, EscalationRequest } from '@autopod/shared';
+import type { RuntimeEvent as AgentEvent, EscalationRequest } from '@autopod/shared';
 import { AutopodError, generateId, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';

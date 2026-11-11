@@ -316,8 +316,12 @@ Operator setup and smoke commands live in `docs/azure-container-apps-sandboxes.m
 ## Runtimes
 
 Each runtime in `src/runtimes/` implements the `Runtime` interface:
-- `spawn(options)` → `AsyncIterable<AgentEvent>`
-- `resume(podId, message)` → `AsyncIterable<AgentEvent>`
+- `spawn(options)` → `AsyncIterable<RuntimeEvent>`
+- `resume(podId, message)` → `AsyncIterable<RuntimeEvent>`
+
+`RuntimeEvent` includes internal usage checkpoints outside the public `AgentEvent`
+activity union. See [Codex usage accounting](../../docs/codex-usage-accounting.md)
+for live counters, verified cap stops, finality, and non-waiving review deferral.
 
 Stream parsers are the tricky part — each vendor's SSE format is different. When adding parser logic,
 add test cases to the co-located `.test.ts` covering partial chunks, multi-event lines, and error frames.

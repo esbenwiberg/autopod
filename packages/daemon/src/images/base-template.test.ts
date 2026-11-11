@@ -54,6 +54,16 @@ async function readScript(filename: string): Promise<string> {
   return readFile(path.join(repoRoot, 'scripts', filename), 'utf8');
 }
 
+describe('Node worker process inspection prerequisites', () => {
+  it.each(
+    workerBaseTemplates.filter((name) => name.startsWith('Dockerfile.node')),
+  )('%s installs real procps for mutation-test process trees', async (name) => {
+    const dockerfile = await readBaseTemplate(name);
+    expect(dockerfile).toMatch(/apt-get install.*?\bprocps\b/s);
+    expect(dockerfile).toContain('command -v ps && ps --version');
+  });
+});
+
 describe('Trusted Pi worker base image prerequisites', () => {
   it.each(
     workerBaseTemplates,
