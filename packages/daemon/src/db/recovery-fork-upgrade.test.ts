@@ -21,7 +21,8 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     runMigrations(db, old, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 245 });
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 248 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 249 });
+    expect(db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM artifact_checks_recoveries').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM artifact_checks_recovery_events').all()).toEqual([]);
     // No FK to deletable pods/history: the source parent and admitted child remain auditable.
