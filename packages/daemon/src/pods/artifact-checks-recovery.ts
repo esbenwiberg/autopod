@@ -368,6 +368,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         inventory.sha256,
       );
       current();
+      const profile = deps.executionForPod(pod);
       const passed =
         result.podId === pod.id &&
         result.attempt === pod.validationAttempts + 1 &&
@@ -376,7 +377,9 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         result.taskReview?.status === 'pass' &&
         result.factValidation?.status === 'pass' &&
         result.taskReview.diff === diff &&
-        (!deps.executionForPod(pod).buildCommand || result.smoke.build.status === 'pass') &&
+        (getPodValidationSkipPhases(profile, pod).includes('build') ||
+          !profile.buildCommand ||
+          result.smoke.build.status === 'pass') &&
         pod.contract!.requiredFacts.every((fact) =>
           result.factValidation!.results.some(
             (r) =>

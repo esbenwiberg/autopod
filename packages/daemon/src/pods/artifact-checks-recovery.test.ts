@@ -356,6 +356,20 @@ describe('held empty-workspace artifact checks through production manager/API', 
       ).statusCode,
     ).toBe(409);
   });
+  it('honors the frozen Facts/review-only workflow without requiring a disabled build phase', async () => {
+    const f = await fixture();
+    const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      expect(config.skipPhases).toContain('build');
+      const result = await execute(config);
+      result.smoke.build.status = 'skip';
+      return result;
+    });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toMatchObject({ outcome: 'pass' });
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
   it('reconciles checked identities from a reopened SQLite database without replay', async () => {
     const f = await fixture();
     await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
