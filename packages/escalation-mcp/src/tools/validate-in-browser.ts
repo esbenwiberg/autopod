@@ -14,6 +14,8 @@ export interface BrowserCheckResult {
 }
 
 export interface ValidateInBrowserResult {
+  /** Absent for executed checks; a deferral is never a pass. */
+  status?: 'deferred';
   passed: boolean;
   results: BrowserCheckResult[];
 }
@@ -210,8 +212,12 @@ export function parseResults(stdout: string, checks: string[]): BrowserCheckResu
 
 function browserInfraFailure(checks: string[], err: unknown): ValidateInBrowserResult {
   const message = err instanceof Error ? err.message : String(err);
-  const reasoning = `Browser validation infrastructure failed before checks could run: ${message}`;
+  const deferred = (err as { code?: string } | null)?.code === 'REVIEWER_WORKER_USAGE_PENDING';
+  const reasoning = deferred
+    ? `Browser checks NOT RUN (deferred): ${message}`
+    : `Browser validation infrastructure failed before checks could run: ${message}`;
   return {
+    ...(deferred ? { status: 'deferred' as const } : {}),
     passed: false,
     results: checks.map((check) => ({
       check,

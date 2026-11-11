@@ -4,7 +4,9 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import type {
-  AgentEvent,
+  AgentCompleteEvent,
+  RuntimeEvent as AgentEvent,
+  AgentUsageEvent,
   ExecutionTarget,
   NativeGoalProcessHooks,
   NativeGoalSession,
@@ -23,6 +25,7 @@ import {
   CODEX_FOUNDRY_PROVIDER,
   foundryCodexProviderSettings,
 } from '../providers/foundry-endpoint.js';
+import { readNativeCompletionUsage } from './codex-completion-usage.js';
 import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
 import { codexGoalRolloutPath } from './codex-goal-usage.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
@@ -31,6 +34,7 @@ import {
   CodexStreamParser,
   type CodexTurnAbortedEvent,
   type CodexUsageAccumulator,
+  type CodexUsageConflictEvent,
   createCodexUsageAccumulator,
 } from './codex-stream-parser.js';
 import { runtimeConfigInstallCommand } from './runtime-config-capability.js';
@@ -147,6 +151,10 @@ export class CodexRuntime implements Runtime {
   private customInstructionsBySession = new Map<string, string>();
   /** Shared by stdout and rollout parsers for one invocation. */
   private usageAccumulators = new Map<string, CodexUsageAccumulator>();
+  private usageBoundaries = new Map<
+    string,
+    Pick<RolloutTailState, 'path' | 'offset' | 'notBefore'>
+  >();
   private logger: Logger;
   private containerManager: ContainerManager;
   private podRepo: PodRepository;
@@ -477,6 +485,16 @@ export class CodexRuntime implements Runtime {
     this.customInstructionsBySession.delete(podId);
   }
 
+  async suspendForUsage(podId: string): Promise<void> {
+    if (!this.handles.has(podId))
+      throw new AutopodError(
+        'No owned Codex exec handle can verify a usage stop',
+        'EXEC_EXIT_UNVERIFIED',
+        409,
+      );
+    await this.suspend(podId);
+  }
+
   async suspend(podId: string): Promise<void> {
     const handle = this.handles.get(podId);
     if (!handle) {
@@ -525,7 +543,30 @@ export class CodexRuntime implements Runtime {
       sawFatal: false,
     };
     const usageAccumulator = createCodexUsageAccumulator();
+    usageAccumulator.sessionId = this.codexSessionIds.get(podId);
+    let usageSegmentId = randomUUID();
+    let segmentSessionId = usageAccumulator.sessionId;
+    let emittedUsage = false;
+    let publishedUsage: AgentUsageEvent | undefined;
+    let terminalUsage = false;
+    const stopUsageConflict = async (
+      event: CodexUsageConflictEvent,
+    ): Promise<CodexUsageConflictEvent> => {
+      this.intentionalTerminations.add(handle);
+      try {
+        await handle.kill();
+        return { ...event, usageIncomplete: true };
+      } catch {
+        return { ...event, usageIncomplete: true, executionTermination: 'unverified' };
+      }
+    };
     this.usageAccumulators.set(podId, usageAccumulator);
+    this.usageBoundaries.set(
+      podId,
+      rolloutTail
+        ? { path: rolloutTail.path, offset: rolloutTail.offset, notBefore: rolloutTail.notBefore }
+        : { path: null, offset: 0 },
+    );
     const enriched = this.parseWithRolloutFallback(
       handle,
       podId,
@@ -561,8 +602,60 @@ export class CodexRuntime implements Runtime {
         }
         if (event.type === 'error' && event.fatal) {
           sawNonRecoverableFatal = true;
+          if ((event as CodexUsageConflictEvent).codexUsageConflict) {
+            yield await stopUsageConflict(event as CodexUsageConflictEvent);
+            return false;
+          }
         }
-        yield event;
+        if (event.type === 'status' && event.sessionId) {
+          if (segmentSessionId && segmentSessionId !== event.sessionId && emittedUsage) {
+            usageSegmentId = randomUUID();
+            emittedUsage = false;
+            publishedUsage = undefined;
+          }
+          segmentSessionId = event.sessionId;
+        }
+        if (event.type === 'usage') {
+          if (terminalUsage) continue;
+          // The final metadata drain can overtake a poller's already queued older
+          // checkpoint. Only suppress component-wise stale native prefixes.
+          if (
+            publishedUsage &&
+            event.sessionId === publishedUsage.sessionId &&
+            event.usageSequence <= publishedUsage.usageSequence
+          ) {
+            const same =
+              event.totalInputTokens === publishedUsage.totalInputTokens &&
+              event.totalOutputTokens === publishedUsage.totalOutputTokens &&
+              (event.cachedInputTokens ?? 0) === (publishedUsage.cachedInputTokens ?? 0) &&
+              event.costUsd === publishedUsage.costUsd;
+            const older =
+              event.usageSequence < publishedUsage.usageSequence &&
+              event.totalInputTokens <= publishedUsage.totalInputTokens &&
+              event.totalOutputTokens <= publishedUsage.totalOutputTokens &&
+              (event.cachedInputTokens ?? 0) <= (publishedUsage.cachedInputTokens ?? 0) &&
+              (event.costUsd ?? 0) <= (publishedUsage.costUsd ?? 0);
+            if (same || older) continue;
+            yield await stopUsageConflict({
+              type: 'error',
+              timestamp: event.timestamp,
+              fatal: true,
+              codexUsageConflict: true,
+              message: 'Conflicting native Codex usage checkpoint sequence',
+            });
+            return false;
+          }
+          publishedUsage = event;
+          emittedUsage = true;
+          yield { ...event, usageSegmentId };
+        } else if (event.type === 'complete') {
+          terminalUsage = true;
+          yield emittedUsage || event.usageSegmentId === 'codex-parser'
+            ? { ...event, usageSegmentId }
+            : event;
+        } else {
+          yield event;
+        }
       }
 
       if (interrupted && !this.intentionalTerminations.has(handle) && !outputState.sawComplete) {
@@ -597,6 +690,7 @@ export class CodexRuntime implements Runtime {
       }
       if (this.usageAccumulators.get(podId) === usageAccumulator) {
         this.usageAccumulators.delete(podId);
+        this.usageBoundaries.delete(podId);
       }
     }
   }
@@ -1150,6 +1244,52 @@ export class CodexRuntime implements Runtime {
     return null;
   }
 
+  private async nativeUsageAtCompletion(podId: string, completion: AgentCompleteEvent) {
+    const sessionId = this.codexSessionIds.get(podId);
+    if (!sessionId) return { native: false };
+    let native = (this.usageAccumulators.get(podId)?.nativeResponses.size ?? 0) > 0;
+    let observed = '';
+    let snapshot: Awaited<ReturnType<typeof readNativeCompletionUsage>> = { native };
+    const deadline = Date.now() + 1000;
+    // CLI stdout can beat the asynchronous rollout writer/poller. Never certify a
+    // stale prefix or reattribute a resumed thread's public cumulative totals.
+    for (let i = 0; i < 20 && Date.now() < deadline; i++) {
+      const rollout = await findLatestCodexRollout(
+        codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
+        sessionId,
+      );
+      if (!rollout) return { native };
+      const revision = rollout.path + ':' + rollout.size + ':' + rollout.mtimeMs;
+      if (revision !== observed) {
+        const boundary = this.usageBoundaries.get(podId);
+        const appendOnly =
+          this.podRepo.getOrThrow(podId).executionTarget !== 'sandbox' &&
+          boundary?.path === rollout.path &&
+          boundary.offset >= 0 &&
+          rollout.size >= boundary.offset;
+        try {
+          snapshot = await readNativeCompletionUsage(
+            rollout.path,
+            rollout.size,
+            sessionId,
+            completion,
+            appendOnly ? { offset: boundary.offset } : { notBefore: boundary?.notBefore },
+            deadline,
+          );
+        } catch {
+          // A writer can be in the middle of a JSONL append. Retry only within
+          // this bounded finalization window, never certify a corrupt snapshot.
+          snapshot = { native: true };
+        }
+        native ||= snapshot.native;
+        observed = revision;
+      }
+      if (snapshot.lines || !native) return snapshot;
+      await sleep(50);
+    }
+    return { native };
+  }
+
   private async *parseCodexLines(
     lines: Readable,
     podId: string,
@@ -1163,6 +1303,33 @@ export class CodexRuntime implements Runtime {
       if (next.done) return next.value;
 
       const event = next.value;
+      if (event.type === 'complete' && event.usageSegmentId !== 'codex-parser') {
+        try {
+          const native = await this.nativeUsageAtCompletion(podId, event);
+          if (native.native) {
+            if (!native.lines) throw new Error('Native Codex final usage proof is unavailable');
+            yield* this.parseCodexLines(
+              Readable.from([native.lines]),
+              podId,
+              seen,
+              outputState,
+              modelHint,
+            );
+            continue;
+          }
+        } catch {
+          yield {
+            type: 'error',
+            timestamp: event.timestamp,
+            fatal: true,
+            codexUsageConflict: true,
+            usageIncomplete: true,
+            message:
+              'Native Codex final usage could not be verified; retain measured usage and reconcile.',
+          } as CodexUsageConflictEvent;
+          return { events: 1, nonStatusEvents: 1, sawComplete: false };
+        }
+      }
       const key = dedupeKey(event);
       if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       seen.add(key);
@@ -1186,7 +1353,7 @@ export class CodexRuntime implements Runtime {
       this.usageAccumulators.get(podId),
     )) {
       stats.events += 1;
-      if (event.type !== 'status') stats.nonStatusEvents += 1;
+      if (event.type !== 'status' && event.type !== 'usage') stats.nonStatusEvents += 1;
       if (event.type === 'complete') stats.sawComplete = true;
       if (event.type === 'status' && event.sessionId) {
         this.codexSessionIds.set(podId, event.sessionId);
@@ -1469,7 +1636,7 @@ function shouldSkipMergedEvent(
 
 function recordOutputEvent(state: OutputState, event: AgentEvent): void {
   state.events += 1;
-  if (event.type !== 'status') state.nonStatusEvents += 1;
+  if (event.type !== 'status' && event.type !== 'usage') state.nonStatusEvents += 1;
   if (event.type === 'complete') state.sawComplete = true;
   if (event.type === 'error' && event.fatal) state.sawFatal = true;
 }

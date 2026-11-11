@@ -28,15 +28,17 @@ export interface Runtime {
   type: RuntimeType;
   /** Creates a lazy native adapter. Execution starts only after the daemon admits a Goal attempt. */
   nativeGoalSession?(config: SpawnConfig, hooks?: NativeGoalProcessHooks): NativeGoalSession;
-  spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
+  spawn(config: SpawnConfig): AsyncIterable<RuntimeEvent>;
   resume(
     podId: string,
     message: string,
     containerId: string,
     env?: Record<string, string>,
-  ): AsyncIterable<AgentEvent>;
+  ): AsyncIterable<RuntimeEvent>;
   abort(podId: string): Promise<void>;
   suspend(podId: string): Promise<void>;
+  /** Live-usage stop requires an owned native execution; absence is not termination proof. */
+  suspendForUsage?(podId: string): Promise<void>;
 }
 
 export interface SpawnConfig {
@@ -87,6 +89,9 @@ export type AgentEvent =
   | AgentTaskSummaryEvent
   | AgentReasoningEvent;
 
+/** Internal runtime transport metadata is not part of the public agent-activity union. */
+export type RuntimeEvent = AgentEvent | AgentUsageEvent;
+
 export interface AgentStatusEvent {
   type: 'status';
   timestamp: string;
@@ -121,10 +126,29 @@ export interface AgentFileChangeEvent {
   diff?: string;
 }
 
+/** Runtime-only observed counters, not task completion or final/billing-complete usage. */
+export interface AgentUsageEvent {
+  type: 'usage';
+  timestamp: string;
+  /** One native CLI invocation; shared by its checkpoints and terminal event. */
+  usageSegmentId: string;
+  /** Monotonic native checkpoint ordinal, used to distinguish queued stale snapshots from regressions. */
+  usageSequence: number;
+  sessionId: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  cachedInputTokens?: number;
+  costUsd?: number;
+}
+
 export interface AgentCompleteEvent {
   type: 'complete';
   timestamp: string;
   result: string;
+  /** Present when runtime checkpoints have already attributed part of these totals. */
+  usageSegmentId?: string;
+  /** Native partial evidence must never become complete accounting at settlement. */
+  usageIncomplete?: boolean;
   /** Per-run input delta including cached and cache-creation input. */
   totalInputTokens?: number;
   totalOutputTokens?: number;
@@ -144,6 +168,8 @@ export interface AgentErrorEvent {
   classification?: ProviderFailureClassification;
   /** Trusted runtime adapter evidence; transport settlement is not process termination. */
   executionTermination?: 'unverified';
+  /** A trusted adapter detected an accounting gap; does not imply an execution-exit failure. */
+  usageIncomplete?: true;
 }
 
 export interface AgentEscalationEvent {

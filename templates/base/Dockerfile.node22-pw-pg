@@ -6,6 +6,7 @@ FROM node:22-slim
 # PostgreSQL is additive so Node/npm/node-gyp behavior remains identical.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    procps \
     curl \
     ca-certificates \
     gnupg \
@@ -20,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && command -v jq \
+    && command -v ps && ps --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep Git integration capabilities independent of the Debian package version.

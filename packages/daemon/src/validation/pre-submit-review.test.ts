@@ -8,7 +8,12 @@ vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
 });
 
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
-import { buildPrompt, hashDiff, runPreSubmitReview } from './pre-submit-review.js';
+import {
+  buildPrompt,
+  getPreSubmitCacheDecision,
+  hashDiff,
+  runPreSubmitReview,
+} from './pre-submit-review.js';
 
 const mockRunClaudeCli = vi.mocked(runClaudeCli);
 
@@ -87,6 +92,30 @@ describe('runPreSubmitReview', () => {
 
     expect(result.status).toBe('skipped');
     expect(result.skipReason).toBe('no-task');
+  });
+
+  it('reports pending live-worker accounting as skipped and never invokes an unbudgeted fallback', async () => {
+    const result = await runPreSubmitReview({
+      task: 'Finish local work',
+      diff: 'diff --git a/a b/a\n+ok',
+      reviewerModel: 'gpt-6.1-terra',
+      reviewerProvider: 'openai',
+      reviewerExecutor: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Review deferred, NOT RUN'), {
+          code: 'REVIEWER_WORKER_USAGE_PENDING',
+        }),
+      ),
+    });
+    expect(result).toMatchObject({
+      status: 'skipped',
+      skipReason: 'worker-usage-pending',
+      reasoning: 'Review deferred, NOT RUN',
+    });
+    expect(result.tokenUsage).toBeUndefined();
+    expect(
+      getPreSubmitCacheDecision({ ...result, checkedAt: 'now' }, { diffHash: result.diffHash }),
+    ).toEqual({ reusable: false, reason: 'status-not-pass' });
+    expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 
   it('skips Pi reviewers instead of falling back to Claude', async () => {

@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@autopod/shared';
+import type { RuntimeEvent as AgentEvent } from '@autopod/shared';
 import { vi } from 'vitest';
 import { createAgentActivity } from '../pods/agent-activity.js';
 import { createAgentEventConsumption } from '../pods/agent-event-consumption.js';
@@ -26,6 +26,7 @@ export function createAgentExecutionFixture(disk = false) {
     activeAgentRuns: registry.activeAgentRuns,
   });
   const consumerCaptured = {
+    runtimeRegistry: f.deps.runtimeRegistry,
     containerManagerFactory: f.deps.containerManagerFactory,
     ...registry,
     ...activity,

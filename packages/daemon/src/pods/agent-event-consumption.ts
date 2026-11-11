@@ -1,5 +1,9 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AgentEvent, Pod, ProviderFailureClassification } from '@autopod/shared';
+import type {
+  RuntimeEvent as AgentEvent,
+  Pod,
+  ProviderFailureClassification,
+} from '@autopod/shared';
 import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
@@ -20,6 +24,7 @@ import type { PodUpdates } from './pod-repository.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
+import { createRuntimeUsageCounter } from './runtime-usage-counter.js';
 import { canFail } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { workerRetryDeadline } from './worker-retry-deadline.js';
@@ -135,6 +140,29 @@ export function createAgentEventConsumption(
         (runOwner.providerOrdinal !== undefined &&
           deps.providerAttemptRepo.getActive(podId)?.ordinal === runOwner.providerOrdinal));
     runOwner.isCurrent = ownsRun;
+    const runtimeUsageDelta = createRuntimeUsageCounter();
+    const priorUsageIncomplete =
+      initialPod.tokenTelemetryAccuracy === 'partial' &&
+      (initialPod.inputTokens > 0 ||
+        initialPod.outputTokens > 0 ||
+        initialPod.costUsd > 0 ||
+        (podRepo.taskExecutions?.snapshot(podId).agentRunCount ?? 0) > 0 ||
+        (deps.providerAttemptRepo?.listRaw(podId).some((p) => p.endedAt !== null) ?? false));
+    const stopUsageWorker = async () => {
+      if (!ownsRun()) return;
+      try {
+        const runtime = captured.runtimeRegistry.get(initialPod.runtime);
+        if (!runtime.suspendForUsage) throw new Error('Runtime cannot verify an owned usage stop');
+        await runtime.suspendForUsage(podId);
+      } catch {
+        retainUnverifiedTermination();
+        throw new AutopodError(
+          'Usage stop could not verify native process termination; source and execution claim retained.',
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        );
+      }
+    };
     let superseded = false;
     let eventError: unknown;
     let hasEventError = false;
@@ -300,7 +328,9 @@ export function createAgentEventConsumption(
           outcome = 'stopped';
           return outcome;
         }
-        if (pauseIntents.has(podId)) {
+        if (event.type === 'error' && event.usageIncomplete)
+          podRepo.update(podId, { tokenTelemetryAccuracy: 'partial' });
+        if (pauseIntents.has(podId) && event.type !== 'usage') {
           outcome = 'paused';
           continue;
         }
@@ -335,12 +365,14 @@ export function createAgentEventConsumption(
           touchHeartbeat(podId);
           continue;
         }
-        eventBus.emit({
-          type: 'pod.agent_activity',
-          timestamp: event.timestamp,
-          podId,
-          event,
-        });
+        // Usage checkpoints are runtime metadata, not a new public agent-activity wire type.
+        if (event.type !== 'usage')
+          eventBus.emit({
+            type: 'pod.agent_activity',
+            timestamp: event.timestamp,
+            podId,
+            event,
+          });
 
         bumpActivityTimestamp(podId);
 
@@ -422,75 +454,97 @@ export function createAgentEventConsumption(
               costUsd: activeAttempt.costUsd,
             });
           }
-        } else if (event.type === 'complete') {
-          outcome = 'completed';
-          observedTerminalOutcome = 'completed';
-          podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
-          // Accumulate token counts and cost cumulatively across all runs in this pod
+        } else if (event.type === 'usage' || event.type === 'complete') {
           const currentSession = podRepo.getOrThrow(podId);
-          const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
-          const newOutputTokens = currentSession.outputTokens + (event.totalOutputTokens ?? 0);
-          const tokenUpdates: PodUpdates = {};
-          if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
-            tokenUpdates.inputTokens = newInputTokens;
-            tokenUpdates.outputTokens = newOutputTokens;
-            const bucketKey = agentPhaseBucketKey(attempt);
-            const existing = currentSession.phaseTokenUsage ?? {};
-            const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
-            const phaseCostUsd = (prev.costUsd ?? 0) + (event.costUsd ?? 0);
-            const phaseCachedInputTokens =
-              (prev.cachedInputTokens ?? 0) + (event.cachedInputTokens ?? 0);
-            const phaseCacheCreationInputTokens =
-              (prev.cacheCreationInputTokens ?? 0) + (event.cacheCreationInputTokens ?? 0);
-            tokenUpdates.phaseTokenUsage = {
-              ...existing,
-              [bucketKey]: {
-                inputTokens: prev.inputTokens + (event.totalInputTokens ?? 0),
-                outputTokens: prev.outputTokens + (event.totalOutputTokens ?? 0),
-                ...(phaseCachedInputTokens > 0 && {
-                  cachedInputTokens: phaseCachedInputTokens,
-                }),
-                ...(phaseCacheCreationInputTokens > 0 && {
-                  cacheCreationInputTokens: phaseCacheCreationInputTokens,
-                }),
-                ...(phaseCostUsd > 0 && { costUsd: phaseCostUsd }),
-              },
-            };
-          }
-          if (event.costUsd !== undefined) {
-            tokenUpdates.costUsd = currentSession.costUsd + event.costUsd;
-          }
-          if (
-            event.totalInputTokens !== undefined ||
-            event.totalOutputTokens !== undefined ||
-            event.costUsd !== undefined
-          ) {
-            const hasPriorTelemetry =
-              currentSession.inputTokens > 0 ||
-              currentSession.outputTokens > 0 ||
-              currentSession.costUsd > 0;
-            tokenUpdates.tokenTelemetryAccuracy =
-              currentSession.tokenTelemetryAccuracy === 'repaired'
-                ? 'repaired'
-                : currentSession.tokenTelemetryAccuracy === 'partial' && hasPriorTelemetry
-                  ? 'partial'
+          let usage: ReturnType<ReturnType<typeof createRuntimeUsageCounter>>;
+          try {
+            if (
+              event.type === 'usage' &&
+              (!event.usageSegmentId || event.sessionId !== nativeSessionId(currentSession))
+            )
+              throw new AutopodError(
+                'Runtime usage does not match the admitted native session',
+                'RUNTIME_USAGE_CONFLICT',
+                409,
+              );
+            usage = runtimeUsageDelta(event);
+            const tokenUpdates: PodUpdates = {};
+            if (usage.totalInputTokens !== undefined || usage.totalOutputTokens !== undefined) {
+              tokenUpdates.inputTokens = currentSession.inputTokens + (usage.totalInputTokens ?? 0);
+              tokenUpdates.outputTokens =
+                currentSession.outputTokens + (usage.totalOutputTokens ?? 0);
+              const bucketKey = agentPhaseBucketKey(attempt);
+              const existing = currentSession.phaseTokenUsage ?? {};
+              const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
+              tokenUpdates.phaseTokenUsage = {
+                ...existing,
+                [bucketKey]: {
+                  ...prev,
+                  inputTokens: prev.inputTokens + (usage.totalInputTokens ?? 0),
+                  outputTokens: prev.outputTokens + (usage.totalOutputTokens ?? 0),
+                  ...((prev.cachedInputTokens ?? 0) + (usage.cachedInputTokens ?? 0) > 0
+                    ? {
+                        cachedInputTokens:
+                          (prev.cachedInputTokens ?? 0) + (usage.cachedInputTokens ?? 0),
+                      }
+                    : {}),
+                  ...((prev.cacheCreationInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0) >
+                  0
+                    ? {
+                        cacheCreationInputTokens:
+                          (prev.cacheCreationInputTokens ?? 0) +
+                          (usage.cacheCreationInputTokens ?? 0),
+                      }
+                    : {}),
+                  ...((prev.costUsd ?? 0) + (usage.costUsd ?? 0) > 0
+                    ? { costUsd: (prev.costUsd ?? 0) + (usage.costUsd ?? 0) }
+                    : {}),
+                },
+              };
+            }
+            if (usage.costUsd !== undefined)
+              tokenUpdates.costUsd = currentSession.costUsd + usage.costUsd;
+            if (event.type === 'usage') tokenUpdates.tokenTelemetryAccuracy = 'partial';
+            else if (
+              event.totalInputTokens !== undefined &&
+              event.totalOutputTokens !== undefined &&
+              !event.usageIncomplete &&
+              !runtimeUsageDelta.hasUnsettledSegments()
+            )
+              tokenUpdates.tokenTelemetryAccuracy = priorUsageIncomplete
+                ? 'partial'
+                : initialPod.tokenTelemetryAccuracy === 'repaired'
+                  ? 'repaired'
                   : 'complete';
-          }
-          if (Object.keys(tokenUpdates).length > 0) {
-            podRepo.update(podId, tokenUpdates);
-          }
-          const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-          if (activeAttempt) {
-            deps.providerAttemptRepo?.updateActive(podId, {
-              expectedOrdinal: runOwner.providerOrdinal,
-              nativeSessionId: nativeSessionId(podRepo.getOrThrow(podId)),
-              inputTokens: activeAttempt.inputTokens + (event.totalInputTokens ?? 0),
-              outputTokens: activeAttempt.outputTokens + (event.totalOutputTokens ?? 0),
-              costUsd: activeAttempt.costUsd + (event.costUsd ?? 0),
+            else tokenUpdates.tokenTelemetryAccuracy = 'partial';
+            atomicPodChange(podRepo, () => {
+              podRepo.update(podId, tokenUpdates);
+              const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+              if (activeAttempt)
+                deps.providerAttemptRepo?.updateActive(podId, {
+                  expectedOrdinal: runOwner.providerOrdinal,
+                  nativeSessionId: nativeSessionId(currentSession),
+                  inputTokens: activeAttempt.inputTokens + (usage.totalInputTokens ?? 0),
+                  outputTokens: activeAttempt.outputTokens + (usage.totalOutputTokens ?? 0),
+                  costUsd: activeAttempt.costUsd + (usage.costUsd ?? 0),
+                });
+              if (event.type === 'complete')
+                podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
             });
+          } catch (error) {
+            // A live worker cannot continue spending after its counters become unusable.
+            if (event.type === 'usage') await stopUsageWorker();
+            throw error;
           }
+          if (event.type === 'complete') {
+            outcome = 'completed';
+            observedTerminalOutcome = 'completed';
+          }
+          const newInputTokens = currentSession.inputTokens + (usage.totalInputTokens ?? 0);
+          const newOutputTokens = currentSession.outputTokens + (usage.totalOutputTokens ?? 0);
 
-          const blockerSummary = summarizeAgentCompletionBlocker(event.result);
+          const blockerSummary =
+            event.type === 'complete' ? summarizeAgentCompletionBlocker(event.result) : null;
           // A recorded infrastructure report owns preservation after native
           // settlement; its completion wording must not bypass that gate.
           if (blockerSummary && !podRepo.hasInfrastructureBlocker?.(podId)) {
@@ -566,6 +620,11 @@ export function createAgentEventConsumption(
                   'Token budget exhausted with infrastructure blocked — preserving after verified settlement, no continuation authorized',
                 );
                 continue;
+              }
+              if (event.type === 'usage') {
+                observedTerminalOutcome = 'failed';
+                await stopUsageWorker();
+                if (!ownsRun()) return 'stopped';
               }
               if (policy === 'hard' || !canExtend) {
                 emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');

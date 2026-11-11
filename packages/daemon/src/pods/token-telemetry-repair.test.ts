@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { computeCostWithCache } from '@autopod/shared';
@@ -97,6 +97,60 @@ async function writeRollout(root: string, podId: string): Promise<void> {
 }
 
 describe('token telemetry repair', () => {
+  it.each([
+    false,
+    true,
+  ])('refuses native-response rollouts instead of overwriting them with compatibility-only totals (attempts=%s)', async (withAttempts) => {
+    const db = createTestDb();
+    try {
+      insertTestProfile(db);
+      seedPod(db, 'native-pod', 'codex');
+      const podRepo = createPodRepository(db);
+      const attempts = createProviderAttemptRepository(db);
+      if (withAttempts) openAndCloseAttempt(attempts, 'native-pod', 'codex');
+      podRepo.update('native-pod', {
+        inputTokens: 2000,
+        outputTokens: 200,
+        tokenTelemetryAccuracy: 'partial',
+      });
+      const before = podRepo.getOrThrow('native-pod');
+      const root = await mkdtemp(path.join(tmpdir(), 'native-telemetry-repair-'));
+      roots.push(root);
+      await writeRollout(root, 'native-pod');
+      await appendFile(
+        path.join(root, 'native-pod', '2026', '07', '30', 'rollout-codex-session.jsonl'),
+        `\n${JSON.stringify({
+          type: 'token_usage_record',
+          payload: {
+            response_id: 'native-response',
+            usage: { input_tokens: 2000, output_tokens: 200, cached_input_tokens: 1000 },
+          },
+        })}\n`,
+      );
+      const repair = createTokenTelemetryRepair({
+        db,
+        podRepo,
+        providerAttemptRepo: attempts,
+        stateRoot: root,
+      });
+      const result = await repair.run({ apply: true });
+      expect(result).toMatchObject({
+        repairedPods: 0,
+        partialPods: 1,
+        entries: [
+          expect.objectContaining({
+            reason: expect.stringContaining('legacy token_count repair cannot certify'),
+          }),
+        ],
+      });
+      expect(podRepo.getOrThrow('native-pod')).toEqual(before);
+      expect(
+        db.prepare('SELECT COUNT(*) FROM provider_attempt_telemetry_corrections').pluck().get(),
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
   it('dry-runs, applies audited Codex corrections, and is idempotent', async () => {
     const db = createTestDb();
     insertTestProfile(db);

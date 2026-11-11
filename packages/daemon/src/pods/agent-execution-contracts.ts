@@ -3,7 +3,7 @@ import type { OperatorFailurePhase } from './completion-diagnostics.js';
 export type { OperatorFailurePhase } from './completion-diagnostics.js';
 
 import type {
-  AgentEvent,
+  RuntimeEvent as AgentEvent,
   EffectiveLaunchConfig,
   ExecutionTarget,
   Pod,
@@ -110,6 +110,7 @@ export interface AgentProcessCaptured {
 }
 
 export interface AgentConsumerCaptured {
+  runtimeRegistry: RuntimeRegistry;
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   podRepo: PodRepository;
   reconcileInfrastructureBlocker(podId: string): Promise<void>;

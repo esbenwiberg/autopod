@@ -116,6 +116,17 @@ export class ReviewerRunRepository {
         task?.budgetCheck?.status === 'unavailable' &&
         (wholeBudget === null || budget.tokenBudgetPolicy === 'hard')
       ) {
+        const ownWorker = this.db
+          .prepare(`SELECT 1 FROM task_agent_runs
+          WHERE pod_id=? AND generation=? AND ended_at IS NULL AND failure_category IS NULL`)
+          .get(pod.id, pod.lifecycleGeneration);
+        if (wholeBudget !== null && total < wholeBudget && ownWorker) {
+          configurationError(
+            'Review deferred, NOT RUN: the current worker has not reported final usage under the hard task token limit. Finish local checks and source work, then let the configured daemon review run after worker settlement. Do not claim this review passed or that a required review is satisfied. Requirements not covered by a configured downstream review remain pending. If accounting is still unavailable after settlement, reconcile it before retrying.',
+            'REVIEWER_WORKER_USAGE_PENDING',
+            409,
+          );
+        }
         const action =
           wholeBudget === null
             ? 'Restore the task budget source and refresh task accounting before retrying.'

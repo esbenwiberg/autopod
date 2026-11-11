@@ -3,6 +3,7 @@ FROM node:22-slim
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    procps \
     libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     curl \
     ca-certificates \
@@ -14,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 build-essential bison libevent-dev libncurses-dev pkg-config \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
+    && command -v ps && ps --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Pilot exercises client-key injection added in tmux 3.7. Debian's unpinned

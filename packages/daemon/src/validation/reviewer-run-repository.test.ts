@@ -239,6 +239,69 @@ it.each([
   }
 });
 
+it.each([
+  false,
+  true,
+])('distinguishes live review deferral from unverified termination (%s)', async (unverified) => {
+  const db = createTestDb();
+  try {
+    const { services } = createTestConfiguration(db);
+    const config = await resolveLaunch(
+      {
+        repositoryId: 'repo-a',
+        task: 'Review after worker',
+        overrides: { workflow: { tokenBudget: 1000, tokenBudgetPolicy: 'hard' } },
+      },
+      services,
+    );
+    insertConfigurationTestPod(db, 'live-worker');
+    db.prepare(
+      "UPDATE pods SET launch_config_digest=?, token_budget=1000, token_telemetry_accuracy='complete' WHERE id='live-worker'",
+    ).run(config.digest);
+    const repo = createPodRepository(db);
+    const ledger = repo.taskExecutions;
+    if (!ledger) throw new Error('Missing ledger');
+    ledger.register('live-worker');
+    const runId = ledger.beginRun(
+      'live-worker',
+      repo.getOrThrow('live-worker').lifecycleGeneration,
+      0,
+      config.ai.main,
+    );
+    repo.update('live-worker', { tokenTelemetryAccuracy: 'partial' });
+    if (unverified) ledger.retainUnverifiedRun(runId);
+    const runs = new ReviewerRunRepository(db, (id) => ledger.snapshot(id));
+    expect(() =>
+      runs.reserve('deferred', repo.getOrThrow('live-worker'), config, config.ai.main),
+    ).toThrow(
+      expect.objectContaining({
+        code: unverified ? 'REVIEWER_RECONCILIATION_REQUIRED' : 'REVIEWER_WORKER_USAGE_PENDING',
+      }),
+    );
+    expect(runs.list('live-worker')).toEqual([]);
+    if (unverified) return;
+    ledger.finishRun(runId, 'completed', null);
+    repo.update('live-worker', {
+      inputTokens: 100,
+      outputTokens: 10,
+      tokenTelemetryAccuracy: 'complete',
+      phaseTokenUsage: {
+        coding: {
+          inputTokens: 100,
+          outputTokens: 10,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          costUsd: 0,
+        },
+      },
+    });
+    runs.reserve('real-review', repo.getOrThrow('live-worker'), config, config.ai.main);
+    expect(runs.list('live-worker')).toMatchObject([{ id: 'real-review', state: 'preparing' }]);
+  } finally {
+    db.close();
+  }
+});
+
 it('explains an exhausted reviewer cap independently of unlimited task tokens', async () => {
   const { db, config, runs, ledger, pod, id } = await timedOutReview('soft');
   try {
