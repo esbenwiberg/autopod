@@ -1515,7 +1515,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'refreshReadinessAfterQualityScore',
         'authorizeValidationRecoveryBudget',
         ...(podRepo.retainedCheckpoints?.ownsRepairExecution(podId)
-          ? ['consumeAgentEvents', 'handleCompletion']
+          ? ['consumeAgentEvents', 'handleCompletion', 'reconcileInfrastructureBlocker']
           : []),
         ...(((!continuation.checked && continuation.activated) || successorChecks) &&
         podRepo.getOrThrow(podId).status === 'running'

@@ -358,7 +358,15 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.pendingRequestsByPod,
     app.log as unknown as import('pino').Logger,
     deps.sessionTokenIssuer,
-    (podId, run) => deps.podRepo?.retainedCoding?.withWorkerScope(podId, run) ?? run(),
+    (podId, run) => {
+      const coding = () =>
+        deps.podRepo?.retainedCoding
+          ? deps.podRepo.retainedCoding.withWorkerScope(podId, run)
+          : run();
+      return deps.podRepo?.retainedCheckpoints
+        ? deps.podRepo.retainedCheckpoints.withWorkerScope(podId, coding)
+        : coding();
+    },
   );
 
   // MCP proxy handler — forwards agent requests to injected profile MCP servers,

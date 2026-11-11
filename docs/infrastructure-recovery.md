@@ -131,6 +131,14 @@ not resume a dead worker, answer credential/override requests, extend a paused
 worker's budget or authorize another coding turn. Qualify task/token headroom
 before admission; a budget-paused/unknown repair remains held, not reset.
 
+The exact live infrastructure repair worker can report plans, progress, summaries
+and blockers through its current pod-scoped MCP credential. This borrows only its
+recorded run/generation/cycle/resource/worktree scope, rechecked on mutation; it
+does not authorize another worker, original-resource access or ordinary controls.
+Stale, settled, foreign or uncertain workers remain refused. A current-generation
+infrastructure blocker parks completion before candidate sealing or validation;
+a clean unchanged checkout is not evidence that blocked integration succeeded.
+
 Both modes run fresh configured checks with mandatory independent review,
 including the additive frozen-review policy for workflows that omitted the review
 phase. No prior worker review is reused. An infrastructure failure does not turn

@@ -1881,6 +1881,10 @@ export function createRetainedCheckpointRecovery(deps: {
       ) {
         deps.podRepo.taskExecutions?.assertCanDelete(podId);
         deps.assertGuidanceCollected(podId);
+        if (deps.podRepo.hasInfrastructureBlocker?.(podId))
+          checkpointError(
+            'Reported infrastructure block must be resolved before sealing repair source or running checks',
+          );
       }
     };
     const final = deps.podRepo.retainedCoding?.finalSource(podId, record.activated.generation);
