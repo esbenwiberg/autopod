@@ -83,10 +83,15 @@ are bypassed only for this trusted artifact source mode. Frozen enabled phases a
 original Fact commands run with the original independent reviewer and task accounting.
 No coding agent or automatic correction worker is dispatched; no budget resets or
 token caps are introduced. The independent copy retains captured root/file modes.
-Every captured source entry remains bound through Facts, before paid review and
-after checks; changed or missing bytes, modes, entry types or linked replacements
-cannot produce a passing outcome. Separately generated build/evidence files are
-allowed and retained as reports, not silently substituted for captured source.
+Every captured source entry is reverified before each Fact, before paid review
+and after checks. Both the exported report snapshot's source projection and the
+live execution copy are checked again before pass accounting. Drift at any of
+these boundaries (bytes, modes, missing entries or symbolic replacements) blocks
+acceptance, even if a writer later restores the live copy. Separately generated
+build/evidence files are allowed and retained as reports, not silently substituted
+for captured source. Buffered command timeout or transport failure is unverified
+termination, not a synthetic exit `124`: stop further checks and retain the exact
+container/operation without replay or a supposedly stable live report export.
 Fact receipts use the validation engine's canonical path spelling without changing
 the original frozen contract.
 

@@ -255,42 +255,47 @@ export function createArtifactChecksExecution(deps: {
       throw error;
     }
     record('engineResult', { result, sourceHash: input.sourceHash, resourceKey });
-    let sourceVerified = false;
-    let sourceError: unknown;
-    try {
-      await verifySource();
-      record('sourceVerified', { sourceHash: input.sourceHash });
-      sourceVerified = true;
-    } catch (error) {
-      sourceError = error;
-      record('sourceRejected', { sourceHash: input.sourceHash });
-    }
-    retries.finish(
-      admission.id,
-      requiresValidationSettlement({ lastValidationResult: result })
-        ? 'unknown'
-        : !sourceVerified || result.overall !== 'pass'
-          ? 'nonretryable'
-          : 'pass',
-      Math.round(performance.now() - started),
-    );
-    if (requiresValidationSettlement({ lastValidationResult: result }))
+    if (requiresValidationSettlement({ lastValidationResult: result })) {
+      retries.finish(admission.id, 'unknown', Math.round(performance.now() - started));
       artifactChecksError(
         'Checks termination is unverified; retain the exact execution and inspect its saved evidence',
       );
-    // Even failed/blocked results retain new reports and both original resources.
-    const reports = await collectArtifactSnapshot({
-      containerManager: deps.cm,
-      containerId,
-      artifactRoot: path.dirname(input.workspace),
-      generation: pod.lifecycleGeneration,
-      cycle: pod.finalization!.cycle,
-      isCurrent: () => {
-        assertCurrent();
-        return true;
-      },
+    }
+    let sourceVerified = true;
+    let sourceError: unknown;
+    const prove = async (verify: () => Promise<unknown>) => {
+      try {
+        await verify();
+      } catch (error) {
+        sourceVerified = false;
+        sourceError ??= error;
+      }
+    };
+    await prove(verifySource);
+    // Retain reports even after known source drift. Do not settle pass until
+    // the exported source AND live copy both prove the selected input again.
+    await prove(async () => {
+      const reports = await collectArtifactSnapshot({
+        containerManager: deps.cm,
+        containerId,
+        artifactRoot: path.dirname(input.workspace),
+        generation: pod.lifecycleGeneration,
+        cycle: pod.finalization!.cycle,
+        isCurrent: () => {
+          assertCurrent();
+          return true;
+        },
+      });
+      record('reports', { path: reports, containerId, sourceHash: input.sourceHash });
+      await verifyArtifactExecutionSource(input.snapshot, reports, assertCurrent);
     });
-    record('reports', { path: reports, containerId, sourceHash: input.sourceHash });
+    await prove(verifySource);
+    record(sourceVerified ? 'sourceVerified' : 'sourceRejected', { sourceHash: input.sourceHash });
+    retries.finish(
+      admission.id,
+      sourceVerified && result.overall === 'pass' ? 'pass' : 'nonretryable',
+      Math.round(performance.now() - started),
+    );
     if (!sourceVerified)
       throw sourceError instanceof Error
         ? sourceError

@@ -2027,6 +2027,26 @@ function classifyValidationInfrastructureFailure(
   };
 }
 
+/** Buffered Docker errors do not prove that the command stopped. Artifact
+ * recovery cannot dispatch further checks or snapshot a possibly live writer.
+ * Preserve structured termination evidence; otherwise fail closed as unknown.
+ */
+function classifyBufferedExecutionFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+  error: unknown,
+  config: ValidationEngineConfig,
+): ValidationInfrastructureFailure | null {
+  const known = classifyValidationInfrastructureFailure(phase, error, config.executionTarget);
+  if (known || !config.artifactSource) return known;
+  return {
+    phase,
+    code: 'EXEC_EXIT_UNVERIFIED',
+    statusCode: 409,
+    message: `Buffered artifact ${phase} execution failed without verified termination: ${error instanceof Error ? error.message : String(error)}`,
+    retryable: false,
+  };
+}
+
 // ── Required facts phase ───────────────────────────────────────────────────
 
 async function runFactValidation(
@@ -2200,7 +2220,8 @@ async function runFactValidation(
         );
       }
     } catch (err) {
-      if (classifyValidationInfrastructureFailure('facts', err, config.executionTarget)) throw err;
+      const failure = classifyBufferedExecutionFailure('facts', err, config);
+      if (failure) throw new ValidationCommandInfrastructureError(failure);
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
       commandResult = {
@@ -2721,6 +2742,8 @@ async function artifactExistsInContainer(
     );
     return result.exitCode === 0 ? true : result.exitCode === 1 ? false : null;
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
     return null;
   }
@@ -2750,6 +2773,8 @@ async function collectFactAttachments(
       .filter(Boolean)
       .map((path) => ({ kind: attachmentKindForPath(path), path }));
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, factId }, 'required fact attachment collection failed');
     return [];
   }
@@ -2835,6 +2860,8 @@ async function artifactHashInContainer(
     const hash = result.stdout.trim().split(/\s+/)[0];
     return result.exitCode === 0 && hash ? hash : undefined;
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, artifactPath }, 'required fact artifact hash check failed');
     return undefined;
   }
@@ -2915,11 +2942,7 @@ async function runLint(
     const duration = Date.now() - lintStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure(
-      'lint',
-      err,
-      config.executionTarget,
-    );
+    const infrastructureFailure = classifyBufferedExecutionFailure('lint', err, config);
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -3006,11 +3029,7 @@ async function runSast(
     const duration = Date.now() - sastStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure(
-      'sast',
-      err,
-      config.executionTarget,
-    );
+    const infrastructureFailure = classifyBufferedExecutionFailure('sast', err, config);
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },

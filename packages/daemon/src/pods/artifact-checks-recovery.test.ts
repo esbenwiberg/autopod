@@ -357,6 +357,70 @@ describe('held empty-workspace artifact checks through production manager/API', 
     );
   });
 
+  it.each([
+    'during-export',
+    'restored-after-export',
+    'after-export',
+  ] as const)('blocks source drift %s before pass accounting, retaining raw result and reports', async (mutation) => {
+    const f = await fixture();
+    const extract = vi.mocked(f.cm.extractDirectoryFromContainer!).getMockImplementation()!;
+    const outcomesAtExport: unknown[] = [];
+    vi.mocked(f.cm.extractDirectoryFromContainer!).mockImplementation(async (...args) => {
+      if (args[0] === f.pod().containerId) return extract(...args);
+      outcomesAtExport.push(f.ctx.podRepo.taskRetries!.state(f.podId).latest?.outcome);
+      const workspace = vi.mocked(f.cm.spawn).mock.calls[0]![0].volumes![0]!.host;
+      const file = path.join(workspace, 'source.js');
+      if (mutation !== 'after-export') await writeFile(file, 'export const answer = 0;\n');
+      await extract(...args);
+      if (mutation === 'restored-after-export')
+        await writeFile(file, 'export const answer = 42;\n');
+      if (mutation === 'after-export') await writeFile(file, 'export const answer = 0;\n');
+    });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toBeUndefined();
+    expect(f.operation().events.blocked).toBeTruthy();
+    expect(f.operation().events.engineResult).toMatchObject({ result: { overall: 'pass' } });
+    expect(f.operation().events.sourceRejected).toBeTruthy();
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).latest?.outcome).toBe('nonretryable');
+    expect(outcomesAtExport).toHaveLength(1);
+    expect(outcomesAtExport).not.toContain('pass');
+    const reports = f.operation().events.reports as { path: string };
+    expect(await readFile(path.join(reports.path, 'source.js'), 'utf8')).toBe(
+      mutation === 'after-export' ? 'export const answer = 42;\n' : 'export const answer = 0;\n',
+    );
+    const captured = f.operation().events.captured as { snapshot: string };
+    expect(await readFile(path.join(captured.snapshot, 'source.js'), 'utf8')).toBe(
+      'export const answer = 42;\n',
+    );
+  });
+
+  it('keeps unverified command termination unknown without report export or automatic replay', async () => {
+    const f = await fixture();
+    const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+      ...(await execute(config)),
+      overall: 'fail',
+      infrastructureFailure: {
+        phase: 'facts',
+        code: 'EXEC_EXIT_UNVERIFIED',
+        statusCode: 409,
+        message: 'Buffered Fact transport timed out; process termination unverified',
+        retryable: false,
+      },
+    }));
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toBeUndefined();
+    expect(f.operation().events.blocked).toBeTruthy();
+    expect(f.operation().events.reports).toBeUndefined();
+    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).latest?.outcome).toBe('unknown');
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+    expect(f.cm.spawn).toHaveBeenCalledOnce();
+  });
+
   it('allows separately generated evidence while keeping every captured source entry unchanged', async () => {
     const f = await fixture();
     const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
