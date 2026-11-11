@@ -668,11 +668,25 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
           503,
         );
       const createSession = manager.createResolvedSession.bind(manager);
+      const prepareSession = manager.prepareResolvedSession?.bind(manager);
       const admitted = await admitLaunch({
         request,
         actorId: identity.userId,
         services: resolution,
         snapshots,
+        ...(prepareSession
+          ? {
+              preparePod: async (config: EffectiveLaunchConfig) => {
+                const create = await prepareSession(
+                  config,
+                  identity.userId,
+                  { name: identity.name, email: identity.email },
+                  identity.actor,
+                );
+                return () => create().id;
+              },
+            }
+          : {}),
         createPod: (config) =>
           createSession(
             config,

@@ -7,6 +7,7 @@ import type {
   AdmissionResolvedLiveDependencies,
 } from './admission-contracts.js';
 import { admitComposablePod } from './composable-pod-admission.js';
+import { prepareIntentionalRerun } from './intentional-rerun-preflight.js';
 import type { PodCreator } from './workspace-contracts.js';
 export function createAdmissionResolved(
   deps: AdmissionResolvedLiveDependencies,
@@ -27,6 +28,7 @@ export function createAdmissionResolved(
     userId: string,
     creator?: PodCreator,
     actor?: OperatorActor,
+    assertRerunSourceQuiescent?: () => string,
   ): Pod {
     if (config.derivation?.kind === 'recovery-fork')
       throw new AutopodError(
@@ -102,6 +104,7 @@ export function createAdmissionResolved(
       userId,
       creator,
       actor,
+      assertRerunSourceQuiescent,
       pods: podRepo,
       read: deps.launchConfiguration.read,
       events: eventBus,
@@ -115,5 +118,24 @@ export function createAdmissionResolved(
     }
     return pod;
   }
-  return { createResolvedSession };
+  async function prepareResolvedSession(
+    config: EffectiveLaunchConfig,
+    userId: string,
+    creator?: PodCreator,
+    actor?: OperatorActor,
+  ): Promise<() => Pod> {
+    if (!config.work.intentionalRerun)
+      return () => createResolvedSession(config, userId, creator, actor);
+    const assertQuiescent = await prepareIntentionalRerun({
+      config,
+      userId,
+      actor,
+      pods: podRepo,
+      read: (id) => deps.launchConfiguration?.read(id) ?? null,
+      manager: containerManagerFactory.get('local'),
+      isIdle: (id) => captured.isRerunSourceIdle?.(id) === true,
+    });
+    return () => createResolvedSession(config, userId, creator, actor, assertQuiescent);
+  }
+  return { createResolvedSession, prepareResolvedSession };
 }

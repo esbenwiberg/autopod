@@ -207,6 +207,33 @@ describe('launch admission retries', () => {
       db.close();
     }
   });
+  it('runs async insertion preflight once and skips it on exact saved replay', async () => {
+    const db = createTestDb();
+    try {
+      const { store, services } = createTestConfiguration(db);
+      const snapshots = createLaunchSnapshotRepository(db, store);
+      const insert = vi.fn(() => insertConfigurationTestPod(db, 'prepared-child'));
+      const preparePod = vi.fn(async () => insert);
+      const fallback = vi.fn(() => 'must-not-run');
+      const input = {
+        request: { repositoryId: 'repo-a', task: 'Prepared', requestId: 'prepared-launch' },
+        actorId: 'user',
+        services,
+        snapshots,
+        createPod: fallback,
+        preparePod,
+      };
+      const first = await admitLaunch(input);
+      preparePod.mockRejectedValue(new Error('Resource is now unavailable'));
+      expect(await admitLaunch(input)).toEqual({ ...first, created: false });
+      expect(preparePod).toHaveBeenCalledTimes(1);
+      expect(insert).toHaveBeenCalledTimes(1);
+      expect(fallback).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
+  });
+
   it('returns the original snapshot before consulting edited presets and rejects changed requests or actors', async () => {
     const db = createTestDb();
     try {

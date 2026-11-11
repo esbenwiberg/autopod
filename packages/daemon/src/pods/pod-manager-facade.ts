@@ -380,6 +380,14 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
       return admissionQueries.getLaunchConfiguration(podId);
     },
+    prepareResolvedSession(
+      config: EffectiveLaunchConfig,
+      userId: string,
+      creator?: PodCreator,
+      actor?: OperatorActor,
+    ): Promise<() => Pod> {
+      return admissionResolved.prepareResolvedSession(config, userId, creator, actor);
+    },
     createResolvedSession(
       config: EffectiveLaunchConfig,
       userId: string,

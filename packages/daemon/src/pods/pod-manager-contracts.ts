@@ -226,6 +226,12 @@ export interface PodManager {
     podId: string,
   ): import('@autopod/shared').SourceAdoptionList['approvalRewrite'];
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
+  prepareResolvedSession?(
+    config: EffectiveLaunchConfig,
+    userId: string,
+    creator?: PodCreator,
+    actor?: OperatorActor,
+  ): Promise<() => Pod>;
   createResolvedSession?(
     config: EffectiveLaunchConfig,
     userId: string,

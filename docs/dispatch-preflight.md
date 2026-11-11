@@ -51,6 +51,11 @@ immutable; no new ledger, migration, dispatch permission or retry is introduced.
 
 ## Exact intentional reruns
 
+The separate `touches` overlap check can still block a failed pod retaining work.
+For the narrowly observed, owner-authorized stopped-Docker exception, see
+[explicit reruns of failed work](intentional-rerun-recovery.md). That exception
+never changes duplicate-work, task-accounting or source-custody evidence.
+
 A human rerun authorizes one exact named direct conflict or the exact execution
 set displayed on its blocked source request. Any changed set requires a new
 decision. Linked rework stays in its logical task; naming its root alone does

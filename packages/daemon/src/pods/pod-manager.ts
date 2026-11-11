@@ -1425,6 +1425,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const admissionResolved = createAdmissionResolved(deps, {
+    isRerunSourceIdle: (id) =>
+      !activeAgentRuns.has(id) &&
+      !controlOperations.isActive(id) &&
+      !checkpointRecovery?.isActive(id) &&
+      !retainedFinalization?.isActive(id) &&
+      !stalledWorkerRecovery?.isActive(id),
     providerAccountStore,
     providerCatalog,
     containerManagerFactory,
