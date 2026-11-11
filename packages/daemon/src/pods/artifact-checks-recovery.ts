@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readdir, readFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ArtifactChecksRecoveryRequest,
@@ -10,6 +10,7 @@ import type {
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { normalizeContractPath } from '../validation/contract-path.js';
 import {
   type ArtifactChecksBinding,
   type ArtifactChecksRecord,
@@ -90,6 +91,13 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
   const store = pods.artifactChecks ?? artifactChecksError('Artifact checks ledger unavailable');
   const pending = new Map<string, Promise<void>>();
   function selection(podId: string, owned = false) {
+    // Execution uses a private host copy mounted for the frozen autopod UID.
+    // Other daemon owners require a separately qualified ownership-transfer
+    // protocol; do not add root/chown authority or make preserved source public.
+    if (process.geteuid?.() !== 1000)
+      artifactChecksError(
+        'Artifact checks currently require daemon effective UID 1000 for private execution-copy ownership',
+      );
     const pod = pods.getOrThrow(podId);
     const launch = deps.readLaunch(podId);
     const profile = deps.executionForPod(pod);
@@ -326,7 +334,11 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         artifactChecksError('Original changed during capture');
       append('captured', { snapshot, inventory, reviewHash: configurationDigest(diff) });
       const workspace = path.join(root, 'execution');
-      await mkdir(workspace, { recursive: false });
+      const sourceMode = (await lstat(snapshot)).mode & 0o7777;
+      await mkdir(workspace, { recursive: false, mode: sourceMode });
+      // cp into an existing directory need not replace its root mode (Node 24).
+      // Preserve the captured mode exactly, including across a stricter umask.
+      await chmod(workspace, sourceMode);
       await cp(snapshot, workspace, { recursive: true, preserveTimestamps: true });
       if ((await fingerprintArtifactSnapshot(workspace)).sha256 !== inventory.sha256)
         artifactChecksError('Independent workspace differs from captured source');
@@ -385,7 +397,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
             (r) =>
               r.factId === fact.id &&
               r.command === fact.command &&
-              r.artifactPath === fact.artifact.path &&
+              r.artifactPath === normalizeContractPath(fact.artifact.path) &&
               r.status === 'pass' &&
               r.passed &&
               r.exitCode === 0,

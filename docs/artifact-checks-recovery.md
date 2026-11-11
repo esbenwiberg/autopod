@@ -20,6 +20,10 @@ uncollected guidance, shared workspace mount, reference input or private registr
 is admitted. Another recovery or active execution retains exclusive custody.
 Facts must name `create` or `touch` artifacts. Historical `update`/`delete` claims
 need a baseline this route cannot establish, so they remain unsupported.
+The daemon must currently run with effective UID `1000`, matching the frozen
+container user for the private execution copy. Other daemon owners are refused
+before admission; this route does not grant root/chown capabilities, loosen
+captured permissions or advertise unqualified ownership transfer.
 
 This retained execution route is separate from a fresh recovery fork. It does not
 import a repository into a new coding task or relax that route's source import
@@ -78,7 +82,13 @@ commit, branch or ancestry. Git resets, empty-diff acceptance and cached worker 
 are bypassed only for this trusted artifact source mode. Frozen enabled phases and
 original Fact commands run with the original independent reviewer and task accounting.
 No coding agent or automatic correction worker is dispatched; no budget resets or
-token caps are introduced.
+token caps are introduced. The independent copy retains captured root/file modes.
+Every captured source entry remains bound through Facts, before paid review and
+after checks; changed or missing bytes, modes, entry types or linked replacements
+cannot produce a passing outcome. Separately generated build/evidence files are
+allowed and retained as reports, not silently substituted for captured source.
+Fact receipts use the validation engine's canonical path spelling without changing
+the original frozen contract.
 
 HTTP 202 acknowledges a durable request, **not** acceptance. A `checked` event with
 `outcome: pass` requires exact-source passing checks, every original Fact with an

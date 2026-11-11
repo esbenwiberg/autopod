@@ -45,6 +45,7 @@ import {
   ContainerReviewerUnavailableError,
   runContainerReviewer,
 } from './container-reviewer-runner.js';
+import { normalizeContractPath } from './contract-path.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -840,6 +841,7 @@ export function createLocalValidationEngine(
                 : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
+          await config.artifactSource?.verify();
           callbacks?.onPhaseStarted?.('review');
           onProgress?.('Running AI task review…');
 
@@ -2048,6 +2050,7 @@ async function runFactValidation(
 
   for (const fact of facts) {
     config.artifactSource?.assertCurrent?.();
+    await config.artifactSource?.verify();
     const requestedDeviation = factDeviationMap.get(fact.id);
     if (requestedDeviation) {
       if (requestedDeviation.decision === 'rejected') {
@@ -2835,10 +2838,6 @@ async function artifactHashInContainer(
     log?.warn({ err, artifactPath }, 'required fact artifact hash check failed');
     return undefined;
   }
-}
-
-function normalizeContractPath(path: string): string {
-  return path.replace(/^\/+/, '').replace(/^\.\//, '');
 }
 
 function shellQuote(value: string): string {

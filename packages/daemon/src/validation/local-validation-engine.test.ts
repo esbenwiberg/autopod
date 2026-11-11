@@ -5160,6 +5160,29 @@ describe('validate() — pre-validation worktree reset', () => {
     expect(result.taskReview).toBeNull();
   });
 
+  it('re-verifies artifact execution before admitting any paid task review', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const verify = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('Artifact execution source changed'));
+    const reviewer = vi.fn(async () => {
+      throw new Error('Paid review must not start');
+    });
+    await expect(
+      createLocalValidationEngine(cm).validate(
+        minimalConfig({
+          skipPhases: [],
+          artifactSource: { sha256: 'a'.repeat(64), verify },
+          reviewerExecutor: reviewer,
+        }),
+      ),
+    ).rejects.toThrow('Artifact execution source changed');
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(reviewer).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+  });
+
   it.each([
     true,
     false,

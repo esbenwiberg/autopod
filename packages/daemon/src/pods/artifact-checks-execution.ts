@@ -9,6 +9,7 @@ import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/val
 import { daemonRelease } from '../release.js';
 import type { createArtifactChecksRecovery } from './artifact-checks-recovery.js';
 import { artifactChecksError } from './artifact-checks-recovery-repository.js';
+import { verifyArtifactExecutionSource } from './artifact-checks-source.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import {
   fingerprintArtifactSnapshot,
@@ -153,6 +154,25 @@ export function createArtifactChecksExecution(deps: {
     const reviewer = deps.reviewer(pod);
     const executor =
       deps.reviewerExecutor(pod) ?? artifactChecksError('Independent frozen reviewer unavailable');
+    const verifySource = async () => {
+      assertCurrent();
+      await verifyArtifactSnapshot(
+        input.snapshot,
+        path.dirname(input.snapshot),
+        pod.lifecycleGeneration,
+        pod.finalization!.cycle,
+        input.sourceHash,
+      );
+      await verifyArtifactExecutionSource(input.snapshot, input.workspace, assertCurrent);
+      await verifyArtifactSnapshot(
+        input.snapshot,
+        path.dirname(input.snapshot),
+        pod.lifecycleGeneration,
+        pod.finalization!.cycle,
+        input.sourceHash,
+      );
+      assertCurrent();
+    };
     const config: ValidationEngineConfig = {
       podId: pod.id,
       containerId,
@@ -187,17 +207,7 @@ export function createArtifactChecksExecution(deps: {
       artifactSource: {
         sha256: input.sourceHash,
         assertCurrent,
-        verify: async () => {
-          assertCurrent();
-          await verifyArtifactSnapshot(
-            input.snapshot,
-            path.dirname(input.snapshot),
-            pod.lifecycleGeneration,
-            pod.finalization!.cycle,
-            input.sourceHash,
-          );
-          assertCurrent();
-        },
+        verify: verifySource,
       },
       contract: pod.contract ?? undefined,
       hasWebUi: false,
@@ -245,13 +255,23 @@ export function createArtifactChecksExecution(deps: {
       throw error;
     }
     record('engineResult', { result, sourceHash: input.sourceHash, resourceKey });
+    let sourceVerified = false;
+    let sourceError: unknown;
+    try {
+      await verifySource();
+      record('sourceVerified', { sourceHash: input.sourceHash });
+      sourceVerified = true;
+    } catch (error) {
+      sourceError = error;
+      record('sourceRejected', { sourceHash: input.sourceHash });
+    }
     retries.finish(
       admission.id,
       requiresValidationSettlement({ lastValidationResult: result })
         ? 'unknown'
-        : result.overall === 'pass'
-          ? 'pass'
-          : 'nonretryable',
+        : !sourceVerified || result.overall !== 'pass'
+          ? 'nonretryable'
+          : 'pass',
       Math.round(performance.now() - started),
     );
     if (requiresValidationSettlement({ lastValidationResult: result }))
@@ -271,6 +291,10 @@ export function createArtifactChecksExecution(deps: {
       },
     });
     record('reports', { path: reports, containerId, sourceHash: input.sourceHash });
+    if (!sourceVerified)
+      throw sourceError instanceof Error
+        ? sourceError
+        : new Error('Independent execution source could not be verified');
     return result;
   };
 }

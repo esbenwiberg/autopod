@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ArtifactChecksRecoveryRequest } from '@autopod/shared';
@@ -31,7 +31,9 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
-async function fixture() {
+async function fixture(options: { factPath?: string } = {}) {
+  // This is a synthetic Linux UID-1000 daemon boundary, not native Docker proof.
+  vi.spyOn(process, 'geteuid').mockReturnValue(1000);
   const ctx = createTestContext();
   const root = await mkdtemp(path.join(os.tmpdir(), 'artifact-checks-'));
   vi.stubEnv('DATA_DIR', root);
@@ -93,7 +95,7 @@ async function fixture() {
         id: 'answer',
         proves: ['contents'],
         kind: 'custom-command' as const,
-        artifact: { path: 'source.js', change: 'create' as const },
+        artifact: { path: options.factPath ?? 'source.js', change: 'create' as const },
         command: 'node source.js',
       },
     ],
@@ -287,6 +289,94 @@ async function fixture() {
 }
 
 describe('held empty-workspace artifact checks through production manager/API', () => {
+  it.each([
+    0, 501, 1001,
+  ])('refuses unsupported daemon ownership before admission (UID %s)', async (uid) => {
+    const f = await fixture();
+    vi.mocked(process.geteuid).mockReturnValue(uid);
+    const preview = await f.app.inject({ url: f.url, headers: f.headers });
+    expect(preview.json().selection).toBeNull();
+    expect(preview.json().refusal).toContain('effective UID 1000');
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(f.operation()).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+  });
+
+  it('preserves captured root and file modes when preparing independent execution', async () => {
+    const f = await fixture();
+    await chmod(f.original, 0o750);
+    await chmod(path.join(f.original, 'source.js'), 0o444);
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toMatchObject({ outcome: 'pass' });
+    const captured = f.operation().events.captured as { snapshot: string };
+    const workspace = vi.mocked(f.cm.spawn).mock.calls[0]![0].volumes![0]!.host;
+    expect((await lstat(workspace)).mode).toBe((await lstat(captured.snapshot)).mode);
+    expect((await lstat(path.join(workspace, 'source.js'))).mode & 0o7777).toBe(0o444);
+    expect(await readFile(path.join(f.original, 'source.js'), 'utf8')).toBe(
+      'export const answer = 42;\n',
+    );
+  });
+
+  it('matches the engine canonical Fact path without changing the original contract', async () => {
+    const f = await fixture({ factPath: './source.js' });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toMatchObject({ outcome: 'pass' });
+    expect(f.pod().contract!.requiredFacts[0]!.artifact.path).toBe('./source.js');
+  });
+
+  it('retains non-passing source changes even if the check boundary returns a passing verdict', async () => {
+    const f = await fixture();
+    const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      const result = await execute(config);
+      const workspace = vi.mocked(f.cm.spawn).mock.calls[0]![0].volumes![0]!.host;
+      await writeFile(path.join(workspace, 'source.js'), 'export const answer = 0;\n');
+      return result;
+    });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toBeUndefined();
+    expect(f.operation().events.blocked).toBeTruthy();
+    expect(f.operation().events.engineResult).toMatchObject({ result: { overall: 'pass' } });
+    expect(f.operation().events.sourceRejected).toBeTruthy();
+    expect(f.operation().events.reports).toBeTruthy();
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).latest?.outcome).toBe('nonretryable');
+    const captured = f.operation().events.captured as { snapshot: string };
+    expect(await readFile(path.join(captured.snapshot, 'source.js'), 'utf8')).toBe(
+      'export const answer = 42;\n',
+    );
+  });
+
+  it('allows separately generated evidence while keeping every captured source entry unchanged', async () => {
+    const f = await fixture();
+    const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      const result = await execute(config);
+      const workspace = vi.mocked(f.cm.spawn).mock.calls[0]![0].volumes![0]!.host;
+      await mkdir(path.join(workspace, 'evidence'));
+      await writeFile(path.join(workspace, 'evidence', 'result.json'), '{"passed":true}\n');
+      return result;
+    });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toMatchObject({ outcome: 'pass' });
+    expect(f.operation().events.sourceVerified).toBeTruthy();
+    const reports = f.operation().events.reports as { path: string };
+    expect(await readFile(path.join(reports.path, 'evidence', 'result.json'), 'utf8')).toBe(
+      '{"passed":true}\n',
+    );
+  });
+
   it('inspects without side effects and records source-bound independent checks without coding or delivery', async () => {
     const f = await fixture();
     expect(f.preview.statusCode).toBe(200);
