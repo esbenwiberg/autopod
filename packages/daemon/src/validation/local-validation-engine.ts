@@ -41,10 +41,12 @@ import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { resolveSandboxCheckpointSourceHead } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
+import { createArtifactExecutionBoundary } from './artifact-execution-boundary.js';
 import {
   ContainerReviewerUnavailableError,
   runContainerReviewer,
 } from './container-reviewer-runner.js';
+import { normalizeContractPath } from './contract-path.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -407,7 +409,7 @@ export class ValidationInterruptedError extends Error {
 }
 
 export function createLocalValidationEngine(
-  containerManager: ContainerManager,
+  baseContainerManager: ContainerManager,
   logger?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
@@ -422,12 +424,17 @@ export function createLocalValidationEngine(
       signal?: AbortSignal,
       callbacks?: ValidationPhaseCallbacks,
     ): Promise<ValidationResult> {
+      const boundary = config.artifactSource
+        ? createArtifactExecutionBoundary(baseContainerManager, config.artifactSource.assertCurrent)
+        : undefined;
+      const containerManager = boundary?.manager ?? baseContainerManager;
       const startTime = Date.now();
 
       // Secondary abort controller fired when the stability monitor detects a crash.
       const crashController = new AbortController();
 
       function checkAbort(): void {
+        config.artifactSource?.assertCurrent?.();
         if (signal?.aborted) throw new ValidationInterruptedError('Validation interrupted by user');
         if (crashController.signal.aborted)
           throw new ValidationInterruptedError(
@@ -447,7 +454,8 @@ export function createLocalValidationEngine(
         // See `resetWorktreeToHead` for the full failure-mode rationale.
         checkAbort();
         try {
-          if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
+          if (config.artifactSource) await config.artifactSource.verify();
+          else if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
         } catch (err) {
           const resetInfrastructureFailure = classifyValidationInfrastructureFailure(
             'setup',
@@ -838,12 +846,14 @@ export function createLocalValidationEngine(
                 : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
+          boundary?.assertVerified();
+          await config.artifactSource?.verify();
           callbacks?.onPhaseStarted?.('review');
           onProgress?.('Running AI task review…');
 
           // Gather enriched context from the worktree (Tier 0+1)
           let reviewContext: ReviewContext | undefined;
-          if (config.worktreePath) {
+          if (config.worktreePath && !config.artifactSource) {
             try {
               reviewContext = await gatherReviewContext(
                 config.worktreePath,
@@ -955,7 +965,14 @@ export function createLocalValidationEngine(
             !reviewRun.requiredReviewUnavailable &&
             config.validationSuite === 'full'
           ) {
-            const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
+            const readSelectedSource = async () => {
+              if (config.artifactSource) {
+                await config.artifactSource.verify();
+                return `artifact:${config.artifactSource.sha256}`;
+              }
+              return readReviewHead(config.worktreePath, config.startCommitSha);
+            };
+            const reviewedHead = await readSelectedSource();
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
               // The identity must attest to the exact bounded, sanitized bytes every axis receives.
@@ -1015,8 +1032,9 @@ export function createLocalValidationEngine(
             };
             const batch = await runReviewBatch({
               packet,
+              concurrency: config.artifactSource && config.reviewerExecutor ? 1 : 3,
               model: config.reviewerModel ?? 'auto',
-              readHead: () => readReviewHead(config.worktreePath, reviewedHead),
+              readHead: readSelectedSource,
               timeoutMs: councilTimeoutMs,
               onProgress: ({
                 stage,
@@ -1334,6 +1352,7 @@ export function createLocalValidationEngine(
         const { infrastructureFailure: _healthInfrastructureFailure, ...storedHealthResult } =
           infrastructureAwareHealth;
 
+        if (!infrastructureFailure) boundary?.assertVerified();
         return {
           podId: config.podId,
           attempt: config.attempt,
@@ -1361,6 +1380,7 @@ export function createLocalValidationEngine(
         };
       } catch (err) {
         if (err instanceof ValidationInterruptedError) {
+          if (!infrastructureFailure) boundary?.assertVerified();
           const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
           log?.info({ podId: config.podId, reason }, 'Validation interrupted');
           const interrupted = makeInterruptedResult(config, startTime, err.message);
@@ -1382,6 +1402,7 @@ export function createLocalValidationEngine(
       signal?: AbortSignal,
       callbacks?: ValidationPhaseCallbacks,
     ): Promise<AdvisoryBrowserQaResult | null> {
+      const containerManager = baseContainerManager;
       const skipPhases = config.skipPhases ?? [];
 
       function checkAbort(): void {
@@ -2016,6 +2037,26 @@ function classifyValidationInfrastructureFailure(
   };
 }
 
+/** Buffered Docker errors do not prove that the command stopped. Artifact
+ * recovery cannot dispatch further checks or snapshot a possibly live writer.
+ * Preserve structured termination evidence; otherwise fail closed as unknown.
+ */
+function classifyBufferedExecutionFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+  error: unknown,
+  config: ValidationEngineConfig,
+): ValidationInfrastructureFailure | null {
+  const known = classifyValidationInfrastructureFailure(phase, error, config.executionTarget);
+  if (known || !config.artifactSource) return known;
+  return {
+    phase,
+    code: 'EXEC_EXIT_UNVERIFIED',
+    statusCode: 409,
+    message: `Buffered artifact ${phase} execution failed without verified termination: ${error instanceof Error ? error.message : String(error)}`,
+    retryable: false,
+  };
+}
+
 // ── Required facts phase ───────────────────────────────────────────────────
 
 async function runFactValidation(
@@ -2038,6 +2079,8 @@ async function runFactValidation(
   let hostBrowserFactDependenciesPrepared = false;
 
   for (const fact of facts) {
+    config.artifactSource?.assertCurrent?.();
+    await config.artifactSource?.verify();
     const requestedDeviation = factDeviationMap.get(fact.id);
     if (requestedDeviation) {
       if (requestedDeviation.decision === 'rejected') {
@@ -2187,7 +2230,8 @@ async function runFactValidation(
         );
       }
     } catch (err) {
-      if (classifyValidationInfrastructureFailure('facts', err, config.executionTarget)) throw err;
+      const failure = classifyBufferedExecutionFailure('facts', err, config);
+      if (failure) throw new ValidationCommandInfrastructureError(failure);
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
       commandResult = {
@@ -2708,6 +2752,8 @@ async function artifactExistsInContainer(
     );
     return result.exitCode === 0 ? true : result.exitCode === 1 ? false : null;
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, artifactPath }, 'required fact artifact existence check failed');
     return null;
   }
@@ -2737,6 +2783,8 @@ async function collectFactAttachments(
       .filter(Boolean)
       .map((path) => ({ kind: attachmentKindForPath(path), path }));
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, factId }, 'required fact attachment collection failed');
     return [];
   }
@@ -2822,13 +2870,11 @@ async function artifactHashInContainer(
     const hash = result.stdout.trim().split(/\s+/)[0];
     return result.exitCode === 0 && hash ? hash : undefined;
   } catch (err) {
+    const failure = classifyBufferedExecutionFailure('facts', err, config);
+    if (config.artifactSource && failure) throw new ValidationCommandInfrastructureError(failure);
     log?.warn({ err, artifactPath }, 'required fact artifact hash check failed');
     return undefined;
   }
-}
-
-function normalizeContractPath(path: string): string {
-  return path.replace(/^\/+/, '').replace(/^\.\//, '');
 }
 
 function shellQuote(value: string): string {
@@ -2906,11 +2952,7 @@ async function runLint(
     const duration = Date.now() - lintStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure(
-      'lint',
-      err,
-      config.executionTarget,
-    );
+    const infrastructureFailure = classifyBufferedExecutionFailure('lint', err, config);
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
@@ -2997,11 +3039,7 @@ async function runSast(
     const duration = Date.now() - sastStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    const infrastructureFailure = classifyValidationInfrastructureFailure(
-      'sast',
-      err,
-      config.executionTarget,
-    );
+    const infrastructureFailure = classifyBufferedExecutionFailure('sast', err, config);
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },

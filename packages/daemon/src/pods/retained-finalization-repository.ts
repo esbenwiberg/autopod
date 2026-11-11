@@ -5,6 +5,10 @@ import path from 'node:path';
 import { AutopodError, type Pod, type RetainedFinalizationReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import {
+  assertArtifactChecksAvailable,
+  assertArtifactChecksPathAvailable,
+} from './artifact-checks-recovery-repository.js';
+import {
   assertRecoveryForkPathAvailable,
   assertRecoveryForkResourceAvailable,
 } from './recovery-fork-repository.js';
@@ -108,6 +112,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertArtifactChecksPathAvailable(db, location);
   assertRecoveryForkPathAvailable(db, location);
   assertStalledRecoveryPathAvailable(db, location);
   const identities = (value: string) => [path.resolve(value), retainedPathIdentity(value)];
@@ -251,6 +256,7 @@ export function createRetainedFinalizationRepository(db: Database.Database) {
       evidence: unknown,
     ) {
       db.transaction(() => {
+        assertArtifactChecksAvailable(db, receipt.podId);
         assertAvailable(receipt.podId);
         if (
           db

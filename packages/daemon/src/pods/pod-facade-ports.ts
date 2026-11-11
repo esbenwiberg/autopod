@@ -43,6 +43,9 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  artifactChecksRecovery?: ReturnType<
+    typeof import('./artifact-checks-recovery.js').createArtifactChecksRecovery
+  >;
   recoveryFork?: ReturnType<typeof import('./recovery-fork.js').createRecoveryFork>;
   retainedFinalization?: ReturnType<
     typeof import('./retained-finalization.js').createRetainedFinalization

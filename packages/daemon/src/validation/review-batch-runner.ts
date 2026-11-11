@@ -59,6 +59,8 @@ export interface FrozenReviewPacket {
 export interface ReviewBatchRunnerOptions {
   packet: FrozenReviewPacket;
   model: string;
+  /** Native pod-exclusive reviewers must serialize within the same frozen deadline. */
+  concurrency?: 1 | 3;
   execute: (
     prompt: string,
     label: string,
@@ -329,7 +331,7 @@ export async function runReviewBatch(
       }
     }
   };
-  await Promise.all(Array.from({ length: 3 }, worker));
+  await Promise.all(Array.from({ length: options.concurrency ?? 3 }, worker));
   // Axis discovery and synthesis are distinct reviewer phases. A slow final
   // axis must not leave synthesis with only the scraps of the axes deadline.
   const synthesisDeadline = Date.now() + (options.timeoutMs ?? 300_000);

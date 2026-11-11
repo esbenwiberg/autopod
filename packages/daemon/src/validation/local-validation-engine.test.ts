@@ -5147,6 +5147,41 @@ describe('validate() — pre-validation worktree reset', () => {
     expect(first.command[2]).toContain('git reset --hard HEAD');
     expect(first.command[2]).toContain('git clean -fd');
   });
+  it('verifies artifact source without any Git reset or baseline creation', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const verify = vi.fn(async () => {});
+    const result = await createLocalValidationEngine(cm).validate(
+      minimalConfig({
+        artifactSource: { sha256: 'a'.repeat(64), verify },
+      }),
+    );
+    expect(verify).toHaveBeenCalledOnce();
+    expect(calls).toHaveLength(0);
+    expect(result.taskReview).toBeNull();
+  });
+
+  it('re-verifies artifact execution before admitting any paid task review', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const verify = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('Artifact execution source changed'));
+    const reviewer = vi.fn(async () => {
+      throw new Error('Paid review must not start');
+    });
+    await expect(
+      createLocalValidationEngine(cm).validate(
+        minimalConfig({
+          skipPhases: [],
+          artifactSource: { sha256: 'a'.repeat(64), verify },
+          reviewerExecutor: reviewer,
+        }),
+      ),
+    ).rejects.toThrow('Artifact execution source changed');
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(reviewer).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+  });
 
   it.each([
     true,

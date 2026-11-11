@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { AutopodError, type StalledWorkerRecoveryReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertArtifactChecksAvailable } from './artifact-checks-recovery-repository.js';
 import { hasUnansweredDecision } from './decision-admission.js';
 
 export const stalledHash = (value: unknown) =>
@@ -234,6 +235,7 @@ export function createStalledWorkerRecoveryRepository(db: Database.Database) {
         .all(podId),
     assertAvailable: (podId: string) => assertStalledRecoveryAvailable(db, podId),
     admit(record: StalledRecord, taskId: string, containerId: string, evidence: unknown) {
+      assertArtifactChecksAvailable(db, record.receipt.podId);
       assertStalledRecoveryAvailable(db, record.receipt.podId);
       db.prepare(
         `INSERT INTO stalled_worker_recoveries(request_key,pod_id,task_id,container_id,request_hash,binding,receipt,archive_path,original_evidence) VALUES(?,?,?,?,?,?,?,?,?)`,

@@ -2,6 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import {
+  assertArtifactChecksAvailable,
+  assertArtifactChecksResourceAvailable,
+} from './artifact-checks-recovery-repository.js';
+import {
   assertRecoveryForkResourceAvailable,
   createRecoveryForkRepository,
 } from './recovery-fork-repository.js';
@@ -14,6 +18,7 @@ import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-reposi
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  assertArtifactChecksResourceAvailable(db, containerId);
   assertRecoveryForkResourceAvailable(db, containerId);
   assertValidationResourceReleasable(db, containerId);
   if (
@@ -44,6 +49,7 @@ export function assertSourceAvailable(
   owner = sourceOwnerScope(db).getStore(),
   initialInsert = false,
 ): void {
+  assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
   if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
   assertStalledRecoveryAvailable(db, podId, true);
@@ -86,6 +92,7 @@ function assertSourceDeliveryEligibility(
   initialInsert = false,
   approvalEntry = false,
 ): void {
+  assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
   if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
   const fork = createRecoveryForkRepository(db).child(podId);

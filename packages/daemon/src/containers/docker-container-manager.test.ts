@@ -147,9 +147,11 @@ describe('DockerContainerManager', () => {
   it('captures immutable image and configured resources, retaining unknown values as null', async () => {
     container.inspect.mockResolvedValue({
       Image: `sha256:${'a'.repeat(64)}`,
+      Mounts: [],
       HostConfig: { Memory: 1024, NanoCpus: 2500000000, NetworkMode: 'none' },
     });
     expect(await manager.getExecutionMetadata('container')).toEqual({
+      workspaceStorage: 'container',
       imageDigest: `sha256:${'a'.repeat(64)}`,
       memoryLimitBytes: 1024,
       cpuLimit: 2.5,
@@ -157,11 +159,23 @@ describe('DockerContainerManager', () => {
     });
     container.inspect.mockResolvedValue({ Image: 'node:mutable', HostConfig: { Memory: 0 } });
     expect(await manager.getExecutionMetadata('container')).toEqual({
+      workspaceStorage: 'unknown',
       imageDigest: null,
       memoryLimitBytes: null,
       cpuLimit: null,
       networkMode: null,
     });
+  });
+  it.each([
+    '/workspace',
+    '/workspace/reports',
+    '/',
+  ])('identifies workspace mount %s as shared custody risk', async (destination) => {
+    container.inspect.mockResolvedValue({
+      Image: 'node:mutable',
+      Mounts: [{ Destination: destination }],
+    });
+    expect((await manager.getExecutionMetadata('container')).workspaceStorage).toBe('mounted');
   });
 
   // ─── spawn() ────────────────────────────────────────────
@@ -1231,6 +1245,35 @@ describe('DockerContainerManager', () => {
       expect(result.exitCode).not.toBe(0);
     });
 
+    it.each([
+      { Running: true, ExitCode: 0 },
+      { Running: false, ExitCode: null },
+      { Running: false, ExitCode: -1 },
+      { Running: false, ExitCode: '0' },
+      { ExitCode: 0 },
+    ])('strict buffered execution refuses an unobserved exit: %j', async (inspection) => {
+      const muxStream = createMockMuxStream();
+      container.exec.mockResolvedValue({
+        id: 'strict-exec',
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue(inspection),
+      });
+      await expect(
+        manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
+      ).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      expect(container.stop).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      0, 1, 124,
+    ])('strict buffered execution preserves observed exit %s', async (exitCode) => {
+      const { exec } = createMockExec(exitCode);
+      container.exec.mockResolvedValue(exec);
+      await expect(
+        manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
+      ).resolves.toMatchObject({ exitCode });
+    });
+
     it('defaults to exit code 1 when ExitCode is null', async () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
@@ -1688,6 +1731,20 @@ describe('DockerContainerManager', () => {
       const result = await manager.execInContainer('abc123', ['true']);
       expect(result.exitCode).toBe(1);
       expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('strict buffered execution refuses inspect timeout rather than inventing exit 1', async () => {
+      const muxStream = new PassThrough();
+      muxStream.resume();
+      process.nextTick(() => muxStream.end());
+      container.exec.mockResolvedValue({
+        id: 'strict-timeout',
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockReturnValue(new Promise(() => {})),
+      });
+      await expect(
+        manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
+      ).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
     });
 
     it('redacts long args in exec.inspect timed out warn log', async () => {

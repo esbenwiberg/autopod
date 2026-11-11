@@ -311,6 +311,32 @@ describe('runReviewBatch', () => {
     expect(JSON.stringify(batch)).not.toContain('private synthesis diagnostic payload');
   });
 
+  it('serializes pod-exclusive axes inside the same deadline rather than resetting each call', async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const timeouts: number[] = [];
+    const synthesize = vi.fn();
+    try {
+      const batch = await runReviewBatch({
+        packet: packet(),
+        model: 'test',
+        concurrency: 1,
+        timeoutMs: 5,
+        execute: async (_prompt, _label, timeout) => {
+          timeouts.push(timeout);
+          now += 2;
+          return { stdout: '{"findings":[]}' };
+        },
+        synthesize,
+      });
+      expect(timeouts).toEqual([5, 3, 1]);
+      expect(batch.infrastructureUnavailable).toBe(true);
+      expect(synthesize).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('shares one deadline across axis calls and skips synthesis after an unavailable axis', async () => {
     const timeouts: number[] = [];
     let synthesized = false;

@@ -684,6 +684,20 @@ export class AutopodClient {
       input,
     );
   }
+  async inspectArtifactChecksRecovery(id: string): Promise<unknown> {
+    return this.request('GET', `/pods/${id}/artifact-checks-recovery`);
+  }
+  async recoverArtifactChecks(
+    id: string,
+    input: import('@autopod/shared').ArtifactChecksRecoveryRequest,
+    reconcile = false,
+  ): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/pods/${id}/artifact-checks-recovery${reconcile ? '/reconcile' : ''}`,
+      input,
+    );
+  }
   async continueRetained(
     id: string,
     input: import('@autopod/shared').RetainedContinuationRequest,

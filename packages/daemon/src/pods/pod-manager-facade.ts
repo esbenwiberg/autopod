@@ -81,6 +81,21 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    inspectArtifactChecksRecovery(podId: string) {
+      return (
+        captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
+      ).inspect(podId);
+    },
+    recoverArtifactChecks(
+      podId: string,
+      input: import('@autopod/shared').ArtifactChecksRecoveryRequest,
+      actor: OperatorActor,
+      reconcile = false,
+    ) {
+      return (
+        captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
+      ).submit(podId, input, actor, reconcile);
+    },
     inspectRecoveryFork(podId: string) {
       return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).inspect(podId);
     },

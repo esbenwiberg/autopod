@@ -32,6 +32,10 @@ import type {
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import {
+  ownsArtifactChecksArchive,
+  ownsArtifactChecksStop,
+} from '../pods/artifact-checks-recovery-repository.js';
+import {
   assertCheckpointResourceNotRetained,
   ownsInfrastructureRecoveryStop,
 } from '../pods/retained-checkpoint-repository.js';
@@ -463,7 +467,8 @@ export class DockerContainerManager implements ContainerManager {
       !this.managedDatabase ||
       (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
         !ownsStalledWorkerStop(this.managedDatabase, containerId) &&
-        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId))
+        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId) &&
+        !ownsArtifactChecksStop(this.managedDatabase, containerId))
     )
       this.assertNotRetained(containerId);
     try {
@@ -774,7 +779,8 @@ export class DockerContainerManager implements ContainerManager {
   ): Promise<void> {
     if (
       !this.managedDatabase ||
-      !ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath)
+      (!ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath) &&
+        !ownsArtifactChecksArchive(this.managedDatabase, containerId, containerPath))
     )
       this.assertNotRetained(containerId);
     assertDirectoryExtractionCurrent(options);
@@ -934,6 +940,18 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
     return {
+      workspaceStorage: !Array.isArray(info.Mounts)
+        ? 'unknown'
+        : info.Mounts.some((mount) => {
+              const destination = mount.Destination?.replace(/\/+$/, '') || '/';
+              return (
+                destination === '/' ||
+                destination === '/workspace' ||
+                destination.startsWith('/workspace/')
+              );
+            })
+          ? 'mounted'
+          : 'container',
       ...(typeof info.Config?.Labels?.['com.autopod.pod-id'] === 'string'
         ? { podId: info.Config.Labels['com.autopod.pod-id'] }
         : {}),
@@ -1021,11 +1039,28 @@ export class DockerContainerManager implements ContainerManager {
       });
       // A success code authorizes callers such as verified process-group kill.
       // Never manufacture that success while inspection still reports running.
+      if (
+        options?.requireObservedExit &&
+        !(inspection.Running === false && isObservedExitCode(inspection.ExitCode))
+      )
+        throw new AutopodError(
+          `Buffered Docker exec ${exec.id} has no observed stopped exit`,
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        );
       exitCode =
         inspection.Running === false && isObservedExitCode(inspection.ExitCode)
           ? inspection.ExitCode
           : 1;
     } catch (err: unknown) {
+      if (options?.requireObservedExit) {
+        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED') throw err;
+        throw new AutopodError(
+          `Buffered Docker exec ${exec.id} termination could not be observed`,
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        );
+      }
       if (err instanceof DockerCallTimeoutError) {
         this.logger.warn(
           { containerId, command: safeCommand },

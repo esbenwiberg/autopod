@@ -54,7 +54,9 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = new Database(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 247 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 248 });
+    expect(db.prepare('SELECT * FROM artifact_checks_recoveries').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM artifact_checks_recovery_events').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM recovery_forks').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM recovery_fork_delivery_evidence').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM stalled_worker_recoveries').all()).toEqual([]);

@@ -53,6 +53,7 @@ import type { SafetyEventsRepository } from '../../safety/safety-events-reposito
 import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
 import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
@@ -841,6 +842,7 @@ export function podRoutes(
   });
 
   checkpointRecoveryRoutes(app, podManager);
+  artifactChecksRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);
