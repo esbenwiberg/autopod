@@ -1,32 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import { requiresValidationSettlement } from '../pods/validation-recovery-policy.js';
 import { createLocalValidationEngine } from './local-validation-engine.js';
 
 async function run(
   marker: string,
-  phase: 'facts' | 'lint' | 'sast',
+  phase: 'facts' | 'lint' | 'sast' | 'setup' | 'build' | 'test',
   observedExit = false,
   message = 'Exec timed out after 123ms',
 ) {
   const commands: string[] = [];
   const cm = {
-    execInContainer: vi.fn(async (_id: string, command: string[]) => {
+    execInContainer: vi.fn(async (_id: string, command: string[], options?: ExecOptions) => {
+      expect(options?.requireObservedExit).toBe(true);
       const shell = command[2] ?? '';
       commands.push(shell);
       if (shell.includes(marker)) {
         if (!observedExit) throw new Error(message);
         return { stdout: '', stderr: 'observed command failure', exitCode: 124 };
       }
-      return { stdout: shell.includes('sha256sum') ? 'a'.repeat(64) : '', stderr: '', exitCode: 0 };
+      return {
+        stdout: shell.includes('sha256sum')
+          ? 'a'.repeat(64)
+          : marker === 'npm rebuild' && shell.includes('-empty -print')
+            ? '/workspace/node_modules/.bin/tool'
+            : '',
+        stderr: '',
+        exitCode: 0,
+      };
     }),
   } as unknown as ContainerManager;
   const config: ValidationEngineConfig = {
     podId: 'artifact-buffered-proof',
     containerId: 'fixture',
     previewUrl: '',
-    buildCommand: '',
+    validationSetupCommand: phase === 'setup' ? 'setup-original' : undefined,
+    buildCommand: phase === 'build' ? 'build-original' : '',
+    testCommand: phase === 'test' ? 'test-original' : undefined,
     startCommand: '',
     healthPath: '/',
     healthTimeout: 1,
@@ -39,9 +50,9 @@ async function run(
     lintCommand: phase === 'lint' ? 'lint-original' : undefined,
     sastCommand: phase === 'sast' ? 'sast-original' : undefined,
     skipPhases: [
-      'setup',
-      'build',
-      'test',
+      ...(phase !== 'setup' ? ['setup' as const] : []),
+      ...(phase !== 'build' ? ['build' as const] : []),
+      ...(phase !== 'test' ? ['test' as const] : []),
       'health',
       'pages',
       'review',
@@ -74,6 +85,12 @@ describe('artifact buffered execution requires positive termination', () => {
     ['facts', 'find '],
     ['lint', 'lint-original'],
     ['sast', 'sast-original'],
+    ['setup', 'setup-original'],
+    ['build', 'build-original'],
+    ['build', '-empty -print'],
+    ['build', 'npm rebuild'],
+    ['build', 'chmod a+rx'],
+    ['test', 'test-original'],
   ] as const)('retains an unverified %s command (%s) without dispatching later Facts', async (phase, marker) => {
     const { result, commands } = await run(marker, phase);
     expect(result.infrastructureFailure).toMatchObject({

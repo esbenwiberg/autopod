@@ -100,6 +100,8 @@ export interface ExecOptions {
   timeout?: number;
   /** Bound buffered stdout + stderr; exceeding it is uncertain execution, never verified termination. */
   maxOutputBytes?: number;
+  /** Return only a positively observed stopped process and valid exit code, never a synthetic failure. */
+  requireObservedExit?: boolean;
   /** Run the command as this user inside the container (e.g. 'root'). */
   user?: string;
   /**

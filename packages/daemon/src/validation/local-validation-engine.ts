@@ -41,6 +41,7 @@ import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { resolveSandboxCheckpointSourceHead } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
+import { createArtifactExecutionBoundary } from './artifact-execution-boundary.js';
 import {
   ContainerReviewerUnavailableError,
   runContainerReviewer,
@@ -408,7 +409,7 @@ export class ValidationInterruptedError extends Error {
 }
 
 export function createLocalValidationEngine(
-  containerManager: ContainerManager,
+  baseContainerManager: ContainerManager,
   logger?: Logger,
   hostBrowserRunner?: HostBrowserRunner,
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
@@ -423,6 +424,10 @@ export function createLocalValidationEngine(
       signal?: AbortSignal,
       callbacks?: ValidationPhaseCallbacks,
     ): Promise<ValidationResult> {
+      const boundary = config.artifactSource
+        ? createArtifactExecutionBoundary(baseContainerManager, config.artifactSource.assertCurrent)
+        : undefined;
+      const containerManager = boundary?.manager ?? baseContainerManager;
       const startTime = Date.now();
 
       // Secondary abort controller fired when the stability monitor detects a crash.
@@ -841,6 +846,7 @@ export function createLocalValidationEngine(
                 : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
+          boundary?.assertVerified();
           await config.artifactSource?.verify();
           callbacks?.onPhaseStarted?.('review');
           onProgress?.('Running AI task review…');
@@ -1026,6 +1032,7 @@ export function createLocalValidationEngine(
             };
             const batch = await runReviewBatch({
               packet,
+              concurrency: config.artifactSource && config.reviewerExecutor ? 1 : 3,
               model: config.reviewerModel ?? 'auto',
               readHead: readSelectedSource,
               timeoutMs: councilTimeoutMs,
@@ -1345,6 +1352,7 @@ export function createLocalValidationEngine(
         const { infrastructureFailure: _healthInfrastructureFailure, ...storedHealthResult } =
           infrastructureAwareHealth;
 
+        if (!infrastructureFailure) boundary?.assertVerified();
         return {
           podId: config.podId,
           attempt: config.attempt,
@@ -1372,6 +1380,7 @@ export function createLocalValidationEngine(
         };
       } catch (err) {
         if (err instanceof ValidationInterruptedError) {
+          if (!infrastructureFailure) boundary?.assertVerified();
           const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
           log?.info({ podId: config.podId, reason }, 'Validation interrupted');
           const interrupted = makeInterruptedResult(config, startTime, err.message);
@@ -1393,6 +1402,7 @@ export function createLocalValidationEngine(
       signal?: AbortSignal,
       callbacks?: ValidationPhaseCallbacks,
     ): Promise<AdvisoryBrowserQaResult | null> {
+      const containerManager = baseContainerManager;
       const skipPhases = config.skipPhases ?? [];
 
       function checkAbort(): void {

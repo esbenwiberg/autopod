@@ -1039,11 +1039,28 @@ export class DockerContainerManager implements ContainerManager {
       });
       // A success code authorizes callers such as verified process-group kill.
       // Never manufacture that success while inspection still reports running.
+      if (
+        options?.requireObservedExit &&
+        !(inspection.Running === false && isObservedExitCode(inspection.ExitCode))
+      )
+        throw new AutopodError(
+          `Buffered Docker exec ${exec.id} has no observed stopped exit`,
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        );
       exitCode =
         inspection.Running === false && isObservedExitCode(inspection.ExitCode)
           ? inspection.ExitCode
           : 1;
     } catch (err: unknown) {
+      if (options?.requireObservedExit) {
+        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED') throw err;
+        throw new AutopodError(
+          `Buffered Docker exec ${exec.id} termination could not be observed`,
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        );
+      }
       if (err instanceof DockerCallTimeoutError) {
         this.logger.warn(
           { containerId, command: safeCommand },

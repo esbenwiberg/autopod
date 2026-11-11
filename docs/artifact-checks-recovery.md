@@ -89,9 +89,16 @@ live execution copy are checked again before pass accounting. Drift at any of
 these boundaries (bytes, modes, missing entries or symbolic replacements) blocks
 acceptance, even if a writer later restores the live copy. Separately generated
 build/evidence files are allowed and retained as reports, not silently substituted
-for captured source. Buffered command timeout or transport failure is unverified
-termination, not a synthetic exit `124`: stop further checks and retain the exact
-container/operation without replay or a supposedly stable live report export.
+for captured source. Every buffered execution (including setup, build, test and
+pre-build helpers) requires a positively observed stopped Docker exec and valid
+exit code. Buffered timeout, transport failure or missing exit inspection is
+unverified termination, not a synthetic exit `124` or `1`: a per-validation fence
+stops further dispatch even if a best-effort helper catches its error. Retain the
+exact container/operation without replay or a supposedly stable live report export.
+The full independent-review council runs its five axes serially for this route,
+within the original shared deadline, respecting the task-exclusive reviewer
+reservation and rechecking source before each call. No reviewer custody, usage
+accounting or review axis is bypassed.
 Fact receipts use the validation engine's canonical path spelling without changing
 the original frozen contract.
 

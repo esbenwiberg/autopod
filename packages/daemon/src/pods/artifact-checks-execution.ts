@@ -7,6 +7,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import { daemonRelease } from '../release.js';
+import { createArtifactExecutionBoundary } from '../validation/artifact-execution-boundary.js';
 import type { createArtifactChecksRecovery } from './artifact-checks-recovery.js';
 import { artifactChecksError } from './artifact-checks-recovery-repository.js';
 import { verifyArtifactExecutionSource } from './artifact-checks-source.js';
@@ -110,8 +111,9 @@ export function createArtifactChecksExecution(deps: {
         (!metadata.cpuLimit || metadata.cpuLimit < requirements.minimumCpu))
     )
       artifactChecksError('Actual independent execution identity/capacity is unqualified');
+    const qualification = createArtifactExecutionBoundary(deps.cm, assertCurrent);
     const preflight = await inspectExecutionPreflight(
-      deps.cm,
+      qualification.manager,
       containerId,
       pod,
       profile,
@@ -124,7 +126,7 @@ export function createArtifactChecksExecution(deps: {
         stopOnProbeError: true,
       },
     );
-    const context = await deps.cm.execInContainer(
+    const context = await qualification.manager.execInContainer(
       containerId,
       [
         '/usr/local/bin/node',
@@ -133,6 +135,7 @@ export function createArtifactChecksExecution(deps: {
       ],
       { user: 'autopod', cwd: '/workspace', timeout: 10_000, maxOutputBytes: 4096, assertCurrent },
     );
+    qualification.assertVerified();
     const observed = context.exitCode === 0 ? JSON.parse(context.stdout) : null;
     if (
       !observed ||
