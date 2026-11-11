@@ -164,6 +164,9 @@ export interface SessionBridgeDependencies {
 }
 
 const VALIDATION_ACTIVITY_INTERVAL_MS = 60_000;
+// Match the finite Codex pre-submit review allowance. This includes isolated
+// reviewer allocation/preflight; browser execution keeps its separate MCP budget.
+const BROWSER_SCRIPT_REVIEW_TIMEOUT_MS = 300_000;
 
 export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge {
   const {
@@ -610,7 +613,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           profile,
           model,
           prompt,
-          timeout: 60_000,
+          timeout: BROWSER_SCRIPT_REVIEW_TIMEOUT_MS,
           logger,
         });
         return stdout.trim();

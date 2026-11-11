@@ -17,6 +17,14 @@ changes future admission, not the historical reason for the refusal.
 | Soft task cap or explicit unlimited budget | Incomplete task usage alone does not block admission; pending reviewer and reviewer-cap guards still apply. Soft task-cap exhaustion is advisory. |
 | Reviewer cap reached | `REVIEWER_BUDGET_EXHAUSTED`: reports the reviewer limit and recorded reviewer total separately from the task limit. Inspect reviewer usage and explicitly revise its budget before retrying. |
 
+Browser-script generation has a finite five-minute reviewer deadline, including isolated
+reviewer allocation and preflight, separate from the MCP browser execution deadline.
+A timed-out generation is not an executed browser check or a review pass. Confirmed
+reviewer cleanup does not prove measured usage: an uncertain run still blocks later
+reviewers until its owning reconciliation control records measured usage or an explicit
+operator acceptance of unknown spend. Never substitute zero tokens for unavailable usage,
+remove the reviewer cap, or treat reconciliation as acceptance of the application.
+
 The existing error codes and 409 status remain unchanged. A task accounting
 refusal does not instruct the operator to reconcile a previous reviewer. Reviewer
 reconciliation only applies to an actual reviewer record, and never proves an
