@@ -2202,8 +2202,10 @@ async function runFactValidation(
     let commandResult: { stdout: string; stderr: string; exitCode: number } | null = null;
     let commandError: string | undefined;
     const commandStart = Date.now();
+    const hostBrowserFact =
+      fact.kind === 'browser-test' && config.browserFactExecution !== 'container';
     try {
-      if (fact.kind === 'browser-test') {
+      if (hostBrowserFact) {
         commandResult = await runBrowserFactOnHost(
           fact.command,
           fact.id,
@@ -2216,6 +2218,12 @@ async function runFactValidation(
       } else {
         const factEnv = {
           ...(config.extraExecEnv ?? {}),
+          ...(fact.kind === 'browser-test'
+            ? {
+                AUTOPOD_PREVIEW_URL: config.containerBaseUrl ?? config.previewUrl,
+                AUTOPOD_CONTAINER_BASE_URL: config.containerBaseUrl ?? config.previewUrl,
+              }
+            : {}),
           AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
           AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
         };
@@ -2242,7 +2250,7 @@ async function runFactValidation(
     }
     const durationMs = Date.now() - commandStart;
 
-    if (fact.kind !== 'browser-test') {
+    if (!hostBrowserFact) {
       const commandInfrastructureFailure = classifyCommandResourceFailure(
         'facts',
         commandResult,
@@ -2255,7 +2263,7 @@ async function runFactValidation(
 
     const commandPassed = commandResult.exitCode === 0;
     const attachments =
-      fact.kind === 'browser-test' && config.worktreePath
+      hostBrowserFact && config.worktreePath
         ? await collectHostFactAttachments(config.worktreePath, fact.id, log)
         : await collectFactAttachments(containerManager, config, fact.id, log);
     const presenceSatisfied =
@@ -2276,8 +2284,10 @@ async function runFactValidation(
     const pendingHumanReason = unavailableReason ?? browserInfrastructureReason;
     const factStatus = passed ? 'pass' : pendingHumanReason ? 'pending_human' : 'fail';
     const executionNote =
-      !passed && fact.kind === 'browser-test' && config.worktreePath
-        ? ` Browser-test fact executed on daemon host worktree (${config.worktreePath}), not inside the agent container.`
+      !passed && fact.kind === 'browser-test'
+        ? hostBrowserFact
+          ? ` Browser-test fact executed on daemon host worktree (${config.worktreePath}), not inside the agent container.`
+          : ' Browser-test fact executed in the selected validation container.'
         : '';
     const reasoning = passed
       ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`

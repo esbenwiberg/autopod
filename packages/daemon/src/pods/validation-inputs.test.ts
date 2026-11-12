@@ -293,6 +293,25 @@ function fixture() {
 }
 
 describe('validation inputs persisted effects', () => {
+  it.each([
+    [true, 'local', 'container'],
+    [false, 'local', undefined],
+    [true, 'sandbox', undefined],
+    [false, 'sandbox', undefined],
+  ] as const)('routes browser facts using native=%s target=%s', async (native, target, expected) => {
+    const f = fixture();
+    try {
+      f.pod.launchConfigDigest = native ? 'frozen-launch' : null;
+      f.pod.executionTarget = target;
+      f.s1.executionTarget = target;
+      const config = (await f.run()).validationConfig;
+      expect(config.browserFactExecution).toBe(expected);
+      expect(config.webProbeMode).toBe(target === 'sandbox' ? 'container' : 'host');
+      expect(config.contract).toBe(f.pod.contract ?? undefined);
+    } finally {
+      f.close();
+    }
+  });
   it('preserves complete bounded isolated review diff without changing legacy capture or source scope', async () => {
     const f = fixture();
     try {

@@ -265,6 +265,9 @@ describe('required fact execution', () => {
     hostBrowserRunner?: HostBrowserRunner;
     command?: string;
     setupWorktree?: (worktreePath: string) => Promise<void>;
+    browserFactExecution?: 'container';
+    containerFactExitCode?: number;
+    artifactPath?: string;
   }) {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
     // These real npm fixtures use only local packages; registry/audit latency is not under test.
@@ -287,6 +290,13 @@ describe('required fact execution', () => {
         if (shell.includes('sha256sum')) {
           return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
         }
+        if (shell.includes('node scripts/e2e.mjs')) {
+          return {
+            stdout: 'declared-container-browser-fact',
+            stderr: '',
+            exitCode: options.containerFactExitCode ?? 0,
+          };
+        }
         if (shell.includes('.autopod/evidence')) {
           return { stdout: '', stderr: '', exitCode: 0 };
         }
@@ -294,6 +304,7 @@ describe('required fact execution', () => {
       }),
     } as unknown as ContainerManager;
     const command = options.command ?? 'printf host-fact';
+    const artifactPath = options.artifactPath ?? 'Client/tests/facts.spec.ts';
     const engine = createLocalValidationEngine(
       containerManager,
       undefined,
@@ -312,13 +323,14 @@ describe('required fact execution', () => {
         smokePages: [],
         attempt: 1,
         task: 'prove browser fact host execution',
+        browserFactExecution: options.browserFactExecution,
         hasWebUi: false,
         worktreePath,
         skipPhases: ['review'],
-        diff: `diff --git a/Client/tests/facts.spec.ts b/Client/tests/facts.spec.ts
+        diff: `diff --git a/${artifactPath} b/${artifactPath}
 new file mode 100644
 --- /dev/null
-+++ b/Client/tests/facts.spec.ts
++++ b/${artifactPath}
 @@ -0,0 +1 @@
 +test('fact', () => {});
 `,
@@ -335,7 +347,7 @@ required_facts:
     proves: [page]
     kind: browser-test
     artifact:
-      path: Client/tests/facts.spec.ts
+      path: ${JSON.stringify(artifactPath)}
       change: create
     command: ${JSON.stringify(command)}
 human_review: []
@@ -346,6 +358,42 @@ human_review: []
       await fs.rm(worktreePath, { recursive: true, force: true });
     }
   }
+
+  it.each([
+    0, 1,
+  ])('runs an unchanged browser fact in its selected container without host fallback (exit=%s)', async (exitCode) => {
+    const command = "node scripts/e2e.mjs --grep 'customer-only creation'";
+    const getAvailability = vi.fn(async () => {
+      throw new Error('Host must not be used');
+    });
+    const { result, execCommands } = await validateBrowserFact({
+      command,
+      browserFactExecution: 'container',
+      containerFactExitCode: exitCode,
+      hostBrowserRunner: { getAvailability } as unknown as HostBrowserRunner,
+    });
+    const fact = result.factValidation?.results[0];
+    expect(execCommands.some((value) => value.includes(command))).toBe(true);
+    expect(fact?.command).toBe(command);
+    expect(fact?.stdout).toBe('declared-container-browser-fact');
+    expect(fact?.exitCode).toBe(exitCode);
+    expect(fact?.passed).toBe(exitCode === 0);
+    expect(fact?.status).toBe(exitCode === 0 ? 'pass' : 'fail');
+    expect(fact?.reasoning).not.toContain('daemon host worktree');
+    expect(getAvailability).not.toHaveBeenCalled();
+  });
+
+  it('does not reinterpret a Mac-only fact as runnable in the selected Linux container', async () => {
+    const command = 'swift test --package-path packages/desktop';
+    const { result, execCommands } = await validateBrowserFact({
+      command,
+      browserFactExecution: 'container',
+      artifactPath: 'packages/desktop/Package.swift',
+    });
+    expect(result.factValidation?.results[0]?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]?.passed).toBe(false);
+    expect(execCommands.some((value) => value.includes(command))).toBe(false);
+  });
 
   it('runs browser-test fact commands on the host when a host browser runner is available', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
