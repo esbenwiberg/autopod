@@ -43,6 +43,7 @@ export async function captureValidationRetryIdentity(
       lint: config.lintCommand,
       sast: config.sastCommand,
       workDir: config.buildWorkDir,
+      ...(config.browserFactExecution ? { browserFactExecution: config.browserFactExecution } : {}),
       timeouts: [config.buildTimeout, config.testTimeout, config.lintTimeout, config.sastTimeout],
     }),
     environment: null,

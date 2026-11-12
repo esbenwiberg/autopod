@@ -171,6 +171,9 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       podId,
       containerId: pod.containerId,
       executionTarget: pod.executionTarget,
+      ...(pod.launchConfigDigest && pod.executionTarget === 'local'
+        ? { browserFactExecution: 'container' as const }
+        : {}),
       previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
       containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
       webProbeMode: pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),

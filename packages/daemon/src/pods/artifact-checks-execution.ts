@@ -180,6 +180,7 @@ export function createArtifactChecksExecution(deps: {
       podId: pod.id,
       containerId,
       executionTarget: 'local',
+      ...(pod.launchConfigDigest ? { browserFactExecution: 'container' as const } : {}),
       previewUrl: 'http://127.0.0.1:3000',
       attempt: pod.validationAttempts + 1,
       task: pod.task,

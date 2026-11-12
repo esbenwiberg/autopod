@@ -49,6 +49,9 @@ export interface ValidationEngineConfig {
    * `containerBaseUrl` via exec inside the sandbox.
    */
   webProbeMode?: 'host' | 'container';
+  /** Trusted native Docker routing: repository browser facts use the selected validation
+   * image/dependencies, not the daemon host. Absent retains legacy/sandbox host execution. */
+  browserFactExecution?: 'container';
   /** Optional setup command run before all blocking validation phases. */
   validationSetupCommand?: string | null;
   buildCommand: string;

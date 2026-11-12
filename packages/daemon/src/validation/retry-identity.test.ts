@@ -3,7 +3,40 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { RETRY_IDENTITY_PROBE } from './retry-identity.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import { captureValidationRetryIdentity, RETRY_IDENTITY_PROBE } from './retry-identity.js';
+
+it('binds browser fact execution context without changing source, command or contract', async () => {
+  const cm = {
+    execInContainer: async () => ({
+      exitCode: 0,
+      stderr: '',
+      stdout: JSON.stringify({ source: 'a'.repeat(64), node: '24' }),
+    }),
+  } as unknown as ContainerManager;
+  const config: ValidationEngineConfig = {
+    podId: 'p',
+    containerId: 'c',
+    previewUrl: '',
+    buildCommand: '',
+    startCommand: '',
+    healthPath: '/',
+    healthTimeout: 1,
+    smokePages: [],
+    attempt: 1,
+    task: 'same task',
+    diff: '',
+  };
+  const host = await captureValidationRetryIdentity(cm, config);
+  const container = await captureValidationRetryIdentity(cm, {
+    ...config,
+    browserFactExecution: 'container',
+  });
+  expect(container.source).toBe(host.source);
+  expect(container.contract).toBe(host.contract);
+  expect(container.commands).not.toBe(host.commands);
+});
 
 it('uses actual tracked and untracked content; unchanged commits and hidden index changes cannot fool identity', () => {
   const root = mkdtempSync(join(tmpdir(), 'retry-input-'));
