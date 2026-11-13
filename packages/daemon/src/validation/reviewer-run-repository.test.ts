@@ -205,6 +205,7 @@ it.each([
       ...ledger.snapshot('diagnostic'),
       tokenBudget: scenario.limit,
       recordedTotalTokens: scenario.tokens,
+      budgetCountedTokens: scenario.tokens,
       budgetCheck: { status: scenario.status, reason },
     }));
     const pod = repo.getOrThrow('diagnostic');

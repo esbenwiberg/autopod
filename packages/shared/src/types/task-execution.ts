@@ -54,6 +54,16 @@ export interface TaskExecutionSummary {
   recordedUnclassifiedTokens?: number;
   /** Canonical total, including native aggregate usage. Optional for older daemon responses. */
   recordedTotalTokens?: number;
+  /**
+   * Cache-read subset of recordedInputTokens, from per-phase attribution. Absent or
+   * unreadable attribution counts as zero (cache reads then weigh as ordinary input).
+   */
+  recordedCachedInputTokens?: number;
+  /**
+   * Total compared with tokenBudget: cache reads count at 0.1x, everything else at 1x.
+   * Never exceeds recordedTotalTokens. Absent from older daemon responses.
+   */
+  budgetCountedTokens?: number;
   recordedCostUsd: number;
   costEvidence?: CostEvidence;
   infrastructureCostUsd: number | null;

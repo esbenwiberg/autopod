@@ -7,7 +7,7 @@ import type {
   SystemEvent,
   ValidationExecutionRecoveryState,
 } from '@autopod/shared';
-import { podStatusSchema } from '@autopod/shared';
+import { describeTaskBudgetUsage, podStatusSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -820,7 +820,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         } else console.log('Source-bound merge evidence unavailable.');
         console.log('Current provider status unverified.');
         console.log(
-          `${chalk.bold('Task tokens:')} ${task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens}/${task.tokenBudget ?? 'no configured limit'}`,
+          `${chalk.bold('Task tokens:')} ${describeTaskBudgetUsage(task, task.tokenBudget)}`,
         );
         console.log(
           `${chalk.bold('Stored task cost subtotal:')} $${task.recordedCostUsd.toFixed(4)} (${task.telemetry} telemetry)`,

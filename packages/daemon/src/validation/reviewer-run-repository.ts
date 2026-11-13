@@ -1,4 +1,5 @@
 import type { AgentRoute, EffectiveLaunchConfig, Pod, TaskExecutionSummary } from '@autopod/shared';
+import { budgetCountedTaskTokens } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationError } from '../configuration/configuration-store.js';
 import type { CodexReviewTokenUsage } from './review-codex-runner.js';
@@ -109,7 +110,7 @@ export class ReviewerRunRepository {
       const budget = config.workflow;
       const task = this.taskUsage?.(pod.id);
       const total = task
-        ? (task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens)
+        ? budgetCountedTaskTokens(task)
         : pod.inputTokens + pod.outputTokens + totals.tokens;
       const wholeBudget = task ? task.tokenBudget : budget.tokenBudget;
       if (

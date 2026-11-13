@@ -284,6 +284,14 @@ Goal, while a running native Goal receives the new allowance without a restart.
 These changes retain original launch settings, operator identity, and measured usage.
 They do not reset counters or remove a separately configured reviewer sublimit.
 Recorded aggregate tokens include input/context usage and are not a billing estimate.
+Limits compare **budget-counted** tokens: recorded tokens with prompt-cache reads
+counted at 0.1x (providers bill cache hits at about a tenth of input). Cache
+creation, output and native Goal tokens count in full, so the counted figure never
+exceeds the recorded total. Cache reads come from stored per-phase attribution;
+where that split is absent (older or unreadable records) they count in full.
+`ap status`, budget failures and refused resumes show both figures and the cache
+reads, for example `Token budget exceeded (230000/200000 budget-counted tokens
+used; 1500000 recorded incl. 1400000 cache reads at 0.1x)`.
 Regular runtime limits are checked when usage is reported; they are not an exact
 per-token provider spending cap. Hard-limited reviews still require settled usage;
 with the default unlimited budget an active worker can request review normally.

@@ -154,3 +154,45 @@ it.each([
     container.remove();
   }
 });
+
+it('shows the budget-counted total and discounted cache reads', async () => {
+  window.localStorage.setItem(STORAGE_KEY, 'token');
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        taskId: 'cached-task',
+        executionId: 'cached-execution',
+        podCount: 1,
+        agentRunCount: 1,
+        providerAttemptCount: 1,
+        validationExecutionCount: 0,
+        recordedInputTokens: 1494436,
+        recordedOutputTokens: 14171,
+        recordedTotalTokens: 1508607,
+        recordedCachedInputTokens: 1433722,
+        budgetCountedTokens: 218258,
+        tokenBudget: 400000,
+        recordedCostUsd: 1.06,
+        telemetry: 'complete',
+        infrastructureCostUsd: null,
+        diagnostics: [],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ),
+  );
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(<TaskExecutionPanel podId="cached" revision="running" />);
+    });
+    expect(container.textContent).toContain(
+      'Budget-counted tokens: 218258 / 400000 · recorded 1508607 incl. 1433722 cache reads counted at 0.1×',
+    );
+    expect(container.textContent).not.toContain('Recorded tokens:');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
