@@ -46,10 +46,12 @@ import Testing
     defer { host.close() }
     try await host.wait { host.has("configuration-help-workflow.validation.setup") }
     for phase in ConfigurationValidationPhase.allCases {
+      try await revealConfigurationHelpControl("configuration-help-\(phase.topic.id)")
       try host.press("configuration-help-\(phase.topic.id)")
       try await host.wait { validationNode("configuration-help-details") != nil }
       #expect(validationText(try #require(phase.topic.source)))
       #expect(!validationText(phase.topic.example))
+      try await revealConfigurationHelpControl("configuration-help-example")
       try validationPress("configuration-help-example")
       try await host.wait { validationText(phase.topic.example) }
       try validationPress("configuration-help-close")

@@ -84,6 +84,7 @@ import Testing
     defer { host.close() }
     for id in ["toolPack.skills.identity", "toolPack.mcp.identity"] {
       try await host.wait { host.has("configuration-help-\(id)") }
+      try await revealConfigurationHelpControl("configuration-help-\(id)")
       try host.press("configuration-help-\(id)")
       try await host.wait { settingText(ConfigurationHelpTopic.topic(id).title) }
       try settingPress("configuration-help-close")
