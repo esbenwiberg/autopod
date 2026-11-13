@@ -34,15 +34,22 @@ test('the installed binary checks maintained source and retains generated/cache 
   const directory = await mkdtemp(path.join(homedir(), '.autopod-biome-policy-'));
   try {
     await writeFile(path.join(directory, 'biome.json'), configText);
-    const sources = ['daemon', 'cli', 'shared', 'validator', 'escalation-mcp', 'mobile-web'].map(
-      (name) => `packages/${name}/src/policy-probe.ts`,
-    );
+    const sources = [
+      ...['daemon', 'cli', 'shared', 'validator', 'escalation-mcp', 'mobile-web'].map(
+        (name) => `packages/${name}/src/policy-probe.ts`,
+      ),
+      '.autopod/review/SAMPLE-policy-probe.html',
+    ];
     const excluded = [
       'packages/daemon/dist/probe.ts',
       'node_modules/probe.ts',
       '.turbo/probe.ts',
       '.pnpm-store/probe.ts',
       '.autopod-data/probe.ts',
+      '.autopod/audit/probe.html',
+      '.autopod/review/local-report.html',
+      '.autopod/review/nested/SAMPLE-local-report.html',
+      '.autopod/reports/probe.ts',
       '.agentry/probe.ts',
       '.claude/worktrees/probe.ts',
       '.clawpatch/features/probe.ts',
@@ -57,7 +64,10 @@ test('the installed binary checks maintained source and retains generated/cache 
     for (const relative of [...sources, ...excluded]) {
       const file = path.join(directory, relative);
       await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, 'let probe = 1;\ndebugger;\n');
+      await writeFile(
+        file,
+        relative.endsWith('.html') ? '<button>Probe</button>\n' : 'let probe = 1;\ndebugger;\n',
+      );
     }
     const check = spawnSync(binary, ['check', '--reporter=json', '--max-diagnostics=1000', '.'], {
       cwd: directory,
