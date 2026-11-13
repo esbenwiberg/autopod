@@ -920,6 +920,11 @@ describe('CodexRuntime', () => {
           'container-123',
           '/home/autopod/.codex/sessions',
           join(tmpRoot, podId),
+          undefined,
+          expect.objectContaining({
+            signal: expect.any(AbortSignal),
+            assertCurrent: expect.any(Function),
+          }),
         );
         expect(events).toEqual(
           expect.arrayContaining([
@@ -1603,6 +1608,422 @@ describe('CodexRuntime', () => {
         handle.stderr.destroy();
         restoreEnv('AUTOPOD_CODEX_STATE_DIR', previous);
         restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPoll);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'stale',
+      'absent',
+      'lagged',
+      'resumed',
+      'failed',
+      'timed-out',
+      'missing-final',
+    ] as const)('refreshes native sandbox proof before stdout completion (%s)', async (mode) => {
+      const root = await mkdtemp(join(tmpdir(), 'codex-sandbox-final-'));
+      const previous = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousTimeout = process.env.AUTOPOD_CODEX_SANDBOX_FINAL_USAGE_TIMEOUT_MS;
+      process.env.AUTOPOD_CODEX_STATE_DIR = root;
+      process.env.AUTOPOD_CODEX_SANDBOX_FINAL_USAGE_TIMEOUT_MS = '150';
+      const session = 'native-sandbox-session';
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo(mode === 'resumed' ? session : null, { executionTarget: 'sandbox' }),
+      );
+      let timestamp = new Date().toISOString();
+      const usage = (id: string, input: number, total: number) => ({
+        type: 'token_usage_record',
+        timestamp,
+        payload: {
+          thread_id: session,
+          turn_id: 'turn',
+          response_id: id,
+          usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 10 },
+          turn_token_usage: {
+            input_tokens: total,
+            cached_input_tokens: 0,
+            output_tokens: id === 'a' ? 10 : 20,
+          },
+        },
+      });
+      const prefix = [
+        { type: 'session_meta', payload: { id: session, cli_version: '0.160.1' } },
+        usage('a', 100, 100),
+      ];
+      const terminal = {
+        type: 'event_msg',
+        timestamp,
+        payload: { type: 'task_complete', last_agent_message: 'Done' },
+      };
+      const writeSnapshot = async (rows: unknown[]) => {
+        const dir = join(root, 'pod-1', '2026', '11', '13');
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          join(dir, `rollout-${session}.jsonl`),
+          `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`,
+        );
+      };
+      const oldRows = [
+        {
+          ...usage('old', 1000, 1000),
+          timestamp: '2020-01-01T00:00:00Z',
+          payload: {
+            ...usage('old', 1000, 1000).payload,
+            turn_id: 'old-turn',
+          },
+        },
+        { ...terminal, timestamp: '2020-01-01T00:00:01Z' },
+      ];
+      let snapshots = 0;
+      vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+        async (_id, _path, _host, _excludes, options) => {
+          snapshots++;
+          if (mode === 'failed') throw new Error('Sandbox files unavailable');
+          if (mode === 'timed-out') return new Promise<void>(() => {});
+          options?.assertCurrent?.();
+          if (mode === 'resumed' && snapshots === 1) {
+            await writeSnapshot(oldRows);
+            return;
+          }
+          timestamp = new Date().toISOString();
+          await writeSnapshot([
+            ...(mode === 'resumed' ? oldRows : []),
+            prefix[0],
+            usage('a', 100, 100),
+            usage('b', 200, 300),
+            ...(mode === 'missing-final' || (mode === 'lagged' && snapshots === 1)
+              ? []
+              : [{ ...terminal, timestamp }]),
+          ]);
+        },
+      );
+      try {
+        if (mode !== 'absent') await writeSnapshot(prefix);
+        const result = (async () => {
+          const events: AgentEvent[] = [];
+          const stream =
+            mode === 'resumed'
+              ? runtime.resume('pod-1', 'Continue', 'container-123')
+              : runtime.spawn({
+                  podId: 'pod-1',
+                  containerId: 'container-123',
+                  task: 'Finish',
+                  model: 'gpt-6.1-sol',
+                  reasoningEffort: 'auto',
+                  workDir: '/workspace',
+                  env: {},
+                  executionTarget: 'sandbox',
+                });
+          for await (const event of stream) events.push(event);
+          return events;
+        })();
+        (handle.stdout as PassThrough).write(
+          JSON.stringify({ type: 'thread.started', thread_id: session }) + '\n',
+        );
+        (handle.stdout as PassThrough).write(
+          JSON.stringify({
+            type: 'turn.completed',
+            usage: { input_tokens: 250, output_tokens: 20 },
+          }) + '\n',
+        );
+        (handle as unknown as { finish(): void }).finish();
+        const events = await withTimeout(result, 2000);
+        if (mode === 'failed' || mode === 'timed-out' || mode === 'missing-final') {
+          expect(events.some((e) => e.type === 'complete')).toBe(false);
+          expect(events).toContainEqual(
+            expect.objectContaining({ type: 'error', fatal: true, usageIncomplete: true }),
+          );
+        } else {
+          expect(events.filter((e) => e.type === 'complete')).toHaveLength(1);
+          expect(events.find((e) => e.type === 'complete')).toMatchObject({
+            totalInputTokens: 300,
+            totalOutputTokens: 20,
+          });
+          expect(events.some((e) => e.type === 'error' && e.fatal)).toBe(false);
+        }
+        expect(snapshots).toBeGreaterThan(0);
+      } finally {
+        handle.stdout.destroy();
+        handle.stderr.destroy();
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previous);
+        restoreEnv('AUTOPOD_CODEX_SANDBOX_FINAL_USAGE_TIMEOUT_MS', previousTimeout);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'stdout-final',
+      'rollout-final',
+      'rollout-eof',
+    ] as const)('refreshes native sandbox usage while stdout stays busy (%s)', async (mode) => {
+      const root = await mkdtemp(join(tmpdir(), 'codex-sandbox-live-'));
+      const env = [
+        'AUTOPOD_CODEX_STATE_DIR',
+        'AUTOPOD_CODEX_ROLLOUT_POLL_MS',
+        'AUTOPOD_CODEX_SANDBOX_USAGE_POLL_MS',
+      ] as const;
+      const previous = env.map((key) => process.env[key]);
+      process.env.AUTOPOD_CODEX_STATE_DIR = root;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_CODEX_SANDBOX_USAGE_POLL_MS = '10';
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo(null, { executionTarget: 'sandbox' }),
+      );
+      const events: AgentEvent[] = [];
+      let snapshots = 0;
+      let terminal = false;
+      let refuseSnapshots = false;
+      let completed = () => {};
+      const completionObserved = new Promise<void>((resolve) => {
+        completed = resolve;
+      });
+      let measured = () => {};
+      const usageObserved = new Promise<void>((resolve) => {
+        measured = resolve;
+      });
+      vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+        async (_id, _path, host, _excludes, options) => {
+          snapshots++;
+          if (refuseSnapshots) throw new Error('Later snapshot unavailable');
+          const records: unknown[] = [
+            { type: 'session_meta', payload: { id: 'live-thread', cli_version: '0.160.1' } },
+          ];
+          for (const [id, input, total, output] of snapshots === 1
+            ? ([['a', 100, 100, 10]] as const)
+            : ([
+                ['a', 100, 100, 10],
+                ['b', 200, 300, 20],
+              ] as const)) {
+            records.push({
+              type: 'token_usage_record',
+              timestamp: new Date().toISOString(),
+              payload: {
+                thread_id: 'live-thread',
+                turn_id: 'turn',
+                response_id: id,
+                usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 10 },
+                turn_token_usage: {
+                  input_tokens: total,
+                  cached_input_tokens: 0,
+                  output_tokens: output,
+                },
+              },
+            });
+          }
+          if (terminal)
+            records.push({
+              type: 'event_msg',
+              payload: { type: 'task_complete', last_agent_message: 'Done' },
+            });
+          const dir = join(host, '2026', '11', '13');
+          await mkdir(dir, { recursive: true });
+          options?.assertCurrent?.();
+          await writeFile(
+            join(dir, 'rollout-live-thread.jsonl'),
+            `${records.map((r) => JSON.stringify(r)).join('\n')}\n`,
+          );
+        },
+      );
+      const run = (async () => {
+        for await (const event of runtime.spawn({
+          podId: 'pod',
+          containerId: 'container-123',
+          task: 'Work',
+          model: 'gpt-6.1-sol',
+          reasoningEffort: 'auto',
+          workDir: '/workspace',
+          env: {},
+          executionTarget: 'sandbox',
+        })) {
+          events.push(event);
+          if (event.type === 'usage' && event.totalInputTokens === 300) measured();
+          if (event.type === 'complete') completed();
+        }
+      })();
+      (handle.stdout as PassThrough).write(
+        `${JSON.stringify({ type: 'thread.started', thread_id: 'live-thread' })}\n`,
+      );
+      const heartbeat = setInterval(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Still working' } })}\n`,
+        );
+      }, 2);
+      try {
+        await withTimeout(usageObserved, 2000);
+        expect(events.some((e) => e.type === 'complete')).toBe(false);
+        expect(events.some((e) => e.type === 'reasoning')).toBe(true);
+        clearInterval(heartbeat);
+        terminal = true;
+        if (mode !== 'stdout-final') {
+          await withTimeout(completionObserved, 2000);
+          refuseSnapshots = true;
+        }
+        if (mode !== 'rollout-eof')
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 300, output_tokens: 20 } })}\n`,
+          );
+        (handle as unknown as { finish(): void }).finish();
+        await withTimeout(run, 2000);
+        expect(events.filter((e) => e.type === 'complete')).toHaveLength(1);
+        expect(
+          events
+            .filter((e) => e.type === 'usage')
+            .map((e) => (e.type === 'usage' ? e.totalInputTokens : 0)),
+        ).toEqual([100, 300]);
+        expect(handle.kill).not.toHaveBeenCalled();
+      } finally {
+        clearInterval(heartbeat);
+        (handle as unknown as { finish(): void }).finish();
+        handle.stdout.destroy();
+        handle.stderr.destroy();
+        await run.catch(() => {});
+        env.forEach((key, i) => {
+          restoreEnv(key, previous[i]);
+        });
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('refuses historical sandbox replay when stdout never identifies the active session', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'codex-sandbox-unknown-session-'));
+      const previous = process.env.AUTOPOD_CODEX_STATE_DIR;
+      process.env.AUTOPOD_CODEX_STATE_DIR = root;
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(async (_id, _path, host) => {
+        const dir = join(host, '2026', '11', '13');
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          join(dir, 'rollout-old-thread.jsonl'),
+          [
+            { type: 'session_meta', payload: { id: 'old-thread', cli_version: '0.160.1' } },
+            {
+              type: 'token_usage_record',
+              payload: {
+                thread_id: 'old-thread',
+                turn_id: 'old-turn',
+                response_id: 'old-response',
+                usage: { input_tokens: 100, output_tokens: 10 },
+                turn_token_usage: { input_tokens: 100, output_tokens: 10 },
+              },
+            },
+            {
+              type: 'event_msg',
+              payload: { type: 'task_complete', last_agent_message: 'Old task' },
+            },
+          ]
+            .map((row) => JSON.stringify(row))
+            .join('\n'),
+        );
+      });
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('old-thread', { executionTarget: 'sandbox' }),
+      );
+      (handle as unknown as { finish(code: number): void }).finish(1);
+      try {
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.spawn({
+          podId: 'pod',
+          containerId: 'container-123',
+          task: 'New task',
+          model: 'gpt-6.1-sol',
+          reasoningEffort: 'auto',
+          workDir: '/workspace',
+          env: {},
+          executionTarget: 'sandbox',
+        }))
+          events.push(event);
+        expect(events.some((e) => e.type === 'complete' || e.type === 'usage')).toBe(false);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'error',
+            fatal: true,
+            message: 'Codex process exited with code 1',
+          }),
+        );
+        expect(cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previous);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'suspend',
+      'generation',
+    ] as const)('does not accept a late sandbox completion after %s', async (change) => {
+      const root = await mkdtemp(join(tmpdir(), 'codex-sandbox-cancel-'));
+      const previous = process.env.AUTOPOD_CODEX_STATE_DIR;
+      process.env.AUTOPOD_CODEX_STATE_DIR = root;
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const repo = createMockPodRepo(null, { executionTarget: 'sandbox', lifecycleGeneration: 1 });
+      const current = repo.getOrThrow('pod');
+      vi.mocked(repo.getOrThrow).mockReturnValue(current);
+      const runtime = new CodexRuntime(logger, cm, repo);
+      let opened = () => {};
+      let release = () => {};
+      const started = new Promise<void>((resolve) => {
+        opened = resolve;
+      });
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let published = false;
+      vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+        async (_id, _path, _host, _excludes, options) => {
+          opened();
+          await waiting;
+          options?.assertCurrent?.();
+          published = true;
+        },
+      );
+      const events: AgentEvent[] = [];
+      const run = (async () => {
+        for await (const event of runtime.spawn({
+          podId: 'pod',
+          containerId: 'container-123',
+          task: 'Finish',
+          model: 'gpt-6.1-sol',
+          reasoningEffort: 'auto',
+          workDir: '/workspace',
+          env: {},
+          executionTarget: 'sandbox',
+        }))
+          events.push(event);
+      })();
+      (handle.stdout as PassThrough).write(
+        `${JSON.stringify({ type: 'thread.started', thread_id: 'thread' })}\n`,
+      );
+      (handle.stdout as PassThrough).write(
+        `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 300, output_tokens: 20 } })}\n`,
+      );
+      (handle as unknown as { finish(): void }).finish();
+      try {
+        await withTimeout(started, 2000);
+        if (change === 'suspend') await runtime.suspend('pod');
+        else current.lifecycleGeneration++;
+        release();
+        await withTimeout(run, 2000);
+        expect(published).toBe(false);
+        expect(events.some((e) => e.type === 'complete')).toBe(false);
+        expect(events.some((e) => e.type === 'usage')).toBe(false);
+      } finally {
+        release();
+        handle.stdout.destroy();
+        handle.stderr.destroy();
+        await run.catch(() => {});
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previous);
         await rm(root, { recursive: true, force: true });
       }
     });
@@ -2820,7 +3241,8 @@ describe('CodexRuntime', () => {
         await rm(tmpRoot, { recursive: true, force: true });
       }
 
-      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+      // Baseline, live snapshot, idle recovery and final stdout/legacy proof refresh.
+      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(4);
       expect(handle.kill).toHaveBeenCalledOnce();
       expect(events).toEqual(
         expect.arrayContaining([

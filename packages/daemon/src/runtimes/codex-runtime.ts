@@ -29,6 +29,7 @@ import { readNativeCompletionUsage } from './codex-completion-usage.js';
 import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
 import { codexGoalRolloutPath } from './codex-goal-usage.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
+import { type CodexSandboxRollout, createCodexSandboxRollout } from './codex-sandbox-rollout.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import {
   CodexStreamParser,
@@ -57,6 +58,8 @@ const DEFAULT_ROLLOUT_POLL_MS = 1_000;
 const DEFAULT_SUMMARY_GRACE_MS = 30_000;
 const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
 const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
+const DEFAULT_SANDBOX_USAGE_POLL_MS = 10_000;
+const DEFAULT_SANDBOX_FINAL_USAGE_TIMEOUT_MS = 30_000;
 const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 5_000;
 const SANDBOX_CONFIG_COMMAND_TIMEOUT_MS = 30_000;
 const SANDBOX_CONFIG_COMMAND_ATTEMPTS = 2;
@@ -844,19 +847,52 @@ export class CodexRuntime implements Runtime {
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
+    const abortSandboxRollout = new AbortController();
     const abortSummaryGrace = new AbortController();
-    this.suspensionSignals.set(podId, () => {
+    const expected = structuredClone(this.podRepo.getOrThrow(podId));
+    const namespace = this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId;
+    const sandboxRollout = summaryRecovery
+      ? createCodexSandboxRollout({
+          containerManager: this.containerManager,
+          containerId: summaryRecovery.containerId,
+          containerPath: CONTAINER_CODEX_SESSIONS_PATH,
+          hostPath: codexStateDirForPod(namespace),
+          signal: abortSandboxRollout.signal,
+          sessionId: () => this.codexSessionIds.get(podId),
+          assertCurrent: () => {
+            const current = this.podRepo.getOrThrow(podId);
+            if (
+              this.handles.get(podId) !== handle ||
+              this.intentionalTerminations.has(handle) ||
+              current.lifecycleGeneration !== expected.lifecycleGeneration ||
+              current.containerId !== expected.containerId ||
+              (current.status !== 'running' && current.status !== 'awaiting_input') ||
+              (this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId) !== namespace
+            )
+              throw new Error('Codex sandbox invocation was superseded');
+          },
+        })
+      : undefined;
+    const suspend = () => {
       abortLiveRollout.abort();
+      abortSandboxRollout.abort();
       abortSummaryGrace.abort();
-    });
-    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
-      Symbol.asyncIterator
-    ]();
+    };
+    this.suspensionSignals.set(podId, suspend);
+    const stdoutIterator = this.parseCodexLines(
+      handle.stdout,
+      podId,
+      seen,
+      outputState,
+      modelHint,
+      sandboxRollout,
+    )[Symbol.asyncIterator]();
     const rolloutIterator = this.pollLatestRollout(
       podId,
       abortLiveRollout.signal,
       modelHint,
       rolloutTail,
+      sandboxRollout,
     )[Symbol.asyncIterator]();
 
     let stdoutStats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
@@ -880,6 +916,7 @@ export class CodexRuntime implements Runtime {
 
     try {
       while (!stdoutDone) {
+        if (abortSandboxRollout.signal.aborted) return;
         const next = await Promise.race([
           stdoutNext,
           rolloutNext,
@@ -887,6 +924,7 @@ export class CodexRuntime implements Runtime {
           summaryRecoveryNext,
           sandboxIdleRecoveryNext,
         ]);
+        if (abortSandboxRollout.signal.aborted) return;
         if (next.source === 'task-summary') {
           taskSummaryNext = neverRuntimeSignal<'task-summary'>();
           if (!outputState.sawComplete) {
@@ -907,9 +945,10 @@ export class CodexRuntime implements Runtime {
             summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
             continue;
           }
-          if (summaryRecovery) {
+          if (summaryRecovery && sandboxRollout) {
             yield* this.recoverSandboxAfterTaskSummary(
               summaryRecovery,
+              sandboxRollout,
               podId,
               seen,
               outputState,
@@ -929,9 +968,10 @@ export class CodexRuntime implements Runtime {
             continue;
           }
 
-          if (summaryRecovery) {
+          if (summaryRecovery && sandboxRollout) {
             yield* this.recoverSandboxLiveProgress(
               summaryRecovery,
+              sandboxRollout,
               podId,
               seen,
               outputState,
@@ -963,9 +1003,15 @@ export class CodexRuntime implements Runtime {
             }
             stdoutDone = true;
             stdoutStats = next.result.value;
-            if (taskSummaryObserved && !outputState.sawComplete && summaryRecovery) {
+            if (
+              taskSummaryObserved &&
+              !outputState.sawComplete &&
+              summaryRecovery &&
+              sandboxRollout
+            ) {
               yield* this.recoverSandboxAfterTaskSummary(
                 summaryRecovery,
+                sandboxRollout,
                 podId,
                 seen,
                 outputState,
@@ -995,20 +1041,31 @@ export class CodexRuntime implements Runtime {
           rolloutNext = nextFrom('rollout', rolloutIterator);
         }
       }
-    } finally {
-      this.suspensionSignals.delete(podId);
       abortLiveRollout.abort();
+      await rolloutIterator.return?.();
+      if (outputState.sawComplete || (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0))
+        return;
+      yield* this.replayLatestRollout(
+        podId,
+        seen,
+        stdoutStats,
+        outputState,
+        modelHint,
+        rolloutTail,
+        sandboxRollout,
+      );
+    } finally {
+      if (this.suspensionSignals.get(podId) === suspend) this.suspensionSignals.delete(podId);
+      abortLiveRollout.abort();
+      abortSandboxRollout.abort();
       abortSummaryGrace.abort();
       await rolloutIterator.return?.();
     }
-
-    if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
-
-    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint, rolloutTail);
   }
 
   private async *recoverSandboxAfterTaskSummary(
     recovery: SandboxRolloutRecovery,
+    sandboxRollout: CodexSandboxRollout,
     podId: string,
     seen: Set<string>,
     outputState: OutputState,
@@ -1025,14 +1082,7 @@ export class CodexRuntime implements Runtime {
       'Codex terminal stream stalled after final task summary — extracting sandbox session state',
     );
 
-    const extraction = await settlePromiseWithin(
-      this.containerManager.extractDirectoryFromContainer(
-        recovery.containerId,
-        CONTAINER_CODEX_SESSIONS_PATH,
-        hostSessionsPath,
-      ),
-      timeoutMs,
-    );
+    const extraction = await settlePromiseWithin(sandboxRollout.refresh(timeoutMs), timeoutMs);
     if (extraction.status === 'timed-out') {
       yield summaryRecoveryError(
         outputState,
@@ -1073,7 +1123,14 @@ export class CodexRuntime implements Runtime {
       );
       const complete = await readRolloutDelta(rollout, rolloutTail);
       if (complete.length > 0) {
-        yield* this.parseCodexLines(Readable.from([complete]), podId, seen, outputState, modelHint);
+        yield* this.parseCodexLines(
+          Readable.from([complete]),
+          podId,
+          seen,
+          outputState,
+          modelHint,
+          sandboxRollout,
+        );
       }
     } catch (err) {
       yield summaryRecoveryError(
@@ -1093,6 +1150,7 @@ export class CodexRuntime implements Runtime {
 
   private async *recoverSandboxLiveProgress(
     recovery: SandboxRolloutRecovery,
+    sandboxRollout: CodexSandboxRollout,
     podId: string,
     seen: Set<string>,
     outputState: OutputState,
@@ -1103,14 +1161,7 @@ export class CodexRuntime implements Runtime {
       this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
     );
     const timeoutMs = summaryRecoveryTimeoutMs();
-    const extraction = await settlePromiseWithin(
-      this.containerManager.extractDirectoryFromContainer(
-        recovery.containerId,
-        CONTAINER_CODEX_SESSIONS_PATH,
-        hostSessionsPath,
-      ),
-      timeoutMs,
-    );
+    const extraction = await settlePromiseWithin(sandboxRollout.refresh(timeoutMs), timeoutMs);
     if (extraction.status !== 'fulfilled') {
       this.logger.warn(
         {
@@ -1136,7 +1187,14 @@ export class CodexRuntime implements Runtime {
       );
       const complete = await readRolloutDelta(rollout, rolloutTail);
       if (complete.length > 0) {
-        yield* this.parseCodexLines(Readable.from([complete]), podId, seen, outputState, modelHint);
+        yield* this.parseCodexLines(
+          Readable.from([complete]),
+          podId,
+          seen,
+          outputState,
+          modelHint,
+          sandboxRollout,
+        );
       }
     } catch (err) {
       this.logger.warn(
@@ -1244,21 +1302,44 @@ export class CodexRuntime implements Runtime {
     return null;
   }
 
-  private async nativeUsageAtCompletion(podId: string, completion: AgentCompleteEvent) {
+  private async nativeUsageAtCompletion(
+    podId: string,
+    completion: AgentCompleteEvent,
+    sandboxRollout?: CodexSandboxRollout,
+  ) {
     const sessionId = this.codexSessionIds.get(podId);
-    if (!sessionId) return { native: false };
+    if (!sessionId) {
+      if (sandboxRollout) throw new Error('Codex sandbox completion has no active session');
+      return { native: false };
+    }
     let native = (this.usageAccumulators.get(podId)?.nativeResponses.size ?? 0) > 0;
     let observed = '';
     let snapshot: Awaited<ReturnType<typeof readNativeCompletionUsage>> = { native };
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + (sandboxRollout ? sandboxFinalUsageTimeoutMs() : 1000);
     // CLI stdout can beat the asynchronous rollout writer/poller. Never certify a
     // stale prefix or reattribute a resumed thread's public cumulative totals.
-    for (let i = 0; i < 20 && Date.now() < deadline; i++) {
+    let refreshError: unknown;
+    while (Date.now() < deadline) {
+      if (sandboxRollout) {
+        sandboxRollout.assertCurrent();
+        try {
+          await sandboxRollout.refresh(Math.max(1, deadline - Date.now()));
+          sandboxRollout.assertCurrent();
+        } catch (err) {
+          refreshError = err;
+          await sleep(Math.min(50, Math.max(0, deadline - Date.now())));
+          continue;
+        }
+      }
       const rollout = await findLatestCodexRollout(
         codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
         sessionId,
       );
-      if (!rollout) return { native };
+      if (!rollout) {
+        if (!sandboxRollout) return { native };
+        await sleep(50);
+        continue;
+      }
       const revision = rollout.path + ':' + rollout.size + ':' + rollout.mtimeMs;
       if (revision !== observed) {
         const boundary = this.usageBoundaries.get(podId);
@@ -1287,6 +1368,16 @@ export class CodexRuntime implements Runtime {
       if (snapshot.lines || !native) return snapshot;
       await sleep(50);
     }
+    if (sandboxRollout) {
+      sandboxRollout.assertCurrent();
+      if (refreshError || !observed) {
+        this.logger.warn(
+          { component: 'codex-runtime', podId, err: refreshError },
+          'Could not acquire current sandbox Codex final usage metadata',
+        );
+        throw new Error('Codex sandbox final usage snapshot unavailable');
+      }
+    }
     return { native };
   }
 
@@ -1296,16 +1387,25 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     outputState: OutputState,
     modelHint?: string,
+    sandboxRollout?: CodexSandboxRollout,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const iterator = this.parseCodexLinesRaw(lines, podId, modelHint)[Symbol.asyncIterator]();
     for (;;) {
       const next = await iterator.next();
       if (next.done) return next.value;
+      try {
+        sandboxRollout?.assertCurrent();
+      } catch {
+        return { events: 0, nonStatusEvents: 0, sawComplete: false };
+      }
 
       const event = next.value;
+      const key = dedupeKey(event);
+      if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       if (event.type === 'complete' && event.usageSegmentId !== 'codex-parser') {
         try {
-          const native = await this.nativeUsageAtCompletion(podId, event);
+          const native = await this.nativeUsageAtCompletion(podId, event, sandboxRollout);
+          sandboxRollout?.assertCurrent();
           if (native.native) {
             if (!native.lines) throw new Error('Native Codex final usage proof is unavailable');
             yield* this.parseCodexLines(
@@ -1314,10 +1414,19 @@ export class CodexRuntime implements Runtime {
               seen,
               outputState,
               modelHint,
+              sandboxRollout,
             );
             continue;
           }
         } catch {
+          try {
+            sandboxRollout?.assertCurrent();
+          } catch {
+            return { events: 0, nonStatusEvents: 0, sawComplete: false };
+          }
+          // A concurrently drained native terminal marker already proved this
+          // invocation. A duplicate stdout completion cannot revoke that proof.
+          if (outputState.sawComplete) continue;
           yield {
             type: 'error',
             timestamp: event.timestamp,
@@ -1330,8 +1439,6 @@ export class CodexRuntime implements Runtime {
           return { events: 1, nonStatusEvents: 1, sawComplete: false };
         }
       }
-      const key = dedupeKey(event);
-      if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       seen.add(key);
       yield event;
       recordOutputEvent(outputState, event);
@@ -1372,8 +1479,20 @@ export class CodexRuntime implements Runtime {
     outputState: OutputState,
     modelHint?: string,
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
+    sandboxRollout?: CodexSandboxRollout,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const activeSessionId = this.codexSessionIds.get(podId);
+    if (sandboxRollout) {
+      // A failed launch without thread.started cannot adopt the newest historical
+      // session copied from the sandbox as this invocation's completion or spend.
+      if (!activeSessionId) return { events: 0, nonStatusEvents: 0, sawComplete: false };
+      try {
+        sandboxRollout.assertCurrent();
+      } catch {
+        return { events: 0, nonStatusEvents: 0, sawComplete: false };
+      }
+      await sandboxRollout.refresh(summaryRecoveryTimeoutMs());
+    }
     const rollout = await findLatestCodexRollout(
       codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
       activeSessionId,
@@ -1414,6 +1533,7 @@ export class CodexRuntime implements Runtime {
       seen,
       outputState,
       modelHint,
+      sandboxRollout,
     );
   }
 
@@ -1422,13 +1542,24 @@ export class CodexRuntime implements Runtime {
     signal: AbortSignal,
     modelHint?: string,
     tail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
+    sandboxRollout?: CodexSandboxRollout,
   ): AsyncGenerator<AgentEvent, void, void> {
+    let nextSnapshotAt = 0;
     while (!signal.aborted) {
       try {
         // Do not replay anything until stdout identifies the active thread (spawn)
         // or resume pre-seeds it. Otherwise an older completed rollout can arm the
         // post-complete grace timer and terminate the live Codex exec.
         const activeSessionId = this.codexSessionIds.get(podId);
+        if (sandboxRollout && activeSessionId && Date.now() >= nextSnapshotAt) {
+          try {
+            await sandboxRollout.refresh(summaryRecoveryTimeoutMs());
+          } finally {
+            nextSnapshotAt = Date.now() + sandboxUsagePollMs();
+          }
+        }
+        if (signal.aborted) return;
+        sandboxRollout?.assertCurrent();
         const rollout = activeSessionId
           ? await findLatestCodexRollout(
               codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
@@ -1438,10 +1569,19 @@ export class CodexRuntime implements Runtime {
         if (rollout) {
           const complete = await readRolloutDelta(rollout, tail);
           if (complete.length > 0) {
-            yield* this.parseCodexLinesRaw(Readable.from([complete]), podId, modelHint);
+            for await (const event of this.parseCodexLinesRaw(
+              Readable.from([complete]),
+              podId,
+              modelHint,
+            )) {
+              sandboxRollout?.assertCurrent();
+              if (signal.aborted) return;
+              yield event;
+            }
           }
         }
       } catch (err) {
+        if (signal.aborted) return;
         this.logger.warn(
           { component: 'codex-runtime', podId, err },
           'Failed to poll Codex rollout JSONL',
@@ -1702,6 +1842,17 @@ function summaryRecoveryTimeoutMs(): number {
 
 function sandboxIdleRecoveryPeriodMs(): number {
   return positiveEnvMs('AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS', DEFAULT_SANDBOX_IDLE_RECOVERY_MS);
+}
+
+function sandboxUsagePollMs(): number {
+  return positiveEnvMs('AUTOPOD_CODEX_SANDBOX_USAGE_POLL_MS', DEFAULT_SANDBOX_USAGE_POLL_MS);
+}
+
+function sandboxFinalUsageTimeoutMs(): number {
+  return positiveEnvMs(
+    'AUTOPOD_CODEX_SANDBOX_FINAL_USAGE_TIMEOUT_MS',
+    DEFAULT_SANDBOX_FINAL_USAGE_TIMEOUT_MS,
+  );
 }
 
 function stalledExecKillTimeoutMs(): number {

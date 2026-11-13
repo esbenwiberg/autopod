@@ -14,8 +14,14 @@ active, rather than waiting for `turn.completed` or `task_complete`.
   delta. Final reports add only the unrecorded remainder, never the whole prefix
   again. Aborted runs retain measured spend as **partial**, not zero or complete.
 - Native completion must agree with the deduplicated response sum and the native
-  turn aggregate. A bounded finalization window drains same-session metadata when
-  stdout overtakes the rollout writer. Metadata is streamed, not capped by total
+  turn aggregate. Sandbox runs collect guarded session snapshots independently of
+  stdout activity (every 10 seconds by default), so a busy stream cannot leave live
+  usage stuck at an old host copy. Final stdout completion refreshes the sandbox
+  snapshot within a separate bounded window (30 seconds by default), including
+  when no host copy exists yet. Concurrent collectors coalesce; suspension,
+  supersession and timeout fence late publication. Missing or unreadable sandbox
+  proof never falls back to stdout totals. Local bind-mounted runs retain their
+  one-second finalization window. Metadata is streamed, not capped by total
   transcript size; oversized metadata records and missing/corrupt final proof
   fail closed. Ordinary tool bodies are never replayed as accounting or activity.
 - Local resumes use the saved append boundary where available. Restored/sandbox
