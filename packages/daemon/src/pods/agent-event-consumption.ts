@@ -4,7 +4,12 @@ import type {
   Pod,
   ProviderFailureClassification,
 } from '@autopod/shared';
-import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
+import {
+  AutopodError,
+  budgetCountedTaskTokens,
+  describeTaskBudgetUsage,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
+} from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
@@ -565,9 +570,11 @@ export function createAgentEventConsumption(
           const taskUsage = podRepo.taskExecutions?.snapshot(podId);
           const effectiveBudget = taskUsage ? taskUsage.tokenBudget : currentSession.tokenBudget;
           const totalUsed = taskUsage
-            ? (taskUsage.recordedTotalTokens ??
-              taskUsage.recordedInputTokens + taskUsage.recordedOutputTokens)
+            ? budgetCountedTaskTokens(taskUsage)
             : newInputTokens + newOutputTokens;
+          const usedText = taskUsage
+            ? describeTaskBudgetUsage(taskUsage, effectiveBudget)
+            : `${totalUsed}/${effectiveBudget} tokens used`;
           const nativeAchievement =
             lifecycle?.nativeGoal &&
             deps.launchConfiguration?.goals?.get(podId)?.state === 'achieved';
@@ -603,7 +610,7 @@ export function createAgentEventConsumption(
 
               emitActivityStatus(
                 podId,
-                `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).${canExtend && policy === 'soft' ? ' Waiting for user approval to continue.' : ' Pod will be stopped.'}`,
+                `Token budget exceeded (${usedText}).${canExtend && policy === 'soft' ? ' Waiting for user approval to continue.' : ' Pod will be stopped.'}`,
               );
               eventBus.emit({
                 type: 'pod.token_budget_exceeded',
@@ -636,7 +643,7 @@ export function createAgentEventConsumption(
                 if (s.status === 'running') {
                   transition(s, 'failed', {
                     completedAt: new Date().toISOString(),
-                    failureReason: `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).`,
+                    failureReason: `Token budget exceeded (${usedText}).`,
                   });
                 }
                 outcome = 'failed';

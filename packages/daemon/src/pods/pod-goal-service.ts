@@ -7,6 +7,7 @@ import type {
   Pod,
   PodGoal,
 } from '@autopod/shared';
+import { budgetCountedTaskTokens } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationError } from '../configuration/configuration-store.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -87,8 +88,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
           503,
         );
       const usage = options.pods.taskExecutions.snapshot(goal.podId);
-      const total =
-        usage.recordedTotalTokens ?? usage.recordedInputTokens + usage.recordedOutputTokens;
+      const total = budgetCountedTaskTokens(usage);
       return usage.tokenBudget === null ? null : Math.max(0, usage.tokenBudget - total);
     },
     publish(goal) {

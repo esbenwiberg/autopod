@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
   AutopodError,
+  budgetCountedTaskTokens,
+  cacheWeightedTokens,
+  describeTaskBudgetUsage,
   type ExecutionTarget,
   type Pod,
   type TaskExecutionSummary,
@@ -32,6 +35,23 @@ export interface ExecutionBinding {
   /** Supplied by the dispatch owner, never reconstructed from a later pod snapshot. */
   resource?: { containerId: string | null; executionTarget: ExecutionTarget };
 }
+/** Valid stored cache-read count of one phase bucket; anything else discounts nothing. */
+function cacheReads(bucket: unknown): number {
+  if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) return 0;
+  const value = (bucket as { cachedInputTokens?: unknown }).cachedInputTokens;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** Agent-phase cache reads, bounded by the authoritative agent input they attribute. */
+function agentCacheReads(phases: unknown, agentInputTokens: unknown): number {
+  if (!phases || typeof phases !== 'object' || Array.isArray(phases)) return 0;
+  if (typeof agentInputTokens !== 'number' || !Number.isFinite(agentInputTokens)) return 0;
+  let reads = 0;
+  for (const [name, value] of Object.entries(phases))
+    if (isAgentCostPhase(name)) reads += cacheReads(value);
+  return Math.min(reads, Math.max(0, agentInputTokens));
+}
+
 function isContainerReference(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -165,6 +185,9 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let recordedInputTokens = 0;
     let recordedOutputTokens = 0;
     let recordedUnclassifiedTokens = 0;
+    // Cache-read subset of recordedInputTokens. Phase attribution is the only stored
+    // split; it can only discount budget-counted usage, never add to it.
+    let recordedCachedInputTokens = 0;
     let recordedCostUsd = 0;
     const costEvidence = emptyCostEvidence();
     let incompleteSpending = false;
@@ -251,6 +274,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       } catch {
         /* reported below */
       }
+      recordedCachedInputTokens += agentCacheReads(rawPhases, agent.inputTokens);
       const cost = reconcilePodCosts(
         {
           id: row.id,
@@ -315,8 +339,10 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
             continue;
           }
           const phase = value as Record<string, unknown>;
-          recordedInputTokens += number(phase.inputTokens, row.id);
+          const phaseInput = number(phase.inputTokens, row.id);
+          recordedInputTokens += phaseInput;
           recordedOutputTokens += number(phase.outputTokens, row.id);
+          recordedCachedInputTokens += Math.min(cacheReads(phase), phaseInput);
         }
       } catch {
         diagnostics.push(`${row.id}: phase telemetry unreadable`);
@@ -449,11 +475,15 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       .get(identity.taskId) as { budget: number | null } | undefined;
     const root = changed ?? original;
     if (!root) diagnostics.push('Task budget source unavailable');
+    const recordedTotalTokens =
+      recordedInputTokens + recordedOutputTokens + recordedUnclassifiedTokens;
+    recordedCachedInputTokens = Math.min(recordedCachedInputTokens, recordedInputTokens);
+    const budgetCountedTokens = cacheWeightedTokens(recordedTotalTokens, recordedCachedInputTokens);
     const budgetCheck: NonNullable<TaskExecutionSummary['budgetCheck']> = !root
       ? { status: 'unavailable', reason: 'Task budget source unavailable.' }
       : root.budget === null || root.budget <= 0
         ? { status: 'unlimited', reason: 'No task token limit configured.' }
-        : recordedInputTokens + recordedOutputTokens + recordedUnclassifiedTokens >= root.budget
+        : budgetCountedTokens >= root.budget
           ? {
               status: 'exhausted',
               reason: 'Recorded task tokens have reached the configured limit.',
@@ -505,7 +535,9 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       recordedInputTokens,
       recordedOutputTokens,
       recordedUnclassifiedTokens,
-      recordedTotalTokens: recordedInputTokens + recordedOutputTokens + recordedUnclassifiedTokens,
+      recordedTotalTokens,
+      recordedCachedInputTokens,
+      budgetCountedTokens,
       recordedCostUsd,
       costEvidence,
       infrastructureCostUsd: null,
@@ -700,11 +732,10 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       if (
         task.tokenBudget !== null &&
         task.tokenBudget > 0 &&
-        (task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens) >=
-          task.tokenBudget
+        budgetCountedTaskTokens(task) >= task.tokenBudget
       )
         throw new AutopodError(
-          `Task token budget exhausted across ${task.podCount} pods; reconcile or extend the task budget before agent execution`,
+          `Task token budget exhausted across ${task.podCount} pods (${describeTaskBudgetUsage(task, task.tokenBudget)}); reconcile or extend the task budget before agent execution`,
           'TASK_BUDGET_EXHAUSTED',
           409,
         );

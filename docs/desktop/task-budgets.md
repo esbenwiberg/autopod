@@ -11,7 +11,8 @@ The editor reads the current task ledger rather than the original pod/profile li
   completion; follow the observed pod state.
 
 The limit is shared by the logical task, including linked repair pods. Recorded
-input includes cached tokens. This is a token cap, not a dollar spending cap.
+input includes cached tokens; the limit counts cache reads at 0.1x where the
+daemon has the cache split. This is a token cap, not a dollar spending cap.
 Changes are audited by the daemon and do not edit a profile, preset, or frozen
 launch configuration. An unlimited task cannot be capped again with this control;
 choose initial limits when launching new tasks.

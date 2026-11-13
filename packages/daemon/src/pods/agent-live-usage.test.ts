@@ -17,7 +17,13 @@ function fixture() {
   f.podRepo.update('prepare', { tokenBudget: 1000, claudeSessionId: 'native-session' });
   return f;
 }
-const checkpoint = (input = 40, output = 10, segment = 'segment-a'): AgentUsageEvent => ({
+// Cache reads weigh 0.1x against task limits; cap-crossing helpers default to uncached input.
+const checkpoint = (
+  input = 40,
+  output = 10,
+  segment = 'segment-a',
+  cached = 0,
+): AgentUsageEvent => ({
   type: 'usage',
   timestamp: '2026-11-11T17:00:00.000Z',
   usageSegmentId: segment,
@@ -25,16 +31,16 @@ const checkpoint = (input = 40, output = 10, segment = 'segment-a'): AgentUsageE
   sessionId: 'native-session',
   totalInputTokens: input,
   totalOutputTokens: output,
-  cachedInputTokens: 20,
+  cachedInputTokens: cached,
   costUsd: input / 10000,
 });
-const complete = (input = 100, output = 20, segment = 'segment-a'): AgentEvent => ({
+const complete = (input = 100, output = 20, segment = 'segment-a', cached = 0): AgentEvent => ({
   type: 'complete',
   timestamp: '2026-11-11T17:00:01.000Z',
   usageSegmentId: segment,
   totalInputTokens: input,
   totalOutputTokens: output,
-  cachedInputTokens: 40,
+  cachedInputTokens: cached,
   costUsd: input / 10000,
   result: 'Completed source work',
 });
@@ -114,6 +120,42 @@ describe('live runtime accounting and hard-stop ownership', () => {
     expect(f.podRepo.taskExecutions?.snapshot('prepare').budgetCheck?.status).toBe('exhausted');
     expect(f.podRepo.taskExecutions?.hasActiveRun('prepare')).toBe(false);
     expect(f.cm.kill).not.toHaveBeenCalled(); // Preserve the container/source, stop only the native worker.
+  });
+
+  it('counts cache reads at 0.1x, so a cache-heavy run under a hard cap completes', async () => {
+    const f = fixture();
+    const outcome = await f.consumer.consumeAgentEvents(
+      'prepare',
+      (async function* () {
+        yield checkpoint(5000, 10, 'segment-a', 4900);
+        expect(f.pod().status).toBe('running');
+        yield complete(6000, 20, 'segment-a', 5900);
+      })(),
+    );
+    expect(outcome).toBe('completed');
+    expect(f.pod().status).not.toBe('failed');
+    expect(f.deps.runtimeRegistry.get('claude').suspendForUsage).not.toHaveBeenCalled();
+    expect(f.podRepo.taskExecutions?.snapshot('prepare')).toMatchObject({
+      recordedTotalTokens: 6020,
+      recordedCachedInputTokens: 5900,
+      budgetCountedTokens: 710,
+      budgetCheck: { status: 'below_recorded_limit' },
+    });
+  });
+
+  it('names discounted cache reads when the budget-counted total crosses a hard cap', async () => {
+    const f = fixture();
+    const outcome = await f.consumer.consumeAgentEvents(
+      'prepare',
+      agentEvents(checkpoint(10000, 1, 'segment-a', 9000)),
+    );
+    expect(outcome).toBe('failed');
+    expect(f.pod()).toMatchObject({
+      status: 'failed',
+      failureReason:
+        'Token budget exceeded (1901/1000 budget-counted tokens used; 10001 recorded incl. 9000 cache reads at 0.1x).',
+    });
+    expect(f.podRepo.taskExecutions?.snapshot('prepare').budgetCheck?.status).toBe('exhausted');
   });
 
   it('retains an unresolved execution claim if the budget stop cannot prove termination', async () => {

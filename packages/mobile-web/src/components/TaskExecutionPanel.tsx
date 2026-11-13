@@ -68,11 +68,20 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
             <p>Source-bound merge evidence unavailable.</p>
           )}
           <p className="muted">Current provider status unverified.</p>
-          <p>
-            Recorded tokens:{' '}
-            {data.recordedTotalTokens ?? data.recordedInputTokens + data.recordedOutputTokens} /{' '}
-            {data.tokenBudget ?? 'no configured limit'}
-          </p>
+          {data.budgetCountedTokens !== undefined && (data.recordedCachedInputTokens ?? 0) > 0 ? (
+            <p>
+              Budget-counted tokens: {data.budgetCountedTokens} /{' '}
+              {data.tokenBudget ?? 'no configured limit'} · recorded{' '}
+              {data.recordedTotalTokens ?? data.recordedInputTokens + data.recordedOutputTokens}{' '}
+              incl. {data.recordedCachedInputTokens} cache reads counted at 0.1×
+            </p>
+          ) : (
+            <p>
+              Recorded tokens:{' '}
+              {data.recordedTotalTokens ?? data.recordedInputTokens + data.recordedOutputTokens} /{' '}
+              {data.tokenBudget ?? 'no configured limit'}
+            </p>
+          )}
           <p>
             Stored task cost subtotal: ${data.recordedCostUsd.toFixed(4)} · {data.telemetry}{' '}
             telemetry

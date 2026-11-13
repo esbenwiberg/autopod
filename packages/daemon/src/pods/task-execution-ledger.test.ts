@@ -871,3 +871,95 @@ describe('task-wide execution accounting', () => {
     }
   });
 });
+
+describe('budget-counted task usage (cache reads at 0.1x)', () => {
+  // Issue #446 shape: 1.49M input, of which 1.43M cache reads and 61k cache creation.
+  const issueUsage = (db: Database.Database, phases: unknown, budget = 400_000) => {
+    db.prepare(
+      "UPDATE pods SET input_tokens=1494436, output_tokens=14171, phase_token_usage=?, token_telemetry_accuracy='complete', token_budget=? WHERE id='root'",
+    ).run(JSON.stringify(phases), budget);
+  };
+  const agentInitial = (cached: unknown) => ({
+    agent_initial: {
+      inputTokens: 1494436,
+      outputTokens: 14171,
+      cachedInputTokens: cached,
+      cacheCreationInputTokens: 60660,
+    },
+  });
+
+  it('admits further budgeted work when cache reads dominate raw usage', () => {
+    const { db, repo } = fixture();
+    try {
+      issueUsage(db, agentInitial(1433722));
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        recordedTotalTokens: 1508607,
+        recordedCachedInputTokens: 1433722,
+        // 1508607 - 1433722 + ceil(143372.2); cache creation keeps full weight.
+        budgetCountedTokens: 218258,
+        budgetCheck: { status: 'below_recorded_limit' },
+      });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('refuses exhausted work with the cache split in the reason', () => {
+    const { db, repo } = fixture();
+    try {
+      issueUsage(db, agentInitial(1433722), 200_000);
+      expect(repo.taskExecutions?.snapshot('fix').budgetCheck?.status).toBe('exhausted');
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+        '(218258/200000 budget-counted tokens used; 1508607 recorded incl. 1433722 cache reads at 0.1x)',
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('counts missing or malformed cache attribution at full weight', () => {
+    for (const cached of [undefined, 'many', -5, Number.NaN]) {
+      const { db, repo } = fixture();
+      try {
+        issueUsage(db, agentInitial(cached));
+        const task = repo.taskExecutions?.snapshot('fix');
+        expect(task).toMatchObject({
+          recordedTotalTokens: 1508607,
+          recordedCachedInputTokens: 0,
+          budgetCountedTokens: 1508607,
+          budgetCheck: { status: 'exhausted' },
+        });
+        expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+          '(1508607/400000 tokens used)',
+        );
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  it('bounds cache attribution by the input it attributes, including harness phases', () => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare(
+        "UPDATE pods SET input_tokens=100, output_tokens=10, phase_token_usage=?, token_telemetry_accuracy='complete', token_budget=1000 WHERE id='root'",
+      ).run(
+        JSON.stringify({
+          agent_initial: { inputTokens: 60, outputTokens: 5, cachedInputTokens: 90 },
+          agent_rework_1: { inputTokens: 40, outputTokens: 5, cachedInputTokens: 50 },
+          review: { inputTokens: 30, outputTokens: 3, cachedInputTokens: 500 },
+        }),
+      );
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        recordedInputTokens: 130,
+        recordedTotalTokens: 143,
+        // Agent reads clamp to the 100 agent input; review reads clamp to its 30 input.
+        recordedCachedInputTokens: 130,
+        budgetCountedTokens: 26,
+      });
+    } finally {
+      db.close();
+    }
+  });
+});

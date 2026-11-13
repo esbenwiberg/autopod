@@ -7,9 +7,10 @@ active, rather than waiting for `turn.completed` or `task_complete`.
 - Each native invocation owns a fresh segment ID. Unique provider response IDs
   deduplicate compatibility projections and replay; a monotonic checkpoint
   sequence distinguishes queued older snapshots from inconsistent counters.
-- Input includes cached input. Task token limits count input plus output, not
-  input minus cache. Cache counters and catalogue cost estimates are attribution,
-  not a provider invoice or proof of subscription-credit consumption.
+- Input includes cached input. Task token limits count input plus output, with
+  attributed cache reads weighted at 0.1x (see the operations reference); they
+  never subtract cache entirely. Cache counters and catalogue cost estimates are
+  attribution, not a provider invoice or proof of subscription-credit consumption.
 - Pod, agent-phase and provider-attempt counters receive the same transactional
   delta. Final reports add only the unrecorded remainder, never the whole prefix
   again. Aborted runs retain measured spend as **partial**, not zero or complete.
