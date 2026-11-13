@@ -25,6 +25,36 @@ function output(value: unknown) {
   console.log(JSON.stringify(value, null, 2));
 }
 
+const presetAuthoringHelp: Partial<Record<ConfigurationKind, string>> = {
+  environment:
+    'Environments own reusable runtimes, versions, tooling and sidecars, not repository identity ' +
+    'or repository install/build steps. Repository setups own project prep/build/test commands.',
+  workflow:
+    'Workflows own reusable validation, output, approval, retry and budget policy, not repository ' +
+    'identity or a one-off task mission. Preserve genuinely different safety/policy variants.',
+  toolPack:
+    'Tool packs own reusable agent capabilities: skills, MCP connections, CLI tools and their ' +
+    'usage guidance. Instruction-only reusable safety packs are legitimate. Repository product ' +
+    'rules and safety conventions belong in source-controlled AGENTS.md, CLAUDE.md or linked ' +
+    'canonical docs; task-specific mission and acceptance belong in the task brief/spec.',
+};
+
+function addPresetAuthoringHelp(command: Command, kind: ConfigurationKind): void {
+  const ownership = presetAuthoringHelp[kind];
+  if (!ownership) return;
+  const name = kind === 'toolPack' ? 'tool-pack' : kind;
+  command.addHelpText(
+    'after',
+    '\nReuse before creating: list existing presets and inspect complete definitions and references ' +
+      'before reuse or archival. Create a new preset only for a reusable difference.\n' +
+      `Use ap preset ${name} list --json and ap preset ${name} show <name-or-id> --json.\n` +
+      `${ownership}\n` +
+      'Name presets by capability, policy or stack rather than repository.\n' +
+      'For safe cleanup, do not detach safety instructions until their source owner is on the ' +
+      'intended default source. Frozen launches and history remain unchanged.\n',
+  );
+}
+
 export async function selectProfilePresets(
   client: AutopodClient,
   ask: (prompt: string) => Promise<string>,
@@ -78,6 +108,7 @@ function registerEntityCommands(
   kind: ConfigurationKind,
   getClient: () => AutopodClient,
 ): void {
+  addPresetAuthoringHelp(command, kind);
   if (kind === 'ai')
     command.addHelpText(
       'after',
@@ -115,7 +146,7 @@ function registerEntityCommands(
         });
       else output(value);
     });
-  command
+  const create = command
     .command('create')
     .requiredOption('--name <name>')
     .option('--file <file>', 'Complete preset payload JSON')
@@ -141,7 +172,7 @@ function registerEntityCommands(
         }),
       );
     });
-  command
+  const update = command
     .command('update <name-or-id>')
     .requiredOption('--file <file>', 'Complete replacement payload JSON')
     .requiredOption(
@@ -165,6 +196,8 @@ function registerEntityCommands(
         );
       },
     );
+  addPresetAuthoringHelp(create, kind);
+  addPresetAuthoringHelp(update, kind);
   command
     .command('archive <name-or-id>')
     .requiredOption('--expected-revision <number>', 'Revision to archive', revision)
