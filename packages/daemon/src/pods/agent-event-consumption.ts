@@ -596,6 +596,10 @@ export function createAgentEventConsumption(
               const extensionsUsed = currentSession.budgetExtensionsUsed;
               const canExtend = maxExtensions === null || extensionsUsed < maxExtensions;
               const policy = profile.tokenBudgetPolicy ?? 'soft';
+              // Extensible soft limits retain terminal-check semantics. Killing a
+              // live native invocation here would turn a normal extension into an
+              // unknown-final-usage hold. Hard/non-extendable limits still stop now.
+              if (event.type === 'usage' && policy === 'soft' && canExtend) continue;
 
               emitActivityStatus(
                 podId,
