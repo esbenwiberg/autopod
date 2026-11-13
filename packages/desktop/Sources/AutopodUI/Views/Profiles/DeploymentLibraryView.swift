@@ -30,6 +30,7 @@ struct DeploymentLibraryView: View {
         Spacer()
         Button("Refresh") { Task { await reload() } }.disabled(busy)
       }
+      ConfigurationContextHelp(topicID: "deployment.sections.overview")
       Text(
         "Deploy the published default branch. Review pins an exact commit; pod changes must be published first."
       ).foregroundStyle(.secondary)
@@ -75,6 +76,7 @@ struct DeploymentLibraryView: View {
         if let review, let run = review["run"] {
           VStack(alignment: .leading, spacing: 12) {
             if !redesign { Text("Review deployment").font(.title2.bold()) }
+            ConfigurationContextHelp(topicID: "deployment.sections.overview")
             Text(
               "\(run["plan"]?["repositoryId"]?.string ?? "") → \(run["plan"]?["targetId"]?.string ?? "")"
             ).font(.headline)
@@ -116,6 +118,7 @@ struct DeploymentLibraryView: View {
         if let uncertain {
           VStack(alignment: .leading, spacing: 14) {
             if !redesign { Text("Reconcile deployment").font(.title2.bold()) }
+            ConfigurationContextHelp(topicID: "deployment.sections.overview")
             Text(
               "Check the destination before continuing. AutoPod could not confirm the outcome and has blocked further deployments to this target."
             )

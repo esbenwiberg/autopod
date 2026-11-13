@@ -130,6 +130,7 @@ struct WatcherEditorView: View {
       }
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
+          ConfigurationContextHelp(topicID: "watcher.sections.overview")
           LabeledContent("Name") { TextField("Watcher name", text: text("name")) }
           Toggle(
             "Enabled",

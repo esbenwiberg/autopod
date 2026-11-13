@@ -54,6 +54,7 @@ public struct SetupSheet: View {
 
       // Form
       VStack(alignment: .leading, spacing: 16) {
+        ConfigurationContextHelp(topicID: "app.sections.connections")
         field("Name") {
           TextField("Local", text: $name)
             .textFieldStyle(.roundedBorder)

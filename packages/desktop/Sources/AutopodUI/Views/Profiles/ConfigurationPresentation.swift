@@ -77,26 +77,37 @@ struct ConfigurationCapabilitiesEditor: View {
 struct ConfigurationAgentTargetEditor: View {
   @Binding var fields: [String: ConfigurationJSON]
   let accounts: [PublicProviderAccountResponse]
+  var showFailoverHelp = false
+  private func help(_ title: String, _ key: String) -> some View {
+    ConfigurationHelpLabel(title: title, topic: showFailoverHelp ? .topic("ai.failover.\(key)") : nil)
+  }
   private func text(_ key: String, fallback: String = "") -> Binding<String> {
     Binding(get: { fields[key]?.string ?? fallback }, set: { fields[key] = .string($0) })
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Picker("Provider account", selection: text("providerAccountId")) {
+      Picker(selection: text("providerAccountId")) {
         Text("Choose account").tag("")
         ForEach(accounts, id: \.id) { Text($0.name).tag($0.id) }
         if let selected = fields["providerAccountId"]?.string, !selected.isEmpty, !accounts.contains(where: { $0.id == selected }) {
           Text("Saved account · \(selected)").tag(selected)
         }
-      }
-      Picker("Runtime", selection: text("runtime", fallback: "claude")) {
+      } label: { help("Provider account", "account") }
+      Picker(selection: text("runtime", fallback: "claude")) {
         Text("Claude").tag("claude"); Text("Codex").tag("codex")
         Text("Pi").tag("pi"); Text("Copilot").tag("copilot")
+      } label: { help("Runtime", "runtime") }
+      if showFailoverHelp {
+        VStack(alignment: .leading, spacing: 2) {
+          help("Model", "model").font(.caption).foregroundStyle(.secondary)
+          TextField("Model", text: text("model"))
+        }
+      } else {
+        ConfigurationTextValue(title: "Model", fields: $fields, key: "model")
       }
-      ConfigurationTextValue(title: "Model", fields: $fields, key: "model")
-      Picker("Reasoning effort", selection: text("reasoningEffort", fallback: "auto")) {
+      Picker(selection: text("reasoningEffort", fallback: "auto")) {
         ForEach(["auto", "low", "medium", "high", "xhigh"], id: \.self) { Text($0.capitalized).tag($0) }
-      }
+      } label: { help("Reasoning effort", "effort") }
     }
   }
 }

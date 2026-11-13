@@ -90,13 +90,14 @@ struct ConfigurationTextValue: View {
   let key: String
   var optional = false
   var multiline = false
+  var helpPath: String? = nil
   private var text: Binding<String> { Binding(get: { fields[key]?.string ?? "" }, set: { fields[key] = optional && $0.isEmpty ? .null : .string($0) }) }
   var body: some View {
     if multiline {
-      VStack(alignment: .leading) { Text(title).font(.caption); TextEditor(text: text).font(.system(.body, design: .monospaced)).frame(minHeight: 80) }
+      VStack(alignment: .leading) { ConfigurationFieldLabel(title: title, key: key, path: helpPath).font(.caption); TextEditor(text: text).font(.system(.body, design: .monospaced)).frame(minHeight: 80) }
     } else {
       VStack(alignment: .leading, spacing: 4) {
-        Text(title).font(.caption).foregroundStyle(.secondary)
+        ConfigurationFieldLabel(title: title, key: key, path: helpPath).font(.caption).foregroundStyle(.secondary)
         TextField(title, text: text).textFieldStyle(.roundedBorder)
       }
     }
@@ -249,7 +250,7 @@ struct SkillSourceEditor: View {
   private var mode: String { fields["source"]?["type"]?.string ?? "builtin" }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      ConfigurationTextValue(title: "Skill name", fields: $fields, key: "name")
+      ConfigurationTextValue(title: "Skill name", fields: $fields, key: "name", helpPath: "skills[].name")
       TextField("Skill description (optional)", text: Binding(get: { fields["description"]?.string ?? "" }, set: {
         if $0.isEmpty { fields.removeValue(forKey: "description") } else { fields["description"] = .string($0) }
       })).accessibilityIdentifier("configuration-skill-description")
@@ -279,7 +280,7 @@ struct McpTransportEditor: View {
   private var mode: String { fields["transport"]?["type"]?.string ?? "http" }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      ConfigurationTextValue(title: "Server name", fields: $fields, key: "name")
+      ConfigurationTextValue(title: "Server name", fields: $fields, key: "name", helpPath: "mcpServers[].name")
       Picker("Connection", selection: Binding(get: { mode }, set: { value in
         transport.wrappedValue = value == "http" ? ["type": .string("http"), "url": .string(""), "headers": .object([:])] : ["type": .string("stdio"), "command": .string(""), "args": .array([]), "env": .object([:])]
       })) { Text("HTTP").tag("http"); Text("Command in the pod").tag("stdio") }

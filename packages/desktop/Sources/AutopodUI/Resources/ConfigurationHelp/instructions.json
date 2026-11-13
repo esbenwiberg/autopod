@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "topics": [
+    {
+      "id": "toolPack.instructions",
+      "title": "Tool-pack instructions",
+      "summary": "Guidance included in the main agent's instructions when this tool pack is selected.",
+      "whenToUse": "Use for reusable working rules, source-of-truth guidance and how the agent should use this pack. Use skills for named procedures, CLI tools for executables and MCP for tool-server connections.",
+      "behavior": "AutoPod combines the selected packs' instruction sections in pack/section order, followed by selected CLI usage guidance. It supplies this through the main agent's runtime instruction integration without overwriting repository instruction files. Do not assume this text is copied into every Reviewer or Advisor prompt.",
+      "defaultBehavior": "No sections means this pack adds no extra instruction sections. Changes affect future launches, not instructions already captured by a running pod.",
+      "impact": "Guidance does not install software, grant access or enforce a rule. Keep secrets out of instruction text.",
+      "example": "Heading: Design source of truth. Instructions: Use the supplied design references. Record differences and state which visual comparisons you actually performed.",
+      "paths": ["instructions"]
+    },
+    {
+      "id": "toolPack.instructions.heading",
+      "title": "Instruction heading",
+      "summary": "Names this section in the agent's generated guidance.",
+      "whenToUse": "Choose a short, descriptive name so the agent can distinguish this guidance from other sections.",
+      "behavior": "The heading becomes a Markdown section heading (## Heading), followed by this row's instruction text. It does not create a file, a skill or a command.",
+      "defaultBehavior": "Each section needs a non-empty heading, up to 128 characters. Clearing the heading does not remove the row; use Remove to delete the section.",
+      "impact": "Moving a section changes presentation order, not a guaranteed instruction priority. Avoid contradictory guidance across sections and packs.",
+      "example": "Use Design source of truth rather than a generic heading such as Notes.",
+      "paths": ["instructions[].heading"]
+    },
+    {
+      "id": "toolPack.instructions.content",
+      "title": "Instruction text",
+      "summary": "Tells the main agent how to work when this pack is selected.",
+      "whenToUse": "Write clear, task-relevant guidance that should be included whenever the pack is selected. Put reusable procedures in Skills when they should be invoked separately.",
+      "behavior": "Text is included beneath its heading in the generated main-agent guidance, in the saved section order. Markdown is supported as instruction text. These words guide a model; they are not executable commands or permission checks.",
+      "defaultBehavior": "Text can be up to 50,000 characters. Empty text leaves a heading-only section; Remove deletes the section. An empty list adds no extra instruction sections.",
+      "impact": "Long guidance adds context for the model to process. Use access policy and validation to enforce requirements, not prose. Never paste credentials or tokens here.",
+      "example": "Read repository guidance before editing. Run the configured checks and report any that could not be performed. Do not claim a visual comparison without inspecting the supplied references.",
+      "paths": ["instructions[].content"]
+    }
+  ]
+}
