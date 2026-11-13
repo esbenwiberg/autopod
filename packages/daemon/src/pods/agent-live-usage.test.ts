@@ -34,13 +34,13 @@ const checkpoint = (
   cachedInputTokens: cached,
   costUsd: input / 10000,
 });
-const complete = (input = 100, output = 20, segment = 'segment-a'): AgentEvent => ({
+const complete = (input = 100, output = 20, segment = 'segment-a', cached = 0): AgentEvent => ({
   type: 'complete',
   timestamp: '2026-11-11T17:00:01.000Z',
   usageSegmentId: segment,
   totalInputTokens: input,
   totalOutputTokens: output,
-  cachedInputTokens: 40,
+  cachedInputTokens: cached,
   costUsd: input / 10000,
   result: 'Completed source work',
 });
@@ -129,7 +129,7 @@ describe('live runtime accounting and hard-stop ownership', () => {
       (async function* () {
         yield checkpoint(5000, 10, 'segment-a', 4900);
         expect(f.pod().status).toBe('running');
-        yield { ...complete(6000, 20), cachedInputTokens: 5900 };
+        yield complete(6000, 20, 'segment-a', 5900);
       })(),
     );
     expect(outcome).toBe('completed');
