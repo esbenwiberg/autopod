@@ -36,11 +36,11 @@ struct LaunchConfigurationEditor: View {
       if let section {
         Button("← All configuration") { self.section = nil }.buttonStyle(.plain).foregroundStyle(DesktopTheme.accent)
         Text(section.rawValue).font(.title2.weight(.semibold))
+        ConfigurationContextHelp(topicID: "launch.sections.\(section.id)")
         detail(section)
       } else {
         Text("Keep the defaults. Change what matters.").font(.title2.weight(.semibold))
-        Text("Inspect inherited values, choose a preset or edit this launch. Reusable configuration stays unchanged.")
-          .font(.callout).foregroundStyle(.secondary)
+        ConfigurationContextHelp(topicID: "launch.sections.overview")
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], spacing: 14) {
           ForEach(LaunchConfigurationSection.allCases) { item in
             Button { section = item } label: {

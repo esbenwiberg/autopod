@@ -100,7 +100,9 @@ public struct ConfigurationLibraryView: View {
             editor = nil; onDirtyChanged(false)
           },
           onDirtyChanged: onDirtyChanged, onBusyChanged: onBusyChanged, onOpenDocument: { edit($0) },
-          onOpenSidecarDefinitions: { document in edit(document, area: .sidecars) }, initialArea: target.area
+          onOpenSidecarDefinitions: { document in edit(document, area: .sidecars) },
+          onOpenValidationSource: { document in edit(document, area: document.kind == .repository ? .setups : .reviewer) },
+          initialArea: target.area
         ).id(target.id)
       } else {
         libraryBody
@@ -895,6 +897,7 @@ struct ConfigurationEditorSheet: View {
   private var onBusyChanged: (Bool) -> Void
   private var onOpenDocument: ((ConfigurationDocument) -> Void)?
   private var onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)?
+  private var onOpenValidationSource: ((ConfigurationDocument) -> Void)?
   private let initialName: String
   private let initialPayload: [String: ConfigurationJSON]
   @State private var area: ConfigurationEditorArea
@@ -926,12 +929,14 @@ struct ConfigurationEditorSheet: View {
     onBusyChanged: @escaping (Bool) -> Void = { _ in },
     onOpenDocument: ((ConfigurationDocument) -> Void)? = nil,
     onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)? = nil,
+    onOpenValidationSource: ((ConfigurationDocument) -> Void)? = nil,
     initialArea: ConfigurationEditorArea? = nil
   ) {
     self.kind = kind; self.document = document; self.draft = draft; self.actions = actions
     self.onClose = onClose; self.onDirtyChanged = onDirtyChanged; self.onBusyChanged = onBusyChanged;
     self.onOpenDocument = onOpenDocument
     self.onOpenSidecarDefinitions = onOpenSidecarDefinitions
+    self.onOpenValidationSource = onOpenValidationSource
     initialName = document?.name ?? draft.map { "\($0.libraryTitle) copy" } ?? ""
     initialPayload = document?.payload ?? draft?.payload ?? Self.initial(kind)
     self._area = State(initialValue: initialArea ?? ConfigurationEditorArea.areas(for: kind)[0])
@@ -946,6 +951,7 @@ struct ConfigurationEditorSheet: View {
     Group {
       if redesign { redesignedEditor } else { legacyEditor }
     }
+    .environment(\.configurationHelpSection, area.helpTopicID(for: kind))
     .textFieldStyle(.roundedBorder)
     .disabled(busy)
     .interactiveDismissDisabled(redesign && (hasChanges || busy))
@@ -956,8 +962,9 @@ struct ConfigurationEditorSheet: View {
         let next = afterDiscard; afterDiscard = nil
         onDirtyChanged(false)
         if let next { next() } else { close() }
-      }
+      }.accessibilityIdentifier("configuration-editor-discard")
       Button("Keep editing", role: .cancel) { afterDiscard = nil }
+        .accessibilityIdentifier("configuration-editor-keep-editing")
     } message: {
       Text("Your configuration draft has not been saved.")
     }
@@ -997,6 +1004,7 @@ struct ConfigurationEditorSheet: View {
     VStack(alignment: .leading, spacing: 12) {
       Text(document == nil ? (draft == nil ? "New \(kind.editorLabel)" : "Duplicate \(draft?.libraryTitle ?? "")") : "Edit \(document?.libraryTitle ?? "")").font(.title2.bold()).lineLimit(1).truncationMode(.middle)
       TextField(kind == .repository ? "Repository display name" : "\(kind.editorLabel) name", text: $name).textFieldStyle(.roundedBorder)
+      ConfigurationContextHelp(topicID: "\(kind.rawValue).sections.overview")
       if kind == .repository, name.contains("://"), let document {
         Button("Use short name: \(document.libraryTitle)") { name = document.libraryTitle }.font(.caption)
       }
@@ -1090,6 +1098,9 @@ struct ConfigurationEditorSheet: View {
           ScrollView {
             VStack(alignment: .leading, spacing: 20) {
               Text(area.rawValue).font(.title3.weight(.semibold))
+              if !area.hasDedicatedHelp(for: kind) {
+                ConfigurationContextHelp(topicID: area.helpTopicID(for: kind))
+              }
               if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                   .font(.callout).foregroundStyle(.red).textSelection(.enabled)
@@ -1307,7 +1318,7 @@ struct ConfigurationEditorSheet: View {
   private var aiForm: some View {
     VStack(alignment: .leading, spacing: 14) {
       if visible(.main) {
-        GroupBox("Main agent") { routeEditor(objectBinding("main"), showFailover: !redesign) }
+        GroupBox("Main agent") { routeEditor(objectBinding("main"), role: .main, showFailover: !redesign) }
         if redesign, let openProviderAccounts {
           Button("Manage provider accounts", systemImage: "person.2.badge.key") {
             requestClose {
@@ -1330,7 +1341,7 @@ struct ConfigurationEditorSheet: View {
           Text("Follow main").tag("follow-main"); Text("Independent account and model").tag("independent")
         }
         if payload["reviewer"]?["mode"]?.string == "independent" {
-          GroupBox("Independent reviewer") { routeEditor(reviewerRoute, showFailover: !redesign) }
+          GroupBox("Independent reviewer") { routeEditor(reviewerRoute, role: .reviewer, showFailover: !redesign) }
         }
         Text(
           "Each route owns its account, runtime, model and failover choices. Reviewer and Advisor usage share the reviewer token limit and whole-task budget."
@@ -1347,18 +1358,25 @@ struct ConfigurationEditorSheet: View {
           Text("Independent account and model").tag("independent")
         }
         if payload["advisor"]?["mode"]?.string == "independent" {
-          GroupBox("Independent Advisor") { routeEditor(advisorRoute, showFailover: !redesign) }
+          GroupBox("Independent Advisor") { routeEditor(advisorRoute, role: .advisor, showFailover: !redesign) }
         }
         Text("Advisor handles AI consultations. Reviewer handles automated review. Both share the reviewer token limit and whole-task budget.")
           .font(.caption).foregroundStyle(.secondary)
       }
       if redesign && area == .failover {
-        if payload["advisor"]?["mode"]?.string == "independent" {
-          GroupBox("Advisor failover") { routeEditor(advisorRoute, showTarget: false) }
+        ConfigurationHelpSummary(topic: .topic("ai.failover"))
+        // Preserve the existing Advisor-first order when its route is independent.
+        if ConfigurationAdvisorSelection.mode(payload) == "independent" {
+          GroupBox("Advisor failover") { routeEditor(advisorRoute, role: .advisor, showTarget: false) }
         }
-        GroupBox("Main agent failover") { routeEditor(objectBinding("main"), showTarget: false) }
+        GroupBox("Main agent failover") { routeEditor(objectBinding("main"), role: .main, showTarget: false) }
         if payload["reviewer"]?["mode"]?.string == "independent" {
-          GroupBox("Reviewer failover") { routeEditor(reviewerRoute, showTarget: false) }
+          GroupBox("Reviewer failover") { routeEditor(reviewerRoute, role: .reviewer, showTarget: false) }
+        } else {
+          ConfigurationFollowedFailover(role: .reviewer, source: "Main agent")
+        }
+        if ConfigurationAdvisorSelection.mode(payload) != "independent" {
+          ConfigurationFollowedFailover(role: .advisor, source: ConfigurationAdvisorSelection.mode(payload) == "follow-main" ? "Main agent" : "Reviewer")
         }
       }
     }
@@ -1374,21 +1392,15 @@ struct ConfigurationEditorSheet: View {
       set: { payload["reviewer"] = .object(["mode": .string("independent"), "route": .object($0)]) })
   }
   private func routeEditor(
-    _ route: Binding<[String: ConfigurationJSON]>, showTarget: Bool = true, showFailover: Bool = true
+    _ route: Binding<[String: ConfigurationJSON]>, role: ConfigurationFailoverRole,
+    showTarget: Bool = true, showFailover: Bool = true
   ) -> some View {
     VStack(alignment: .leading, spacing: 14) {
       if showTarget { ConfigurationAgentTargetEditor(fields: route, accounts: accounts) }
       if showFailover {
-        Stepper(
-          "Maximum failover switches: \(Int(route.wrappedValue["maxHops"]?.number ?? 0))",
-          value: Binding(
-            get: { Int(route.wrappedValue["maxHops"]?.number ?? 0) },
-            set: { route.wrappedValue["maxHops"] = .number(Double($0)) }), in: 0...16)
-        Text("Fallbacks are tried in order. Zero switches disables failover.").font(.caption).foregroundStyle(
-          .secondary)
-        ConfigurationObjectListEditor(title: "Fallback models", values: Binding(get: { route.wrappedValue["failover"]?.array ?? [] }, set: { route.wrappedValue["failover"] = .array($0) }), initial: {
-        Self.initialRoute.filter { !["failover", "maxHops"].contains($0.key) }
-      }) { ConfigurationAgentTargetEditor(fields: $0, accounts: accounts) }
+        ConfigurationFailoverEditor(
+          route: route, role: role, accounts: accounts,
+          initialTarget: Self.initialRoute.filter { !["failover", "maxHops"].contains($0.key) })
       }
     }.padding(6)
   }
@@ -1406,33 +1418,10 @@ struct ConfigurationEditorSheet: View {
       }
       }
       if visible(.validation) {
-        ConfigurationSection(title: "Validation checks") {
-          LazyVGrid(
-            columns: [
-              GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading),
-            ], alignment: .leading, spacing: 10
-          ) {
-            ForEach(
-              ["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review"],
-              id: \.self
-            ) { phase in
-              Toggle(
-                phase.capitalized,
-                isOn: Binding(
-                  get: { payload["validationPhases"]?.array?.contains(.string(phase)) ?? false },
-                  set: { enabled in
-                    var values = payload["validationPhases"]?.array ?? [];
-                    values.removeAll { $0 == .string(phase) }; if enabled { values.append(.string(phase)) };
-                    payload["validationPhases"] = .array(values)
-                  }))
-            }
-          }
-          Toggle("Advisory browser QA", isOn: Binding(
-            get: { ConfigurationAdvisoryBrowserQA.isEnabled(payload) },
-            set: { ConfigurationAdvisoryBrowserQA.setEnabled($0, in: &payload) }))
-            .accessibilityIdentifier("workflow-advisory-browser-qa")
-        Stepper("Validation attempts: \(workflowInteger("maxValidationAttempts", fallback: 3))", value: integerBinding("maxValidationAttempts", fallback: 3), in: 1...10)
-      }
+        ConfigurationWorkflowValidationEditor(payload: $payload, documents: actions.documents,
+          openSource: onOpenValidationSource.map { open in
+            { document in requestClose { onDirtyChanged(false); open(document) } }
+          })
       }
       if visible(.budgets) {
         ConfigurationSection(
@@ -1620,15 +1609,7 @@ struct ConfigurationEditorSheet: View {
         ) { ConfigurationCliToolEditor(fields: $0) }
       }
       if visible(.instructions) {
-        ConfigurationObjectListEditor(
-          title: "Instructions", values: arrayBinding("instructions"),
-          initial: { ["heading": .string(""), "content": .string("")] }
-        ) { fields in
-          VStack {
-            ConfigurationTextValue(title: "Heading", fields: fields, key: "heading");
-            ConfigurationTextValue(title: "Instructions", fields: fields, key: "content", multiline: true)
-          }
-        }
+        ConfigurationToolPackInstructionsEditor(payload: $payload)
       }
       if visible(.integrations) {
         ConfigurationObjectListEditor(
@@ -1654,7 +1635,9 @@ struct ConfigurationEditorSheet: View {
           }
         )
       }
-      Text("Tool packs provide CLI tools, skills, MCP servers and instructions. Selected CLIs are installed automatically; access is selected separately.").font(.caption).foregroundStyle(.secondary)
+      if !redesign || area != .instructions {
+        Text("Tool packs provide CLI tools, skills, MCP servers and instructions. Selected CLIs are installed automatically; access is selected separately.").font(.caption).foregroundStyle(.secondary)
+      }
     }
   }
   private func arrayBinding(_ key: String) -> Binding<[ConfigurationJSON]> { Binding(get: { payload[key]?.array ?? [] }, set: { payload[key] = .array($0) }) }

@@ -13,6 +13,7 @@ import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
+import { registerConfigurationHelp } from './configuration-help.js';
 import {
   extractClaudeOauthToken,
   isPiOAuthProviderId,
@@ -163,6 +164,7 @@ export function registerProviderAccountCommands(
     .command('provider-account')
     .alias('accounts')
     .description('Manage shared model-provider accounts');
+  registerConfigurationHelp(accounts, 'providerAccount');
 
   accounts
     .command('ls')

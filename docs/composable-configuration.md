@@ -216,3 +216,111 @@ Independent Advisor fallbacks appear in Failover (inline in the older editor).
 Reviewer and Advisor share `reviewerTokenBudget` and whole-task budget accounting,
 including unknown-usage reconciliation and cleanup guards; there is no separate
 Advisor budget. Non-composed legacy profiles retain their existing behavior.
+
+### Configuration explanations
+
+Desktop Failover shows a short purpose, off/empty-list status and clickable info
+buttons. The buttons open explanations without changing the draft; examples and
+JSON paths are collapsed until requested. Backup account/runtime/model/effort
+fields have their own help. Followed Reviewer/Advisor routes are identified rather
+than creating hidden independent settings.
+
+Main-agent automatic continuation requires a confirmed usage/quota limit and safe
+execution settlement. It is not a general outage or test-failure fallback. Isolated
+Reviewer/Advisor calls instead try supported authentication/provider-unavailable
+alternatives only with measured usage and within the shared call deadline. A zero
+switch limit or an empty backup list disables alternatives for either case.
+
+The same static help is available offline, without connecting to a daemon:
+
+```sh
+ap preset ai explain
+ap preset ai explain main.failover
+ap preset ai explain reviewer.route.failover
+ap preset ai explain main.maxHops
+ap preset ai explain --list
+ap preset ai explain 'main.failover[0].model' --json
+```
+
+Workflow → Validation uses the same pattern for all ten phases and the attempt
+limit: short descriptions, source mappings and expandable explanations. Source
+links let you choose a saved Repository or AI setup to inspect; they do not select
+a launch default or claim that a shared Workflow has one effective command. Links
+to Repository project setups or AI Reviewer retain the unsaved-change guard.
+
+```sh
+ap preset workflow explain
+ap preset workflow explain validation.build
+ap preset workflow explain validation.facts
+ap preset workflow explain validation.advisory
+ap preset workflow explain maxValidationAttempts
+ap preset workflow explain --list --json
+```
+
+Workflow enables checks; Repository setups supply commands/web targets, the task
+supplies structured acceptance facts, and AI setup selects Reviewer. Missing
+required commands can block launch. Pages need passing Health and configured
+pages; Facts without required facts skip. Advisory browser QA needs passing
+blocking checks/Health, a web UI and a scenario/human-review checklist; it is not a
+blocking acceptance gate. The first validation run counts toward the attempt limit.
+These explanations do not change phase selections or defaults.
+
+Tool pack → Instructions explains reusable guidance included in the main agent's
+instructions when that pack is selected. Heading and text fields have expandable
+help for formatting, limits, ordering and the distinction from skills, CLI tools,
+MCP connections and enforceable permissions. An empty pack adds no extra sections;
+opening help does not change its payload. Repository instruction files are not
+overwritten. Do not assume this text is copied into every Reviewer/Advisor prompt,
+and never put credentials in instruction prose.
+
+```sh
+ap preset tool-pack explain
+ap preset tool-pack explain instructions.heading
+ap preset tool-pack explain 'instructions[0].content' --json
+ap preset tool-pack explain --list
+```
+
+### All configuration and operating settings
+
+Every composable editor area has a short purpose and visible impact line, plus a
+keyboard-accessible **Settings explained** browser. Search by setting name or JSON
+path, including conditional and currently empty settings. Field info buttons open
+the same details directly where a field has an unambiguous mapping. Choices,
+examples and JSON paths are collapsed; reading help never writes configuration.
+
+Coverage includes all eight configuration kinds, Repository setup subsections,
+launch-only selections/allocation, Provider Accounts, watchers, deployment,
+Podsitter and local app settings. Scope is explicit: daemon-hosted Docker is not
+necessarily this Mac; credentials, software, permission and execution capacity
+are separate. Preview/selection does not execute work, activate PIM or approve
+deployment. Sidecar allocation maps replace rather than recursively merge the
+Profile map; inspect resolved Preview after changing one.
+
+Offline CLI examples:
+
+```sh
+ap profile explain environmentId
+ap profile explain 'execution.sidecars.database.memoryGb'
+ap repository explain 'setups[0].buildCommand'
+ap preset environment explain template
+ap preset github-access explain 'rules[0].operations'
+ap provider-account explain --list
+ap watcher explain --list
+ap deployment explain --list
+ap explain --kind launch --list
+ap explain --kind app theme
+ap explain --kind podsitter --list --json
+```
+
+`ap explain --kind <kind>` also covers desktop-only settings as an offline guide,
+not commands that alter those preferences. Existing AI/Workflow/Tool-pack default
+explain topics are retained; `--list` exposes all their settings. Existing
+`show`, `--payload` and JSON configuration output are unchanged. Editing a
+reusable block affects future launches, not captured configuration in running pods.
+
+Help content is canonical in `packages/shared/src/configuration-help/{failover,validation,instructions,settings}.json`.
+After changing it, run `node scripts/sync-configuration-help.mjs` to update the
+checked-in Swift resources. Shared tests check byte parity and schema-field
+coverage; `node scripts/sync-configuration-help.mjs --check` checks parity alone.
+Validation phase topic IDs such as `validation.build` are help topics, not extra
+object keys under the `validationPhases` JSON array.

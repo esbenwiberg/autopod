@@ -43,6 +43,7 @@ struct RepositorySetupEditor: View {
         }
       }.frame(width: 138)
       VStack(alignment: .leading, spacing: 12) {
+        ConfigurationContextHelp(topicID: "repository.sections.\(String(describing: section))")
         switch section {
         case .commands: commands
         case .validation: validation
@@ -60,6 +61,7 @@ struct RepositorySetupEditor: View {
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    .environment(\.configurationHelpSection, "repository.sections.\(String(describing: section))")
   }
   private var commands: some View {
     ConfigurationSection(title: "Commands & paths", subtitle: "Commands run inside this repository's workspace. Empty optional commands are disabled.") {

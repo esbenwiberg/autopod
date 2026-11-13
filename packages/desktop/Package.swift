@@ -27,7 +27,7 @@ let package = Package(
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
             path: "Sources/AutopodUI",
-            resources: [.copy("Resources/Village")]
+            resources: [.copy("Resources/Village"), .copy("Resources/ConfigurationHelp")]
         ),
         .target(
             name: "AutopodClient",

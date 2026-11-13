@@ -28,6 +28,10 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
     case trust = "Trust & identity"
     case advanced = "Complete JSON"
     var id: String { rawValue }
+    func helpTopicID(for kind: ConfigurationKind) -> String { "\(kind.rawValue).sections.\(String(describing: self))" }
+    func hasDedicatedHelp(for kind: ConfigurationKind) -> Bool {
+        (kind == .ai && self == .failover) || (kind == .workflow && self == .validation) || (kind == .toolPack && self == .instructions)
+    }
     static func areas(for kind: ConfigurationKind) -> [Self] {
         switch kind {
         case .profile: [.composition, .execution, .network, .sidecars, .access, .advanced]

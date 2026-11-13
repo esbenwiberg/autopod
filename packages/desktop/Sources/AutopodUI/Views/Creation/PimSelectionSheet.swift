@@ -61,6 +61,7 @@ struct PimSelectionSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       if !redesign { Text("Choose eligible PIM access").font(.title2.bold()) }
+      ConfigurationContextHelp(topicID: "profile.sections.access")
       Text("Same configured account. Saving selections does not activate access.").foregroundStyle(.secondary)
       HStack {
         TextField("Search roles and scopes", text: $search).textFieldStyle(.roundedBorder)

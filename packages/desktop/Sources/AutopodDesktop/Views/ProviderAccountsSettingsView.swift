@@ -59,6 +59,7 @@ struct ProviderAccountsSettingsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+      ConfigurationContextHelp(topicID: "providerAccount.sections.overview")
 
       if let onConfigurePresets {
         HStack {
@@ -894,6 +895,7 @@ struct ProviderAPIKeySheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       if !redesign { Text("Replace \(provider.displayName) API Key").font(.headline) }
+      ConfigurationContextHelp(topicID: "providerAccount.sections.overview")
       Text("Enter a new key for \(accountName). The stored secret is never displayed.")
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -1011,6 +1013,7 @@ struct FoundryCredentialsSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       if !redesign { Text("Foundry Credentials").font(.headline) }
+      ConfigurationContextHelp(topicID: "providerAccount.sections.overview")
       Text("Replaces the endpoint and key for \(accountName). The stored secret is never displayed.")
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -1088,6 +1091,7 @@ struct ProviderAccountCreateSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       if !redesign { Text("New Provider Account").font(.headline) }
+      ConfigurationContextHelp(topicID: "providerAccount.sections.overview")
 
       if let errorMessage {
         Text(errorMessage)
@@ -1245,6 +1249,7 @@ struct ProviderAccountImportSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
+      ConfigurationContextHelp(topicID: "providerAccount.sections.overview")
       if !redesign { Text("Import Provider Credentials").font(.headline) }
 
       if let errorMessage {

@@ -9,6 +9,7 @@ import {
 } from '@autopod/shared';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
+import { registerConfigurationHelp, registerRootConfigurationHelp } from './configuration-help.js';
 import { configurationId } from './launch-request.js';
 import { readSecret } from './provider-account.js';
 
@@ -109,13 +110,26 @@ function registerEntityCommands(
   getClient: () => AutopodClient,
 ): void {
   addPresetAuthoringHelp(command, kind);
-  if (kind === 'ai')
+  registerConfigurationHelp(command, kind);
+  if (kind === 'toolPack')
+    command.addHelpText(
+      'after',
+      '\nFor instruction guidance: ap preset tool-pack explain (offline).\n',
+    );
+  if (kind === 'workflow')
+    command.addHelpText(
+      'after',
+      '\nFor validation guidance: ap preset workflow explain (offline).\n',
+    );
+  if (kind === 'ai') {
     command.addHelpText(
       'after',
       '\nAI presets configure main, reviewer (automated review), and optional advisor (consultations). ' +
         'Advisor modes: follow-main, follow-reviewer (default when absent), independent with a full route. ' +
-        'Reviewer and Advisor share reviewerTokenBudget and whole-task accounting.\n',
+        'Reviewer and Advisor share reviewerTokenBudget and whole-task accounting.\n' +
+        'For failover guidance: ap preset ai explain (offline).\n',
     );
+  }
   command
     .command('list')
     .alias('ls')
@@ -212,6 +226,7 @@ export function registerConfigurationCommands(
   program: Command,
   getClient: () => AutopodClient,
 ): void {
+  registerRootConfigurationHelp(program);
   const feeds = program
     .command('package-feed')
     .description('Reusable package feeds (PAT entry is interactive and never an argument)');
@@ -277,6 +292,7 @@ export function registerConfigurationCommands(
   const deployment = program
     .command('deployment')
     .description('Request and review deployment of the published default branch');
+  registerConfigurationHelp(deployment, 'deployment');
   deployment
     .command('reconcile <run-id>')
     .requiredOption('--digest <digest>', 'Exact deployment approval digest')
@@ -383,6 +399,7 @@ export function registerConfigurationCommands(
   ] as const)
     registerEntityCommands(presets.command(name), kind, getClient);
   const watcher = program.command('watcher').description('Configure repository issue watchers');
+  registerConfigurationHelp(watcher, 'watcher');
   watcher
     .command('list')
     .option('--json', 'Full watcher configuration')

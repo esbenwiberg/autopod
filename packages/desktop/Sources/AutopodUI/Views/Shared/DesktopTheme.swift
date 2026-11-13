@@ -87,7 +87,7 @@ public struct DesktopAppearanceSettings: View {
                     Text("THIS MAC").font(.system(size: 9, weight: .medium)).tracking(1.2).foregroundStyle(
                         .secondary)
                     Text("Appearance").font(.title2.weight(.semibold))
-                    Text("Choose how Autopod looks.").font(.callout).foregroundStyle(.secondary)
+                    ConfigurationContextHelp(topicID: "app.sections.appearance")
                     DesktopPanel(title: "Theme") {
                         Text("A palette for your workspace. Saved on this Mac and applied immediately.")
                             .font(.callout).foregroundStyle(.secondary)
@@ -118,6 +118,7 @@ public struct DesktopAppearanceSettings: View {
         } else {
             Form {
                 Section("Appearance") {
+                    ConfigurationContextHelp(topicID: "app.sections.appearance")
                     DesktopAppearancePicker()
                     Text("Enable the new desktop interface below to choose a workspace theme.")
                         .font(.caption).foregroundStyle(.secondary)

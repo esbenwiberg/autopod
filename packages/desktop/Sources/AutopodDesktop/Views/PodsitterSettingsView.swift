@@ -30,6 +30,7 @@ struct PodsitterSettingsView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 14) {
           authorityWarning
+          ConfigurationContextHelp(topicID: "podsitter.sections.overview")
           decisionModel
           authorization
           providerStatus

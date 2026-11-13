@@ -307,9 +307,7 @@ public struct SettingsView: View {
                 .buttonStyle(.borderless)
                 .help("Add daemon connection")
             }
-            Text("Saved daemon connections.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            ConfigurationContextHelp(topicID: "app.sections.connections")
 
             let connections = ConnectionStore.loadAll()
 
@@ -548,9 +546,7 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Notifications")
                 .font(.title3.weight(.semibold))
-            Text("Control which events trigger macOS notifications.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            ConfigurationContextHelp(topicID: "app.sections.notifications")
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Escalation (agent needs input)", isOn: $notifyEscalation)
@@ -585,9 +581,7 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Logs")
                 .font(.title3.weight(.semibold))
-            Text("Control which events appear in the pod log viewer.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            ConfigurationContextHelp(topicID: "app.sections.logs")
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Show reasoning / thinking events", isOn: $showReasoning)
@@ -614,6 +608,7 @@ public struct SettingsView: View {
 
     private var aboutContent: some View {
         VStack(spacing: 12) {
+            ConfigurationContextHelp(topicID: "app.sections.about")
             Spacer()
             Image(systemName: "server.rack")
                 .font(.system(size: 36))

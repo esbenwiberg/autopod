@@ -1,5 +1,11 @@
 export { canonicalConfiguration } from './canonical-configuration.js';
-
+export {
+  type ConfigurationHelpKind,
+  type ConfigurationHelpTopic,
+  configurationHelpKinds,
+  configurationHelpTopics,
+  findConfigurationHelp,
+} from './configuration-help/index.js';
 // Constants (runtime values)
 export {
   AUTOPOD_INSTRUCTIONS_PATH,

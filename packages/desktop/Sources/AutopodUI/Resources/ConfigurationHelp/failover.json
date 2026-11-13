@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "topics": [
+    {
+      "id": "ai.failover",
+      "title": "Failover",
+      "summary": "Choose backup accounts and models for supported provider failures.",
+      "whenToUse": "Optional: use backups when you want work to continue without waiting for you to select another account.",
+      "behavior": "Backups are tried in order, within the switch limit. Main-agent continuation and Reviewer/Advisor calls have different failure conditions; see each role for details.",
+      "defaultBehavior": "Off by default: zero switches or an empty backup list means no automatic alternative.",
+      "impact": "Backup accounts may have different costs and data handling. Changes apply to future launches, not running pods.",
+      "example": "Add a compatible second account and model, then allow one switch. The primary attempt does not count as that switch.",
+      "paths": []
+    },
+    {
+      "id": "ai.failover.main",
+      "title": "Main agent failover",
+      "summary": "Continues work after a confirmed account usage or quota limit.",
+      "whenToUse": "Use a backup if the main account may reach its usage limit during a task.",
+      "behavior": "AutoPod settles the current execution and checks that work can be continued safely before trying a compatible backup. It does not switch automatically for general outages, authentication errors, failing tests or infrastructure problems.",
+      "defaultBehavior": "Without an enabled, usable backup, AutoPod pauses at a confirmed provider limit for operator intervention.",
+      "impact": "Continuation uses preserved work and a handoff; it is not an identical native conversation moved between runtimes. Task budgets are not reset.",
+      "example": "Your primary account reaches its confirmed usage limit. AutoPod can continue preserved work on the next eligible configured account.",
+      "paths": ["main.failover"]
+    },
+    {
+      "id": "ai.failover.reviewer",
+      "title": "Reviewer failover",
+      "summary": "Retries supported authentication or provider-availability failures.",
+      "whenToUse": "Use backups to avoid losing an automated review to a supported provider failure.",
+      "behavior": "Isolated review calls try alternatives only for supported authentication or provider-unavailable errors when usage is measured. Retries share the call deadline. Unknown usage or unsafe execution is not permission for a blind retry.",
+      "defaultBehavior": "Follow main reuses the main route and its backups, but review-call failure rules still apply. Independent mode uses the Reviewer's own route.",
+      "impact": "Reviewer and Advisor calls share the reviewer token limit and whole-task accounting. A review finding does not itself trigger model failover.",
+      "example": "A review call reports a supported provider-unavailable error with measured usage. The next configured target can be tried within the remaining deadline.",
+      "paths": ["reviewer.route.failover"]
+    },
+    {
+      "id": "ai.failover.advisor",
+      "title": "Advisor failover",
+      "summary": "Uses review-call retry rules for AI consultations.",
+      "whenToUse": "Use backups for supported provider failures during an AI consultation.",
+      "behavior": "Isolated Advisor calls use the same supported authentication/provider-unavailable retry conditions, measured-usage requirement and shared deadline as Reviewer calls. Selecting a route does not enable consultations; Workflow controls that.",
+      "defaultBehavior": "When Advisor is absent it follows Reviewer. Follow main or follow reviewer reuses that role's route; independent mode has its own backups.",
+      "impact": "Advisor and Reviewer share the reviewer token limit and whole-task accounting.",
+      "example": "An independent Advisor can have a backup account without changing the main agent's or Reviewer's configured route.",
+      "paths": ["advisor.route.failover"]
+    },
+    {
+      "id": "ai.failover.switches",
+      "title": "Maximum failover switches",
+      "summary": "Limits how many automatic alternatives may be tried.",
+      "whenToUse": "Use a small limit to bound switching between backup accounts and models.",
+      "behavior": "The primary attempt is not a switch. A limit does not create extra backups; only configured alternatives can be used.",
+      "defaultBehavior": "0 disables failover even when backup rows are saved. Supported range: 0–16.",
+      "impact": "A positive limit with no backups is still off. An enabled policy does not guarantee that a backup is eligible when needed.",
+      "example": "With two backups and a limit of 1, at most one automatic alternative is tried. Zero leaves both rows saved but inactive.",
+      "paths": ["main.maxHops", "reviewer.route.maxHops", "advisor.route.maxHops"]
+    },
+    {
+      "id": "ai.failover.account",
+      "title": "Backup provider account",
+      "summary": "Chooses the enrolled account that authenticates and pays for this backup.",
+      "whenToUse": "Select an account with valid credentials for the intended provider and runtime.",
+      "behavior": "Each backup is a complete account, runtime, model and reasoning-effort selection. The account must remain available and compatible at execution time.",
+      "defaultBehavior": "No account is inferred from the model name. A saved unavailable account is retained for you to replace, not silently substituted.",
+      "impact": "Switching accounts can change billing and the provider handling task data. Selecting an account here does not sign in or create credentials.",
+      "example": "Select a second enrolled account, then choose a runtime and model supported by that account.",
+      "paths": [
+        "main.failover[].providerAccountId",
+        "reviewer.route.failover[].providerAccountId",
+        "advisor.route.failover[].providerAccountId"
+      ]
+    },
+    {
+      "id": "ai.failover.runtime",
+      "title": "Backup runtime",
+      "summary": "Chooses the agent integration used to run this backup.",
+      "whenToUse": "Match Claude, Codex, Copilot or Pi to the selected account's supported integration.",
+      "behavior": "Runtime is not the model or the account. AutoPod validates compatibility with the selected provider account.",
+      "defaultBehavior": "A displayed runtime is a selection, not proof that the account supports it.",
+      "impact": "Different runtimes can have different tools and session behavior; native conversation state is not copied unchanged between them.",
+      "example": "An Anthropic account normally uses Claude; an OpenAI account normally uses Codex.",
+      "paths": [
+        "main.failover[].runtime",
+        "reviewer.route.failover[].runtime",
+        "advisor.route.failover[].runtime"
+      ],
+      "options": {
+        "claude": "Claude integration.",
+        "codex": "Codex integration.",
+        "copilot": "Copilot integration.",
+        "pi": "Pi integration."
+      }
+    },
+    {
+      "id": "ai.failover.model",
+      "title": "Backup model",
+      "summary": "Chooses the model requested when this backup is used.",
+      "whenToUse": "Choose an available model supported by the backup account and runtime.",
+      "behavior": "Enter the provider/runtime's model identifier. A model name alone does not supply credentials or select a provider account.",
+      "defaultBehavior": "The saved model is requested explicitly; the backup is not chosen simply because a different model might produce a better result.",
+      "impact": "Capability, token cost and data handling can differ from the primary model.",
+      "example": "Use an exact model identifier supported by the selected account rather than a display name copied from another provider.",
+      "paths": [
+        "main.failover[].model",
+        "reviewer.route.failover[].model",
+        "advisor.route.failover[].model"
+      ]
+    },
+    {
+      "id": "ai.failover.effort",
+      "title": "Backup reasoning effort",
+      "summary": "Adjusts reasoning effort where the selected runtime and model support it.",
+      "whenToUse": "Use higher effort for difficult work when additional latency and token use are acceptable.",
+      "behavior": "Auto leaves effort to the runtime default. Explicit low, medium, high or extra-high effort is subject to runtime/model support.",
+      "defaultBehavior": "Auto is the default; it does not mean that reasoning is disabled.",
+      "impact": "Higher effort can increase response time and token use. This is unrelated to the desktop's show-reasoning display preference.",
+      "example": "Keep Auto for normal work; choose High deliberately for a difficult backup task.",
+      "paths": [
+        "main.failover[].reasoningEffort",
+        "reviewer.route.failover[].reasoningEffort",
+        "advisor.route.failover[].reasoningEffort"
+      ],
+      "options": {
+        "auto": "Runtime default.",
+        "low": "Lower effort.",
+        "medium": "Medium effort.",
+        "high": "Higher effort.",
+        "xhigh": "Extra-high effort where supported."
+      }
+    }
+  ]
+}
