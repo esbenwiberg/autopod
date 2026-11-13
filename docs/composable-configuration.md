@@ -6,6 +6,33 @@ A repository owns source identity and project setups. An environment owns softwa
 
 Images are identified by software configuration. Changing repository, AI account or container size does not create a different software identity. Repository preparation and caches remain scoped to the enrolled repository and selected setup.
 
+## Author reusable presets
+
+Reuse before creating: use `ap preset list --kind environment --json` (or `workflow`
+or `tool-pack`), then `ap preset <kind> show <name-or-id> --json` to inspect complete
+definitions. Inspect their references in profiles and launch consumers before reuse
+or archival; a similar name alone does not establish compatibility. Create a new
+preset only for a reusable difference, and name it by capability, policy or stack
+rather than repository (for example, `node22-postgres`, `review-required` or
+`browser-tools`). Parent, `create --help` and `update --help` repeat this guidance.
+
+- Environments own reusable runtimes, versions, tooling and sidecars. Repository
+  identity and project install/prep/build/test commands belong in repository setups.
+- Workflows own reusable validation, output, approval, retry and budget policy.
+  Keep genuinely different safety/policy variants; repository identity and one-off
+  task missions are not workflow boundaries.
+- Tool packs own reusable agent capabilities: skills, MCP connections, CLI tools
+  and their usage guidance. Instruction-only reusable safety packs are legitimate.
+  Repository product rules and safety conventions belong in source-controlled
+  `AGENTS.md`, `CLAUDE.md` or linked canonical docs; task-specific mission and
+  acceptance belong in the task brief/spec.
+
+For safe cleanup, inspect complete definitions and references first. Do not detach
+safety instructions until their source owner is merged into the intended default
+source and available to future launches. Migrate live references deliberately
+before archiving an old preset. Preset edits and archival leave frozen launches
+and history unchanged; this guidance does not automatically consolidate presets.
+
 ## Launch and inspect
 
 ```sh

@@ -6,6 +6,119 @@ import { registerConfigurationCommands, selectProfilePresets } from './configura
 
 afterEach(() => vi.restoreAllMocks());
 describe('configuration CLI', () => {
+  const categories = [
+    {
+      name: 'environment',
+      kind: 'environment',
+      guidance: [
+        'reusable runtimes, versions, tooling and sidecars',
+        'not repository identity or repository install/build steps',
+        'Repository setups own project prep/build/test commands',
+      ],
+    },
+    {
+      name: 'workflow',
+      kind: 'workflow',
+      guidance: [
+        'reusable validation, output, approval, retry and budget policy',
+        'not repository identity or a one-off task mission',
+        'Preserve genuinely different safety/policy variants',
+      ],
+    },
+    {
+      name: 'tool-pack',
+      kind: 'toolPack',
+      guidance: [
+        'skills, MCP connections, CLI tools and their usage guidance',
+        'Instruction-only reusable safety packs are legitimate',
+        'Repository product rules and safety conventions belong in source-controlled AGENTS.md, CLAUDE.md or linked canonical docs',
+        'task-specific mission and acceptance belong in the task brief/spec',
+      ],
+    },
+  ] as const;
+
+  for (const category of categories) {
+    for (const action of ['', 'create', 'update']) {
+      it(`renders standalone ${category.name} ${action || 'parent'} help without a client`, async () => {
+        let rendered = '';
+        const writeOut = vi.fn((text: string) => {
+          rendered += text;
+        });
+        const writeErr = vi.fn();
+        const getClient = vi.fn(() => {
+          throw new Error('Help must not create a client or contact the daemon');
+        });
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const program = new Command().name('ap');
+        // outputHelp emits addHelpText events; helpInformation alone omits them.
+        program.configureOutput({ writeOut, writeErr }).exitOverride();
+        registerConfigurationCommands(program, getClient);
+        const args = ['preset', category.name, ...(action ? [action] : []), '--help'];
+        await expect(program.parseAsync(args, { from: 'user' })).rejects.toMatchObject({
+          code: 'commander.helpDisplayed',
+          exitCode: 0,
+        });
+        expect(rendered).toContain('Usage: ap preset');
+        for (const text of [
+          'Reuse before creating',
+          'inspect complete definitions and references before reuse or archival',
+          'Create a new preset only for a reusable difference',
+          'Name presets by capability, policy or stack rather than repository',
+          'do not detach safety instructions until their source owner is on the intended default source',
+          'Frozen launches and history remain unchanged',
+          ...category.guidance,
+        ]) {
+          expect(rendered).toContain(text);
+        }
+        expect(getClient).not.toHaveBeenCalled();
+        expect(writeOut).toHaveBeenCalled();
+        expect(writeErr).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
+      });
+    }
+
+    for (const path of ['category', 'general']) {
+      it(`preserves ${category.name} ${path} JSON list output`, async () => {
+        const entries = [{ id: 'preset-id', name: 'Reusable preset', revision: 2 }];
+        const listConfigurations = vi.fn(async () => entries);
+        const getClient = vi.fn(() => ({ listConfigurations }) as unknown as AutopodClient);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const writeOut = vi.fn();
+        const program = new Command().configureOutput({ writeOut });
+        registerConfigurationCommands(program, getClient);
+        await program.parseAsync(
+          path === 'category'
+            ? ['preset', category.name, 'list', '--json']
+            : ['preset', 'list', '--kind', category.name, '--json'],
+          { from: 'user' },
+        );
+        expect(getClient).toHaveBeenCalledTimes(1);
+        expect(listConfigurations).toHaveBeenCalledExactlyOnceWith(category.kind);
+        expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify(entries, null, 2));
+        expect(writeOut).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it('preserves existing AI help', () => {
+    let rendered = '';
+    const program = new Command().configureOutput({
+      writeOut: (text) => {
+        rendered += text;
+      },
+    });
+    const getClient = vi.fn();
+    registerConfigurationCommands(program, getClient);
+    program.commands
+      .find((command) => command.name() === 'preset')
+      ?.commands.find((command) => command.name() === 'ai')
+      ?.outputHelp();
+    expect(rendered).toContain('Advisor modes: follow-main, follow-reviewer');
+    expect(rendered).toContain('Reviewer and Advisor share reviewerTokenBudget');
+    expect(rendered).not.toContain('Reuse before creating');
+    expect(getClient).not.toHaveBeenCalled();
+  });
+
   it('lists package feeds and tests the saved revision without any secret argument', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const entry = { id: 'feed', name: 'Company packages', revision: 3, archived: false };
