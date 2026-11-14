@@ -60,7 +60,9 @@ const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
 const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
 const DEFAULT_SANDBOX_USAGE_POLL_MS = 10_000;
 const DEFAULT_SANDBOX_FINAL_USAGE_TIMEOUT_MS = 30_000;
-const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 5_000;
+// Covers the in-container tree termination (bounded at 15 s) plus Docker exec
+// create/start on a busy host; a shorter bound reported verified kills as unverified.
+const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 30_000;
 const SANDBOX_CONFIG_COMMAND_TIMEOUT_MS = 30_000;
 const SANDBOX_CONFIG_COMMAND_ATTEMPTS = 2;
 const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
