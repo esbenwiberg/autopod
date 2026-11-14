@@ -266,6 +266,36 @@ sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database
   fi
 fi
 
+# ---- preflight: Docker network capacity (read-only, warning only) --------
+# Each local pod bridge consumes a dockerd address-pool subnet and retained
+# checkpoints never release theirs. A deploy neither fixes nor worsens this,
+# so only warn; enlarging pools is a separate host change (see
+# docs/hosted-daemon-docker-networks.md). Older daemons do not report it.
+note "checking Docker network capacity"
+NETWORK_HEALTH="$(curl -sS --max-time 15 "${HEALTH_URL}?detail=full" 2>/dev/null || true)"
+NETWORK_CAPACITY="$(printf '%s' "$NETWORK_HEALTH" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unreported"); sys.exit(0)
+n = (d.get("docker") or {}).get("networks") if isinstance(d, dict) else None
+if not isinstance(n, dict) or "severity" not in n:
+    print("unreported"); sys.exit(0)
+p = n.get("addressPools") or {}
+q = n.get("podNetworks") or {}
+v = lambda x: "?" if x is None else x
+print("%s headroom=%s pools=%s/%s (%s) autopod=%s retained=%s" % (
+    n["severity"], v(n.get("reclaimableHeadroom")), v(p.get("used")), v(p.get("capacity")),
+    p.get("source", "?"), v(q.get("total")), v(q.get("retained"))))
+' 2>/dev/null || true)"
+[ -n "$NETWORK_CAPACITY" ] || NETWORK_CAPACITY=unreported
+case "$NETWORK_CAPACITY" in
+  critical*|warning*)
+    note "WARN: Docker network capacity $NETWORK_CAPACITY — new local pods may fail with HOST_NETWORK_CAPACITY; deploying does not change this (see docs/hosted-daemon-docker-networks.md)" ;;
+  *) note "Docker network capacity: $NETWORK_CAPACITY" ;;
+esac
+
 # ---- deployment drain -----------------------------------------------------
 # The initial active-pod snapshot is not enough: a pod can be created while the
 # staged release builds. A durable daemon-owned drain closes admission, then we

@@ -73,6 +73,20 @@ bounded retry window is a deployment failure.
   `sudo -u ewi -H bash -lc 'cd /home/ewi/.autopod/worktrees/<pod> && npx playwright install chromium'`.
   Treat a waiver as a temporary operator decision, not durable browser coverage.
 
+- **Docker network capacity is a host condition, not a deploy step.** The
+  preflight prints `Docker network capacity: ...` from `/health?detail=full`
+  and warns on `warning` or `critical`. It never blocks. A deploy neither frees
+  nor consumes subnets. If it is critical, tell the user that new local pods
+  fail with `HOST_NETWORK_CAPACITY` until capacity is freed. Do not "fix" it
+  during a deploy:
+  - Never `docker network rm` retained-checkpoint bridges.
+  - Never edit `/etc/docker/daemon.json` or restart dockerd as part of a
+    deploy. Without `live-restore`, a dockerd restart stops every running pod
+    container.
+  - Enlarging `default-address-pools` is a separate operator procedure with
+    its own approval and maintenance window. See
+    `docs/hosted-daemon-docker-networks.md`.
+
 ## Rollback discipline
 
 Every successful run prints the exact rollback command (`--rollback <prev-sha>`).
