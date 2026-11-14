@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { BackupHealth } from '@autopod/shared';
+import type { BackupHealth, DockerNetworkCapacity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
+import { inspectNetworkCapacity } from '../../containers/docker-network-capacity.js';
 import type { DbBackupManager } from '../../db/backup.js';
 import type { PodQueue } from '../../pods/index.js';
 import { daemonRelease } from '../../release.js';
@@ -108,6 +109,19 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
       }
     }
 
+    // Bridge address-pool pressure: retained checkpoint networks are never
+    // pruned, so exhaustion blocks every new local pod (issue #565).
+    let networks: DockerNetworkCapacity | { error: string } | undefined;
+    if (docker && dockerConnected) {
+      try {
+        networks = await inspectNetworkCapacity({ docker, db });
+      } catch {
+        networks = { error: 'Docker network capacity unavailable' };
+      }
+    }
+    const networksCritical =
+      !!networks && 'severity' in networks && networks.severity === 'critical';
+
     let dbConnected = false;
     let migrationsApplied = 0;
     if (db) {
@@ -139,6 +153,7 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
     return {
       status:
         securityMlDegraded ||
+        networksCritical ||
         (db && !dbConnected) ||
         (docker && !dockerConnected) ||
         (deps.backupManager && backup.state !== 'fresh')
@@ -151,6 +166,7 @@ export function healthRoutes(app: FastifyInstance, deps: HealthDeps = {}): void 
       docker: {
         connected: dockerConnected,
         containers_running: containersRunning,
+        ...(networks ? { networks } : {}),
       },
       database: {
         connected: dbConnected,

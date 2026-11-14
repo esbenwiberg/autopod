@@ -520,7 +520,13 @@ export type {
   ReadinessStatus,
 } from './types/readiness.js';
 export * from './types/recovery-fork.js';
-export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
+export type {
+  BackupHealth,
+  DaemonHealthSummary,
+  DaemonReleaseInfo,
+  DockerNetworkCapacity,
+  DockerNetworkCapacitySeverity,
+} from './types/release.js';
 export type {
   RetainedFinalizationMode,
   RetainedFinalizationReceipt,

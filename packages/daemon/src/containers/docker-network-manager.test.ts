@@ -562,6 +562,15 @@ describe('DockerNetworkManager', () => {
       expect(removeFn).toHaveBeenCalledTimes(1);
     });
 
+    it('re-throws a non-subnet error from the post-prune retry unchanged', async () => {
+      docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
+      docker.mock.createNetwork
+        .mockRejectedValueOnce(new Error('all predefined address pools have been fully subnetted'))
+        .mockRejectedValueOnce(new Error('daemon unavailable'));
+      docker.mock.listNetworks.mockResolvedValueOnce([]);
+      await expect(manager.ensureNetworkForPod('pod-abc')).rejects.toThrow('daemon unavailable');
+    });
+
     it('re-throws non-subnet errors from createNetwork', async () => {
       docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
       docker.mock.createNetwork.mockRejectedValueOnce(new Error('server error'));

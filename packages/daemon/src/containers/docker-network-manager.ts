@@ -1,8 +1,9 @@
-import type {
-  InjectedMcpServer,
-  NetworkPolicy,
-  NetworkPolicyMode,
-  PrivateRegistry,
+import {
+  AutopodError,
+  type InjectedMcpServer,
+  type NetworkPolicy,
+  type NetworkPolicyMode,
+  type PrivateRegistry,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
@@ -13,6 +14,11 @@ import {
   retainedCheckpointNetworkIdentities,
 } from '../pods/retained-checkpoint-repository.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
+import {
+  DOCKER_SUBNET_EXHAUSTED,
+  HOST_NETWORK_CAPACITY,
+  NETWORK_CAPACITY_DOCS,
+} from './docker-network-capacity.js';
 import { generateHaproxyConfig, HAPROXY_LISTEN_PORT } from './haproxy-config.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
@@ -30,6 +36,34 @@ const SAFE_HOST_REGEX =
  */
 export function networkNameForPod(podId: string): string {
   return `autopod-${podId}`;
+}
+
+function isSubnetExhausted(err: unknown): boolean {
+  return ((err as { message?: string })?.message ?? '').includes(DOCKER_SUBNET_EXHAUSTED);
+}
+
+export interface SubnetPruneOutcome {
+  totalPodNetworks: number;
+  candidates: number;
+  removed: number;
+  retained: number;
+  attached: number;
+  failed: number;
+}
+
+/** Distinct, actionable failure once pruning could not free a bridge subnet. */
+export function hostNetworkCapacityError(outcome: SubnetPruneOutcome): AutopodError {
+  return new AutopodError(
+    `Host network capacity exhausted: Docker has no free address-pool subnet for a new pod ` +
+      `network. ${outcome.totalPodNetworks} autopod networks exist; ${outcome.retained} are held ` +
+      `by retained checkpoints, ${outcome.attached} are attached to containers, ` +
+      `${outcome.removed} unattached were pruned and ${outcome.failed} could not be inspected or ` +
+      `removed. Retained checkpoint networks are not released automatically. To free capacity, ` +
+      `kill failed pods you no longer need or enlarge Docker default-address-pools on the host ` +
+      `(${NETWORK_CAPACITY_DOCS}). Check pressure with \`ap health\`.`,
+    HOST_NETWORK_CAPACITY,
+    503,
+  );
 }
 
 export const DEFAULT_ALLOWED_HOSTS = [
@@ -247,12 +281,13 @@ export class DockerNetworkManager {
         logger: this.logger,
       });
     } catch (err: unknown) {
-      const msg = (err as { message?: string }).message ?? '';
-      if (msg.includes('all predefined address pools have been fully subnetted')) {
+      if (isSubnetExhausted(err)) {
         // Docker's default subnet pool is exhausted by orphaned autopod networks.
         // Prune any autopod network that has no containers attached (safe to
         // remove — active networks always have at least the pod or a sidecar).
+        // Networks held by retained custody are never removed here.
         this.logger.warn({ podId }, 'Subnet pool exhausted — pruning unattached autopod networks');
+        const prune = { candidates: 0, removed: 0, retained: 0, attached: 0, failed: 0 };
         const nets = await boundedDockerCall(
           this.docker.listNetworks({
             filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
@@ -263,30 +298,49 @@ export class DockerNetworkManager {
             logger: this.logger,
           },
         );
-        await Promise.all(
-          nets
-            .filter((n) => !n.Containers || Object.keys(n.Containers).length === 0)
-            .map(async (n) => {
-              try {
-                const network = this.docker.getNetwork(n.Id);
-                const live = await this.inspectNetworkCustody(network, n.Name);
-                if (live && Object.keys(live.Containers ?? {}).length > 0) return;
-                this.assertNetworkMutable(n.Name, Object.keys(live?.Containers ?? {}));
-                await boundedDockerCall(network.remove(), {
-                  label: 'network.remove',
-                  timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
-                  logger: this.logger,
-                });
-              } catch {
-                // best effort
-              }
-            }),
+        const candidates = nets.filter(
+          (n) => !n.Containers || Object.keys(n.Containers).length === 0,
         );
-        await boundedDockerCall(this.docker.createNetwork(networkConfig), {
-          label: 'network.create',
-          timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
-          logger: this.logger,
-        });
+        prune.candidates = candidates.length;
+        prune.attached = nets.length - candidates.length;
+        await Promise.all(
+          candidates.map(async (n) => {
+            try {
+              const network = this.docker.getNetwork(n.Id);
+              const live = await this.inspectNetworkCustody(network, n.Name);
+              if (live && Object.keys(live.Containers ?? {}).length > 0) {
+                prune.attached++;
+                return;
+              }
+              this.assertNetworkMutable(n.Name, Object.keys(live?.Containers ?? {}));
+              await boundedDockerCall(network.remove(), {
+                label: 'network.remove',
+                timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+                logger: this.logger,
+              });
+              prune.removed++;
+            } catch (pruneErr) {
+              // Best effort. Custody refusals (409) are expected for retained
+              // checkpoints and are counted separately from Docker failures.
+              if (pruneErr instanceof AutopodError && pruneErr.statusCode === 409) prune.retained++;
+              else prune.failed++;
+            }
+          }),
+        );
+        this.logger.warn(
+          { podId, totalPodNetworks: nets.length, ...prune },
+          'Subnet pool prune finished',
+        );
+        try {
+          await boundedDockerCall(this.docker.createNetwork(networkConfig), {
+            label: 'network.create',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
+            logger: this.logger,
+          });
+        } catch (retryErr) {
+          if (!isSubnetExhausted(retryErr)) throw retryErr;
+          throw hostNetworkCapacityError({ totalPodNetworks: nets.length, ...prune });
+        }
       } else {
         throw err;
       }

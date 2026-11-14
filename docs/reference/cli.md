@@ -28,7 +28,7 @@ still require a new interactive or device login.
 ```bash
 ap connect <url>             # Connect CLI to a daemon
 ap disconnect                # Disconnect
-ap health                   # Show daemon release and backup readiness
+ap health                   # Show daemon release, backup and Docker network readiness
 ap stop                     # Gracefully stop the daemon
 ```
 
