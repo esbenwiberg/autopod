@@ -71,6 +71,11 @@ Recommended dockerd setting for a pod host, giving 256 networks:
 }
 ```
 
+A pod bridge holds only the pod and a few sidecars, so a smaller `size`
+multiplies capacity. With `"size": 26`, the same /16 gives 1024 networks of 62
+addresses each. Prefer this if other workloads on the host don't need larger
+networks.
+
 Before you apply it:
 
 - **Choose a non-overlapping range.** The base must not overlap the VM's VNet
