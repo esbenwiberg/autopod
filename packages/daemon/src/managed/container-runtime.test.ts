@@ -486,6 +486,9 @@ it('pre-start cancellation creates a bound tombstone and prevents a delayed real
   }
 });
 
+// STOP_SUPERVISOR deliberately waits its full 3 s launch deadline while the lock is held,
+// plus two Python start-ups (about 3.1 s in pods), so state a budget instead of relying on
+// the 5 s default's remaining headroom under load.
 it('does not claim pre-start cancellation while the actual launch lock is held', () => {
   const root = mkdtempSync(join(tmpdir(), 'managed-stop-lock-'));
   try {
@@ -501,7 +504,7 @@ assert not (root/'execution.json').exists()
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 it('reports the trusted never-started receipt without a fabricated process exit code', async () => {
   const f = fixture();
