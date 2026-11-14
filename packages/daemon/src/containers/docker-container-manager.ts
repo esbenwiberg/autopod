@@ -1188,15 +1188,26 @@ export class DockerContainerManager implements ContainerManager {
         if (resolved) return;
         resolved = true;
         try {
-          const inspection = await boundedDockerCall(exec.inspect(), {
-            label: 'exec.inspect (execStreaming)',
-            timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
-            logger,
-            containerId: containerIdForLog,
-          });
-          if (inspection.Running !== false || !isObservedExitCode(inspection.ExitCode)) {
-            reject(unverifiedExecExit());
-          } else resolve(inspection.ExitCode);
+          // A locally destroyed transport (verified kill, forced close) can be
+          // observed before Docker records the exit. Re-inspect for a bounded
+          // interval; only a stopped exec with an exit code resolves.
+          for (let attempt = 0; ; attempt++) {
+            const inspection = await boundedDockerCall(exec.inspect(), {
+              label: 'exec.inspect (execStreaming)',
+              timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+              logger,
+              containerId: containerIdForLog,
+            });
+            if (inspection.Running === false && isObservedExitCode(inspection.ExitCode)) {
+              resolve(inspection.ExitCode);
+              return;
+            }
+            if (inspection.Running !== true || attempt >= STREAMING_EXIT_INSPECT_RETRIES) {
+              reject(unverifiedExecExit());
+              return;
+            }
+            await new Promise((settle) => setTimeout(settle, STREAMING_EXIT_INSPECT_INTERVAL_MS));
+          }
         } catch {
           reject(unverifiedExecExit());
         }
@@ -1213,13 +1224,22 @@ export class DockerContainerManager implements ContainerManager {
     // creating an unhandled rejection during that interval. Awaiting still rejects.
     void exitCode.catch(() => {});
 
-    const kill = async () => {
+    // Concurrent callers (abort plus a runtime's forced termination) share one
+    // in-flight termination instead of racing on the PID file.
+    let killing: Promise<void> | undefined;
+    const kill = (): Promise<void> => {
+      killing ??= terminate().finally(() => {
+        killing = undefined;
+      });
+      return killing;
+    };
+    const terminate = async () => {
       try {
         const termination = await this.execInContainer(
           containerId,
           ['sh', '-c', terminateStreamingProcessGroupScript(pidPath)],
           {
-            timeout: 5_000,
+            timeout: STREAMING_TERMINATION_TIMEOUT_MS,
           },
         );
         if (termination.exitCode !== 0) {
@@ -1273,7 +1293,7 @@ export class DockerContainerManager implements ContainerManager {
       const result = await this.execInContainer(
         identity.containerId,
         ['sh', '-c', terminateStreamingProcessGroupScript(identity.pidPath)],
-        { timeout: 5000 },
+        { timeout: STREAMING_TERMINATION_TIMEOUT_MS },
       );
       if (result.exitCode !== 0) throw unverifiedExecExit();
       current = await inspect();
@@ -1427,6 +1447,24 @@ interface DemuxWriterContext {
   logger: Logger;
 }
 
+/** Ceiling for the in-container tree termination (two 2 s signal rounds plus /proc scans). */
+const STREAMING_TERMINATION_TIMEOUT_MS = 15_000;
+/** Bounded re-inspection while Docker has not yet recorded a closed exec's exit. */
+const STREAMING_EXIT_INSPECT_RETRIES = 10;
+const STREAMING_EXIT_INSPECT_INTERVAL_MS = 250;
+
+/**
+ * Verified termination of a streaming exec and everything it started.
+ *
+ * The exec leader (`pid`) owns a dedicated session and process group, but agent
+ * CLIs start tool processes that leave both: Claude's Bash tool detaches
+ * background commands (`run_in_background`) into their own session, and such a
+ * child keeps the CLI alive after its final result. Members are therefore the
+ * leader's group, its session and every descendant (by parent PID), collected
+ * before signalling so orphans reparented to PID 1 stay tracked. Each member is
+ * recorded with its kernel start time, so a recycled PID is never signalled or
+ * mistaken for a survivor. Exit 0 only when no non-zombie member remains.
+ */
 export function terminateStreamingProcessGroupScript(pidPath: string): string {
   return [
     `pid_file=${pidPath}`,
@@ -1434,14 +1472,26 @@ export function terminateStreamingProcessGroupScript(pidPath: string): string {
     'pid=$(cat "$pid_file")',
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
     '[ -d /proc/1 ] || exit 1',
-    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; IFS= read -r stat < "$stat_file" || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    'self=$$',
+    'tree=" "',
+    // Fixed point over /proc: leader, group/session members and descendants.
+    'collect() { changed=1; while [ "$changed" = 1 ]; do changed=0; for stat_file in /proc/[0-9]*/stat; do stat=; { IFS= read -r stat < "$stat_file"; } 2>/dev/null || continue; p=${stat%% *}; [ "$p" = "$self" ] && continue; case "$tree" in *" $p:"*) continue;; esac; rest=${stat##*) }; set -- $rest; member=0; if [ "$p" = "$pid" ] || [ "$3" = "$pid" ] || [ "$4" = "$pid" ]; then member=1; else case "$tree" in *" $2:"*) member=1;; esac; fi; [ "$member" = 1 ] || continue; tree="$tree$p:${20} "; changed=1; done; done; return 0; }',
+    // A recorded member is live when the same process (PID and start time) is not a zombie.
+    'member_live() { started=$2; stat=; { IFS= read -r stat < "/proc/$1/stat"; } 2>/dev/null || return 1; rest=${stat##*) }; set -- $rest; [ "$1" != "Z" ] && [ "${20}" = "$started" ]; }',
+    'tree_alive() { for entry in $tree; do member_live "${entry%%:*}" "${entry#*:}" && return 0; done; return 1; }',
+    'signal_tree() { kill -"$1" -"$pid" 2>/dev/null || true; for entry in $tree; do member_live "${entry%%:*}" "${entry#*:}" && kill -"$1" "${entry%%:*}" 2>/dev/null; done; return 0; }',
+    'collect',
     'kill -TERM -"$pid" 2>/dev/null || true',
+    'signal_tree TERM',
     'i=0',
-    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'while collect && tree_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'collect',
     'kill -KILL -"$pid" 2>/dev/null || true',
+    'signal_tree KILL',
     'i=0',
-    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
-    'group_alive && exit 1',
+    'while collect && tree_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'collect',
+    'tree_alive && exit 1',
     'rm -f "$pid_file"',
   ].join('; ');
 }

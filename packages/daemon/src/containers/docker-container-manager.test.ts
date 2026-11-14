@@ -1337,6 +1337,31 @@ describe('DockerContainerManager', () => {
       muxStream.resume();
       muxStream.end();
       await observed;
+      if (failure === 'still-running') expect(inspect).toHaveBeenCalledTimes(11);
+    });
+
+    it('observes an exit Docker records shortly after a verified kill closed the transport', async () => {
+      const muxStream = new PassThrough();
+      const inspect = vi
+        .fn()
+        .mockResolvedValueOnce({ Running: true, ExitCode: 0 })
+        .mockResolvedValueOnce({ Running: true, ExitCode: 0 })
+        .mockResolvedValue({ Running: false, ExitCode: 143 });
+      container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
+      vi.spyOn(manager, 'execInContainer').mockResolvedValue({
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+      const result = await manager.execStreaming('abc123', ['cmd']);
+      // Abort and a runtime's forced termination share one in-flight kill.
+      await Promise.all([result.kill(), result.kill()]);
+      expect(manager.execInContainer).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(manager.execInContainer).mock.calls[0]?.[2]).toMatchObject({
+        timeout: 15_000,
+      });
+      await expect(result.exitCode).resolves.toBe(143);
+      expect(inspect).toHaveBeenCalledTimes(3);
     });
 
     it('returns stdout/stderr streams and exit code promise', async () => {
@@ -1451,7 +1476,7 @@ describe('DockerContainerManager', () => {
       expect(terminateCommand).toContain('kill -TERM -"$pid"');
       expect(terminateCommand).toContain('kill -KILL -"$pid"');
       expect(terminateCommand).toContain('IFS= read -r stat');
-      expect(terminateCommand).toContain('group_alive && exit 1');
+      expect(terminateCommand).toContain('tree_alive && exit 1');
       expect(muxStream.destroyed).toBe(true);
     });
 
@@ -1516,6 +1541,83 @@ describe('DockerContainerManager', () => {
           expect(childRunnable).toBe(false);
         } finally {
           group.kill('SIGKILL');
+          rmSync(testDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.skipIf(process.platform !== 'linux')(
+      'terminates a detached background descendant that keeps the CLI alive (broad-earthworm)',
+      async () => {
+        // Claude's Bash tool detaches `run_in_background` commands into their
+        // own session, so they escape the exec's process group. The CLI then
+        // waits on that child and never exits after its final result.
+        const testDir = mkdtempSync(join(tmpdir(), 'autopod-stream-tree-'));
+        const pidPath = join(testDir, 'group.pid');
+        const childPath = join(testDir, 'child.pid');
+        const grandchildPath = join(testDir, 'grandchild.pid');
+        const childScript = join(testDir, 'child.sh');
+        const grandchildScript = join(testDir, 'grandchild.sh');
+        writeFileSync(
+          grandchildScript,
+          `trap "" TERM; echo $$ > ${grandchildPath}; while :; do sleep 1; done\n`,
+        );
+        writeFileSync(
+          childScript,
+          `trap "" TERM; sh ${grandchildScript} & while :; do sleep 1; done\n`,
+        );
+        const group = spawn(
+          'setsid',
+          [
+            '-w',
+            'sh',
+            '-c',
+            `echo $$ > ${pidPath}; setsid sh ${childScript} & echo $! > ${childPath}; wait`,
+          ],
+          { stdio: 'ignore' },
+        );
+        const runnable = (pid: number) => {
+          try {
+            const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+            return stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0] !== 'Z';
+          } catch {
+            return false;
+          }
+        };
+        let childPid = 0;
+        let grandchildPid = 0;
+        try {
+          for (let i = 0; i < 100 && !existsSync(grandchildPath); i++) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          childPid = Number(readFileSync(childPath, 'utf8'));
+          grandchildPid = Number(readFileSync(grandchildPath, 'utf8'));
+          const leaderPid = Number(readFileSync(pidPath, 'utf8'));
+          const session = (pid: number) => {
+            const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+            return stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[3];
+          };
+          // Precondition: the background child escaped the leader's session.
+          expect(session(childPid)).not.toBe(String(leaderPid));
+          expect(runnable(grandchildPid)).toBe(true);
+
+          execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
+            timeout: 10_000,
+          });
+
+          expect(runnable(leaderPid)).toBe(false);
+          expect(runnable(childPid)).toBe(false);
+          expect(runnable(grandchildPid)).toBe(false);
+          expect(existsSync(pidPath)).toBe(false);
+        } finally {
+          group.kill('SIGKILL');
+          for (const pid of [childPid, grandchildPid])
+            if (pid > 0)
+              try {
+                process.kill(pid, 'SIGKILL');
+              } catch {
+                /* already gone */
+              }
           rmSync(testDir, { recursive: true, force: true });
         }
       },

@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
 import type { AgentErrorEvent, AgentEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeRuntime, ResumeSessionNotFoundError } from './claude-runtime.js';
 
@@ -633,74 +633,119 @@ describe('ClaudeRuntime', () => {
       expect(execArgs.at(-1)).toBe(bigStr);
     });
 
-    it('terminates within grace window when stdout never closes after result event', async () => {
-      // Simulate the wedged-container case: agent emits its final result event
-      // (which the parser maps to a `complete` AgentEvent) but stdout never
-      // EOFs. Without the post-complete grace, the for-await would hang
-      // indefinitely. Bound the grace and exit-code timeouts via env so the
-      // test stays fast.
-      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
-      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
-
-      try {
+    describe('CLI that outlives its final result (broad-earthworm regression)', () => {
+      // The agent ended its turn with a background `npx vitest run` still
+      // running (Bash run_in_background). Claude emitted its result but did
+      // not exit, so stdout never closed and no exit was observed.
+      async function runWedged(
+        kind: 'spawn' | 'resume',
+        kill: (handle: ReturnType<typeof createMockHandle>) => Promise<void>,
+      ) {
+        vi.stubEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', '50');
+        vi.stubEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', '50');
+        vi.stubEnv('AUTOPOD_RUNTIME_TERMINATION_TIMEOUT_MS', '200');
         const handle = createMockHandle();
+        handle.kill = vi.fn(() => kill(handle));
         const cm = createMockContainerManager(handle);
         const runtime = new ClaudeRuntime(logger, cm);
-
+        runtime.setClaudeSessionId('wedged-sess', 'native-session');
         setTimeout(() => {
           emitLine(handle.stdout as PassThrough, {
             type: 'result',
             subtype: 'success',
             result: 'Done',
           });
-          // Deliberately do NOT close stdout or resolve exit code — simulates
-          // a wedged container.
+          // Deliberately do NOT close stdout or resolve the exit code.
         }, 10);
-
         const events: AgentEvent[] = [];
         const start = Date.now();
+        const source =
+          kind === 'resume'
+            ? runtime.resume('wedged-sess', 'Fix validation', 'container-123')
+            : runtime.spawn({
+                podId: 'wedged-sess',
+                task: 'Task',
+                model: 'opus',
+                reasoningEffort: 'auto',
+                workDir: '/workspace',
+                containerId: 'container-123',
+                env: {},
+              });
         const consumed = (async () => {
-          for await (const event of runtime.spawn({
-            podId: 'wedged-sess',
+          for await (const event of source) events.push(event);
+        })();
+        return { handle, events, consumed, start };
+      }
+      afterEach(() => vi.unstubAllEnvs());
+
+      it.each([
+        'spawn',
+        'resume',
+      ] as const)('%s terminates the process tree, observes the exit and retains completion', async (kind) => {
+        const { handle, events, consumed, start } = await runWedged(kind, async (h) => {
+          (h.stdout as PassThrough).destroy();
+          (h.stderr as PassThrough).destroy();
+          h.finish(143);
+        });
+        await expect(consumed).resolves.toBeUndefined();
+        expect(Date.now() - start).toBeLessThan(1_000);
+        expect(handle.kill).toHaveBeenCalledOnce();
+        // Grace still ends the daemon-side stream first.
+        expect((handle.stdout as PassThrough).writableEnded).toBe(true);
+        expect(events.some((e) => e.type === 'complete')).toBe(true);
+        const errors = events.filter((e): e is AgentErrorEvent => e.type === 'error');
+        expect(errors.some((e) => e.fatal)).toBe(false);
+        expect(errors.map((e) => e.message).join('\n')).toContain(
+          'terminated its process tree and observed exit code 143',
+        );
+      });
+
+      it.each([
+        'spawn',
+        'resume',
+      ] as const)('%s stays unverified when the tree termination is not verified', async (kind) => {
+        const { handle, consumed } = await runWedged(kind, async () => {
+          throw new Error('Remote streaming exec termination was not verified (exit 1)');
+        });
+        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+        expect(handle.kill).toHaveBeenCalledOnce();
+      });
+
+      it('stays unverified when the exit is still not observed after a verified kill', async () => {
+        const { handle, consumed } = await runWedged('spawn', async () => {});
+        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+        expect(handle.kill).toHaveBeenCalledOnce();
+      });
+
+      it('terminates and observes the exit when the consumer stops reading mid-turn', async () => {
+        vi.stubEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', '50');
+        vi.stubEnv('AUTOPOD_RUNTIME_TERMINATION_TIMEOUT_MS', '200');
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new ClaudeRuntime(logger, cm);
+        const iterator = runtime
+          .spawn({
+            podId: 'abandoned',
             task: 'Task',
             model: 'opus',
             reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             env: {},
-          })) {
-            events.push(event);
-          }
-        })();
-        await expect(consumed).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
-        const elapsed = Date.now() - start;
-
-        // Should have terminated within grace + exit-code timeout + a little
-        // tolerance for scheduling.
-        expect(elapsed).toBeLessThan(500);
-
-        // Grace timer should have ended stdout (signals EOF to readline).
-        expect((handle.stdout as PassThrough).writableEnded).toBe(true);
-
-        // The result event should have come through as a `complete` event.
-        const completeEvent = events.find((e) => e.type === 'complete');
-        expect(completeEvent).toBeDefined();
-
-        // Output remains historical evidence; a closed stream did not prove process exit.
-        expect(
-          events.some(
-            (e) =>
-              e.type === 'error' &&
-              e.fatal === false &&
-              e.message.includes('exit code did not resolve'),
-          ),
-        ).toBe(false);
-      } finally {
-        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
-        delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
-        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
-        delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
-      }
+          })
+          [Symbol.asyncIterator]();
+        const next = iterator.next();
+        emitLine(handle.stdout as PassThrough, {
+          type: 'system',
+          subtype: 'init',
+          session_id: 'native',
+        });
+        await next;
+        // The consumer stops reading mid-turn: the process must still be
+        // terminated and its exit observed before the generator settles.
+        await expect(iterator.return?.()).resolves.toMatchObject({ done: true });
+        expect(handle.kill).toHaveBeenCalledOnce();
+      });
     });
   });
 
