@@ -1,5 +1,5 @@
 import type { ScanFinding } from '@autopod/shared';
-import { processContent } from '@autopod/shared';
+import { AutopodError, processContent } from '@autopod/shared';
 import type { CompletionDiagnosticsCaptured } from './completion-ports.js';
 
 const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
@@ -42,6 +42,10 @@ export function sanitizeFailureReason(raw: unknown, prefix: string): string {
 }
 
 export function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
+  // Host capacity is not a pod defect: keep its code visible instead of the
+  // generic setup prefix so operators free host capacity rather than debug the pod.
+  if (err instanceof AutopodError && err.code === 'HOST_NETWORK_CAPACITY')
+    return sanitizeFailureReason(err, 'Pod could not start (HOST_NETWORK_CAPACITY)');
   const prefix =
     phase === 'setup'
       ? 'Pod setup failed before the agent could finish'

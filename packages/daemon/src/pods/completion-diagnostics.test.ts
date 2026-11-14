@@ -1,5 +1,6 @@
 import type { ScanFinding } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { hostNetworkCapacityError } from '../containers/docker-network-manager.js';
 import {
   createCompletionDiagnostics,
   describeSyncFailure,
@@ -22,6 +23,23 @@ describe('completion operator diagnostics', () => {
           ? 'while the agent'
           : 'while finalizing',
     );
+  });
+  it('reports host network capacity with its own code instead of a generic setup failure', () => {
+    const message = operatorErrorMessage(
+      hostNetworkCapacityError({
+        totalPodNetworks: 30,
+        candidates: 30,
+        removed: 0,
+        retained: 26,
+        attached: 4,
+        failed: 0,
+      }),
+      'setup',
+    );
+    expect(message).toMatch(/^Pod could not start \(HOST_NETWORK_CAPACITY\): Host network/);
+    expect(message).not.toContain('Pod setup failed');
+    expect(message).toContain('26 are held by retained checkpoints');
+    expect(message).toContain('default-address-pools');
   });
   it.each([
     'bwrap: no permissions to create a new namespace',

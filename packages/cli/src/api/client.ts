@@ -1281,8 +1281,8 @@ export class AutopodClient {
   }
 
   // Health
-  async checkHealth(): Promise<DaemonHealthSummary> {
-    return this.request<DaemonHealthSummary>('GET', '/health');
+  async checkHealth(detail?: 'full'): Promise<DaemonHealthSummary> {
+    return this.request<DaemonHealthSummary>('GET', detail ? '/health?detail=full' : '/health');
   }
 
   // WebSocket helpers

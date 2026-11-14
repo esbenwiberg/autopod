@@ -150,6 +150,51 @@ describe('healthRoutes', () => {
       await app2.close();
     });
 
+    it('reports exhausted Docker network capacity as degraded without changing basic health', async () => {
+      const networks = [
+        {
+          Id: 'pod-net',
+          Name: 'autopod-pod',
+          Scope: 'local',
+          Labels: { 'com.autopod.pod-network': 'true' },
+          IPAM: { Config: [{ Subnet: '10.200.0.0/24' }] },
+        },
+      ];
+      const exhaustedDocker = {
+        ping: vi.fn().mockResolvedValue(undefined),
+        listContainers: vi.fn().mockResolvedValue([]),
+        info: vi
+          .fn()
+          .mockResolvedValue({ DefaultAddressPools: [{ Base: '10.200.0.0/24', Size: 24 }] }),
+        listNetworks: vi.fn().mockResolvedValue(networks),
+        getNetwork: vi.fn(() => ({
+          inspect: vi.fn().mockResolvedValue({ Containers: { c: {} } }),
+        })),
+      } as unknown as import('dockerode').default;
+      const app2 = Fastify();
+      healthRoutes(app2, { docker: exhaustedDocker, db });
+      await app2.ready();
+      try {
+        expect((await app2.inject('/health')).json().status).toBe('ok');
+        const body = (await app2.inject('/health?detail=full')).json();
+        expect(body.status).toBe('degraded');
+        expect(body.docker.networks).toMatchObject({
+          severity: 'critical',
+          addressPools: { capacity: 1, used: 1, free: 0 },
+          podNetworks: { total: 1, attached: 1, retained: null },
+        });
+      } finally {
+        await app2.close();
+      }
+    });
+
+    it('reports network capacity as unavailable without degrading on inspection failure', async () => {
+      const res = await appWithDeps.inject({ method: 'GET', url: '/health?detail=full' });
+      const body = res.json();
+      expect(body.status).toBe('ok');
+      expect(body.docker.networks).toEqual({ error: 'Docker network capacity unavailable' });
+    });
+
     it('returns sensible defaults when no deps are provided', async () => {
       const bare = Fastify();
       healthRoutes(bare);

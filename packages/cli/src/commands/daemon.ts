@@ -1,3 +1,4 @@
+import type { DaemonHealthSummary } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { AutopodClient } from '../api/client.js';
@@ -5,10 +6,38 @@ import { getToken } from '../auth/token-manager.js';
 import * as configStore from '../config/config-store.js';
 import { withSpinner } from '../output/spinner.js';
 
+/** One-line Docker bridge capacity summary, or null when the daemon does not report it. */
+export function formatNetworkCapacity(health: DaemonHealthSummary): string | null {
+  const networks = health.docker?.networks;
+  if (!networks) return null;
+  if (!('severity' in networks)) return `Docker networks: ${chalk.yellow('unavailable')}`;
+  const pods = networks.podNetworks;
+  const pools = networks.addressPools;
+  const severity =
+    networks.severity === 'critical'
+      ? chalk.red('CRITICAL')
+      : networks.severity === 'warning'
+        ? chalk.yellow('WARNING')
+        : networks.severity === 'ok'
+          ? chalk.green('ok')
+          : chalk.yellow('unknown');
+  const poolText =
+    pools.capacity === null
+      ? 'pool capacity unknown'
+      : `${pools.used}/${pools.capacity} pool subnets used (${pools.source})`;
+  const line =
+    `Docker networks: ${severity}; ${pods.total} autopod ` +
+    `(${pods.retained ?? '?'} retained, ${pods.attached} attached, ` +
+    `${pods.reclaimable ?? '?'} reclaimable); ${poolText}; ` +
+    `headroom ${networks.reclaimableHeadroom ?? '?'}`;
+  if (networks.severity !== 'critical' && networks.severity !== 'warning') return line;
+  return `${line}\n  New local pods may fail with HOST_NETWORK_CAPACITY. Kill failed pods you no longer need or enlarge Docker default-address-pools (docs/hosted-daemon-docker-networks.md).`;
+}
+
 export function registerDaemonCommands(program: Command): void {
   program
     .command('health')
-    .description('Show daemon release and backup readiness')
+    .description('Show daemon release, backup and Docker network readiness')
     .option('--json', 'Print machine-readable health evidence')
     .option('--url <url>', 'Inspect this daemon without changing the saved connection')
     .action(async (options: { json?: boolean; url?: string }) => {
@@ -17,7 +46,7 @@ export function registerDaemonCommands(program: Command): void {
       const health = await new AutopodClient({
         baseUrl: daemonUrl,
         getToken: async () => '',
-      }).checkHealth();
+      }).checkHealth('full');
       if (options.json) {
         console.log(JSON.stringify(health, null, 2));
         return;
@@ -29,6 +58,8 @@ export function registerDaemonCommands(program: Command): void {
       console.log(
         `Backup: ${health.backup?.state ?? 'unavailable'}; latest ${health.backup?.lastCompletedAt ?? 'unverified'}`,
       );
+      const networks = formatNetworkCapacity(health);
+      if (networks) console.log(networks);
     });
 
   program

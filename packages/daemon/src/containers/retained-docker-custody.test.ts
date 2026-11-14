@@ -378,4 +378,37 @@ describe('retained bridge custody (real SQLite, provider doubles)', () => {
     expect(f.network.remove).not.toHaveBeenCalled();
     expect(f.docker.createNetwork).toHaveBeenCalledTimes(2);
   });
+  it('fails with HOST_NETWORK_CAPACITY when only retained bridges remain after pruning', async () => {
+    const db = database();
+    hold(db);
+    const f = networkFixture(db);
+    f.network.inspect.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { statusCode: 404 }),
+    );
+    const exhausted = () =>
+      Object.assign(
+        new Error(
+          '(HTTP code 400) unexpected - all predefined address pools have been fully subnetted',
+        ),
+        { statusCode: 400 },
+      );
+    f.docker.createNetwork.mockRejectedValueOnce(exhausted()).mockRejectedValueOnce(exhausted());
+    f.docker.listNetworks.mockResolvedValueOnce([
+      {
+        Id: 'held-network',
+        Name: 'autopod-pod',
+        Labels: { 'com.autopod.pod-id': 'pod' },
+        Containers: {},
+      },
+    ]);
+    const failure = f.manager.ensureNetworkForPod('another');
+    await expect(failure).rejects.toMatchObject({
+      code: 'HOST_NETWORK_CAPACITY',
+      statusCode: 503,
+    });
+    await expect(failure).rejects.toThrow(
+      /1 autopod networks exist; 1 are held by retained checkpoints, 0 are attached to containers, 0 unattached were pruned/,
+    );
+    expect(f.network.remove).not.toHaveBeenCalled();
+  });
 });
