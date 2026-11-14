@@ -17,18 +17,79 @@ export interface VerifiedAgentCli {
   cliVersion: string;
 }
 
-/** Fixed read-only probes; never run repository-provided command strings. */
+/**
+ * Per-exec ceiling for the fixed CLI probes. Native agent CLIs are large
+ * binaries (Claude's is ~220 MB); a cold start right after a heavy validation
+ * and workspace sync-back can exceed the former 10 s ceiling on a busy host.
+ */
+export const AGENT_CLI_PROBE_TIMEOUT_MS = 30_000;
+const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 2_000;
+
+export interface VerifyAgentCliOptions
+  extends Pick<ExecOptions, 'assertCurrent' | 'cwd' | 'env' | 'user' | 'maxOutputBytes'> {
+  /**
+   * Total attempts when a probe fails without an observed answer (exec
+   * timeout, Docker transport error). Observed answers — a missing CLI or an
+   * unusable version — are never retried. Defaults to one attempt.
+   */
+  transientAttempts?: number;
+  /** Delay before each transient retry. */
+  transientRetryDelayMs?: number;
+}
+
+/** Bounded, sanitized description of an unobserved probe failure. */
+export function describeAgentCliProbeFailure(error: unknown): string {
+  const raw =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown error');
+  return processContent(raw.replace(/\s+/g, ' ').slice(0, 300), {
+    sanitization: { preset: 'standard' },
+  }).text.trim();
+}
+
+/**
+ * Fixed read-only probes; never run repository-provided command strings.
+ * Probes are idempotent, so a transport failure without an observed answer can
+ * be retried within `transientAttempts`. The result stays fail-closed: every
+ * attempt must fail to observe the CLI before the caller sees the error.
+ */
 export async function verifyAgentCli(
   cm: ContainerManager,
   containerId: string,
   runtime: RuntimeType,
   model?: string | null,
-  options: Pick<ExecOptions, 'assertCurrent' | 'cwd' | 'env' | 'user' | 'maxOutputBytes'> = {},
+  options: VerifyAgentCliOptions = {},
+): Promise<VerifiedAgentCli> {
+  const { transientAttempts, transientRetryDelayMs, ...execOptions } = options;
+  const attempts = Math.max(1, Math.floor(transientAttempts ?? 1));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await probeAgentCli(cm, containerId, runtime, model, execOptions);
+    } catch (error) {
+      // An observed answer (or a superseded owner) is authoritative.
+      if (error instanceof AutopodError || attempt >= attempts) throw error;
+      options.assertCurrent?.();
+      await new Promise((resolve) =>
+        setTimeout(resolve, transientRetryDelayMs ?? DEFAULT_TRANSIENT_RETRY_DELAY_MS * attempt),
+      );
+      options.assertCurrent?.();
+    }
+  }
+}
+
+async function probeAgentCli(
+  cm: ContainerManager,
+  containerId: string,
+  runtime: RuntimeType,
+  model: string | null | undefined,
+  options: Pick<ExecOptions, 'assertCurrent' | 'cwd' | 'env' | 'user' | 'maxOutputBytes'>,
 ): Promise<VerifiedAgentCli> {
   const exec = async (command: string[]) => {
     options.assertCurrent?.();
     try {
-      return await cm.execInContainer(containerId, command, { ...options, timeout: 10000 });
+      return await cm.execInContainer(containerId, command, {
+        ...options,
+        timeout: AGENT_CLI_PROBE_TIMEOUT_MS,
+      });
     } finally {
       options.assertCurrent?.();
     }

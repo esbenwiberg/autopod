@@ -312,6 +312,91 @@ describe('continuation context', () => {
     expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
+  describe('post-validation CLI probe (fine-landfowl regression)', () => {
+    afterEach(() => vi.useRealTimers());
+    function probeFixture(fail: (probe: number, command: string) => Error | null) {
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+      const f = fixture();
+      const exec = vi.mocked(f.ctx.containerManager.execInContainer);
+      const answer = exec.getMockImplementation();
+      if (!answer) throw new Error('Missing exec fixture');
+      const probes: string[] = [];
+      exec.mockImplementation(async (id, command, options) => {
+        const joined = command.join(' ');
+        if (joined === 'claude --version' || joined.endsWith('command -v claude')) {
+          probes.push(joined);
+          const error = fail(probes.length, joined);
+          if (error) throw error;
+        }
+        return answer(id, command, options);
+      });
+      return { f, probes };
+    }
+    async function settle<T>(pending: Promise<T>): Promise<PromiseSettledResult<T>> {
+      const settled = Promise.allSettled([pending]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const [result] = await settled;
+      if (!result) throw new Error('Missing settlement');
+      return result;
+    }
+    it('re-probes after an unanswered exec instead of failing the rework turn', async () => {
+      // Validation finished, then the first `claude --version` exec timed out
+      // on a busy host. A second read-only probe observes the CLI.
+      const { f, probes } = probeFixture((_probe, command) =>
+        command === 'claude --version' && probes.filter((p) => p === command).length === 1
+          ? new Error('Exec timed out after 30000ms')
+          : null,
+      );
+      const result = await settle(f.c.taskFeedbackEvents('context', 'Fix validation', false));
+      expect(result.status).toBe('fulfilled');
+      expect(probes.filter((p) => p === 'claude --version')).toHaveLength(2);
+      expect(f.ctx.podRepo.executionProvenance?.latest('context')).toMatchObject({
+        status: 'checked',
+        cliVersion: '1.0.0',
+      });
+      expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+      expect(
+        vi
+          .mocked(f.ctx.containerManager.execInContainer)
+          .mock.calls.filter(([, command]) => command.join(' ') === 'claude --version')
+          .every(([, , options]) => options?.timeout === 30_000),
+      ).toBe(true);
+    });
+    it('stays fail-closed with the observed cause when the CLI never answers', async () => {
+      const { f, probes } = probeFixture((_probe, command) =>
+        command === 'claude --version' ? new Error('Exec timed out after 30000ms') : null,
+      );
+      const result = await settle(f.c.taskFeedbackEvents('context', 'Fix validation', false));
+      expect(result.status).toBe('rejected');
+      const reason = (result as PromiseRejectedResult).reason as Error & { code?: string };
+      expect(reason.code).toBe('PREFLIGHT_RUNTIME_UNAVAILABLE');
+      expect(reason.message).toContain('after 3 attempts');
+      expect(reason.message).toContain('Exec timed out after 30000ms');
+      expect(probes.filter((p) => p === 'claude --version')).toHaveLength(3);
+      expect(f.ctx.podRepo.executionProvenance?.latest('context')?.status).toBe('blocked');
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    });
+    it('never retries an observed missing CLI', async () => {
+      const { f, probes } = probeFixture(() => null);
+      const exec = vi.mocked(f.ctx.containerManager.execInContainer);
+      const answer = exec.getMockImplementation();
+      if (!answer) throw new Error('Missing exec fixture');
+      exec.mockImplementation(async (id, command, options) => {
+        if (!command.join(' ').endsWith('command -v claude')) return answer(id, command, options);
+        probes.push(command.join(' '));
+        return { stdout: '', stderr: 'not found', exitCode: 127 };
+      });
+      const result = await settle(f.c.taskFeedbackEvents('context', 'Fix validation', false));
+      expect(result.status).toBe('rejected');
+      expect((result as PromiseRejectedResult).reason).toMatchObject({
+        code: 'PREFLIGHT_RUNTIME_UNAVAILABLE',
+        message: expect.stringContaining('Agent CLI missing'),
+      });
+      expect(probes).toHaveLength(1);
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+  });
   it('retains queued human guidance and tells feedback workers to collect its receipt', async () => {
     const f = fixture();
     f.ctx.nudgeRepo.queue('context', 'Preserved human direction');
