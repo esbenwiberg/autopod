@@ -12,6 +12,7 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { formatFeedback } from '../pods/feedback-formatter.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
@@ -5874,5 +5875,109 @@ describe('startAppStabilityMonitor — regression guard', () => {
 
     expect(onCrash).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+});
+
+describe('validation output bounds keep both ends', () => {
+  const head = '> autopod@ test /workspace\n> turbo run test --concurrency=1\n';
+  const passing = ' ✓ packages/shared/src/module.test.ts (12 tests) 34ms\n'.repeat(4_000);
+  const failure =
+    ' FAIL  src/pods/broken.test.ts > retries the failed step\n' +
+    'AssertionError: expected 2 to be 3\n' +
+    ' Test Files  1 failed | 4000 passed (4001)';
+  const largeLog = `${head}${passing}${failure}`;
+
+  function boundsConfig(phase: 'build' | 'test' | 'lint' | 'sast'): ValidationEngineConfig {
+    return {
+      podId: 'pod-bounds',
+      containerId: 'container-bounds',
+      previewUrl: 'http://127.0.0.1:9999',
+      buildCommand: phase === 'build' ? 'bounded-build-cmd' : 'true',
+      startCommand: '',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [],
+      attempt: 1,
+      task: 'test task',
+      diff: '',
+      hasWebUi: false,
+      ...(phase === 'test' ? { testCommand: 'bounded-test-cmd' } : {}),
+      ...(phase === 'lint' ? { lintCommand: 'bounded-lint-cmd' } : {}),
+      ...(phase === 'sast' ? { sastCommand: 'bounded-sast-cmd' } : {}),
+    };
+  }
+
+  function containerWith(
+    exec: (joined: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>,
+  ): ContainerManager {
+    return {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        const joined = cmd.join(' ');
+        if (/bounded-(build|test|lint|sast)-cmd/.test(joined)) return exec(joined);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+      execStreaming: vi.fn(),
+    } as unknown as ContainerManager;
+  }
+
+  function phaseOutput(
+    result: Awaited<ReturnType<ReturnType<typeof createLocalValidationEngine>['validate']>>,
+    phase: 'build' | 'test' | 'lint' | 'sast',
+  ): string {
+    if (phase === 'build') return result.smoke.build.output;
+    if (phase === 'test') return result.test?.stdout ?? '';
+    return result[phase]?.output ?? '';
+  }
+
+  it.each([
+    'build',
+    'test',
+    'lint',
+    'sast',
+  ] as const)('stores the head, a truncation marker and the final failure for %s', async (phase) => {
+    const cm = containerWith(async () => ({ stdout: largeLog, stderr: '', exitCode: 1 }));
+    const result = await createLocalValidationEngine(cm).validate(boundsConfig(phase));
+    const output = phaseOutput(result, phase);
+    expect(output.length).toBeLessThanOrEqual(50_000);
+    expect(output.startsWith('> autopod@ test /workspace')).toBe(true);
+    expect(output).toMatch(/characters omitted; beginning and end of output retained/);
+    expect(output).toContain('FAIL  src/pods/broken.test.ts > retries the failed step');
+    expect(output).toContain('Test Files  1 failed | 4000 passed (4001)');
+
+    const feedback = formatFeedback({
+      type: 'validation_failure',
+      result,
+      task: 'task',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(feedback).toContain('> autopod@ test /workspace');
+    expect(feedback).toContain('AssertionError: expected 2 to be 3');
+  });
+
+  it('bounds test stdout and stderr independently, keeping both tails', async () => {
+    const cm = containerWith(async () => ({
+      stdout: largeLog,
+      stderr: `${'warn: noisy\n'.repeat(10_000)}@autopod/daemon#test: ERROR command exited (1)`,
+      exitCode: 1,
+    }));
+    const result = await createLocalValidationEngine(cm).validate(boundsConfig('test'));
+    expect(result.test?.status).toBe('fail');
+    expect(result.test?.stdout).toContain('Test Files  1 failed | 4000 passed (4001)');
+    expect(result.test?.stderr?.length).toBeLessThanOrEqual(50_000);
+    expect(result.test?.stderr).toMatch(/@autopod\/daemon#test: ERROR command exited \(1\)$/);
+  });
+
+  it('keeps the interruption message and the end of the partial output on timeout', async () => {
+    const cm = containerWith(async () => {
+      throw Object.assign(new Error('Exec timed out after 600000ms'), { partialOutput: largeLog });
+    });
+    const result = await createLocalValidationEngine(cm).validate(boundsConfig('test'));
+    expect(result.test?.status).toBe('fail');
+    const stdout = result.test?.stdout ?? '';
+    expect(stdout.length).toBeLessThanOrEqual(50_000);
+    expect(stdout.startsWith('Exec timed out after 600000ms')).toBe(true);
+    expect(stdout).toContain('--- partial output before interruption ---');
+    expect(stdout).toContain('Test Files  1 failed | 4000 passed (4001)');
   });
 });
