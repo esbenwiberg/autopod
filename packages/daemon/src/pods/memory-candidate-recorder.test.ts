@@ -11,6 +11,7 @@ import { createMemoryExtractionAttemptRepository } from './memory-extraction-att
 import { createMemoryRepository } from './memory-repository.js';
 import type { NewPod } from './pod-repository.js';
 import { createPodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createValidationRepository } from './validation-repository.js';
 
 // ---------------------------------------------------------------------------
@@ -162,8 +163,9 @@ describe('MemoryCandidateRecorder', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }
 
-  function makeRecorder(options: { withContainerFactory?: boolean } = {}) {
+  function makeRecorder(options: { withContainerFactory?: boolean; withAttempts?: boolean } = {}) {
     return createMemoryCandidateRecorder({
+      ...(options.withAttempts ? { providerAttemptRepo: createProviderAttemptRepository(db) } : {}),
       eventBus,
       podRepo,
       profileStore: mockProfileStore as never,
@@ -230,6 +232,44 @@ describe('MemoryCandidateRecorder', () => {
 
     const candidates = candidateRepo.list('test-profile');
     expect(candidates).toHaveLength(1);
+  });
+
+  it.each([
+    false,
+    true,
+  ])('skips the reviewer for a zero-work provider account failure (agent worked: %s)', async (worked) => {
+    podRepo.insert(basePod({ status: 'killed' }));
+    podRepo.update(POD_ID, {
+      prFixAttempts: 1,
+      failureReason: 'Provider account unavailable: Your workspace is out of credits.',
+    });
+    if (worked)
+      eventBus.emit({
+        type: 'pod.agent_activity',
+        timestamp: new Date().toISOString(),
+        podId: POD_ID,
+        event: { type: 'tool_use', timestamp: new Date().toISOString(), tool: 'Read', input: {} },
+      });
+    const recorder = makeRecorder({ withAttempts: true });
+    recorder.start();
+
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'killed',
+      summary: { id: POD_ID, profileName: 'test-profile' } as never,
+    });
+
+    await flushAsync();
+    recorder.stop();
+
+    expect(vi.mocked(createProfileMemoryReviewer).mock.calls.length > 0).toBe(worked);
+    if (!worked)
+      expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+        status: 'skipped',
+        reason: 'provider_account_unavailable_no_work',
+      });
   });
 
   it('creates a candidate on pod.status_changed to review_required', async () => {

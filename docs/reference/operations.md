@@ -296,4 +296,21 @@ Regular runtime limits are checked when usage is reported; they are not an exact
 per-token provider spending cap. Hard-limited reviews still require settled usage;
 with the default unlimited budget an active worker can request review normally.
 
+## Provider account failures
+
+A worker refused by its provider account (for example a revoked OAuth login or a
+workspace out of credits) fails with `Provider account unavailable: <provider message>`
+rather than `Agent failed: …`. The worker retry ledger records it as an `auth` failure:
+repair the account, then `ap rerun` it; reworking the same task also needs a recorded
+retry authorization.
+
+If that refusal arrives before any agent work on a local Docker pod, the daemon
+releases the container, sidecars and per-pod network automatically and records the
+run's usage as complete at zero. No work means no recorded usage, tool, file,
+reasoning, plan or summary activity, commits, source changes, validation, PR,
+escalation, rework or recovery. The pod stays `failed` with its worktree, and no
+memory reviewer runs against the refused account. Any work or custody evidence, an
+active or unverified run, a native Goal launch or a sandbox pod keeps the existing
+retention until `ap kill`.
+
 Node24 worker release, real-image smoke checks, migration and rollback: [operator runbook](../node24-environments.md). Explicit Node22 templates remain available for compatibility.

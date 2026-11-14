@@ -44,6 +44,18 @@ const COPILOT_QUOTA_MESSAGES = [
   /^Copilot premium request limit reached$/i,
 ];
 
+/**
+ * Exact runtime wording for a provider account that cannot serve any request until a
+ * human repairs its credentials or billing (revoked/expired login, exhausted prepaid
+ * credits). These are recorded as definitive `auth` failures: the provider rejected
+ * the account, not the task, so no automatic retry or reset applies.
+ */
+const ACCOUNT_UNAVAILABLE_MESSAGES = [
+  /^failed to authenticate[.:]\s.*\b(?:oauth|token|api[ _-]?key|api error: 40[13]|log ?in)\b/i,
+  /^oauth token (?:has been )?(?:revoked|expired)(?:[.: ].*)?$/i,
+  /^your (?:workspace|organization|account) is out of credits(?:[.: ].*)?$/i,
+  /^(?:your )?credit balance is too low(?:[.: ].*)?$/i,
+];
 const AUTH_CODES = new Set(['authentication_error', 'invalid_api_key', 'unauthorized']);
 const AUTH_MESSAGE =
   /^(?:authentication failed|invalid api key|not authenticated|unauthorized)(?:[.: ].*)?$/i;
@@ -97,6 +109,9 @@ function classify(
     return classification('quota_exhausted', true, sanitizedMessage, retryAfter);
   }
 
+  if (ACCOUNT_UNAVAILABLE_MESSAGES.some((pattern) => pattern.test(rawMessage.trim()))) {
+    return classification('auth', true, sanitizedMessage, retryAfter);
+  }
   // Structured provider evidence outranks a generic transport status. Some
   // gateways use 429 for account/auth policy failures as well as throttling.
   if ((code !== null && AUTH_CODES.has(code)) || AUTH_MESSAGE.test(rawMessage.trim())) {
