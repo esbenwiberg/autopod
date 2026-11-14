@@ -1,11 +1,16 @@
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { expect, it } from 'vitest';
+import { createDatabase } from './connection.js';
 import { runMigrations } from './migrate.js';
 
+// Full on-disk replay of every migration (in two upgrade steps) plus a reopen. Use the daemon's
+// production connection policy (WAL, synchronous=NORMAL) rather than the per-commit fsyncs of
+// the better-sqlite3 default: under the I/O contention of concurrent pod validations those
+// fsyncs pushed this functional test past the 5 s default. Like the sibling upgrade tests, it
+// states an explicit per-test budget; it is not a latency test.
 it('upgrades v245 and retains immutable recovery request, actor, child lineage and facts after reopen', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'recovery-fork-upgrade-'));
   const old = path.join(root, 'v245');
@@ -16,7 +21,7 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
       copyFileSync(path.join(migrations, file), path.join(old, file));
   const logger = pino({ level: 'silent' });
   const filename = path.join(root, 'durable.db');
-  let db = new Database(filename);
+  let db = createDatabase(filename, logger);
   try {
     runMigrations(db, old, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 245 });
@@ -60,7 +65,7 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
       'now',
     );
     db.close();
-    db = new Database(filename);
+    db = createDatabase(filename, logger);
     runMigrations(db, migrations, logger);
     expect(
       db.prepare('SELECT parent_pod_id,request_id,actor_id FROM recovery_forks').get(),
@@ -84,4 +89,4 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
