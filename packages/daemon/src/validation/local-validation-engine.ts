@@ -1694,14 +1694,14 @@ async function runBuild(
     .catch(() => null);
   if (stubCheck?.stdout?.trim()) {
     log?.info('0-byte .bin stubs found before build — running npm rebuild');
+    const rebuildCommand =
+      "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done";
     await containerManager
       .execInContainer(
         config.containerId,
-        [
-          'sh',
-          '-c',
-          "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done",
-        ],
+        config.nonSecretExecEnv === undefined
+          ? ['sh', '-c', rebuildCommand]
+          : wrapValidationExecCommand(rebuildCommand, config.extraExecEnv, config.nonSecretExecEnv),
         { timeout: 120_000, ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}) },
       )
       .catch((err: unknown) =>
@@ -3242,7 +3242,13 @@ export async function runHealthCheck(
   containerManager
     .execInContainer(
       config.containerId,
-      ['sh', '-c', buildSupervisorCommand(config.startCommand)],
+      config.nonSecretExecEnv === undefined
+        ? ['sh', '-c', buildSupervisorCommand(config.startCommand)]
+        : wrapValidationExecCommand(
+            buildSupervisorCommand(config.startCommand),
+            config.extraExecEnv,
+            config.nonSecretExecEnv,
+          ),
       {
         cwd: startCwd,
         ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),

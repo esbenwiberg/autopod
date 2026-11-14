@@ -5546,6 +5546,34 @@ describe('runBuild — warning policy', () => {
     } as unknown as ContainerManager;
   }
 
+  it.each([
+    true,
+    false,
+  ])('reapplies only bound literals for npm rebuild (bound=%s)', async (bound) => {
+    const env = { PATH: '/pinned/bin:/usr/bin', TOKEN: 'secret-value', OVERRIDE: 'resolved' };
+    const execInContainer = vi.fn(async (_id: string, cmd: string[]) => ({
+      stdout: cmd.join(' ').includes('head -1') ? '/workspace/node_modules/.bin/tool' : '',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const cm = { execInContainer } as unknown as ContainerManager;
+    await createLocalValidationEngine(cm).validate({
+      ...baseConfigForBuild('true'),
+      extraExecEnv: env,
+      ...(bound ? { nonSecretExecEnv: { PATH: env.PATH, OVERRIDE: 'stale' } } : {}),
+    });
+    const call = execInContainer.mock.calls.find(([, cmd]) =>
+      cmd.join(' ').includes('npm rebuild'),
+    );
+    expect(call).toBeDefined();
+    const command = call?.[1] ?? [];
+    expect(command.slice(0, bound ? 3 : 2)).toEqual(
+      bound ? ['/usr/bin/env', '--', `PATH=${env.PATH}`] : ['sh', '-c'],
+    );
+    expect(command.join(' ')).not.toContain('secret-value');
+    expect(command.join(' ')).not.toContain('OVERRIDE=');
+  });
+
   it("keeps status 'pass' when exit 0 but warnings are present", async () => {
     const cm = containerManagerWithBuildOutput(
       'Restore complete (1.0s)\nBuild succeeded with 3 warning(s) in 17.8s',
@@ -5719,6 +5747,34 @@ describe('runHealthCheck — supervisor spawn', () => {
       expect.arrayContaining(['sh', '-c']),
       expect.objectContaining({ cwd: '/workspace', env: extraExecEnv }),
     );
+  });
+
+  it.each([
+    true,
+    false,
+  ])('reapplies only bound literals to the supervisor (bound=%s)', async (bound) => {
+    const execInContainer = vi.fn(async (_id: string, _command: string[]) => ({
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const cm = { execInContainer } as unknown as ContainerManager;
+    const env = { PATH: '/pinned/bin:/usr/bin', TOKEN: 'secret-value', OVERRIDE: 'resolved' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, text: async () => 'ok' }));
+    await runHealthCheck(
+      cm,
+      makeConfig({
+        extraExecEnv: env,
+        ...(bound ? { nonSecretExecEnv: { PATH: env.PATH, OVERRIDE: 'stale' } } : {}),
+      }),
+    );
+    const command = vi.mocked(execInContainer).mock.calls[0]?.[1] as string[];
+    expect(command.slice(0, bound ? 3 : 2)).toEqual(
+      bound ? ['/usr/bin/env', '--', `PATH=${env.PATH}`] : ['sh', '-c'],
+    );
+    expect(command.join(' ')).toContain('export START_COMMAND');
+    expect(command.join(' ')).not.toContain('secret-value');
+    expect(command.join(' ')).not.toContain('OVERRIDE=');
   });
 
   it('probes containerBaseUrl through container exec in container probe mode', async () => {
