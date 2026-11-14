@@ -4,6 +4,7 @@ import {
   type NetworkPolicy,
   type NetworkPolicyMode,
   type PrivateRegistry,
+  type RetainedNetworkCandidate,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
@@ -20,11 +21,7 @@ import {
   NETWORK_CAPACITY_DOCS,
 } from './docker-network-capacity.js';
 import { generateHaproxyConfig, HAPROXY_LISTEN_PORT } from './haproxy-config.js';
-import {
-  planRetainedNetworkReleases,
-  type RetainedNetworkCandidate,
-  releaseRetainedNetwork,
-} from './retained-network-release.js';
+import { planRetainedNetworkReleases, releaseRetainedNetwork } from './retained-network-release.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
 // Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.
