@@ -1,3 +1,4 @@
+import { describeTaskBudgetUsage } from '@autopod/shared';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
@@ -27,8 +28,11 @@ export function registerBudgetCommand(program: Command, getClient: () => Autopod
         if (goal.executionStopped && !['achieved', 'cancelled'].includes(goal.state))
           await client.controlGoal(id, goal.revision, 'resume');
       }
-      withJsonOutput(opts, updated, (task) =>
-        console.log(`Task token limit: ${task.tokenBudget ?? 'off'}`),
-      );
+      withJsonOutput(opts, updated, (task) => {
+        console.log(`Task token limit: ${task.tokenBudget ?? 'off'}`);
+        // Usage is compared with the limit on the budget-counted figure, not the raw total.
+        if (typeof task.recordedInputTokens === 'number')
+          console.log(`Task tokens: ${describeTaskBudgetUsage(task, task.tokenBudget)}`);
+      });
     });
 }
