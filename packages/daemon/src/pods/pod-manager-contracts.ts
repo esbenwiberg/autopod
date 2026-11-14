@@ -35,6 +35,7 @@ import type {
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import type { ProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
 import type {
   SandboxWorkspaceCheckpointArgs,
   WorkspaceCheckpointResult,
@@ -62,6 +63,8 @@ export interface ContainerManagerFactory {
 export interface PodManagerDependencies {
   podRepo: PodRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
+  /** Passive provider account health (#566): recorded on attempt close, read for failover. */
+  providerAccountHealth?: ProviderAccountHealthStore;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   /** Queue of feedback messages drained into the next fix-pod iteration. */

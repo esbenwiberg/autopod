@@ -37,6 +37,7 @@ import { createPodGoalService } from '../pods/pod-goal-service.js';
 import type { PodManager, PodManagerDependencies } from '../pods/pod-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { RecoveryForkSelectionError } from '../pods/recovery-fork-rejection.js';
+import type { ProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
 import type { ProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { IsolatedReviewer, type IsolatedReviewerOptions } from '../validation/isolated-reviewer.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
@@ -73,6 +74,8 @@ export interface ConfigurationComponentsOptions {
   logger: Logger;
   pods: PodRepository;
   accounts: ProviderAccountStore;
+  /** Passive account health (#566); launches reject a known-unhealthy primary account. */
+  accountHealth?: Pick<ProviderAccountHealthStore, 'current'>;
   credentials: ConfigurationCredentialStore;
   images: Pick<ImageBuilder, 'resolveEnvironment' | 'buildEnvironmentImage'>;
   github: GitHubMutationClient & GitHubDownloadClient;
@@ -236,6 +239,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     githubRepositories: (rule, repository) => github.resolveRepositories(rule, repository),
     githubWorkflows: (rule) => github.resolveWorkflows(rule),
     resolveAgentRoute: async (route) => resolveLaunchAgentRoute(route, options.accounts),
+    ...(options.accountHealth ? { agentAccountHealth: options.accountHealth } : {}),
     resolveCredentialReferences: async (config) =>
       resolveLaunchCredentialReferences(config, options.credentials),
     assertCapabilities: assertCurrent,
@@ -339,13 +343,16 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
           profileId,
           task: parent.task,
         },
+        // Only software/resources are taken from this template; the original AI routes stay
+        // frozen, so the template profile's account health is not an admission input.
         previewOptions?.readOnly
           ? {
               ...resolution,
+              agentAccountHealth: undefined,
               resolveEnvironment: (environment, target, clis) =>
                 options.images.resolveEnvironment(environment, target, clis, { allowPull: false }),
             }
-          : resolution,
+          : { ...resolution, agentAccountHealth: undefined },
       );
       if (
         template.requiredSidecarIds.length ||

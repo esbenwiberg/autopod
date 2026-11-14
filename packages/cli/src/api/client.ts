@@ -1062,6 +1062,14 @@ export class AutopodClient {
     return this.request<PublicProviderAccount>('PATCH', `/provider-accounts/${id}`, changes);
   }
 
+  async markProviderAccountOk(id: string, reason: string): Promise<PublicProviderAccount> {
+    return this.request<PublicProviderAccount>(
+      'POST',
+      `/provider-accounts/${encodeURIComponent(id)}/health/mark-ok`,
+      { reason },
+    );
+  }
+
   async deleteProviderAccount(id: string): Promise<void> {
     await this.request<void>('DELETE', `/provider-accounts/${id}`);
   }

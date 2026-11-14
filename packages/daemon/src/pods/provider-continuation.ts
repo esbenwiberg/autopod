@@ -28,6 +28,8 @@ type Captured = Pick<
   | 'closeProviderAttempt'
   | 'selectProviderFailoverTarget'
   | 'providerFailoverUnavailableActivity'
+  | 'providerFailoverSkippedActivity'
+  | 'providerFailoverPolicy'
   | 'profileForProviderTarget'
   | 'openProviderTargetAttempt'
   | 'forgetMaxCredentialLineage'
@@ -55,6 +57,8 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     closeProviderAttempt,
     selectProviderFailoverTarget,
     providerFailoverUnavailableActivity,
+    providerFailoverSkippedActivity,
+    providerFailoverPolicy,
     profileForProviderTarget,
     openProviderTargetAttempt,
     forgetMaxCredentialLineage,
@@ -227,6 +231,8 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     }
     podRepo.update(podId, { containerId: null });
     const selection = selectProviderFailoverTarget(podRepo.getOrThrow(podId));
+    for (const line of providerFailoverSkippedActivity?.(selection) ?? [])
+      emitActivityStatus(podId, line);
     if (!selection.target) {
       emitActivityStatus(podId, providerFailoverUnavailableActivity(selection));
       return;
@@ -347,8 +353,9 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         );
       }
     } else if (!primaryRecovery) {
-      const resolved = profileStore.resolveProviderFailover(pod.profileName);
-      const policy = resolved.policy;
+      const policy = providerFailoverPolicy
+        ? providerFailoverPolicy(pod)
+        : profileStore.resolveProviderFailover(pod.profileName).policy;
       const isConfigured = policy?.targets.some(
         (configured) =>
           configured.providerAccountId === target.providerAccountId &&

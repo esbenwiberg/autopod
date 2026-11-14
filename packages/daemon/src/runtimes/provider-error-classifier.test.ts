@@ -3,6 +3,7 @@ import {
   classifyProviderError,
   classifySettledPiProviderError,
   type ProviderErrorEvidence,
+  providerAccountUnavailableState,
 } from './provider-error-classifier.js';
 
 const quotaFixtures = [
@@ -319,5 +320,33 @@ describe('classifyProviderError', () => {
 
     expect(result.sanitizedMessage).not.toContain(credential.split(' ').at(-1));
     expect(result.sanitizedMessage).toContain('[REDACTED]');
+  });
+});
+
+describe('providerAccountUnavailableState', () => {
+  it.each([
+    ['Failed to authenticate: OAuth token revoked. Please log in again.', 'auth_revoked'],
+    ['OAuth token has expired', 'auth_revoked'],
+    ['Your workspace is out of credits. Add credits to continue.', 'out_of_credits'],
+    ['Credit balance is too low', 'out_of_credits'],
+  ] as const)('maps %s to %s', (message, state) => {
+    expect(providerAccountUnavailableState(classifyProviderError('codex', { message }))).toBe(
+      state,
+    );
+  });
+
+  it('ignores non-definitive auth and other categories', () => {
+    expect(
+      providerAccountUnavailableState(
+        classifyProviderError('claude', { code: 'authentication_error', message: 'Bad key' }),
+      ),
+    ).toBeNull();
+    expect(
+      providerAccountUnavailableState({
+        category: 'quota_exhausted',
+        definitive: true,
+        sanitizedMessage: 'Your workspace is out of credits.',
+      }),
+    ).toBeNull();
   });
 });

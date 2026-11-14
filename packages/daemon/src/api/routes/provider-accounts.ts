@@ -3,6 +3,7 @@ import {
   createProviderAccountSchemas,
   importProviderAccountFromProfileSchema,
   PROVIDER_CATALOG,
+  type ProviderAccount,
   type PublicProviderCatalog,
   providerAccountIdSchema,
 } from '@autopod/shared';
@@ -10,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ProfileStore } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
+import type { ProviderAccountHealthStore } from '../../provider-accounts/provider-account-health.js';
 import { redactProfileSecrets } from '../profile-redaction.js';
 import { redactProviderAccountSecrets } from '../provider-account-redaction.js';
 
@@ -57,6 +59,10 @@ function asProviderAccountValidationError(error: unknown): never {
   throw error;
 }
 
+const markProviderAccountOkSchema = z.object({
+  reason: z.string().trim().min(1).max(1200),
+});
+
 function validateProviderAccountRequest<T>(operation: () => T): T {
   try {
     return operation();
@@ -71,7 +77,9 @@ export function providerAccountRoutes(
   profileStore: ProfileStore,
   catalog: PublicProviderCatalog = PROVIDER_CATALOG,
   composable = false,
+  health?: ProviderAccountHealthStore,
 ): void {
+  const publicAccount = (account: ProviderAccount) => redactProviderAccountSecrets(account, health);
   const assertLegacy = () => {
     if (composable)
       throw new AutopodError(
@@ -86,7 +94,7 @@ export function providerAccountRoutes(
     const query = request.query as { provider?: string };
     const provider = query.provider ? catalogProviderSchema.parse(query.provider) : undefined;
     const accounts = providerAccountStore.list(provider ? { provider } : undefined);
-    return accounts.map(redactProviderAccountSecrets);
+    return accounts.map(publicAccount);
   });
 
   app.post('/provider-accounts', async (request, reply) => {
@@ -94,20 +102,33 @@ export function providerAccountRoutes(
       providerAccountStore.create(request.body as Record<string, unknown>),
     );
     reply.status(201);
-    return redactProviderAccountSecrets(account);
+    return publicAccount(account);
   });
 
   app.get('/provider-accounts/:id', async (request) => {
     const { id } = request.params as { id: string };
-    return redactProviderAccountSecrets(providerAccountStore.get(id));
+    return publicAccount(providerAccountStore.get(id));
   });
 
   app.patch('/provider-accounts/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const account = validateProviderAccountRequest(() =>
-      providerAccountStore.update(id, request.body as Record<string, unknown>),
-    );
-    return redactProviderAccountSecrets(account);
+    const changes = request.body as Record<string, unknown>;
+    const account = validateProviderAccountRequest(() => providerAccountStore.update(id, changes));
+    // A human credential replacement (re-login, new key) supersedes observed refusals,
+    // including account-scoped exhausted credits. Runtime token rotation does not.
+    if (health && changes?.credentials)
+      health.markOk(id, request.user.oid, 'Credentials replaced by an operator');
+    return publicAccount(account);
+  });
+
+  app.post('/provider-accounts/:id/health/mark-ok', async (request) => {
+    const { id } = request.params as { id: string };
+    if (!health)
+      throw new AutopodError('Provider account health is unavailable', 'NOT_SUPPORTED', 501);
+    const body = markProviderAccountOkSchema.parse(request.body ?? {});
+    providerAccountStore.get(id);
+    health.markOk(id, request.user.oid, body.reason);
+    return publicAccount(providerAccountStore.get(id));
   });
 
   app.delete('/provider-accounts/:id', async (request, reply) => {

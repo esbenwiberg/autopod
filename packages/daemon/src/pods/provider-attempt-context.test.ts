@@ -12,6 +12,7 @@ import { loadOrCreateKey } from '../crypto/credentials-cipher.js';
 import { createDatabase } from '../db/connection.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
+import { createProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
 import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/types.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
@@ -491,6 +492,48 @@ describe('provider attempt context', () => {
     expect(() => f.context.resolveEffectiveBoundProfile(f.pod())).toThrow(
       expect.objectContaining({ code: 'INVALID_PROVIDER_TARGET' }),
     );
+  });
+  it('fails over saved launches within their frozen main route and skips unhealthy accounts', async () => {
+    const f = fixture();
+    const { services, store } = createTestConfiguration(f.db);
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, f.accounts);
+    const ai = store.get('ai', 'ai');
+    store.writeBatch([
+      {
+        id: 'ai',
+        kind: 'ai',
+        name: ai.name,
+        expectedRevision: ai.revision,
+        payload: {
+          main: {
+            providerAccountId: 'account',
+            runtime: 'claude',
+            model: 'claude-sonnet-4-6',
+            failover: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-next' }],
+            maxHops: 1,
+          },
+        },
+      },
+    ]);
+    const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Saved launch' }, services);
+    const snapshots = createLaunchSnapshotRepository(f.db, store);
+    snapshots.admit({ config: launch, requestDigest: 'fixture', createPod: () => 'context' });
+    const health = createProviderAccountHealthStore(f.db, f.accounts);
+    f.live.launchConfiguration = { read: snapshots.get };
+    f.live.providerAccountHealth = health;
+    // The legacy profile has no policy; the saved route is the failover authority.
+    expect(f.context.selectProviderFailoverTarget(f.pod())).toMatchObject({
+      target: { providerAccountId: 'backup', runtime: 'codex', model: 'gpt-next' },
+      reason: null,
+    });
+    health.recordFailure('backup', 'out_of_credits', 'Out of credits', 'other-pod');
+    const selection = f.context.selectProviderFailoverTarget(f.pod());
+    expect(selection).toMatchObject({ target: null, reason: { type: 'ineligible' } });
+    expect(f.context.providerFailoverSkippedActivity(selection)).toEqual([
+      expect.stringMatching(
+        /^Provider failover skipped account=backup runtime=codex model=gpt-next: backup: out of credits/,
+      ),
+    ]);
   });
   it('checks real saved launch routes and immutable account identity through late launch reads', async () => {
     const f = fixture();

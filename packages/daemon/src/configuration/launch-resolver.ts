@@ -23,6 +23,10 @@ import {
   workflowPresetSchema,
 } from '@autopod/shared';
 import { deriveFeedName } from '../pods/registry-injector.js';
+import {
+  assertRouteAccountHealthy,
+  type ProviderAccountHealthStore,
+} from '../provider-accounts/provider-account-health.js';
 import { assertAnalysisWorkspace } from './analysis-workspace.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
@@ -53,6 +57,8 @@ export interface LaunchResolutionServices {
   referenceRevision(repository: RepositoryConfig, ref: string): Promise<string>;
   skillContent(skill: ToolPack['skills'][number]): Promise<string>;
   resolveAgentRoute(route: AgentRoute): Promise<ResolvedAgentAccount>;
+  /** Observed account health. Absent on hosts without health evidence: no extra gate. */
+  agentAccountHealth?: Pick<ProviderAccountHealthStore, 'current'>;
   executionCapabilities(
     target: EffectiveLaunchConfig['execution']['target'],
   ): Promise<ExecutionCapabilities>;
@@ -490,6 +496,8 @@ async function resolve(
     ...(config.ai.reviewer.mode === 'independent' ? [config.ai.reviewer.route] : []),
     ...(config.ai.advisor?.mode === 'independent' ? [config.ai.advisor.route] : []),
   ]) {
+    // A known-refused primary account would fail before any work; reject before resources.
+    if (services.agentAccountHealth) assertRouteAccountHealthy(route, services.agentAccountHealth);
     for (const target of [
       route,
       ...route.failover.map((target) => ({ ...target, failover: [], maxHops: 0 })),

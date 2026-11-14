@@ -33,11 +33,24 @@ const accountColumns: ColumnDef<PublicProviderAccount>[] = [
     width: 8,
   },
   {
+    header: 'Health',
+    formatter: (account) => formatAccountHealth(account.health),
+    width: 16,
+  },
+  {
     header: 'Last Used',
     formatter: (account) => account.lastUsedAt ?? '-',
     width: 24,
   },
 ];
+
+/** Observed health; `unknown` means nothing applies to the current credentials. */
+export function formatAccountHealth(health: PublicProviderAccount['health']): string {
+  if (!health) return chalk.dim('-');
+  if (health.state === 'ok') return chalk.green('ok');
+  if (health.state === 'unknown') return chalk.dim('unknown');
+  return chalk.red(health.state === 'auth_revoked' ? 'auth revoked' : 'out of credits');
+}
 
 function collectOption(value: string, previous: string[] = []): string[] {
   return [...previous, value];
@@ -204,6 +217,13 @@ export function registerProviderAccountCommands(
         console.log(`${chalk.bold('ID:')}        ${data.id}`);
         console.log(`${chalk.bold('Provider:')}  ${data.provider}`);
         console.log(`${chalk.bold('Auth:')}      ${data.hasCredentials ? 'yes' : 'no'}`);
+        if (data.health) {
+          console.log(`${chalk.bold('Health:')}    ${formatAccountHealth(data.health)}`);
+          if (data.health.observedAt)
+            console.log(
+              `  ${data.health.source ?? 'observed'} at ${data.health.observedAt}${data.health.actor ? ` by ${data.health.actor}` : ''}: ${data.health.reason ?? ''}`,
+            );
+        }
         console.log(`${chalk.bold('Created:')}   ${data.createdAt}`);
         console.log(`${chalk.bold('Updated:')}   ${data.updatedAt}`);
         if (data.lastAuthenticatedAt) {
@@ -222,6 +242,21 @@ export function registerProviderAccountCommands(
           console.log(`${chalk.bold('Max hops:')}  ${data.failoverPolicy.maxHops}`);
         }
       });
+    });
+
+  accounts
+    .command('mark-ok <id>')
+    .description(
+      'Record that a provider account is usable again (e.g. credits added) without new credentials',
+    )
+    .requiredOption('--reason <reason>', 'Why the observed refusal no longer applies')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, opts: { reason: string; json?: boolean }) => {
+      if (!opts.reason.trim()) throw new Error('mark-ok requires a reason');
+      const account = await getClient().markProviderAccountOk(id, opts.reason.trim());
+      withJsonOutput(opts, account, (data) =>
+        console.log(`${data.id}: health ${formatAccountHealth(data.health)}`),
+      );
     });
 
   accounts

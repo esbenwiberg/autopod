@@ -89,6 +89,7 @@ import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
 import { createPodsitterService } from './podsitter/podsitter-service.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
+import { createProviderAccountHealthStore } from './provider-accounts/provider-account-health.js';
 import { createAzureDevOpsAuth } from './providers/azure-devops-auth.js';
 import {
   ClaudeRuntime,
@@ -284,6 +285,7 @@ const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath, (podId) =>
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
 const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
+const providerAccountHealth = createProviderAccountHealthStore(db, providerAccountStore);
 const podsitterRepo = createPodsitterRepository(db);
 // Stores that let daemon-side LLM helpers (PR body, auto-commit message) resolve
 // the same live provider-account credentials the agent authenticates with.
@@ -796,6 +798,7 @@ const configuration = createHostConfigurationComponents({
   logger,
   pods: podRepo,
   accounts: providerAccountStore,
+  accountHealth: providerAccountHealth,
   audit: actionAuditRepo,
   cipher: credentialsCipher,
   githubAuth,
@@ -832,6 +835,7 @@ podManager = createPodManager({
   launchConfiguration: configuration.launchConfiguration,
   podRepo,
   providerAttemptRepo,
+  providerAccountHealth,
   escalationRepo,
   nudgeRepo,
   fixFeedbackRepo,
@@ -1178,6 +1182,7 @@ const app = await createServer({
   podManager,
   profileStore,
   providerAccountStore,
+  providerAccountHealth,
   podsitterRepository: podsitterRepo,
   podsitterService,
   systemDecisionExecutionTarget,

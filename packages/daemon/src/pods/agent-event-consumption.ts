@@ -13,6 +13,7 @@ import {
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { providerAccountUnavailableState } from '../runtimes/provider-error-classifier.js';
 import type {
   AgentConsumerCaptured,
   AgentExecutionLiveDependencies,
@@ -170,6 +171,7 @@ export function createAgentEventConsumption(
       }
     };
     let superseded = false;
+    let accountFailover = false;
     let eventError: unknown;
     let hasEventError = false;
     let attemptPod: Pod;
@@ -698,6 +700,11 @@ export function createAgentEventConsumption(
                 : 'Agent failed',
             );
             emitActivityStatus(podId, failureReason);
+            const accountFailoverAvailability = providerAccountUnavailableState(
+              terminalClassification,
+            )
+              ? captured.providerFailoverAvailability?.(pod)
+              : undefined;
             if (
               terminalClassification.category === 'quota_exhausted' &&
               terminalClassification.definitive
@@ -706,14 +713,26 @@ export function createAgentEventConsumption(
                 pauseReason: 'provider_limit',
                 failureReason,
               });
+            } else if (accountFailoverAvailability?.available) {
+              // A refused account cannot serve this task; continue on the next configured
+              // account through the provider-limit handoff instead of failing the task.
+              transition(pod, 'paused', {
+                pauseReason: 'provider_limit',
+                failureReason,
+              });
+              accountFailover = true;
             } else {
+              // Name failover targets passed over as known-unhealthy before failing.
+              for (const line of accountFailoverAvailability?.skipped ?? [])
+                emitActivityStatus(podId, line);
               transition(pod, 'failed', {
                 completedAt: new Date().toISOString(),
                 failureReason,
               });
             }
           }
-          outcome = 'failed';
+          // The run handed over to another account; it is not a worker failure to retry.
+          outcome = accountFailover ? 'paused' : 'failed';
           observedTerminalOutcome = 'failed';
           break;
         } else if (event.type === 'tool_use' || event.type === 'file_change') {
@@ -788,6 +807,31 @@ export function createAgentEventConsumption(
                 !podRepo.retainedCoding?.isOwner(podId)
               )
                 await handleProviderLimit(podId, terminalClassification);
+            } else if (
+              accountFailover &&
+              terminalClassification &&
+              current.status === 'paused' &&
+              current.pauseReason === 'provider_limit'
+            ) {
+              closeProviderAttempt(
+                podId,
+                'failed',
+                terminalClassification,
+                PROVIDER_FAILOVER_HANDOFF_PATH,
+                runOwner.providerOrdinal,
+              );
+              if (
+                !podRepo.hasInfrastructureBlocker?.(podId) &&
+                !podRepo.retainedCoding?.isOwner(podId)
+              )
+                await handleProviderLimit(podId, terminalClassification);
+              // No continuation was queued: an account refusal has no reset to wait for.
+              const settled = podRepo.getOrThrow(podId);
+              if (settled.status === 'paused' && settled.pauseReason === 'provider_limit')
+                transition(settled, 'failed', {
+                  completedAt: new Date().toISOString(),
+                  pauseReason: null,
+                });
             } else if (
               current.pauseReason === 'provider_limit' &&
               outcome === 'failed' &&
