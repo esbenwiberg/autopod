@@ -53,6 +53,7 @@ export function createAgentProcessWorkflow(
     ownsLifecycle,
     persistRuntimeCredentialsForPod,
     preserveSandboxAfterAgentFailure,
+    releaseZeroWorkFailure,
     hasDurableAgentExecutionEvidence,
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,
@@ -672,6 +673,7 @@ export function createAgentProcessWorkflow(
         await this.handleCompletion(podId);
       } else if (outcome === 'failed') {
         await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
+        await releaseZeroWorkFailure(podId, lifecycleGeneration, containerId);
       }
     } catch (err) {
       if (err instanceof AgentContinuationSupersededError) return;

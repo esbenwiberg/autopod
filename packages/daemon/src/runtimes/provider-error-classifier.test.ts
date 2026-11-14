@@ -51,6 +51,36 @@ const quotaFixtures = [
 ] as const;
 
 describe('classifyProviderError', () => {
+  it.each([
+    [
+      'claude',
+      'Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.',
+    ],
+    ['claude', 'Failed to authenticate. API Error: 401 OAuth token has expired'],
+    ['claude', 'Credit balance is too low'],
+    ['codex', 'Your workspace is out of credits. Add credits to continue.'],
+    ['pi', 'OAuth token revoked'],
+  ] as const)('records unusable %s provider accounts as definitive auth failures', (runtime, message) => {
+    expect(classifyProviderError(runtime, { message })).toEqual({
+      category: 'auth',
+      definitive: true,
+      sanitizedMessage: message,
+      retryAfter: null,
+    });
+  });
+
+  it('keeps account wording inside other errors unclassified', () => {
+    for (const message of [
+      'Tool output: Failed to authenticate with the test database',
+      'Error: your workspace is out of credits? no',
+    ])
+      expect(classifyProviderError('codex', { message }).definitive).toBe(false);
+    expect(
+      classifyProviderError('claude', { message: 'Failed to authenticate: MCP server unreachable' })
+        .category,
+    ).toBe('unknown');
+  });
+
   it('treats structured Claude 529 as unavailable without authorizing account failover', () => {
     expect(
       classifyProviderError('claude', { status: 529, message: 'API Error: 529 Overloaded' }),

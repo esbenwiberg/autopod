@@ -32,6 +32,7 @@ import type { ProviderAttemptRepository } from './provider-attempt-repository.js
 import { computeQualitySignals } from './quality-signals.js';
 import { resolveReviewerModel } from './runtime-resolver.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { assessZeroWorkProviderAccountFailure } from './zero-work-failure.js';
 
 export interface MemoryCandidateRecorder {
   start(): void;
@@ -155,6 +156,25 @@ export function createMemoryCandidateRecorder(
         score: null,
         signals: [],
       });
+      return 'ignored';
+    }
+
+    // A provider-account refusal before any agent work has no lesson to learn. A reviewer
+    // here often shares the refused account; its failed run is recorded as uncertain
+    // reviewer usage that blocks task accounting and later reviews.
+    if (
+      (pod.status === 'failed' || pod.status === 'killed') &&
+      assessZeroWorkProviderAccountFailure(pod, { eventRepo, providerAttemptRepo }).qualifies
+    ) {
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'skipped',
+        reason: 'provider_account_unavailable_no_work',
+        score: null,
+        signals: [],
+      });
+      // Not a durable decision: a later rework with real work remains extractable.
       return 'ignored';
     }
 

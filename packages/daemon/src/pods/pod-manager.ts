@@ -195,6 +195,7 @@ export type {
 import { createPodManagerFacade } from './pod-manager-facade.js';
 import { createRecoveryFork } from './recovery-fork.js';
 import { createTerminationReconciliation } from './termination-reconciliation.js';
+import { createZeroWorkFailureRelease } from './zero-work-failure-release.js';
 
 export type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
 
@@ -393,6 +394,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       killSidecarsForPod,
       destroyPodNetwork,
     });
+
+  const { releaseZeroWorkFailure } = createZeroWorkFailureRelease({
+    podRepo,
+    eventRepo: deps.eventRepo,
+    providerAttemptRepo: deps.providerAttemptRepo,
+    launchConfiguration: deps.launchConfiguration,
+    ownsLifecycle,
+    killSidecarsForPod,
+    cleanupContainer,
+    destroyPodNetwork,
+    emitActivityStatus,
+    logger,
+  });
 
   const { cleanupContainerAfterAdvisorySettles } = createResourceAdvisoryCleanup({
     assertGuidanceCollected,
@@ -1070,6 +1084,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ownsLifecycle,
     persistRuntimeCredentialsForPod,
     preserveSandboxAfterAgentFailure,
+    releaseZeroWorkFailure,
     hasDurableAgentExecutionEvidence,
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,

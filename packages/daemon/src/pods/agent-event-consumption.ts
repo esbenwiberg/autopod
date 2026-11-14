@@ -39,6 +39,7 @@ import {
   workerBindingHash,
 } from './worker-retry-history.js';
 import { createWorkspaceFileObserver } from './workspace-file-observer.js';
+import { PROVIDER_ACCOUNT_UNAVAILABLE } from './zero-work-failure.js';
 
 export function createAgentEventConsumption(
   deps: Pick<
@@ -690,7 +691,12 @@ export function createAgentEventConsumption(
               Date.now(),
             );
           if (canFail(pod.status) && !podRepo.hasInfrastructureBlocker?.(podId)) {
-            const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
+            const failureReason = sanitizeFailureReason(
+              event.message,
+              terminalClassification.category === 'auth'
+                ? PROVIDER_ACCOUNT_UNAVAILABLE
+                : 'Agent failed',
+            );
             emitActivityStatus(podId, failureReason);
             if (
               terminalClassification.category === 'quota_exhausted' &&
