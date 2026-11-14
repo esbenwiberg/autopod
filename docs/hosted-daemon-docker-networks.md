@@ -35,41 +35,6 @@ default `docker0` bridge uses one of them.
    counts. It is not reported as a generic setup failure. No agent or container
    was started. Free capacity first, then retry or relaunch the task.
 
-## Check pressure
-
-```bash
-ap health              # prints a "Docker networks:" line
-ap health --json       # docker.networks in full
-curl -s "$DAEMON/health?detail=full" | jq .docker.networks
-```
-
-`docker.networks` reports the following:
-
-- `addressPools.capacity`, `used` and `free`: pool-sized subnets. `source` is
-  `configured` when dockerd reports `DefaultAddressPools`, `builtin-default`
-  when it reports none, and `unknown` when `docker info` failed.
-- `podNetworks`: the number of autopod bridges, broken down as `retained`
-  (custody-held), `attached` (live endpoints), `unattached`, `reclaimable`
-  (unattached and not retained, so the prune can free them), `releasable`
-  (superseded retained bridges the release protocol may remove) and `unknown`
-  (inspection failed).
-- `reclaimableHeadroom`: `free` plus `reclaimable` plus `releasable`. `severity` is `critical`
-  at 0 and `warning` at 5 or fewer. A `critical` result makes
-  `/health?detail=full` report `degraded`. Basic `/health` is unchanged.
-
-These counts are a read-only estimate. A value that could not be measured is
-`null`, never treated as healthy.
-
-## Free capacity
-
-- Kill failed pods you no longer need: `ap kill <pod>`.
-- Release superseded retained bridges: `ap release-retained-networks` (dry
-  run), then `ap release-retained-networks --apply [--limit N]`.
-- Do not remove retained-checkpoint bridges by hand with `docker network rm`.
-  That skips the eligibility checks and leaves no release record.
-- If retained checkpoints alone exhaust the pools, enlarge the host's address
-  pools. This is a host configuration change, not a daemon change.
-
 ## Release protocol
 
 An empty bridge is an execution resource, not custody evidence. The daemon can
@@ -104,3 +69,38 @@ releasable or held. `--apply` releases the eligible ones, oldest first (at
 most `--limit`, default 100), records the authenticated operator, and exits
 non-zero if any release failed or was refused. The automatic path records
 `subnet_pressure` as its trigger.
+
+## Check pressure
+
+```bash
+ap health              # prints a "Docker networks:" line
+ap health --json       # docker.networks in full
+curl -s "$DAEMON/health?detail=full" | jq .docker.networks
+```
+
+`docker.networks` reports the following:
+
+- `addressPools.capacity`, `used` and `free`: pool-sized subnets. `source` is
+  `configured` when dockerd reports `DefaultAddressPools`, `builtin-default`
+  when it reports none, and `unknown` when `docker info` failed.
+- `podNetworks`: the number of autopod bridges, broken down as `retained`
+  (custody-held), `attached` (live endpoints), `unattached`, `reclaimable`
+  (unattached and not retained, so the prune can free them), `releasable`
+  (superseded retained bridges the release protocol may remove) and `unknown`
+  (inspection failed).
+- `reclaimableHeadroom`: `free` plus `reclaimable` plus `releasable`. `severity` is `critical`
+  at 0 and `warning` at 5 or fewer. A `critical` result makes
+  `/health?detail=full` report `degraded`. Basic `/health` is unchanged.
+
+These counts are a read-only estimate. A value that could not be measured is
+`null`, never treated as healthy.
+
+## Free capacity
+
+- Kill failed pods you no longer need: `ap kill <pod>`.
+- Release superseded retained bridges: `ap release-retained-networks` (dry
+  run), then `ap release-retained-networks --apply [--limit N]`.
+- Do not remove retained-checkpoint bridges by hand with `docker network rm`.
+  That skips the eligibility checks and leaves no release record.
+- If retained checkpoints alone exhaust the pools, enlarge the host's address
+  pools. This is a host configuration change, not a daemon change.
