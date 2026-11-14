@@ -44,6 +44,7 @@ import {
   ownsStalledWorkerArchive,
   ownsStalledWorkerStop,
 } from '../pods/stalled-worker-recovery-repository.js';
+import { boundOutput } from '../util/bounded-output.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   boundedDockerCall,
@@ -1411,7 +1412,7 @@ function collectDemuxedOutput(
         if (typeof destroyableStream.destroy === 'function') {
           destroyableStream.destroy();
         }
-        const partialOutput = [stdoutBuf, stderrBuf].filter(Boolean).join('\n').slice(-5_000);
+        const partialOutput = boundOutput([stdoutBuf, stderrBuf].filter(Boolean).join('\n'));
         const err = Object.assign(new Error(`Exec timed out after ${timeout}ms`), {
           partialOutput,
         });

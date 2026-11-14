@@ -345,6 +345,23 @@ describe('buildCorrectionContext', () => {
     expect(context.screenshotDescriptions).toContainEqual(expect.stringContaining('Tests failed'));
   });
 
+  it('keeps the trailing test failure of a long log in the correction context', async () => {
+    const cm = mockContainerManager();
+    const result = mockValidationResult({ testsFailed: true });
+    result.test = {
+      status: 'fail',
+      duration: 1,
+      stdout: `> pnpm test\n${' ✓ passing package test\n'.repeat(2_000)} FAIL src/broken.test.ts`,
+      stderr: '@autopod/daemon#test: command exited (1)',
+    };
+    const context = await buildCorrectionContext(mockSession(), mockProfile(), result, cm);
+    const description = context.screenshotDescriptions.find((d) => d.startsWith('Tests failed'));
+    expect(description).toContain('> pnpm test');
+    expect(description).toContain('FAIL src/broken.test.ts');
+    expect(description).toContain('@autopod/daemon#test: command exited (1)');
+    expect(description?.length).toBeLessThanOrEqual('Tests failed:\n'.length + 2_000);
+  });
+
   it('handles exec error gracefully', async () => {
     const cm = mockContainerManager();
     (cm.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no commits'));

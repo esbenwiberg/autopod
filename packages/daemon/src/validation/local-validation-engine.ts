@@ -39,6 +39,7 @@ import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { wrapValidationExecCommand } from '../pods/registry-injector.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { boundOutput } from '../util/bounded-output.js';
 import { resolveSandboxCheckpointSourceHead } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
 import { createArtifactExecutionBoundary } from './artifact-execution-boundary.js';
@@ -531,7 +532,14 @@ export function createLocalValidationEngine(
               );
             }
             const message = err instanceof Error ? err.message : String(err);
-            setupResult = { status: 'fail', output: message, duration };
+            setupResult = {
+              status: 'fail',
+              output: interruptedOutput(
+                message,
+                (err as { partialOutput?: string })?.partialOutput ?? '',
+              ),
+              duration,
+            };
             callbacks?.onPhaseCompleted?.('setup', 'fail', setupResult);
             return makeSetupFailedResult(config, startTime, setupResult);
           }
@@ -547,7 +555,9 @@ export function createLocalValidationEngine(
               .join('\n');
             setupResult = {
               status: 'skip',
-              output: `${setupInfrastructureFailure.message}\n\n--- setup output ---\n${rawOutput}`,
+              output: boundOutput(
+                `${setupInfrastructureFailure.message}\n\n--- setup output ---\n${rawOutput}`,
+              ),
               duration: setupDuration,
             };
             callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
@@ -561,7 +571,9 @@ export function createLocalValidationEngine(
           if (setupExecResult.exitCode !== 0) {
             setupResult = {
               status: 'fail',
-              output: [setupExecResult.stdout, setupExecResult.stderr].filter(Boolean).join('\n'),
+              output: boundOutput(
+                [setupExecResult.stdout, setupExecResult.stderr].filter(Boolean).join('\n'),
+              ),
               duration: setupDuration,
             };
             callbacks?.onPhaseCompleted?.('setup', 'fail', setupResult);
@@ -569,7 +581,7 @@ export function createLocalValidationEngine(
           }
           setupResult = {
             status: 'pass',
-            output: setupExecResult.stdout,
+            output: boundOutput(setupExecResult.stdout),
             duration: setupDuration,
           };
           callbacks?.onPhaseCompleted?.('setup', 'pass', setupResult);
@@ -1765,7 +1777,7 @@ async function runBuild(
     log?.warn({ err, duration }, timedOut ? 'build timed out' : 'build execution failed');
     return {
       status: 'fail' as const,
-      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      output: interruptedOutput(message, partial),
       duration,
     };
   }
@@ -1811,7 +1823,7 @@ async function runBuild(
 
   return {
     status,
-    output: output.slice(0, 50_000), // Cap output size
+    output: boundOutput(output), // Cap size, keeping both ends
     duration,
     warningCount,
     infrastructureFailure,
@@ -1875,7 +1887,7 @@ async function runTests(
     return {
       status: 'fail',
       duration,
-      stdout: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      stdout: interruptedOutput(message, partial),
       stderr: '',
     };
   }
@@ -1896,10 +1908,7 @@ async function runTests(
     return {
       status: 'skip',
       duration,
-      stdout: `${infrastructureFailure.message}\n\n--- test output ---\n${rawOutput}`.slice(
-        0,
-        50_000,
-      ),
+      stdout: boundOutput(`${infrastructureFailure.message}\n\n--- test output ---\n${rawOutput}`),
       stderr: '',
       infrastructureFailure,
     };
@@ -1915,8 +1924,8 @@ async function runTests(
   return {
     status,
     duration,
-    stdout: result.stdout.slice(0, 50_000),
-    stderr: result.stderr.slice(0, 50_000),
+    stdout: boundOutput(result.stdout),
+    stderr: boundOutput(result.stderr),
   };
 }
 
@@ -1979,10 +1988,13 @@ class ValidationCommandInfrastructureError extends Error {
 
 function validationInfrastructureOutput(error: unknown, partial = ''): string {
   const message = error instanceof Error ? error.message : String(error);
-  return `Validation infrastructure failure: ${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(
-    0,
-    50_000,
-  );
+  return interruptedOutput(`Validation infrastructure failure: ${message}`, partial);
+}
+
+/** Interruption message plus the captured partial output, bounded while keeping both ends. */
+function interruptedOutput(message: string, partial: string): string {
+  if (!partial) return boundOutput(message);
+  return boundOutput(`${message}\n\n--- partial output before interruption ---\n${partial}`);
 }
 
 function classifyValidationInfrastructureFailure(
@@ -2979,7 +2991,7 @@ async function runLint(
     log?.warn({ err, duration }, timedOut ? 'lint timed out' : 'lint execution failed');
     return {
       status: 'fail' as const,
-      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      output: interruptedOutput(message, partial),
       duration,
     };
   }
@@ -2998,10 +3010,7 @@ async function runLint(
     );
     return {
       status: 'skip' as const,
-      output: `${infrastructureFailure.message}\n\n--- lint output ---\n${combined}`.slice(
-        0,
-        50_000,
-      ),
+      output: boundOutput(`${infrastructureFailure.message}\n\n--- lint output ---\n${combined}`),
       duration,
       infrastructureFailure,
     };
@@ -3015,7 +3024,7 @@ async function runLint(
     log?.info({ duration }, 'lint passed');
   }
 
-  return { status, output: combined.slice(0, 50_000), duration };
+  return { status, output: boundOutput(combined), duration };
 }
 
 // ── SAST phase ──────────────────────────────────────────────────────────────
@@ -3066,7 +3075,7 @@ async function runSast(
     log?.warn({ err, duration }, timedOut ? 'SAST timed out' : 'SAST execution failed');
     return {
       status: 'fail' as const,
-      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
+      output: interruptedOutput(message, partial),
       duration,
     };
   }
@@ -3085,10 +3094,7 @@ async function runSast(
     );
     return {
       status: 'skip' as const,
-      output: `${infrastructureFailure.message}\n\n--- SAST output ---\n${combined}`.slice(
-        0,
-        50_000,
-      ),
+      output: boundOutput(`${infrastructureFailure.message}\n\n--- SAST output ---\n${combined}`),
       duration,
       infrastructureFailure,
     };
@@ -3102,7 +3108,7 @@ async function runSast(
     log?.info({ duration }, 'SAST passed');
   }
 
-  return { status, output: combined.slice(0, 50_000), duration };
+  return { status, output: boundOutput(combined), duration };
 }
 
 // ── Health check phase ──────────────────────────────────────────────────────
