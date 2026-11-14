@@ -16,7 +16,9 @@ default `docker0` bridge uses one of them.
 |---|---|
 | Running or validating pod | The pod is cleaned up |
 | Failed pod that has not been killed | `ap kill <pod>`, or the subnet-exhaustion prune below (if no custody holds it) |
-| Retained checkpoint identity (original and every `-retained-*` generation) | Not released automatically. Custody keeps the bridge until an explicit release protocol exists (#565) |
+| Current identity of a live retained pod, or an in-progress artifact check | Not released |
+| Superseded retained-checkpoint or artifact-checks identity (original and older `-retained-*` generations) | The release protocol below: automatically under pool pressure, or `ap release-retained-networks --apply` |
+| Any identity of a pod with a retained finalization or a recovery fork | Not released |
 
 ## What the daemon does
 
@@ -24,10 +26,49 @@ default `docker0` bridge uses one of them.
    `com.autopod.pod-network` bridges. Retained-custody bridges are never
    removed. The daemon logs the number of networks it removed and how many it
    skipped as retained, attached or failed (`Subnet pool prune finished`).
-2. If the retry still fails, the pod fails with `HOST_NETWORK_CAPACITY`
+2. If creation still fails, the daemon releases superseded retained bridges,
+   oldest first and one at a time, retrying creation after each. It stops as
+   soon as the new network is created (`Pod network created after retained
+   release`). See [Release protocol](#release-protocol).
+3. If creation still fails, the pod fails with `HOST_NETWORK_CAPACITY`
    (`Pod could not start (HOST_NETWORK_CAPACITY): ...`), which includes those
    counts. It is not reported as a generic setup failure. No agent or container
    was started. Free capacity first, then retry or relaunch the task.
+
+## Release protocol
+
+An empty bridge is an execution resource, not custody evidence. The daemon can
+release a retained bridge only when all of these hold, re-checked immediately
+before each release:
+
+- The identity comes from a retained checkpoint recovery (the original pod
+  identity or an activated `-retained-*` generation) or an artifact-checks
+  recovery.
+- The owning pod has no retained finalization and is not a recovery-fork
+  parent.
+- The identity is not the current provider identity of a non-terminal pod,
+  and not the identity of an artifact check that has not finished (`checked`
+  or `blocked`).
+- The bridge has no live endpoints, and every container that references it
+  (looked up by network ID and by name) is `created`, `exited` or `dead`. None
+  of them is the current or sidecar container of a non-terminal pod.
+
+Before Docker removes the bridge, the daemon writes an append-only record to
+`retained_network_releases`. The record holds the identity, owning pod, source,
+exact network ID, driver, IPAM, options and labels, and the observed
+containers. It then removes the bridge by ID and appends the outcome
+(`removed`, `already_absent` or `failed`) to
+`retained_network_release_outcomes`. Containers, mounts, worktrees, source and
+reports are never touched. Held containers stay held: no wake, exec or release
+of them is authorized. Recreating the bridge would only matter to a future
+protocol that is allowed to start a held container, and that protocol would
+have to recreate the bridge from the recorded specification.
+
+`ap release-retained-networks` shows every retained bridge and why it is
+releasable or held. `--apply` releases the eligible ones, oldest first (at
+most `--limit`, default 100), records the authenticated operator, and exits
+non-zero if any release failed or was refused. The automatic path records
+`subnet_pressure` as its trigger.
 
 ## Check pressure
 
@@ -44,9 +85,10 @@ curl -s "$DAEMON/health?detail=full" | jq .docker.networks
   when it reports none, and `unknown` when `docker info` failed.
 - `podNetworks`: the number of autopod bridges, broken down as `retained`
   (custody-held), `attached` (live endpoints), `unattached`, `reclaimable`
-  (unattached and not retained, so the prune can free them) and `unknown`
+  (unattached and not retained, so the prune can free them), `releasable`
+  (superseded retained bridges the release protocol may remove) and `unknown`
   (inspection failed).
-- `reclaimableHeadroom`: `free` plus `reclaimable`. `severity` is `critical`
+- `reclaimableHeadroom`: `free` plus `reclaimable` plus `releasable`. `severity` is `critical`
   at 0 and `warning` at 5 or fewer. A `critical` result makes
   `/health?detail=full` report `degraded`. Basic `/health` is unchanged.
 
@@ -56,8 +98,10 @@ These counts are a read-only estimate. A value that could not be measured is
 ## Free capacity
 
 - Kill failed pods you no longer need: `ap kill <pod>`.
+- Release superseded retained bridges: `ap release-retained-networks` (dry
+  run), then `ap release-retained-networks --apply [--limit N]`.
 - Do not remove retained-checkpoint bridges by hand with `docker network rm`.
-  They are part of recovery custody.
+  That skips the eligibility checks and leaves no release record.
 - If retained checkpoints alone exhaust the pools, enlarge the host's address
   pools (below). This is a host configuration change, not a daemon change.
 

@@ -29,6 +29,7 @@ still require a new interactive or device login.
 ap connect <url>             # Connect CLI to a daemon
 ap disconnect                # Disconnect
 ap health                   # Show daemon release, backup and Docker network readiness
+ap release-retained-networks [--apply] [--limit N]  # Release superseded retained Docker bridges (dry run by default)
 ap stop                     # Gracefully stop the daemon
 ```
 

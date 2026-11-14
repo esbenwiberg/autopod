@@ -28,10 +28,11 @@ export function formatNetworkCapacity(health: DaemonHealthSummary): string | nul
   const line =
     `Docker networks: ${severity}; ${pods.total} autopod ` +
     `(${pods.retained ?? '?'} retained, ${pods.attached} attached, ` +
-    `${pods.reclaimable ?? '?'} reclaimable); ${poolText}; ` +
+    `${pods.reclaimable ?? '?'} reclaimable` +
+    `${pods.releasable === undefined ? '' : `, ${pods.releasable ?? '?'} releasable`}); ${poolText}; ` +
     `headroom ${networks.reclaimableHeadroom ?? '?'}`;
   if (networks.severity !== 'critical' && networks.severity !== 'warning') return line;
-  return `${line}\n  New local pods may fail with HOST_NETWORK_CAPACITY. Kill failed pods you no longer need or enlarge Docker default-address-pools (docs/hosted-daemon-docker-networks.md).`;
+  return `${line}\n  New local pods may fail with HOST_NETWORK_CAPACITY. Kill failed pods you no longer need, release superseded retained bridges (ap release-retained-networks), or enlarge Docker default-address-pools (docs/hosted-daemon-docker-networks.md).`;
 }
 
 export function registerDaemonCommands(program: Command): void {
@@ -114,6 +115,60 @@ export function registerDaemonCommands(program: Command): void {
         process.exit(1);
       }
     });
+
+  program
+    .command('release-retained-networks')
+    .description(
+      'Release empty Docker bridges of superseded retained checkpoints (dry run unless --apply)',
+    )
+    .option('--dry-run', 'Show what would be released without changing anything (default)')
+    .option('--apply', 'Record and remove eligible bridges; containers and source are untouched')
+    .option('--limit <n>', 'Release at most N bridges, oldest first', (value) => {
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100)
+        throw new Error('--limit must be an integer from 1 to 100');
+      return parsed;
+    })
+    .option('--json', 'Print the machine-readable plan or report')
+    .action(
+      async (options: { dryRun?: boolean; apply?: boolean; limit?: number; json?: boolean }) => {
+        if (options.dryRun && options.apply) throw new Error('Choose either --dry-run or --apply');
+        const daemonUrl = configStore.get('daemon');
+        if (!daemonUrl) throw new Error('No daemon configured. Run: ap connect <url>');
+        const client = new AutopodClient({ baseUrl: daemonUrl, getToken });
+        if (!options.apply) {
+          const plan = await client.planRetainedNetworkRelease();
+          if (options.json) {
+            console.log(JSON.stringify(plan, null, 2));
+            return;
+          }
+          console.log(
+            `${chalk.cyan('Dry run')}: ${plan.eligible} of ${plan.candidates.length} retained bridges releasable`,
+          );
+          for (const c of plan.candidates)
+            console.log(
+              `  ${c.networkName}  ${c.eligible ? chalk.green('releasable') : chalk.dim(`held: ${c.reason ?? 'unknown'}`)}`,
+            );
+          if (plan.eligible > 0)
+            console.log(chalk.dim('Review, then rerun with --apply to release them oldest first.'));
+          return;
+        }
+        const report = await withSpinner('Releasing retained bridges...', () =>
+          client.releaseRetainedNetworks(options.limit),
+        );
+        if (options.json) {
+          console.log(JSON.stringify(report, null, 2));
+          return;
+        }
+        console.log(`${chalk.green('Released')}: ${report.released} bridge(s)`);
+        for (const r of report.results)
+          console.log(
+            `  ${r.networkName}  ${r.outcome === 'removed' || r.outcome === 'already_absent' ? chalk.green(r.outcome) : chalk.yellow(r.outcome)}${r.detail ? `  ${r.detail}` : ''}`,
+          );
+        if (report.results.some((r) => r.outcome === 'failed' || r.outcome === 'refused'))
+          process.exitCode = 1;
+      },
+    );
 
   program
     .command('repair-token-telemetry')
