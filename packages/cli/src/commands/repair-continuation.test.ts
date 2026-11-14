@@ -97,7 +97,7 @@ describe('repair continuation CLI modes', () => {
     expect(output).toContain('Retained HOST HEAD:');
     expect(output).toContain('Retry grants and budget changes are separate');
     expect(output).toContain('not a claim to contain final sandbox bytes');
-    expect(output).toContain('Cumulative tokens: 800; limit: 1000; telemetry: partial');
+    expect(output).toContain('Cumulative tokens: 800/1000 tokens used; telemetry: partial');
     expect(output).toContain('workerRetries: 2 admissions / 1 executions');
     const need = vi
       .mocked(console.log)
@@ -106,6 +106,20 @@ describe('repair continuation CLI modes', () => {
     expect(need).toContain('worker / Build');
     expect(need).not.toContain('\u001b');
     expect(need).not.toContain('\n');
+  });
+  it('compares budget-counted usage with the limit and names discounted cache reads', async () => {
+    const counted = {
+      tokenBudget: 2000000,
+      recordedTotalTokens: 1888511,
+      recordedCachedInputTokens: 1804032,
+      budgetCountedTokens: 264883,
+      telemetry: 'complete',
+    };
+    client.getTaskExecution.mockResolvedValueOnce(counted);
+    await run();
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
+      'Cumulative tokens: 264883/2000000 budget-counted tokens used; 1888511 recorded incl. 1804032 cache reads at 0.1x; telemetry: complete',
+    );
   });
   it('keeps unavailable accounting explicit and preserves structured JSON context', async () => {
     client.getTaskExecution.mockRejectedValueOnce(new Error('Accounting unavailable'));

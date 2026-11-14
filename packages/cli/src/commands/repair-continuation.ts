@@ -1,4 +1,5 @@
 import {
+  describeTaskBudgetUsage,
   type RepairContinuationInspectionV1,
   type RepairContinuationOperationV1,
   type RepairContinuationPreviewV1,
@@ -197,6 +198,8 @@ const reportContext = z.object({
 const budgetContext = z.object({
   tokenBudget: z.number().nullable(),
   recordedTotalTokens: z.number().optional(),
+  recordedCachedInputTokens: z.number().optional(),
+  budgetCountedTokens: z.number().optional(),
   telemetry: z.string(),
   budgetCheck: z.object({ status: z.string(), reason: z.string() }).optional(),
 });
@@ -245,8 +248,15 @@ function renderContext(observations: Awaited<ReturnType<typeof context>>) {
         continue;
       }
       const budget = parsed.data;
+      const usage =
+        budget.recordedTotalTokens === undefined
+          ? `unavailable; limit: ${budget.tokenBudget ?? 'not configured'}`
+          : describeTaskBudgetUsage(
+              { ...budget, recordedInputTokens: 0, recordedOutputTokens: 0 },
+              budget.tokenBudget,
+            );
       console.log(
-        `Cumulative tokens: ${budget.recordedTotalTokens ?? 'unavailable'}; limit: ${budget.tokenBudget ?? 'not configured'}; telemetry: ${safeText(budget.telemetry)}; budget admission: ${safeText(budget.budgetCheck?.status ?? 'unavailable')}.`,
+        `Cumulative tokens: ${usage}; telemetry: ${safeText(budget.telemetry)}; budget admission: ${safeText(budget.budgetCheck?.status ?? 'unavailable')}.`,
       );
       if (budget.budgetCheck) console.log(safeText(budget.budgetCheck.reason));
     } else {

@@ -546,9 +546,16 @@ it.each([
     agentRunCount: 3,
     providerAttemptCount: 4,
     validationExecutionCount: 5,
-    recordedInputTokens: 90,
-    recordedOutputTokens: 10,
-    tokenBudget: 100,
+    ...(hasDisposition
+      ? {
+          recordedInputTokens: 1850000,
+          recordedOutputTokens: 38511,
+          recordedTotalTokens: 1888511,
+          recordedCachedInputTokens: 1804032,
+          budgetCountedTokens: 264883,
+          tokenBudget: 2000000,
+        }
+      : { recordedInputTokens: 90, recordedOutputTokens: 10, tokenBudget: 100 }),
     budgetCheck: {
       status: 'unavailable',
       reason: 'Task token accounting incomplete; reconcile prior execution telemetry.',
@@ -688,6 +695,11 @@ it.each([
       );
     if (hasDisposition) expect(output).toContain('Last recorded closed PRs: 1');
     expect(output).toContain('Current provider status unverified.');
+    expect(output).toContain(
+      hasDisposition
+        ? 'Task tokens: 264883/2000000 budget-counted tokens used; 1888511 recorded incl. 1804032 cache reads at 0.1x'
+        : 'Task tokens: 100/100 tokens used',
+    );
     expect(output).toContain(
       'Task token accounting incomplete; reconcile prior execution telemetry.',
     );
