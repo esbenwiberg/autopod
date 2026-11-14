@@ -38,6 +38,13 @@ case "$*" in
     if [ "$count" -le "${DEPLOY_TEST_HEALTH_FAILURES:-0}" ]; then exit 7; fi
     echo '{"status":"ok"}'
     ;;
+  *'/health?detail=full'*)
+    if [ -n "${DEPLOY_TEST_NETWORK_SEVERITY:-}" ]; then
+      printf '{"status":"degraded","docker":{"networks":{"severity":"%s","reclaimableHeadroom":0,"addressPools":{"source":"builtin-default","capacity":31,"used":31},"podNetworks":{"total":30,"retained":26}}}}\n' "$DEPLOY_TEST_NETWORK_SEVERITY"
+    else
+      echo '{"status":"ok"}'
+    fi
+    ;;
   *'/health'*)
     if [[ "$*" == *'%{http_code}'* ]]; then echo 200; exit 0; fi
     python3 - <<'PYRELEASE'
@@ -217,6 +224,17 @@ grep -qF 'FORCE: 1 restart-blocking pod(s) still active after drain' "$tmp/force
 grep -qF 'FORCE: restarting with 1 active pod(s) at final gate' "$tmp/force-out"
 grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/force-out"
 [ -e "$tmp/restarted" ]
+
+# Docker network pressure is a host condition a deploy neither fixes nor
+# worsens: report it loudly but never block the deployment on it.
+reset_fixture
+if ! DEPLOY_TEST_NETWORK_SEVERITY=critical run_deploy >"$tmp/network-out" 2>&1; then
+  cat "$tmp/network-out" >&2
+  exit 1
+fi
+grep -qF 'WARN: Docker network capacity critical headroom=0 pools=31/31 (builtin-default) autopod=30 retained=26' "$tmp/network-out"
+grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/network-out"
+grep -qF 'Docker network capacity: unreported' "$tmp/queued-out"
 
 # Startup can legitimately take longer than one fixed sleep. The local health
 # gate must retry boundedly before declaring the new release unhealthy.

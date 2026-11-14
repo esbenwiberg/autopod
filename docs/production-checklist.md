@@ -78,6 +78,7 @@ stat -c '%a %U' ~/.autopod/secrets.key
 - [ ] `/var/run/docker.sock` is accessible to the daemon process.
 - [ ] The daemon user is in the `docker` group **or** the socket is bind-mounted with appropriate group permissions.
 - [ ] The socket is not world-readable on the host — Docker socket access is equivalent to root.
+- [ ] dockerd has enlarged `default-address-pools` (for example `10.200.0.0/16`, size 24) in a range that does not overlap host routes. Each local pod network and each retained checkpoint uses one subnet, and Docker's built-in pools allow only about 31. See [Docker network capacity](hosted-daemon-docker-networks.md).
 
 ---
 

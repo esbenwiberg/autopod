@@ -59,4 +59,69 @@ These counts are a read-only estimate. A value that could not be measured is
 - Do not remove retained-checkpoint bridges by hand with `docker network rm`.
   They are part of recovery custody.
 - If retained checkpoints alone exhaust the pools, enlarge the host's address
-  pools. This is a host configuration change, not a daemon change.
+  pools (below). This is a host configuration change, not a daemon change.
+
+## Enlarge the host address pools
+
+Recommended dockerd setting for a pod host, giving 256 networks:
+
+```json
+{
+  "default-address-pools": [{ "base": "10.200.0.0/16", "size": 24 }]
+}
+```
+
+A pod bridge holds only the pod and a few sidecars, so a smaller `size`
+multiplies capacity. With `"size": 26`, the same /16 gives 1024 networks of 62
+addresses each. Prefer this if other workloads on the host don't need larger
+networks.
+
+Before you apply it:
+
+- **Choose a non-overlapping range.** The base must not overlap the VM's VNet
+  or subnet, peered or VPN-routed ranges, Tailscale (`100.64.0.0/10`), or any
+  network that pods or the daemon must reach. Check the VNet address space and
+  `ip -4 route` on the host. If 10.200.0.0/16 is taken, pick another free /16.
+- **Merge, don't overwrite.** `/etc/docker/daemon.json` may already hold other
+  keys. Read it first, add only `default-address-pools`, and validate the
+  result with `sudo dockerd --validate --config-file /etc/docker/daemon.json`
+  (Docker 23+).
+- **Configured pools replace the built-in ones.** They apply to networks
+  created afterwards. Existing networks, including retained-checkpoint bridges,
+  keep their current subnets. Unless `bip` is set, the default `docker0` bridge
+  may be renumbered from the new pool. If anything on the host names
+  `172.17.0.1` (for example `AUTOPOD_CONTAINER_HOST` or a firewall rule), set
+  `"bip": "172.17.0.1/16"` as well or update those references.
+- **A dockerd restart is required, and it stops containers.**
+  `default-address-pools` cannot be reloaded. The hosted VM runs without
+  `live-restore`, so `systemctl restart docker` stops every running container,
+  including pod and sidecar containers. Apply only in a maintenance window with
+  no restart-blocking pods (the same check `scripts/deploy-hosted-daemon.sh`
+  runs). Stopped retained containers and their networks are kept.
+  `live-restore` itself is reloadable (`systemctl reload docker`). It would
+  keep containers running across future dockerd restarts, but it changes
+  failure semantics, so treat enabling it as a separate owner decision.
+
+On the hosted VM there is no SSH, so run each step through
+`az vm run-command invoke -g <rg> -n <vm> --command-id RunShellScript`.
+This is an operator procedure. Neither the deploy script nor the daemon
+applies it.
+
+```bash
+# 1. Inspect (read-only)
+cat /etc/docker/daemon.json 2>/dev/null || echo '(none)'
+docker info 2>/dev/null | grep -A3 'Default Address Pools' || true
+ip -4 route
+# 2. Write the merged daemon.json (a backup first), then validate
+sudo cp -a /etc/docker/daemon.json /etc/docker/daemon.json.bak 2>/dev/null || true
+sudo dockerd --validate --config-file /etc/docker/daemon.json
+# 3. Maintenance window only: confirm no restart-blocking pods, then
+sudo systemctl restart docker
+```
+
+Afterwards, check that `ap health` reports `Docker networks: ok` and that
+`docker.networks.addressPools` shows `source: configured` with `capacity: 256`.
+Then start one canary pod with a network policy.
+
+For a newly provisioned host, put `default-address-pools` in
+`/etc/docker/daemon.json` before Docker first starts, so no restart is needed.
