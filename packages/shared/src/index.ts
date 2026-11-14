@@ -526,6 +526,13 @@ export type {
   DaemonReleaseInfo,
   DockerNetworkCapacity,
   DockerNetworkCapacitySeverity,
+  ObservedContainer,
+  RetainedNetworkCandidate,
+  RetainedNetworkReleasePlan,
+  RetainedNetworkReleaseReport,
+  RetainedNetworkReleaseResult,
+  RetainedNetworkReleaseTrigger,
+  RetainedNetworkSource,
 } from './types/release.js';
 export type {
   RetainedFinalizationMode,

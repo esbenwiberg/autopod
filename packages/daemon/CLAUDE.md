@@ -233,9 +233,12 @@ Denied restricted-egress attempts are emitted as `pod.firewall_denied` events
 and can be queried through `/pods/:podId/firewall-denials`. Network and iptables
 rules are torn down in `cleanup()` — always call it in the pod's finally block.
 
-Each bridge consumes one dockerd address-pool subnet. Retained-checkpoint bridges
-are never pruned, so pool exhaustion fails new pods with `HOST_NETWORK_CAPACITY`
-after the unattached-network prune; `/health?detail=full` reports
+Each bridge consumes one dockerd address-pool subnet. Ordinary pruning never
+touches retained-checkpoint bridges. On pool exhaustion,
+`containers/retained-network-release.ts` releases superseded retained bridges,
+oldest first, after recording them in `retained_network_releases`. Operators can
+also run `ap release-retained-networks`. If no subnet can be freed, new pods
+fail with `HOST_NETWORK_CAPACITY`. `/health?detail=full` reports
 `docker.networks` pressure. See `docs/hosted-daemon-docker-networks.md`.
 
 ### Sandboxes (`src/containers/sandbox-container-manager.ts`)

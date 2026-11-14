@@ -4,6 +4,7 @@ import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import { retainedCheckpointNetworkIdentities } from '../pods/retained-checkpoint-repository.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
+import { planRetainedNetworkReleases } from './retained-network-release.js';
 
 export const POD_NETWORK_LABEL = 'com.autopod.pod-network';
 export const HOST_NETWORK_CAPACITY = 'HOST_NETWORK_CAPACITY';
@@ -194,7 +195,21 @@ export async function inspectNetworkCapacity({
   );
 
   const free = capacity === null || used === null ? null : Math.max(0, capacity - used);
-  const reclaimableHeadroom = free === null ? null : free + reclaimable;
+  // Superseded retained bridges the subnet-exhaustion path may release (#565).
+  let releasable: number | null = null;
+  if (db && held !== null) {
+    try {
+      releasable = (await planRetainedNetworkReleases({ docker, db, logger })).filter(
+        (candidate) => candidate.eligible,
+      ).length;
+    } catch (err) {
+      logger?.warn({ err }, 'Retained bridge release plan unavailable for capacity check');
+    }
+  }
+  const reclaimableHeadroom =
+    free === null || (db && held !== null && releasable === null)
+      ? null
+      : free + reclaimable + (releasable ?? 0);
   return {
     checkedAt,
     severity: classifyNetworkHeadroom(reclaimableHeadroom),
@@ -210,6 +225,7 @@ export async function inspectNetworkCapacity({
       attached,
       unattached,
       reclaimable: held === null ? null : reclaimable,
+      releasable,
       unknown,
     },
     reclaimableHeadroom,

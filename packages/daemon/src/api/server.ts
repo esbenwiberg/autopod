@@ -77,6 +77,7 @@ import { podRoutes } from './routes/pods.js';
 import { podsitterRoutes } from './routes/podsitter.js';
 import { profileRoutes } from './routes/profiles.js';
 import { providerAccountRoutes } from './routes/provider-accounts.js';
+import { retainedNetworkRoutes } from './routes/retained-networks.js';
 import { scanReportRoutes } from './routes/scan-reports.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { screenshotRoutes } from './routes/screenshots.js';
@@ -287,6 +288,8 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
       hostedImage: deps.systemDecisionHostedImage,
     });
   }
+
+  if (deps.docker && deps.db) retainedNetworkRoutes(app, { docker: deps.docker, db: deps.db });
 
   // Scheduled jobs routes
   if (deps.scanOperatorService) scanReportRoutes(app, deps.scanOperatorService);

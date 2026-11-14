@@ -19,7 +19,8 @@ export type DockerNetworkCapacitySeverity = 'ok' | 'warning' | 'critical' | 'unk
 /**
  * Read-only Docker bridge address-pool pressure. `reclaimableHeadroom` is free
  * pool subnets plus unattached autopod networks that are not held by retained
- * custody (the subnet-exhaustion prune can free those). Null means unknown.
+ * custody, plus superseded retained bridges eligible for release (the
+ * subnet-exhaustion path can free both). Null means unknown.
  */
 export interface DockerNetworkCapacity {
   checkedAt: string;
@@ -36,6 +37,8 @@ export interface DockerNetworkCapacity {
     attached: number;
     unattached: number;
     reclaimable: number | null;
+    /** Superseded retained bridges eligible for the release protocol. */
+    releasable: number | null;
     unknown: number;
   };
   reclaimableHeadroom: number | null;
@@ -53,4 +56,41 @@ export interface DaemonHealthSummary {
     containers_running?: number;
     networks?: DockerNetworkCapacity | { error: string };
   };
+}
+
+export type RetainedNetworkSource = 'retained_checkpoint' | 'artifact_checks';
+export type RetainedNetworkReleaseTrigger = 'subnet_pressure' | 'operator';
+export interface ObservedContainer {
+  id: string;
+  name: string;
+  status: string;
+}
+/** One held bridge in Docker and whether the release protocol may remove it. */
+export interface RetainedNetworkCandidate {
+  identity: string;
+  ownerPodId: string;
+  source: RetainedNetworkSource;
+  networkId: string;
+  networkName: string;
+  created: string | null;
+  eligible: boolean;
+  /** Why the bridge is not releasable; absent when eligible. */
+  reason?: string;
+  containers: ObservedContainer[];
+}
+export interface RetainedNetworkReleaseResult {
+  identity: string;
+  networkId: string;
+  networkName: string;
+  outcome: 'removed' | 'already_absent' | 'failed' | 'refused';
+  releaseId?: string;
+  detail?: string;
+}
+export interface RetainedNetworkReleasePlan {
+  eligible: number;
+  candidates: RetainedNetworkCandidate[];
+}
+export interface RetainedNetworkReleaseReport {
+  released: number;
+  results: RetainedNetworkReleaseResult[];
 }

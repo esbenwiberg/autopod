@@ -346,9 +346,13 @@ container ID, with holds checked before stop and again before removal. Managed
 reuse and constructor failure cleanup also respect holds. Missing identity or
 custody authority fails closed.
 
-Original and replacement bridges stay retained, even when empty. Startup orphan
-reconciliation and subnet-pool pruning cannot remove them or detach retained
-endpoints. Do not manually prune them to recover address space.
+Startup orphan reconciliation and ordinary pruning cannot remove retained bridges
+or detach retained endpoints. A bridge is an execution resource, not custody
+evidence. Only the [release protocol](hosted-daemon-docker-networks.md#release-protocol)
+may remove the empty bridge of a *superseded* identity, and only after a
+durable release record. It never releases the current identity of a non-terminal
+pod or any bridge of a finalized or recovery-fork pod, and never touches
+containers. Do not prune bridges manually with `docker network rm`.
 
 For disposable native Docker qualification, select an **already present exact**
 image ID with the `autopod` user and `sleep`; no pull or substitution occurs:

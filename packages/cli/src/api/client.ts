@@ -40,6 +40,8 @@ import type {
   RetainedFinalizationReceipt,
   RetainedFinalizationRequest,
   RetainedFinalizationView,
+  RetainedNetworkReleasePlan,
+  RetainedNetworkReleaseReport,
   ReworkEligibility,
   ReworkRequestInput,
   ReworkRequestReceipt,
@@ -1266,6 +1268,18 @@ export class AutopodClient {
       apply,
       ...(apply && { confirmation: 'APPLY_TOKEN_TELEMETRY_REPAIR' }),
     });
+  }
+
+  async planRetainedNetworkRelease(): Promise<RetainedNetworkReleasePlan> {
+    return this.request<RetainedNetworkReleasePlan>('GET', '/maintenance/retained-networks');
+  }
+
+  async releaseRetainedNetworks(limit?: number): Promise<RetainedNetworkReleaseReport> {
+    return this.request<RetainedNetworkReleaseReport>(
+      'POST',
+      '/maintenance/retained-networks/release',
+      limit === undefined ? {} : { limit },
+    );
   }
 
   // Issue watcher

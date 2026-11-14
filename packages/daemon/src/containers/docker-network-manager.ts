@@ -20,6 +20,11 @@ import {
   NETWORK_CAPACITY_DOCS,
 } from './docker-network-capacity.js';
 import { generateHaproxyConfig, HAPROXY_LISTEN_PORT } from './haproxy-config.js';
+import {
+  planRetainedNetworkReleases,
+  type RetainedNetworkCandidate,
+  releaseRetainedNetwork,
+} from './retained-network-release.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
 // Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.
@@ -49,6 +54,8 @@ export interface SubnetPruneOutcome {
   retained: number;
   attached: number;
   failed: number;
+  /** Superseded retained bridges released under pressure (oldest first). */
+  released?: number;
 }
 
 /** Distinct, actionable failure once pruning could not free a bridge subnet. */
@@ -57,9 +64,10 @@ export function hostNetworkCapacityError(outcome: SubnetPruneOutcome): AutopodEr
     `Host network capacity exhausted: Docker has no free address-pool subnet for a new pod ` +
       `network. ${outcome.totalPodNetworks} autopod networks exist; ${outcome.retained} are held ` +
       `by retained checkpoints, ${outcome.attached} are attached to containers, ` +
-      `${outcome.removed} unattached were pruned and ${outcome.failed} could not be inspected or ` +
-      `removed. Retained checkpoint networks are not released automatically. To free capacity, ` +
-      `kill failed pods you no longer need or enlarge Docker default-address-pools on the host ` +
+      `${outcome.removed} unattached were pruned, ${outcome.released ?? 0} superseded retained ` +
+      `bridges were released and ${outcome.failed} could not be inspected or removed. Current ` +
+      `retained, finalized and recovery-fork bridges are never released automatically. To free ` +
+      `capacity, kill failed pods you no longer need or enlarge Docker default-address-pools on the host ` +
       `(${NETWORK_CAPACITY_DOCS}). Check pressure with \`ap health\`.`,
     HOST_NETWORK_CAPACITY,
     503,
@@ -331,15 +339,43 @@ export class DockerNetworkManager {
           { podId, totalPodNetworks: nets.length, ...prune },
           'Subnet pool prune finished',
         );
-        try {
-          await boundedDockerCall(this.docker.createNetwork(networkConfig), {
-            label: 'network.create',
-            timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
-            logger: this.logger,
-          });
-        } catch (retryErr) {
-          if (!isSubnetExhausted(retryErr)) throw retryErr;
-          throw hostNetworkCapacityError({ totalPodNetworks: nets.length, ...prune });
+        const create = async (): Promise<boolean> => {
+          try {
+            await boundedDockerCall(this.docker.createNetwork(networkConfig), {
+              label: 'network.create',
+              timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
+              logger: this.logger,
+            });
+            return true;
+          } catch (retryErr) {
+            if (!isSubnetExhausted(retryErr)) throw retryErr;
+            return false;
+          }
+        };
+        let released = 0;
+        if (!(await create())) {
+          // Release protocol (#565): superseded retained bridges, oldest first,
+          // one at a time and only until creation succeeds. Each release
+          // re-establishes scope and live state and is recorded before removal.
+          if (this.managedDatabase) {
+            const deps = { docker: this.docker, db: this.managedDatabase, logger: this.logger };
+            let candidates: RetainedNetworkCandidate[] = [];
+            try {
+              candidates = (await planRetainedNetworkReleases(deps)).filter((c) => c.eligible);
+            } catch (planErr) {
+              this.logger.warn({ err: planErr, podId }, 'Retained bridge release plan failed');
+            }
+            for (const candidate of candidates) {
+              const result = await releaseRetainedNetwork(deps, candidate, 'subnet_pressure');
+              if (result.outcome !== 'removed' && result.outcome !== 'already_absent') continue;
+              released++;
+              if (await create()) {
+                this.logger.warn({ podId, released }, 'Pod network created after retained release');
+                return name;
+              }
+            }
+          }
+          throw hostNetworkCapacityError({ totalPodNetworks: nets.length, ...prune, released });
         }
       } else {
         throw err;

@@ -90,3 +90,64 @@ it('formats network capacity only when the daemon reports it', () => {
     formatNetworkCapacity({ status: 'ok', version: 'x', docker: { networks: { error: 'nope' } } }),
   ).toContain('unavailable');
 });
+
+it('release-retained-networks dry-runs by default and applies only with --apply', async () => {
+  const requests: { method?: string; url?: string; body: string }[] = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      requests.push({ method: req.method, url: req.url, body });
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify(
+          req.method === 'GET'
+            ? {
+                eligible: 1,
+                candidates: [
+                  { networkName: 'autopod-old', eligible: true },
+                  { networkName: 'autopod-current', eligible: false, reason: 'current' },
+                ],
+              }
+            : { released: 1, results: [{ networkName: 'autopod-old', outcome: 'removed' }] },
+        ),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  vi.mocked(config.get).mockReturnValue(url as never);
+  vi.mocked(getToken).mockResolvedValue('token');
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const dryRun = new Command();
+    registerDaemonCommands(dryRun);
+    await dryRun.parseAsync(['node', 'ap', 'release-retained-networks']);
+    expect(requests).toEqual([{ method: 'GET', url: '/maintenance/retained-networks', body: '' }]);
+    expect(log.mock.calls.flat().join('\n')).toContain('1 of 2 retained bridges releasable');
+
+    const apply = new Command();
+    registerDaemonCommands(apply);
+    await apply.parseAsync(['node', 'ap', 'release-retained-networks', '--apply', '--limit', '1']);
+    expect(requests[1]).toEqual({
+      method: 'POST',
+      url: '/maintenance/retained-networks/release',
+      body: JSON.stringify({ limit: 1 }),
+    });
+    expect(log.mock.calls.flat().join('\n')).toContain('Released');
+
+    const both = new Command();
+    both.exitOverride();
+    registerDaemonCommands(both);
+    await expect(
+      both.parseAsync(['node', 'ap', 'release-retained-networks', '--apply', '--dry-run']),
+    ).rejects.toThrow('Choose either --dry-run or --apply');
+    expect(requests).toHaveLength(2);
+  } finally {
+    log.mockRestore();
+    vi.mocked(config.get).mockReset();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

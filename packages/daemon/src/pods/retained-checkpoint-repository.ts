@@ -40,7 +40,11 @@ export function checkpointResourceIdentity(podId: string, recoveryId: string, ge
   return `${podId}-retained-${checkpointHash(['docker-v1', recoveryId, generation]).slice(0, 24)}`;
 }
 
-/** Original and replacement bridges remain held until an explicit release protocol exists. */
+/**
+ * Bridges held from ordinary teardown and pruning. Only the explicit release
+ * protocol (`containers/retained-network-release.ts`) may remove a superseded,
+ * empty one after a durable release record.
+ */
 export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<string> {
   const rows = db
     .prepare(`SELECT r.id,r.pod_id AS podId,e.evidence FROM retained_checkpoint_recoveries r
