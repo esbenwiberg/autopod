@@ -132,7 +132,14 @@ export function createReviewerImageSelector(input: {
 export function createHostConfigurationComponents(
   options: Pick<
     ConfigurationComponentsOptions,
-    'db' | 'logger' | 'pods' | 'accounts' | 'audit' | 'podManager' | 'admissionReady'
+    | 'db'
+    | 'logger'
+    | 'pods'
+    | 'accounts'
+    | 'accountHealth'
+    | 'audit'
+    | 'podManager'
+    | 'admissionReady'
   > & {
     cipher: CredentialsCipher;
     githubAuth: DaemonGitHubAuth;

@@ -154,6 +154,49 @@ describe('provider-account commands', () => {
     expect(logSpy).toHaveBeenCalled();
   });
 
+  it('shows observed account health and records mark-ok with a reason', async () => {
+    vi.mocked(mockClient.listProviderAccounts).mockResolvedValueOnce([
+      {
+        ...createAccount(),
+        health: {
+          state: 'out_of_credits',
+          observedAt: '2026-11-14T07:11:38Z',
+          source: 'observed_failure',
+          reason: 'Your workspace is out of credits.',
+          actor: null,
+        },
+      },
+    ]);
+    await program.parseAsync(['node', 'ap', 'provider-account', 'ls']);
+    expect(logSpy.mock.calls.flat().join('\n')).toContain('out of credits');
+
+    const markOk = vi.fn().mockResolvedValue({
+      ...createAccount(),
+      health: {
+        state: 'ok',
+        observedAt: '2026-11-14T08:00:00Z',
+        source: 'operator_override',
+        reason: 'Credits added',
+        actor: 'operator-1',
+      },
+    });
+    (mockClient as unknown as { markProviderAccountOk: typeof markOk }).markProviderAccountOk =
+      markOk;
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'mark-ok',
+      'contextand',
+      '--reason',
+      'Credits added',
+    ]);
+    expect(markOk).toHaveBeenCalledWith('contextand', 'Credits added');
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'mark-ok', 'contextand']),
+    ).rejects.toThrow();
+  });
+
   it('creates a provider account without modifying shared AI presets', async () => {
     await program.parseAsync([
       'node',

@@ -1,8 +1,10 @@
 import type {
   EffectiveLaunchConfig,
   Pod,
+  ProviderAccountHealth,
   ProviderAccountProvider,
   ProviderAttempt,
+  ProviderFailoverPolicy,
   ProviderFailoverTarget,
   ProviderFailureClassification,
   PublicProviderCatalog,
@@ -12,8 +14,14 @@ import { assertLaunchAgentAccount } from '../configuration/agent-route-resolutio
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import {
+  describeAccountHealth,
+  isUnhealthyAccount,
+  type ProviderAccountHealthStore,
+} from '../provider-accounts/provider-account-health.js';
 import { resolveProviderAccountAuth } from '../providers/auth-resolution.js';
 import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
+import { providerAccountUnavailableState } from '../runtimes/provider-error-classifier.js';
 import type { PodRepository } from './pod-repository.js';
 import {
   nativeSessionId,
@@ -32,6 +40,10 @@ export interface ProviderAttemptLiveDependencies {
     'getActive' | 'getActiveProfileSnapshot' | 'list' | 'open' | 'close'
   >;
   launchConfiguration?: { read(podId: string): EffectiveLaunchConfig | null };
+  providerAccountHealth?: Pick<
+    ProviderAccountHealthStore,
+    'current' | 'recordFailure' | 'recordSuccess'
+  >;
 }
 
 export interface ProviderAttemptCaptured {
@@ -46,10 +58,17 @@ export interface ProviderAttemptCaptured {
   >;
 }
 
+/** A configured target passed over because its account is known to refuse runs. */
+interface UnhealthyFailoverTarget {
+  target: ProviderFailoverTarget;
+  health: ProviderAccountHealth;
+}
+
 type ProviderFailoverSelection =
-  | { target: ProviderFailoverTarget; reason: null }
+  | { target: ProviderFailoverTarget; reason: null; skipped?: UnhealthyFailoverTarget[] }
   | {
       target: null;
+      skipped?: UnhealthyFailoverTarget[];
       reason:
         | { type: 'unavailable' }
         | { type: 'no_policy' }
@@ -227,6 +246,26 @@ export function createProviderAttemptContext(
       costUsd: active.costUsd,
       handoffReference,
     });
+    recordAccountHealth(podId, active.providerAccountId, outcome, classification);
+  }
+
+  /** Passive account health is advisory evidence; recording it never changes the attempt. */
+  function recordAccountHealth(
+    podId: string,
+    accountId: string | null,
+    outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
+    classification: ProviderFailureClassification | null,
+  ): void {
+    const health = deps.providerAccountHealth;
+    if (!health || !accountId) return;
+    try {
+      const refused = classification ? providerAccountUnavailableState(classification) : null;
+      if (outcome === 'failed' && refused && classification)
+        health.recordFailure(accountId, refused, classification.sanitizedMessage, podId);
+      else if (outcome === 'completed') health.recordSuccess(accountId, podId);
+    } catch {
+      /* A deleted or unreadable account has no health to record. */
+    }
   }
 
   function isCompatibleTarget(
@@ -262,8 +301,7 @@ export function createProviderAttemptContext(
     if (!providerAccountStore || !deps.providerAttemptRepo) {
       return { target: null, reason: { type: 'unavailable' } };
     }
-    const resolved = profileStore.resolveProviderFailover(pod.profileName);
-    const policy = resolved.policy;
+    const policy = providerFailoverPolicy(pod);
     if (!policy) return { target: null, reason: { type: 'no_policy' } };
     if (policy.targets.length === 0) return { target: null, reason: { type: 'disabled' } };
     const attempts = deps.providerAttemptRepo.list(pod.id);
@@ -293,19 +331,62 @@ export function createProviderAttemptContext(
       };
     }
     const ineligibleTargets: ProviderFailoverTarget[] = [];
+    const skipped: UnhealthyFailoverTarget[] = [];
     for (const target of policy.targets) {
       const key = `${target.providerAccountId}\0${target.runtime}\0${target.model}`;
       if (used.has(key)) continue;
       try {
         const account = providerAccountStore.get(target.providerAccountId);
-        if (isCompatibleTarget(target, account)) return { target, reason: null };
+        const health = deps.providerAccountHealth?.current(target.providerAccountId);
+        if (health && isUnhealthyAccount(health)) {
+          // Known to refuse before any work: never hand a task to it automatically.
+          skipped.push({ target, health });
+          ineligibleTargets.push(target);
+          continue;
+        }
+        if (isCompatibleTarget(target, account))
+          return { target, reason: null, ...(skipped.length ? { skipped } : {}) };
         ineligibleTargets.push(target);
       } catch {
         // Deleted, unauthenticated, or otherwise ineligible targets fail closed.
         ineligibleTargets.push(target);
       }
     }
-    return { target: null, reason: { type: 'ineligible', targets: ineligibleTargets } };
+    return {
+      target: null,
+      ...(skipped.length ? { skipped } : {}),
+      reason: { type: 'ineligible', targets: ineligibleTargets },
+    };
+  }
+
+  /**
+   * Saved launches fail over within their frozen main route; legacy profiles use the
+   * profile or account policy.
+   */
+  function providerFailoverPolicy(pod: Pod): ProviderFailoverPolicy | null {
+    const launch = deps.launchConfiguration?.read(pod.id);
+    if (launch) {
+      const main = launch.ai.main;
+      // Saved routes default to zero hops: their alternatives are then disabled.
+      if (main.maxHops === 0) return { targets: [] };
+      return {
+        targets: main.failover.map(({ providerAccountId, runtime, model }) => ({
+          providerAccountId,
+          runtime,
+          model,
+        })),
+        maxHops: main.maxHops,
+      };
+    }
+    return profileStore.resolveProviderFailover(pod.profileName).policy;
+  }
+
+  /** Receipt lines for failover targets passed over on observed account health. */
+  function providerFailoverSkippedActivity(selection: ProviderFailoverSelection): string[] {
+    return (selection.skipped ?? []).map(
+      ({ target, health }) =>
+        `Provider failover skipped ${describeProviderFailoverTarget(target)}: ${describeAccountHealth(target.providerAccountId, health)}`,
+    );
   }
 
   function escapeProviderTargetDiagnosticValue(value: string, fallback: string): string {
@@ -542,6 +623,8 @@ export function createProviderAttemptContext(
     escapeProviderTargetDiagnosticValue,
     describeProviderFailoverTarget,
     providerFailoverUnavailableActivity,
+    providerFailoverSkippedActivity,
+    providerFailoverPolicy,
     profileForProviderTarget,
     resolveEffectiveBoundProfile,
     openProviderTargetAttempt,

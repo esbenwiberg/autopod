@@ -478,6 +478,9 @@ export type {
 } from './types/profile.js';
 export type {
   ProviderAccount,
+  ProviderAccountHealth,
+  ProviderAccountHealthSource,
+  ProviderAccountHealthState,
   ProviderAccountProvider,
   ProviderAuthSource,
   ProviderFailoverPolicy,

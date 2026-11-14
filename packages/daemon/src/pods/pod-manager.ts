@@ -346,6 +346,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     closeProviderAttempt,
     selectProviderFailoverTarget,
     providerFailoverUnavailableActivity,
+    providerFailoverSkippedActivity,
+    providerFailoverPolicy,
     profileForProviderTarget,
     resolveEffectiveBoundProfile,
     openProviderTargetAttempt,
@@ -667,6 +669,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     closeProviderAttempt,
     selectProviderFailoverTarget,
     providerFailoverUnavailableActivity,
+    providerFailoverSkippedActivity,
+    providerFailoverPolicy,
     profileForProviderTarget,
     openProviderTargetAttempt,
     forgetMaxCredentialLineage,
@@ -1123,6 +1127,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     syncSandboxRuntimeSessionState,
     closeProviderAttempt,
     handleProviderLimit,
+    providerFailoverAvailability: (pod) => {
+      const selection = selectProviderFailoverTarget(pod);
+      return {
+        available: selection.target !== null,
+        skipped: providerFailoverSkippedActivity(selection),
+      };
+    },
     stopCommitPolling,
     lastEventWriteAt,
   });

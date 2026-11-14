@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProfileStore, type ProfileStore } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
 import { createProviderAccountStore } from '../../provider-accounts/index.js';
+import { createProviderAccountHealthStore } from '../../provider-accounts/provider-account-health.js';
 import { createTestDb } from '../../test-utils/mock-helpers.js';
 import { profileRoutes } from './profiles.js';
 import { providerAccountRoutes } from './provider-accounts.js';
@@ -677,4 +678,70 @@ it('rejects legacy profile credential mutations before reading stores on a compo
   } finally {
     await app.close();
   }
+});
+
+describe('provider account health routes', () => {
+  function healthApp() {
+    const db = createTestDb();
+    const accounts = createProviderAccountStore(db);
+    const health = createProviderAccountHealthStore(db, accounts);
+    const app = Fastify();
+    app.decorateRequest('user', null as never);
+    app.addHook('onRequest', async (request) => {
+      request.user = { oid: 'operator-1', roles: [] } as unknown as typeof request.user;
+    });
+    providerAccountRoutes(app, accounts, createProfileStore(db), undefined, true, health);
+    accounts.create({
+      id: 'contextand',
+      name: 'Contextand',
+      provider: 'openai',
+      credentials: { provider: 'openai', authJson: '{"tokens":"one"}' },
+    });
+    return { app, health };
+  }
+
+  it('shows observed health and records an explicit mark-ok with actor and reason', async () => {
+    const { app, health } = healthApp();
+    health.recordFailure('contextand', 'out_of_credits', 'Your workspace is out of credits.', 'p');
+    const listed = await app.inject({ method: 'GET', url: '/provider-accounts' });
+    expect(listed.json()[0].health).toMatchObject({ state: 'out_of_credits' });
+    // The server error handler maps the schema rejection to 400; nothing is recorded.
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/contextand/health/mark-ok',
+      payload: {},
+    });
+    expect(rejected.statusCode).toBeGreaterThanOrEqual(400);
+    expect(health.current('contextand').state).toBe('out_of_credits');
+    const marked = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/contextand/health/mark-ok',
+      payload: { reason: 'Credits added' },
+    });
+    expect(marked.statusCode).toBe(200);
+    expect(marked.json().health).toMatchObject({
+      state: 'ok',
+      source: 'operator_override',
+      actor: 'operator-1',
+      reason: 'Credits added',
+    });
+  });
+
+  it('treats a human credential replacement as clearing observed refusals', async () => {
+    const { app, health } = healthApp();
+    health.recordFailure('contextand', 'out_of_credits', 'Out of credits', 'p');
+    await app.inject({
+      method: 'PATCH',
+      url: '/provider-accounts/contextand',
+      payload: { name: 'Renamed' },
+    });
+    expect(health.current('contextand').state).toBe('out_of_credits');
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: '/provider-accounts/contextand',
+      payload: { credentials: { provider: 'openai', authJson: '{"tokens":"two"}' } },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().health).toMatchObject({ state: 'ok', actor: 'operator-1' });
+  });
 });

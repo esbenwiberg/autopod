@@ -158,6 +158,11 @@ export interface AgentConsumerCaptured {
     podId: string,
     classification: ProviderFailureClassification,
   ) => Promise<void>;
+  /**
+   * Whether a configured, healthy failover target could take over this pod now, plus
+   * receipt lines for targets passed over on observed account health.
+   */
+  providerFailoverAvailability?: (pod: Pod) => { available: boolean; skipped: string[] };
   stopCommitPolling: (podId: string) => void;
   lastEventWriteAt: Map<string, number>;
 }

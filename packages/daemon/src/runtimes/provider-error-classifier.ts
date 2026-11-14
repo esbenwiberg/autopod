@@ -50,12 +50,28 @@ const COPILOT_QUOTA_MESSAGES = [
  * credits). These are recorded as definitive `auth` failures: the provider rejected
  * the account, not the task, so no automatic retry or reset applies.
  */
-const ACCOUNT_UNAVAILABLE_MESSAGES = [
+const AUTH_REVOKED_MESSAGES = [
   /^failed to authenticate[.:]\s.*\b(?:oauth|token|api[ _-]?key|api error: 40[13]|log ?in)\b/i,
-  /^oauth token (?:has been )?(?:revoked|expired)(?:[.: ].*)?$/i,
+  /^oauth token (?:has been |has |was )?(?:revoked|expired)(?:[.: ].*)?$/i,
+];
+const OUT_OF_CREDITS_MESSAGES = [
   /^your (?:workspace|organization|account) is out of credits(?:[.: ].*)?$/i,
   /^(?:your )?credit balance is too low(?:[.: ].*)?$/i,
 ];
+const ACCOUNT_UNAVAILABLE_MESSAGES = [...AUTH_REVOKED_MESSAGES, ...OUT_OF_CREDITS_MESSAGES];
+
+/** Account health implied by a definitive account refusal; null for any other evidence. */
+export function providerAccountUnavailableState(
+  classification: Pick<
+    ProviderFailureClassification,
+    'category' | 'definitive' | 'sanitizedMessage'
+  >,
+): 'auth_revoked' | 'out_of_credits' | null {
+  if (classification.category !== 'auth' || !classification.definitive) return null;
+  const message = classification.sanitizedMessage.trim();
+  if (OUT_OF_CREDITS_MESSAGES.some((pattern) => pattern.test(message))) return 'out_of_credits';
+  return AUTH_REVOKED_MESSAGES.some((pattern) => pattern.test(message)) ? 'auth_revoked' : null;
+}
 const AUTH_CODES = new Set(['authentication_error', 'invalid_api_key', 'unauthorized']);
 const AUTH_MESSAGE =
   /^(?:authentication failed|invalid api key|not authenticated|unauthorized)(?:[.: ].*)?$/i;

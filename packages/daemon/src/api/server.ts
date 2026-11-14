@@ -44,6 +44,7 @@ import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { PodsitterService } from '../podsitter/podsitter-service.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import type { ProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ScanOperatorService } from '../scheduled-jobs/scan-operator-service.js';
@@ -104,6 +105,7 @@ export interface ServerDependencies {
   configuration?: ConfigurationRouteDependencies;
   pim?: PimRouteDependencies;
   providerAccountStore?: ProviderAccountStore;
+  providerAccountHealth?: ProviderAccountHealthStore;
   podsitterRepository?: PodsitterRepository;
   podsitterService?: PodsitterService;
   systemDecisionExecutionTarget?: ExecutionTarget;
@@ -276,6 +278,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
       deps.profileStore,
       undefined,
       Boolean(deps.configuration),
+      deps.providerAccountHealth,
     );
   }
   if (deps.providerAccountStore && deps.podsitterRepository && deps.podsitterService) {

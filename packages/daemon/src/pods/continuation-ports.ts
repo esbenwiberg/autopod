@@ -84,6 +84,12 @@ export interface ContinuationCaptured {
   providerFailoverUnavailableActivity: ReturnType<
     typeof createProviderAttemptContext
   >['providerFailoverUnavailableActivity'];
+  providerFailoverSkippedActivity?: ReturnType<
+    typeof createProviderAttemptContext
+  >['providerFailoverSkippedActivity'];
+  providerFailoverPolicy?: ReturnType<
+    typeof createProviderAttemptContext
+  >['providerFailoverPolicy'];
   assertExecutionTerminationVerified: (podId: string) => void;
   profileStore: Pick<ProfileStore, 'resolveProviderFailover'>;
   operatorErrorMessage: (err: unknown, phase: 'agent') => string;

@@ -313,4 +313,28 @@ memory reviewer runs against the refused account. Any work or custody evidence, 
 active or unverified run, a native Goal launch or a sandbox pod keeps the existing
 retention until `ap kill`.
 
+### Observed account health
+
+Definitive refusals are recorded per account. `ap accounts ls` shows them in a `Health`
+column; `ap accounts show <id>` shows when each was observed and why:
+- `auth revoked`: the login was revoked or expired. This applies only to the refused
+  credentials, so re-authenticating clears it.
+- `out of credits`: the account's prepaid credit is exhausted. Token rotation does not
+  clear it. A completed run, a human credential replacement, or
+  `ap accounts mark-ok <id> --reason "<why>"` does. Mark-ok records the operator and
+  the reason.
+
+These states have the following effects:
+- **Admission and preview**: a launch whose main route (or independent reviewer or
+  advisor route) has a known-unhealthy primary account is rejected with
+  `PROVIDER_ACCOUNT_UNAVAILABLE` before any container exists. The error names healthy
+  failover accounts if there are any.
+- **Failover**: when a running pod's account is refused and its route has failover
+  hops, the pod hands over to the next configured account through the same
+  provider-limit handoff that quota exhaustion uses. Known-unhealthy targets are
+  skipped, with an activity line such as `Provider failover skipped account=… : … out of
+  credits`. If no healthy target remains, the pod fails as described above.
+
+There are no active probes. Health comes only from runs that were actually refused.
+
 Node24 worker release, real-image smoke checks, migration and rollback: [operator runbook](../node24-environments.md). Explicit Node22 templates remain available for compatibility.
