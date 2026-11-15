@@ -370,7 +370,12 @@ import Testing
     window.isReleasedWhenClosed = false; window.contentView = hosting
     hosting.appearance = NSAppearance(named: light ? .aqua : .darkAqua); window.orderFront(nil)
   }
-  func close() { window.contentView = nil; window.close() }
+  func close() {
+    // Take down presentations (popovers are child windows) while their anchor is still attached.
+    // Detaching the content first leaves an open popover on screen for later tests (#575).
+    for child in window.childWindows ?? [] { window.removeChildWindow(child); child.orderOut(nil) }
+    window.contentView = nil; window.close()
+  }
   var nodes: [NSObject] { window.layoutIfNeeded(); hosting.layoutSubtreeIfNeeded(); return launchNodes(hosting) }
   func matches(_ id: String) -> [NSObject] { nodes.filter { launchAX($0, "accessibilityIdentifier") as? String == id } }
   func containsText(_ text: String) -> Bool { nodes.contains { (launchAX($0, "accessibilityLabel") as? String ?? "").contains(text) || (launchAX($0, "accessibilityValue") as? String ?? "").contains(text) } }
@@ -395,11 +400,11 @@ import Testing
     let editor = try #require(field.currentEditor() as? NSTextView)
     editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
   }
-  func wait(_ predicate: () -> Bool) async throws {
+  /// Polls UI state; report a timeout at the caller's line, not here, so failures name the step.
+  func wait(_ predicate: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
     let deadline = Date().addingTimeInterval(5)
     while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(predicate())
-    try #require(predicate())
+    try #require(predicate(), "UI state not reached within 5 s", sourceLocation: sourceLocation)
   }
   func capture(_ name: String) throws {
     guard let output = ProcessInfo.processInfo.environment["AUTOPOD_LAUNCH_RENDER_DIR"] else { return }

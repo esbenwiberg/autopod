@@ -183,7 +183,7 @@ import Testing
   [root] + (instructionAX(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(instructionNodes)
 }
 @MainActor private var instructionAllNodes: [NSObject] {
-  NSApplication.shared.windows.compactMap(\.contentView).flatMap(instructionNodes)
+  configurationHelpWindows.compactMap(\.contentView).flatMap(instructionNodes)
 }
 @MainActor private func instructionNode(_ id: String) -> NSObject? {
   instructionAllNodes.first { instructionAX($0, "accessibilityIdentifier") as? String == id }

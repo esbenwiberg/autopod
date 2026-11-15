@@ -178,7 +178,7 @@ import Testing
   [root] + (helpAX(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(helpNodes)
 }
 @MainActor private var allHelpNodes: [NSObject] {
-  NSApplication.shared.windows.compactMap(\.contentView).flatMap(helpNodes)
+  configurationHelpWindows.compactMap(\.contentView).flatMap(helpNodes)
 }
 @MainActor private func helpNode(_ id: String) -> NSObject? {
   allHelpNodes.first { helpAX($0, "accessibilityIdentifier") as? String == id }

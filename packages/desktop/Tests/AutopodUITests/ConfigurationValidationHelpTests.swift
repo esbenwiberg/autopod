@@ -42,6 +42,7 @@ import Testing
   @Test func everyInfoPopoverExplainsSourcesWithoutDirtyingMissingFields() async throws {
     let fixture = try ValidationHelpFixture()
     let original = fixture.document.payload
+    #expect(validationNode("configuration-help-details") == nil, "An earlier test left a help popover on screen")
     let host = fixture.host()
     defer { host.close() }
     try await host.wait { host.has("configuration-help-workflow.validation.setup") }
@@ -207,7 +208,7 @@ import Testing
   [root] + (validationAX(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(validationNodes)
 }
 @MainActor private var validationAllNodes: [NSObject] {
-  NSApplication.shared.windows.compactMap(\.contentView).flatMap(validationNodes)
+  configurationHelpWindows.compactMap(\.contentView).flatMap(validationNodes)
 }
 @MainActor private func validationNode(_ id: String) -> NSObject? {
   validationAllNodes.first { validationAX($0, "accessibilityIdentifier") as? String == id }

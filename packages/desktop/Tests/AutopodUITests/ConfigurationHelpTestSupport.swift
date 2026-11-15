@@ -1,6 +1,12 @@
 import AppKit
 import Testing
 
+/// Windows a configuration help test may observe: those currently on screen.
+/// Closed hosts and dismissed popovers can stay alive (and keep their accessibility
+/// tree) in `NSApplication.windows` after a test ends, so app-wide queries must not
+/// see them, or a later test reads another test's popover (#575).
+@MainActor var configurationHelpWindows: [NSWindow] { NSApplication.shared.windows.filter(\.isVisible) }
+
 /// macOS 15 will not anchor a popover to an offscreen AX button. Scroll the
 /// actual document first, just as a person must, rather than pressing hidden rows.
 @MainActor func revealConfigurationHelpControl(_ id: String) async throws {
@@ -12,7 +18,7 @@ import Testing
     [root] + (value(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(nodes)
   }
   func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
-  let window = try #require(NSApplication.shared.windows.first { window in
+  let window = try #require(configurationHelpWindows.first { window in
     guard let content = window.contentView else { return false }
     return nodes(content).contains { value($0, "accessibilityIdentifier") as? String == id }
   })
