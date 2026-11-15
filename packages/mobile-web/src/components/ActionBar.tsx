@@ -44,7 +44,8 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
         action.kind === 'accept_findings' ||
         action.kind === 'retry' ||
         action.kind === 'rework' ||
-        action.kind === 'continue_budget'
+        action.kind === 'continue_budget' ||
+        action.kind === 'continue_provider'
       )
         upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
     } catch (err) {
@@ -75,6 +76,11 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
           </button>
         ))}
       </div>
+      {pod.status === 'paused' &&
+      pod.pauseReason !== 'budget' &&
+      pod.pauseReason !== 'provider_limit' ? (
+        <p>Resume is unavailable for this pause reason.</p>
+      ) : null}
       {notice ? <output style={{ display: 'block' }}>{notice}</output> : null}
       {error ? <div className="error">{error}</div> : null}
       {prompt ? (

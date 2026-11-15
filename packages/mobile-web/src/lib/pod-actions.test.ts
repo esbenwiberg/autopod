@@ -16,9 +16,21 @@ describe('availableActions', () => {
     expect(labels).toEqual(['pause', 'nudge', 'kill']);
   });
 
-  it('paused pods expose resume, nudge, kill', () => {
-    const labels = availableActions('paused').map((a) => a.kind);
-    expect(labels).toEqual(['resume', 'nudge', 'kill']);
+  it.each([
+    'manual',
+    null,
+    undefined,
+  ] as const)('unsupported pause %s only exposes kill', (pauseReason) => {
+    expect(availableActions('paused', { pauseReason } as Pod).map((a) => a.kind)).toEqual(['kill']);
+  });
+
+  it('provider-limit pauses expose provider continuation', () => {
+    expect(
+      availableActions('paused', { pauseReason: 'provider_limit' } as Pod).map((a) => a.kind),
+    ).toEqual(['continue_provider', 'kill']);
+    expect(
+      availableActions('paused', { pauseReason: 'provider_limit' } as Pod)[0]?.optimistic,
+    ).toBeNull();
   });
 
   it('budget-paused pods expose budget approval instead of a nudge-based resume', () => {
@@ -174,12 +186,12 @@ describe('runAction', () => {
     expect(spy.mock.calls[0]?.[1]?.method).toBe('POST');
   });
 
-  it('resume sends a "continue" nudge', async () => {
+  it('provider continuation posts to the provider endpoint', async () => {
     const spy = mockFetch();
-    await runAction('pod-1', 'resume');
-    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/nudge');
-    const body = spy.mock.calls[0]?.[1]?.body;
-    expect(body).toBe(JSON.stringify({ message: 'continue' }));
+    await runAction('pod-1', 'continue_provider');
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/continue-provider');
+    expect(spy.mock.calls[0]?.[1]?.method).toBe('POST');
   });
 
   it('nudge passes through the supplied message', async () => {

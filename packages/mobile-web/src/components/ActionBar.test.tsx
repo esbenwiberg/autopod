@@ -6,6 +6,60 @@ import { usePodsStore } from '../store/pods.js';
 import { ActionBar } from './ActionBar.js';
 
 it.each([
+  ['budget', 'Approve budget & continue', 'continue-budget'],
+  ['provider_limit', 'Resume', 'continue-provider'],
+] as const)('continues a %s pause through its control and refreshes the pod', async (reason, label, endpoint) => {
+  const pod = { id: 'paused-pod', status: 'paused', pauseReason: reason } as Pod;
+  const initial = usePodsStore.getState();
+  usePodsStore.setState({ pods: [pod] });
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...pod, status: 'running' })));
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ActionBar pod={pod} />));
+    await act(async () => {
+      const button = Array.from(container.querySelectorAll('button')).find(
+        (item) => item.textContent === label,
+      );
+      if (!button) throw new Error(`Missing ${label} button`);
+      button.click();
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      `/pods/paused-pod/${endpoint}`,
+      '/pods/paused-pod',
+    ]);
+    expect(usePodsStore.getState().pods[0]?.status).toBe('running');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    fetch.mockRestore();
+    usePodsStore.setState(initial);
+  }
+});
+
+it.each(['manual', null] as const)('explains unavailable resume for %s pauses', async (reason) => {
+  const pod = { id: 'paused-pod', status: 'paused', pauseReason: reason } as Pod;
+  const fetch = vi.spyOn(globalThis, 'fetch');
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ActionBar pod={pod} />));
+    expect(container.textContent).toContain('Resume is unavailable for this pause reason.');
+    expect(
+      Array.from(container.querySelectorAll('button')).map((button) => button.textContent),
+    ).toEqual(['Kill']);
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    act(() => root.unmount());
+    fetch.mockRestore();
+  }
+});
+
+it.each([
   'Branch preservation',
   'Approval delivery',
   'Source reconciliation',

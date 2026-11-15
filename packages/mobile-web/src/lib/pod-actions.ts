@@ -11,7 +11,7 @@ import { apiFetch } from './api.js';
 export type ActionKind =
   | 'accept_findings'
   | 'pause'
-  | 'resume'
+  | 'continue_provider'
   | 'continue_budget'
   | 'retry'
   | 'rework'
@@ -44,11 +44,11 @@ const PAUSE: ActionDef = {
   optimistic: { status: 'paused' },
   promptsForText: false,
 };
-const RESUME: ActionDef = {
-  kind: 'resume',
+const CONTINUE_PROVIDER: ActionDef = {
+  kind: 'continue_provider',
   label: 'Resume',
   tone: 'neutral',
-  optimistic: { status: 'running' },
+  optimistic: null,
   promptsForText: false,
 };
 // A token-budget pause is a pending approval: the worker already finished its
@@ -155,7 +155,7 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
     KILL,
   ],
   running: [PAUSE, NUDGE, KILL],
-  paused: [RESUME, NUDGE, KILL],
+  paused: [KILL],
   // Answer surfaces as a dedicated card (EscalationCard) above the bar.
   awaiting_input: [KILL],
   queued: [KILL],
@@ -182,6 +182,8 @@ export function availableActions(
   >,
 ): ActionDef[] {
   if (status === 'paused' && pod?.pauseReason === 'budget') return [CONTINUE_BUDGET, KILL];
+  if (status === 'paused' && pod?.pauseReason === 'provider_limit')
+    return [CONTINUE_PROVIDER, KILL];
   if (
     status === 'failed' &&
     (pod?.options.output === 'artifact' || pod?.completionPolicy === 'accept-findings') &&
@@ -231,12 +233,8 @@ export async function runAction(
     case 'continue_budget':
       await apiFetch(`/pods/${podId}/continue-budget`, { method: 'POST' });
       return;
-    case 'resume':
-      // No dedicated unpause endpoint — a nudge releases the paused pod.
-      await apiFetch(`/pods/${podId}/nudge`, {
-        method: 'POST',
-        body: JSON.stringify({ message: message ?? 'continue' }),
-      });
+    case 'continue_provider':
+      await apiFetch(`/pods/${podId}/continue-provider`, { method: 'POST' });
       return;
     case 'nudge':
       await apiFetch(`/pods/${podId}/nudge`, {
