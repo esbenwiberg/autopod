@@ -73,6 +73,22 @@ describe('fresh actual-base contract declarations', () => {
     ).rejects.toMatchObject({ code: 'STALE_CONTRACT' });
   });
 
+  it('accepts an upsert target whether or not it exists in the actual base', async () => {
+    const { dir, base } = fixture();
+    await expect(
+      inspectContractBase(dir, 'main', [
+        fact('existing.ts', 'upsert'),
+        fact('missing.ts', 'upsert'),
+      ]),
+    ).resolves.toEqual({
+      baseCommitSha: base,
+      artifacts: [
+        { path: 'existing.ts', exists: true },
+        { path: 'missing.ts', exists: false },
+      ],
+    });
+  });
+
   it('refuses missing fetched base and pathspec or traversal expansion', async () => {
     const { dir } = fixture();
     await expect(

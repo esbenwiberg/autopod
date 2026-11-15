@@ -162,7 +162,7 @@ export async function inspectRequiredCommands(
       if (
         (pod.contract?.requiredFacts ?? []).some(
           (fact) =>
-            fact.artifact.change === 'create' &&
+            (fact.artifact.change === 'create' || fact.artifact.change === 'upsert') &&
             executable.replace(/^\.\//, '') === fact.artifact.path,
         )
       ) {

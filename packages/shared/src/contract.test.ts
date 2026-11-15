@@ -99,6 +99,18 @@ required_facts:
     expect(result.contract?.requiredFacts[0]?.artifact.change).toBe('delete');
   });
 
+  it('accepts an explicit upsert (create-or-update) declaration', () => {
+    const contract = validDomainContract();
+    const result = inspectSpecContract({
+      ...contract,
+      requiredFacts: [
+        { ...contract.requiredFacts[0], artifact: { path: 'config.ts', change: 'upsert' } },
+      ],
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.contract?.requiredFacts[0]?.artifact.change).toBe('upsert');
+  });
+
   it('accepts the corrected Luumi counterpart', () => {
     const result = inspectSpecContractYaml(`contract_version: 1
 title: Luumi corrected
