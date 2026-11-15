@@ -61,6 +61,8 @@ import Testing
     try settingPress("configuration-help-choices")
     try await host.wait { settingText("Docker on the selected daemon host.") }
     try settingPress("configuration-help-close")
+    // Await the dismissal before teardown; closing the host first orphans the popover (#575).
+    try await host.wait { settingNode("configuration-help-details") == nil }
     #expect(fixture.document.payload["execution"] == nil)
     #expect(fixture.document.payload["futureField"] == .string("keep"))
     #expect(!host.enabled("configuration-editor-save"))
@@ -80,6 +82,7 @@ import Testing
       "mcpServers": .array([.object(["name": .string("sample-server"), "transport": .object(["type": .string("http"), "url": .string("https://example.invalid/mcp")])])]),
     ])
     let original = fixture.document.payload
+    #expect(settingNode("configuration-help-details") == nil, "An earlier test left a help popover on screen")
     let host = fixture.host(.integrations)
     defer { host.close() }
     for id in ["toolPack.skills.identity", "toolPack.mcp.identity"] {
@@ -159,7 +162,7 @@ import Testing
 @MainActor private func settingNodes(_ root: NSObject) -> [NSObject] {
   [root] + (settingAX(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(settingNodes)
 }
-@MainActor private var allSettingNodes: [NSObject] { NSApplication.shared.windows.compactMap(\.contentView).flatMap(settingNodes) }
+@MainActor private var allSettingNodes: [NSObject] { configurationHelpWindows.compactMap(\.contentView).flatMap(settingNodes) }
 @MainActor private func settingNode(_ id: String) -> NSObject? {
   allSettingNodes.first { settingAX($0, "accessibilityIdentifier") as? String == id }
 }
@@ -173,7 +176,7 @@ import Testing
 }
 @MainActor private func editSettingsSearch(_ text: String) throws {
   func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-  let field = try #require(NSApplication.shared.windows.compactMap(\.contentView).flatMap(descendants).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "Find a setting or JSON path" })
+  let field = try #require(configurationHelpWindows.compactMap(\.contentView).flatMap(descendants).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "Find a setting or JSON path" })
   field.window?.makeFirstResponder(field)
   let editor = try #require(field.currentEditor() as? NSTextView)
   editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
