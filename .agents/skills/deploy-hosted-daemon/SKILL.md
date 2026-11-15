@@ -29,7 +29,8 @@ scripts/deploy-hosted-daemon.sh --rollback <sha># repoint + restart, nothing els
 It runs the full dance: preflight → build new release on the VM → verify the
 built bundle → prewarm and launch-check daemon Playwright Chromium → atomic
 symlink swap → restart → post-verify (local + external health) → print rollback
-→ prune old releases. It refuses to swap unless the build completed, host
+→ prune old releases (keeps current + previous-live + the 2 newest others;
+`--keep N` changes that "2"). It refuses to swap unless the build completed, host
 browser validation is ready, and health is green, so a failed run leaves
 `current` untouched.
 
@@ -92,7 +93,8 @@ bounded retry window is a deployment failure.
 Every successful run prints the exact rollback command (`--rollback <prev-sha>`).
 If anything looks off after deploy — external health not 200, journal errors,
 behavior regressed — roll back first, diagnose second. The old release is still
-on the box (pruning protects both current and previous-live).
+on the box (pruning always protects both current and previous-live, on top of the
+`--keep N` newest other releases, default 2 — so at most N+2 releases remain).
 
 ## Before you run
 

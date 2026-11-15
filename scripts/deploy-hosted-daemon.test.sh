@@ -328,3 +328,28 @@ rm "$provenance/packages/daemon/src/new-source.ts"
 printf 'actual config change\n' >>"$provenance/packages/daemon/tsup.config.ts"
 [ -n "$(git -C "$provenance" status --porcelain -- packages)" ]
 echo 'Build provenance generated-file and real-source checks passed.'
+
+# Release pruning selection: run the real prune_script against a temp fixture.
+prune="$tmp/prune"
+mkdir -p "$prune/releases"
+for n in r1 r2 r3 r4 r5 r6 r7; do mkdir "$prune/releases/$n"; done
+i=0
+for n in r1 r2 r3 r4 r5 r6 r7; do i=$((i+1)); touch -d "2024-01-0$i" "$prune/releases/$n"; done
+ln -s "$prune/releases/r1" "$prune/current" # current is the OLDEST release
+eval "$(sed -n '/^prune_script() {/,/^}/p' "$script")"
+run_prune() { # $1=keep
+  RELEASES="$prune/releases" CURRENT_LINK="$prune/current" LIVE_SHA=r2 KEEP="$1"
+  prune_script | sh
+}
+grep -q '^KEEP=2$' "$script" || { echo 'default KEEP is not 2' >&2; exit 1; }
+cp -a "$prune/releases" "$prune/releases.orig"
+out="$(run_prune 2)"
+for n in r1 r2 r7 r6; do [ -d "$prune/releases/$n" ] || { echo "$n wrongly pruned" >&2; exit 1; }; done
+for n in r3 r4 r5; do [ ! -e "$prune/releases/$n" ] || { echo "$n not pruned" >&2; exit 1; }; done
+grep -q 'keep (protected): r1' <<<"$out" && grep -q 'keep (protected): r2' <<<"$out"
+# --keep override
+rm -rf "$prune/releases"; cp -a "$prune/releases.orig" "$prune/releases"
+run_prune 4 >/dev/null
+for n in r1 r2 r4 r5 r6 r7; do [ -d "$prune/releases/$n" ] || { echo "keep 4: $n wrongly pruned" >&2; exit 1; }; done
+[ ! -e "$prune/releases/r3" ] || { echo 'keep 4: r3 not pruned' >&2; exit 1; }
+echo 'Release pruning selection checks passed.'
