@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   budgetCountedTaskTokens,
   cacheWeightedTokens,
+  describeBudgetPause,
   describeTaskBudgetUsage,
 } from './token-budget.js';
 
@@ -39,6 +40,23 @@ describe('task token budget weighting', () => {
       ),
     ).toBe(
       '218258/200000 budget-counted tokens used; 1508607 recorded incl. 1433722 cache reads at 0.1x',
+    );
+  });
+});
+
+describe('budget pause guidance', () => {
+  it('names counted usage and the one-step continue command', () => {
+    const task = {
+      recordedInputTokens: 300000,
+      recordedOutputTokens: 58000,
+      budgetCountedTokens: 358000,
+      tokenBudget: 150000,
+    };
+    expect(describeBudgetPause('abcd1234', task)).toBe(
+      'Paused: token budget (358000/150000 counted). Run: ap budget abcd1234 <tokens> --continue',
+    );
+    expect(describeBudgetPause('abcd1234', null)).toBe(
+      'Paused: token budget. Run: ap budget abcd1234 <tokens> --continue',
     );
   });
 });

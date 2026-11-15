@@ -38,7 +38,14 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
       await runAction(pod.id, action.kind, message, pod.researchFindings);
       if (action.kind === 'nudge')
         setNotice('Nudge saved. It remains pending until the worker acknowledges receipt.');
-      if (action.kind === 'accept_findings' || action.kind === 'retry' || action.kind === 'rework')
+      if (action.kind === 'continue_budget')
+        setNotice('Budget extension approved. Validation started in the background.');
+      if (
+        action.kind === 'accept_findings' ||
+        action.kind === 'retry' ||
+        action.kind === 'rework' ||
+        action.kind === 'continue_budget'
+      )
         upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
     } catch (err) {
       if (snapshot) patchPodLocal(pod.id, snapshot);

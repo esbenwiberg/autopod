@@ -4,6 +4,7 @@
  * Covers:
  * - GET /pods/stats
  * - POST /pods/:id/message
+ * - POST /pods/:id/continue-budget (and /resume on a budget pause)
  * - POST /pods/:id/nudge
  * - GET /pods/:id/validations
  * - GET /pods/:id/cost
@@ -114,6 +115,7 @@ describe('Extended Route Tests', () => {
   let approvalPrManager: PrManager | null;
   let containerManager: ReturnType<typeof createMockContainerManager>;
   let worktreeManager: ReturnType<typeof createMockWorktreeManager>;
+  let manager: ReturnType<typeof createPodManager>;
 
   function createMockContainerManager() {
     const manager = createSharedMockContainerManager();
@@ -237,6 +239,7 @@ describe('Extended Route Tests', () => {
       daemonConfig: { mcpServers: [], claudeMdSections: [] },
       logger,
     });
+    manager = podManager;
 
     const podBridge = {
       createEscalation: vi.fn(),
@@ -725,6 +728,39 @@ describe('Extended Route Tests', () => {
       expect(res.json().ok).toBe(true);
     });
 
+    it('approves a budget pause without waiting for validation (ap tell compatibility)', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: authHeaders,
+        payload: { profileName: 'test-app', task: 'Task' },
+      });
+      const podId = createRes.json().id;
+      await waitForPodValidated(podId);
+      db.prepare("UPDATE pods SET status = 'paused', pause_reason = 'budget' WHERE id = ?").run(
+        podId,
+      );
+      const completion = vi
+        .spyOn(manager, 'handleCompletion')
+        .mockReturnValue(new Promise(() => {}));
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/message`,
+        headers: authHeaders,
+        payload: { message: 'approved' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, action: 'continue-budget', validation: 'started' });
+      expect(completion).toHaveBeenCalledExactlyOnceWith(podId);
+      expect(
+        db
+          .prepare('SELECT status, budget_extensions_used AS used FROM pods WHERE id = ?')
+          .get(podId),
+      ).toEqual({ status: 'running', used: 1 });
+    });
+
     it('returns 404 for nonexistent pod', async () => {
       const res = await app.inject({
         method: 'POST',
@@ -751,6 +787,99 @@ describe('Extended Route Tests', () => {
         payload: { invalid: 'payload' },
       });
       expect(res.statusCode).toBe(400);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Budget pause approval
+  // -------------------------------------------------------------------------
+
+  describe('POST /pods/:id/continue-budget and /resume on a budget pause', () => {
+    async function budgetPausedPod(): Promise<string> {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: authHeaders,
+        payload: { profileName: 'test-app', task: 'Task' },
+      });
+      const podId = createRes.json().id;
+      await waitForPodValidated(podId);
+      db.prepare("UPDATE pods SET status = 'paused', pause_reason = 'budget' WHERE id = ?").run(
+        podId,
+      );
+      return podId;
+    }
+
+    it('acknowledges the recorded approval while validation runs in the background', async () => {
+      const podId = await budgetPausedPod();
+      vi.spyOn(manager, 'handleCompletion').mockReturnValue(new Promise(() => {}));
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/continue-budget`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        ok: true,
+        action: 'continue-budget',
+        budgetExtensionsUsed: 1,
+        maxBudgetExtensions: null,
+        validation: 'started',
+      });
+      expect(
+        db.prepare('SELECT status, pause_reason AS reason FROM pods WHERE id = ?').get(podId),
+      ).toEqual({ status: 'running', reason: null });
+    });
+
+    it('records a background validation failure after acknowledging', async () => {
+      const podId = await budgetPausedPod();
+      vi.spyOn(manager, 'handleCompletion').mockRejectedValue(new Error('validator crashed'));
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/continue-budget`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      await vi.waitFor(() =>
+        expect(
+          db.prepare('SELECT status, failure_reason AS reason FROM pods WHERE id = ?').get(podId),
+        ).toEqual({
+          status: 'failed',
+          reason: 'Validation after budget approval failed: validator crashed',
+        }),
+      );
+    });
+
+    it('rejects a pod that is not budget-paused with a 409', async () => {
+      const podId = await budgetPausedPod();
+      db.prepare("UPDATE pods SET pause_reason = 'manual' WHERE id = ?").run(podId);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/continue-budget`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe('NOT_BUDGET_PAUSED');
+    });
+
+    it('lets Resume approve the budget pause', async () => {
+      const podId = await budgetPausedPod();
+      vi.spyOn(manager, 'handleCompletion').mockReturnValue(new Promise(() => {}));
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/resume`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, action: 'continue-budget' });
     });
   });
 

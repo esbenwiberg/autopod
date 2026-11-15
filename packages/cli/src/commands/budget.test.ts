@@ -33,6 +33,7 @@ it('shows budget-counted usage beside the raised limit', async () => {
     budgetCountedTokens: 264883,
   };
   const client = {
+    getSession: vi.fn(async () => ({ status: 'running', pauseReason: null })),
     getTaskExecution: vi.fn(async () => ({ tokenBudget: 2000000 })),
     raiseTaskBudget: vi.fn(async () => updated),
   };
@@ -47,6 +48,7 @@ it('shows budget-counted usage beside the raised limit', async () => {
 it.each([false, true])('removes the current task limit with explicit resume=%s', async (resume) => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   const client = {
+    getSession: vi.fn(async () => ({ status: 'running', pauseReason: null })),
     getTaskExecution: vi.fn(async () => ({ tokenBudget: 100 })),
     raiseTaskBudget: vi.fn(async () => ({ tokenBudget: null })),
     getGoal: vi.fn(async () => ({ revision: 7, state: 'budget_limited', executionStopped: true })),
@@ -59,4 +61,68 @@ it.each([false, true])('removes the current task limit with explicit resume=%s',
   });
   expect(client.raiseTaskBudget).toHaveBeenCalledExactlyOnceWith('12345678', null, 100);
   expect(client.controlGoal).toHaveBeenCalledTimes(resume ? 1 : 0);
+});
+
+function budgetClient(session: { status: string; pauseReason: string | null }) {
+  return {
+    getSession: vi.fn(async () => session),
+    getTaskExecution: vi.fn(async () => ({ tokenBudget: 150000 })),
+    raiseTaskBudget: vi.fn(async () => ({ tokenBudget: 600000 })),
+    continueBudget: vi.fn(async () => ({
+      ok: true,
+      action: 'continue-budget',
+      budgetExtensionsUsed: 1,
+      maxBudgetExtensions: null,
+      validation: 'started',
+    })),
+  };
+}
+async function runBudget(client: object, args: string[]) {
+  const program = new Command().exitOverride();
+  registerBudgetCommand(program, () => client as unknown as AutopodClient);
+  await program.parseAsync(['budget', '12345678', ...args], { from: 'user' });
+}
+
+it('raises the limit and approves a budget pause in one step with --continue', async () => {
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const client = budgetClient({ status: 'paused', pauseReason: 'budget' });
+  await runBudget(client, ['600000', '--continue']);
+  expect(client.raiseTaskBudget).toHaveBeenCalledExactlyOnceWith('12345678', 600000, 150000);
+  expect(client.continueBudget).toHaveBeenCalledExactlyOnceWith('12345678');
+  expect(client.raiseTaskBudget.mock.invocationCallOrder[0]).toBeLessThan(
+    client.continueBudget.mock.invocationCallOrder[0] ?? 0,
+  );
+  expect(log.mock.calls.flat()).toContain(
+    'Budget extension approved; validation started in the background. Follow with: ap status 12345678 or ap logs 12345678 -f',
+  );
+});
+
+it('refuses --continue before raising when the pod is not budget-paused', async () => {
+  const client = budgetClient({ status: 'running', pauseReason: null });
+  await expect(runBudget(client, ['600000', '--continue'])).rejects.toThrow(
+    'Pod 12345678 is not paused on its token budget (status: running); nothing to continue.',
+  );
+  expect(client.raiseTaskBudget).not.toHaveBeenCalled();
+  expect(client.continueBudget).not.toHaveBeenCalled();
+});
+
+it('names the approval command when a raise leaves the pod budget-paused', async () => {
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const client = budgetClient({ status: 'paused', pauseReason: 'budget' });
+  await runBudget(client, ['600000']);
+  expect(client.continueBudget).not.toHaveBeenCalled();
+  expect(log.mock.calls.flat()).toContain(
+    'Pod 12345678 is still paused on its token budget. Approve with: ap budget 12345678 <tokens> --continue (or ap resume 12345678)',
+  );
+});
+
+it('documents --continue in help', () => {
+  const program = new Command();
+  registerBudgetCommand(program, () => ({}) as AutopodClient);
+  const budget = program.commands.find((command) => command.name() === 'budget');
+  let help = '';
+  budget?.configureOutput({ writeOut: (text) => (help += text) });
+  budget?.outputHelp();
+  expect(help).toContain('--continue');
+  expect(help).toContain('ap budget <pod> <tokens> --continue');
 });

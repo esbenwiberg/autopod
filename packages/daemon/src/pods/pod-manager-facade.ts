@@ -22,6 +22,7 @@ import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
 import { rewriteConfiguration } from './approval-source-rewrite.js';
 import type { ArtifactResumeObservation } from './artifact-resume-observation.js';
+import type { BudgetApprovalOptions, BudgetApprovalResult } from './operator-contracts.js';
 import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { PodFacadeOwners } from './pod-facade-ports.js';
 import type { PodStats } from './pod-repository.js';
@@ -456,12 +457,13 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       podId: string,
       message: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+      options?: BudgetApprovalOptions,
     ): Promise<void> {
       if (captured.podRepo.retainedCoding?.latest(podId))
         return (
           captured.checkpointRecovery ?? checkpointError('Coding reply unavailable')
         ).replyToCoding(podId, actor, () =>
-          operatorMessages.sendMessage.call(this, podId, message, actor),
+          operatorMessages.sendMessage.call(this, podId, message, actor, options),
         );
       if (
         captured.podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
@@ -470,9 +472,36 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         return (
           captured.checkpointRecovery ?? checkpointError('Recovery unavailable')
         ).replyToRepair(podId, actor, () =>
-          operatorMessages.sendMessage.call(this, podId, message, actor),
+          operatorMessages.sendMessage.call(this, podId, message, actor, options),
         );
-      return operatorMessages.sendMessage.call(this, podId, message, actor);
+      return operatorMessages.sendMessage.call(this, podId, message, actor, options);
+    },
+
+    async approveBudgetPause(
+      podId: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+      options?: BudgetApprovalOptions,
+    ): Promise<BudgetApprovalResult> {
+      // Same reply-custody routing as sendMessage: retained coding/repair
+      // owners never grant budget extensions through a reply.
+      const approve = () => operatorMessages.approveBudgetPause.call(this, podId, actor, options);
+      let result: BudgetApprovalResult | undefined;
+      const capture = async () => {
+        result = await approve();
+      };
+      if (captured.podRepo.retainedCoding?.latest(podId))
+        await (
+          captured.checkpointRecovery ?? checkpointError('Coding reply unavailable')
+        ).replyToCoding(podId, actor, capture);
+      else if (
+        captured.podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
+          ?.mode === 'rework'
+      )
+        await (
+          captured.checkpointRecovery ?? checkpointError('Recovery unavailable')
+        ).replyToRepair(podId, actor, capture);
+      else return approve();
+      return result ?? checkpointError('Budget approval was not recorded');
     },
 
     approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
@@ -797,17 +826,27 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     reconcileTermination(podId: string, runId: string, reason: string, actor: OperatorActor) {
       return terminationReconciliation.reconcileTermination(podId, runId, reason, actor);
     },
-    resumePod(
+    async resumePod(
       podId: string,
-      options?: { backgroundValidation?: boolean },
+      options?: { backgroundValidation?: boolean; actor?: OperatorActor },
     ): Promise<{
       action:
         | 'retry-pr'
         | 'revalidate'
         | 'retry-fix-delivery'
         | 'retry-agent'
-        | 'collect-artifacts';
+        | 'collect-artifacts'
+        | 'continue-budget';
     }> {
+      const current = captured.podRepo.getOrThrow(podId);
+      // A soft token-budget pause is a pending human approval, not a failure:
+      // Resume approves one extension with every budget/Goal/infrastructure gate.
+      if (current.status === 'paused' && current.pauseReason === 'budget') {
+        const approved = await this.approveBudgetPause(podId, options?.actor, {
+          backgroundCompletion: options?.backgroundValidation,
+        });
+        return { action: approved.action };
+      }
       return continuationControls.resumePod.call(
         {
           handleCompletion: (...args) => this.handleCompletion(...args),

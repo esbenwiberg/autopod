@@ -121,6 +121,15 @@ into `backgroundValidation`; push/PR and artifact paths retain their existing se
 The desktop Resume delivery handoff dismisses on acceptance, but retains errors
 and uncertain network results without automatically resubmitting.
 
+A soft token-budget pause (`status=paused`, `pauseReason=budget`) is a pending
+approval, not a failure. `POST /pods/:podId/continue-budget`, Resume and the
+compatibility `/message` reply (`ap tell`) all go through `approveBudgetPause`
+or the same `continueBudgetPause` helper: they keep `maxBudgetExtensions`,
+infrastructure-blocker and native Goal gates, record the extension and the
+`running` transition, and over HTTP acknowledge before `handleCompletion`
+finishes. A background completion failure still fails the pod with a
+`failureReason`. In-process callers without `backgroundCompletion` still await it.
+
 If `pod.recoveryWorktreePath` is set, `processPod()` mounts the existing worktree instead of
 creating a new one and resumes the Claude pod via `claude_session_id`.
 The flag is cleared **immediately** (one-shot) before the container starts — it will not re-trigger on

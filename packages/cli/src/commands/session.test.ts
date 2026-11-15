@@ -460,6 +460,67 @@ describe('pod commands', () => {
     expect(mockClient.sendMessage).toHaveBeenCalledWith('abcd1234', 'hey there');
   });
 
+  it('names the one-step budget command in status for a budget-paused pod', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(mockClient.getSession).mockResolvedValueOnce({
+      ...(await mockClient.getSession('abcd1234')),
+      status: 'paused',
+      pauseReason: 'budget',
+    });
+    vi.mocked(mockClient.getTaskExecution).mockResolvedValueOnce({
+      taskId: 'logical-root',
+      executionId: 'execution',
+      rootPodId: 'abcd1234',
+      podCount: 1,
+      agentRunCount: 1,
+      failedRunCount: 0,
+      transientFailureCount: 0,
+      providerAttemptCount: 1,
+      validationExecutionCount: 0,
+      tokenBudget: 150000,
+      recordedInputTokens: 300000,
+      recordedOutputTokens: 58000,
+      budgetCountedTokens: 358000,
+      recordedCostUsd: 1,
+      infrastructureCostUsd: null,
+      telemetry: 'partial',
+      diagnostics: [],
+    });
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    expect(log.mock.calls.flat().map(String)).toContainEqual(
+      expect.stringContaining(
+        'Paused: token budget (358000/150000 counted). Run: ap budget abcd1234 <tokens> --continue',
+      ),
+    );
+    log.mockRestore();
+  });
+
+  it('reports a background validation start when tell approves a budget pause', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(mockClient.sendMessage).mockResolvedValueOnce({
+      ok: true,
+      action: 'continue-budget',
+      validation: 'started',
+    });
+    await program.parseAsync(['node', 'ap', 'tell', 'abcd1234', 'approved']);
+    expect(log.mock.calls.flat().map(String)).toContainEqual(
+      expect.stringContaining('Budget extension approved; validation started in the background'),
+    );
+    log.mockRestore();
+  });
+
+  it('reports a budget approval from resume', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    (mockClient as unknown as { resumePod: unknown }).resumePod = vi
+      .fn()
+      .mockResolvedValue({ ok: true, action: 'continue-budget' });
+    await program.parseAsync(['node', 'ap', 'resume', 'abcd1234']);
+    expect(log.mock.calls.flat().map(String)).toContainEqual(
+      expect.stringContaining('Budget extension approved; validation started in the background'),
+    );
+    log.mockRestore();
+  });
+
   it('registers approve command that calls approveSession', async () => {
     await program.parseAsync(['node', 'ap', 'approve', 'abcd1234', '--squash']);
     expect(mockClient.approveSession).toHaveBeenCalledWith('abcd1234', { squash: true });

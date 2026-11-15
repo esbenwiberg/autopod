@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   AutopodError,
+  type BudgetContinuationResponse,
   type CompactPod,
   type CompactPodPage,
   collectPiiPatternNames,
@@ -1048,11 +1049,38 @@ export function podRoutes(
   });
 
   // POST /pods/:podId/message — send message
+  // A reply to a budget-paused pod approves one extension (compatibility for
+  // `ap tell`); validation then continues in the background.
   app.post('/pods/:podId/message', async (request) => {
     const { podId } = request.params as { podId: string };
     const { message } = sendMessageSchema.parse(request.body);
-    await podManager.sendMessage(podId, message, humanActor(request));
-    return { ok: true };
+    const before = podManager.getSession(podId);
+    const budgetPaused = before.status === 'paused' && before.pauseReason === 'budget';
+    await podManager.sendMessage(podId, message, humanActor(request), {
+      backgroundCompletion: true,
+    });
+    return budgetPaused
+      ? { ok: true, action: 'continue-budget', validation: 'started' }
+      : { ok: true };
+  });
+
+  // POST /pods/:podId/continue-budget — approve one soft token-budget extension
+  // for a budget-paused pod. Acknowledges once the approval is recorded; the
+  // validation outcome is observed via pod state/events.
+  app.post('/pods/:podId/continue-budget', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      const result = await podManager.approveBudgetPause(podId, humanActor(request), {
+        backgroundCompletion: true,
+      });
+      return { ok: true, ...result } satisfies BudgetContinuationResponse;
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
   });
 
   // GET /pods/:podId/validations — validation history
@@ -1471,14 +1499,19 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/resume — operator escape hatch for failed pods and
+  // POST /pods/:podId/resume — operator escape hatch for failed pods,
+  // budget-paused pods (approves one extension) and
   // infrastructure-blocked review_required pods. Picks the cheapest recovery path:
   // push + open PR if validation passed, otherwise validation-only. No agent rework.
   // Validation acknowledges admission promptly; its outcome is observed via pod state/events.
   app.post('/pods/:podId/resume', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     try {
-      const result = await podManager.resumePod(podId, { backgroundValidation: true });
+      const result = await podManager.resumePod(podId, {
+        backgroundValidation: true,
+        // The actor is only consulted when Resume approves a budget pause.
+        ...(request.user ? { actor: humanActor(request) } : {}),
+      });
       return { ok: true, action: result.action };
     } catch (err) {
       if (err instanceof AutopodError) {

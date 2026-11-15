@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  BudgetContinuationResponse,
   CompactPod,
   ConfigurationEntity,
   ConfigurationKind,
@@ -750,8 +751,17 @@ export class AutopodClient {
     return this.request('GET', `/pods/${encodeURIComponent(id)}/files`);
   }
 
-  async sendMessage(id: string, message: string): Promise<void> {
-    await this.request<void>('POST', `/pods/${id}/message`, { message });
+  /** A reply to a budget-paused pod approves one extension; validation continues in the background. */
+  async sendMessage(
+    id: string,
+    message: string,
+  ): Promise<{ ok: boolean; action?: 'continue-budget'; validation?: 'started' } | undefined> {
+    return this.request('POST', `/pods/${id}/message`, { message });
+  }
+
+  /** Approve one soft token-budget extension for a budget-paused pod. */
+  async continueBudget(id: string): Promise<BudgetContinuationResponse> {
+    return this.request('POST', `/pods/${id}/continue-budget`);
   }
 
   async getValidations(

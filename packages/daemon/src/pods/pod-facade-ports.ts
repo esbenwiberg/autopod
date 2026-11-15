@@ -89,7 +89,10 @@ export interface PodFacadeOwners {
     ReturnType<typeof createCompletionWorkflow>,
     'handleCompletion' | 'reconcileInfrastructureBlocker'
   >;
-  operatorMessages: Pick<ReturnType<typeof createOperatorMessages>, 'sendMessage'>;
+  operatorMessages: Pick<
+    ReturnType<typeof createOperatorMessages>,
+    'sendMessage' | 'approveBudgetPause'
+  >;
   approvalWorkflow: Pick<ReturnType<typeof createApprovalWorkflow>, 'approveSession'>;
   operatorRejection: Pick<ReturnType<typeof createOperatorRejection>, 'rejectSession'>;
   operatorPause: Pick<ReturnType<typeof createOperatorPause>, 'pauseSession'>;

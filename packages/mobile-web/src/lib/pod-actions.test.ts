@@ -21,6 +21,14 @@ describe('availableActions', () => {
     expect(labels).toEqual(['resume', 'nudge', 'kill']);
   });
 
+  it('budget-paused pods expose budget approval instead of a nudge-based resume', () => {
+    const pod = { pauseReason: 'budget' } as Pod;
+    expect(availableActions('paused', pod).map((a) => [a.kind, a.label])).toEqual([
+      ['continue_budget', 'Approve budget & continue'],
+      ['kill', 'Kill'],
+    ]);
+  });
+
   it('awaiting_input pods only expose kill (answer is the EscalationCard, not an ActionBar button)', () => {
     expect(availableActions('awaiting_input').map((a) => a.kind)).toEqual(['kill']);
   });
@@ -156,6 +164,14 @@ describe('runAction', () => {
     if (!action) throw new Error('Missing failed-pod action');
     await runAction('pod-1', action.kind);
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/resume');
+  });
+
+  it('budget approval posts to /pods/:id/continue-budget', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'continue_budget');
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/continue-budget');
+    expect(spy.mock.calls[0]?.[1]?.method).toBe('POST');
   });
 
   it('resume sends a "continue" nudge', async () => {

@@ -291,3 +291,142 @@ describe('Token budget — sendMessage approval', () => {
     );
   });
 });
+
+describe('Token budget — first-class pause approval', () => {
+  function budgetPausedPod(maxBudgetExtensions: number | null = null, budgetExtensionsUsed = 0) {
+    const ctx = createTestContext();
+    insertBudgetProfile(ctx.db, {
+      tokenBudget: 5_000,
+      tokenBudgetPolicy: 'soft',
+      maxBudgetExtensions,
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
+    ctx.podRepo.update(pod.id, { status: 'paused', pauseReason: 'budget', budgetExtensionsUsed });
+    return { ctx, manager, podId: pod.id };
+  }
+  const human = { type: 'human' as const, userId: 'user-1' };
+  function pendingCompletion() {
+    let settle!: { resolve: () => void; reject: (err: Error) => void };
+    const promise = new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    return { promise, ...settle };
+  }
+
+  it('records the approval and returns before background validation finishes', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    const completion = pendingCompletion();
+    const handleCompletion = vi
+      .spyOn(manager, 'handleCompletion')
+      .mockReturnValue(completion.promise);
+
+    const result = await manager.approveBudgetPause(podId, human, { backgroundCompletion: true });
+
+    expect(result).toEqual({
+      action: 'continue-budget',
+      budgetExtensionsUsed: 1,
+      maxBudgetExtensions: null,
+      validation: 'started',
+    });
+    expect(handleCompletion).toHaveBeenCalledExactlyOnceWith(podId);
+    const approved = ctx.podRepo.getOrThrow(podId);
+    expect(approved).toMatchObject({ status: 'running', pauseReason: null });
+    expect(approved.budgetExtensionsUsed).toBe(1);
+    completion.resolve();
+    await completion.promise;
+  });
+
+  it('records a failure from the background completion on the pod', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    const completion = pendingCompletion();
+    vi.spyOn(manager, 'handleCompletion').mockReturnValue(completion.promise);
+
+    await manager.approveBudgetPause(podId, human, { backgroundCompletion: true });
+    expect(ctx.podRepo.getOrThrow(podId).status).toBe('running');
+    completion.reject(new Error('validation container vanished'));
+
+    await vi.waitFor(() => expect(ctx.podRepo.getOrThrow(podId).status).toBe('failed'));
+    expect(ctx.podRepo.getOrThrow(podId).failureReason).toBe(
+      'Validation after budget approval failed: validation container vanished',
+    );
+  });
+
+  it('still awaits and rethrows completion failures for in-process callers', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    vi.spyOn(manager, 'handleCompletion').mockRejectedValue(new Error('boom'));
+
+    await expect(manager.approveBudgetPause(podId, human)).rejects.toThrow('boom');
+    expect(ctx.podRepo.getOrThrow(podId).status).toBe('failed');
+  });
+
+  it('keeps the maxBudgetExtensions limit', async () => {
+    const { ctx, manager, podId } = budgetPausedPod(1, 1);
+    const handleCompletion = vi.spyOn(manager, 'handleCompletion');
+
+    await expect(
+      manager.approveBudgetPause(podId, human, { backgroundCompletion: true }),
+    ).rejects.toMatchObject({ code: 'BUDGET_EXHAUSTED' });
+    expect(handleCompletion).not.toHaveBeenCalled();
+    expect(ctx.podRepo.getOrThrow(podId)).toMatchObject({
+      status: 'paused',
+      pauseReason: 'budget',
+      budgetExtensionsUsed: 1,
+    });
+  });
+
+  it('rejects pods that are not paused on their token budget', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    ctx.podRepo.update(podId, { pauseReason: 'manual' });
+
+    await expect(manager.approveBudgetPause(podId, human)).rejects.toMatchObject({
+      code: 'NOT_BUDGET_PAUSED',
+      message: expect.stringContaining('pause reason: manual'),
+    });
+  });
+
+  it('keeps native Goal pods on the Goal control', async () => {
+    const { ctx, podId } = budgetPausedPod();
+    const goalManager = createPodManager({
+      ...ctx.deps,
+      launchConfiguration: { read: () => ({ intent: 'goal' }) },
+    } as unknown as Parameters<typeof createPodManager>[0]);
+
+    await expect(goalManager.approveBudgetPause(podId, human)).rejects.toMatchObject({
+      code: 'GOAL_NATIVE_RESUME_REQUIRED',
+      message: expect.stringContaining('--resume'),
+    });
+    expect(ctx.podRepo.getOrThrow(podId).budgetExtensionsUsed).toBe(0);
+  });
+
+  it('lets Resume approve a budget-paused pod without waiting for validation', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    vi.spyOn(manager, 'handleCompletion').mockReturnValue(new Promise(() => {}));
+
+    await expect(
+      manager.resumePod(podId, { backgroundValidation: true, actor: human }),
+    ).resolves.toEqual({ action: 'continue-budget' });
+    expect(ctx.podRepo.getOrThrow(podId)).toMatchObject({ status: 'running', pauseReason: null });
+  });
+
+  it('names the right command when Resume does not apply to a paused pod', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    ctx.podRepo.update(podId, { pauseReason: 'manual' });
+    await expect(manager.resumePod(podId)).rejects.toThrow(`run: ap tell ${podId}`);
+    ctx.podRepo.update(podId, { pauseReason: 'provider_limit' });
+    await expect(manager.resumePod(podId)).rejects.toThrow(`ap continue-provider ${podId}`);
+  });
+
+  it('keeps ap tell as a compatible, non-blocking approval path', async () => {
+    const { ctx, manager, podId } = budgetPausedPod();
+    vi.spyOn(manager, 'handleCompletion').mockReturnValue(new Promise(() => {}));
+
+    await manager.sendMessage(podId, 'approved', human, { backgroundCompletion: true });
+
+    expect(ctx.podRepo.getOrThrow(podId)).toMatchObject({
+      status: 'running',
+      pauseReason: null,
+      budgetExtensionsUsed: 1,
+    });
+  });
+});
