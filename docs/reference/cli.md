@@ -106,6 +106,8 @@ ap tell <id> "<message>"                    # Send message (also resumes paused 
 ap tell <id> --file instructions.md         # Message from file
 ap tell <id> --stdin                        # Pipe from stdin
 ap pause <id>                               # Pause a running pod
+ap budget <id> <tokens> --continue          # Raise the token limit and approve a budget pause
+ap resume <id>                              # Also approves a budget pause (no limit change)
 ap nudge <id> "<message>"                   # Send nudge (agent picks up async)
 
 # Validate & Preview

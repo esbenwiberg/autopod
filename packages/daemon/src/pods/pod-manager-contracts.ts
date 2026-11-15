@@ -48,6 +48,7 @@ import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type { BudgetApprovalOptions, BudgetApprovalResult } from './operator-contracts.js';
 import type { PodRepository, PodStats } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
@@ -262,7 +263,26 @@ export interface PodManager {
   quiesceSandboxAgent(podId: string): Promise<void>;
   suspendSandboxForRecovery(podId: string): Promise<void>;
   cleanupPodResourcesForRecovery(podId: string): Promise<void>;
-  sendMessage(podId: string, message: string, actor?: OperatorActor): Promise<void>;
+  /**
+   * Reply to a pending decision or pause. For a soft token-budget pause this is
+   * the compatibility approval path; `backgroundCompletion` acknowledges once
+   * the approval is recorded and validation continues in the background.
+   */
+  sendMessage(
+    podId: string,
+    message: string,
+    actor?: OperatorActor,
+    options?: BudgetApprovalOptions,
+  ): Promise<void>;
+  /**
+   * Approve one soft token-budget extension for a budget-paused pod and continue
+   * to validation. Keeps maxBudgetExtensions, infrastructure and Goal gates.
+   */
+  approveBudgetPause(
+    podId: string,
+    actor?: OperatorActor,
+    options?: BudgetApprovalOptions,
+  ): Promise<BudgetApprovalResult>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
   getReviewerConfig(pod: Pod): {
@@ -526,15 +546,22 @@ export interface PodManager {
    * Operator escape hatch for `failed` pods: advance the pod from where it died
    * without re-running the agent. Picks the cheapest action that fits the pod's
    * state — push + open PR if validation passed, re-validate if validation
-   * failed on infra. Throws when the pod isn't in a recoverable state.
+   * failed on infra. A soft token-budget pause is approved (one extension) and
+   * continues to validation. Throws when the pod isn't in a recoverable state.
    * HTTP callers opt into backgroundValidation to acknowledge admission without
    * waiting for the validation outcome.
    */
   resumePod(
     podId: string,
-    options?: { backgroundValidation?: boolean },
+    options?: { backgroundValidation?: boolean; actor?: OperatorActor },
   ): Promise<{
-    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' | 'collect-artifacts';
+    action:
+      | 'retry-pr'
+      | 'revalidate'
+      | 'retry-fix-delivery'
+      | 'retry-agent'
+      | 'collect-artifacts'
+      | 'continue-budget';
   }>;
   /**
    * Continue a provider-limit pause, or explicitly recover a failed pod on the

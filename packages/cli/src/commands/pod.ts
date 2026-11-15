@@ -7,7 +7,7 @@ import type {
   SystemEvent,
   ValidationExecutionRecoveryState,
 } from '@autopod/shared';
-import { describeTaskBudgetUsage, podStatusSchema } from '@autopod/shared';
+import { describeBudgetPause, describeTaskBudgetUsage, podStatusSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -21,7 +21,7 @@ import { resolvePodId } from '../utils/id-resolver.js';
 import { followLogs } from '../utils/log-follow.js';
 import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
 import { registerArtifactChecksRecoveryCommand } from './artifact-checks-recovery.js';
-import { registerBudgetCommand } from './budget.js';
+import { budgetContinuedMessage, registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
 import { registerLaunchCommand } from './launch.js';
@@ -576,15 +576,18 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('resume <id>')
     .description(
-      'Resume artifact collection, delivery or validation using the existing task budget and provider binding',
+      'Resume artifact collection, delivery or validation using the existing task budget and provider binding; approves a token-budget pause',
     )
     .option('--json', 'Output JSON')
     .action(async (id: string, opts: { json?: boolean }) => {
       const client = getClient();
-      const result = await client.resumePod(await resolvePodId(client, id));
+      const resolvedId = await resolvePodId(client, id);
+      const result = await client.resumePod(resolvedId);
       withJsonOutput(opts, result, (value) =>
         console.log(
-          `Resume requested: ${value.action}. Inspect status and retry-state for execution outcome.`,
+          value.action === 'continue-budget'
+            ? budgetContinuedMessage(resolvedId)
+            : `Resume requested: ${value.action}. Inspect status and retry-state for execution outcome.`,
         ),
       );
     });
@@ -768,6 +771,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      if (s.status === 'paused' && s.pauseReason === 'budget')
+        console.log(chalk.yellow(describeBudgetPause(s.id, s.taskExecution)));
       if (s.fleetArchivedAt)
         console.log(
           `Fleet archived: ${s.fleetArchivedAt}. Resources retained; execution unchanged.`,
@@ -1137,8 +1142,14 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .action(async (id: string, message: string) => {
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
-      await withSpinner('Sending message...', () => client.sendMessage(resolvedId, message));
-      console.log(chalk.green('Message recorded.'));
+      const result = await withSpinner('Sending message...', () =>
+        client.sendMessage(resolvedId, message),
+      );
+      console.log(
+        result?.action === 'continue-budget'
+          ? chalk.green(budgetContinuedMessage(resolvedId))
+          : chalk.green('Message recorded.'),
+      );
     });
 
   // ap approve

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, type Pod } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
@@ -42,6 +42,16 @@ type Captured = Pick<
   | 'pushAndCreatePr'
   | 'transition'
 >;
+
+/** Names the control that continues a paused pod when Resume does not apply. */
+export function pausedResumeHint(pod: Pick<Pod, 'id' | 'status' | 'pauseReason'>): string {
+  if (pod.status !== 'paused') return '';
+  if (pod.pauseReason === 'budget')
+    return `. This pod is paused on its token budget; run: ap budget ${pod.id} <tokens> --continue`;
+  if (pod.pauseReason === 'provider_limit')
+    return `. This pod is paused on a provider limit; run: ap continue-provider ${pod.id}`;
+  return `. To continue a paused pod, run: ap tell ${pod.id} "<message>"`;
+}
 
 export function createContinuationControls(deps: ContinuationLiveDependencies, captured: Captured) {
   const {
@@ -325,7 +335,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       podRepo.taskRetries?.state(podId).latest?.outcome !== 'pass';
     if (pod.status !== 'failed' && !isInfrastructureReviewResume && !hasSettledRetryFailure) {
       throw new AutopodError(
-        `Cannot resume pod ${podId} in status ${pod.status} — only failed pods or review_required pods with a recorded validation failure can be resumed`,
+        `Cannot resume pod ${podId} in status ${pod.status} — only failed pods or review_required pods with a recorded validation failure can be resumed${pausedResumeHint(pod)}`,
         'INVALID_STATE',
         409,
       );

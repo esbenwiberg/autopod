@@ -12,6 +12,7 @@ export type ActionKind =
   | 'accept_findings'
   | 'pause'
   | 'resume'
+  | 'continue_budget'
   | 'retry'
   | 'rework'
   | 'kill'
@@ -48,6 +49,15 @@ const RESUME: ActionDef = {
   label: 'Resume',
   tone: 'neutral',
   optimistic: { status: 'running' },
+  promptsForText: false,
+};
+// A token-budget pause is a pending approval: the worker already finished its
+// turn. Approval continues to validation in the background (no nudge involved).
+const CONTINUE_BUDGET: ActionDef = {
+  kind: 'continue_budget',
+  label: 'Approve budget & continue',
+  tone: 'neutral',
+  optimistic: null, // Status follows daemon evidence (running → validating).
   promptsForText: false,
 };
 const KILL: ActionDef = {
@@ -166,8 +176,12 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
 
 export function availableActions(
   status: PodStatus,
-  pod?: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation' | 'completionPolicy'>,
+  pod?: Pick<
+    Pod,
+    'options' | 'finalization' | 'pendingEscalation' | 'completionPolicy' | 'pauseReason'
+  >,
 ): ActionDef[] {
+  if (status === 'paused' && pod?.pauseReason === 'budget') return [CONTINUE_BUDGET, KILL];
   if (
     status === 'failed' &&
     (pod?.options.output === 'artifact' || pod?.completionPolicy === 'accept-findings') &&
@@ -213,6 +227,9 @@ export async function runAction(
       return;
     case 'retry':
       await apiFetch(`/pods/${podId}/resume`, { method: 'POST' });
+      return;
+    case 'continue_budget':
+      await apiFetch(`/pods/${podId}/continue-budget`, { method: 'POST' });
       return;
     case 'resume':
       // No dedicated unpause endpoint — a nudge releases the paused pod.

@@ -42,3 +42,36 @@ export function describeTaskBudgetUsage(task: BudgetUsage, limit: number | null)
   if (reads <= 0 || task.budgetCountedTokens === undefined) return `${head} tokens used`;
   return `${head} budget-counted tokens used; ${recordedTaskTokens(task)} recorded incl. ${reads} cache reads at ${CACHE_READ_BUDGET_WEIGHT}x`;
 }
+
+/** Operator command that raises the limit and approves a budget-paused pod in one step. */
+export function budgetContinueCommand(podId: string): string {
+  return `ap budget ${podId} <tokens> --continue`;
+}
+
+/**
+ * One-line status for a pod paused on its soft token limit. The worker has
+ * finished its turn; approval continues to validation. Usage is omitted when
+ * task accounting is unavailable.
+ */
+export function describeBudgetPause(
+  podId: string,
+  task?: (BudgetUsage & { tokenBudget: number | null }) | null,
+): string {
+  const usage = task
+    ? ` (${budgetCountedTaskTokens(task)}/${task.tokenBudget ?? 'no limit'} counted)`
+    : '';
+  return `Paused: token budget${usage}. Run: ${budgetContinueCommand(podId)}`;
+}
+
+/** Response to an accepted budget-pause approval. */
+export interface BudgetContinuationResponse {
+  ok: true;
+  action: 'continue-budget';
+  budgetExtensionsUsed: number;
+  maxBudgetExtensions: number | null;
+  /**
+   * `started`: approval and the transition are recorded; validation runs in the
+   * background. Follow pod status and events for the outcome.
+   */
+  validation: 'started' | 'finished';
+}

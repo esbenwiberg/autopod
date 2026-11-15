@@ -281,6 +281,14 @@ preset limit, or `--token-budget 500000` to choose a limit explicitly.
 `ap budget <pod> off` removes an existing whole-task limit; a larger integer raises
 it. Linked repair pods share that change. `--resume` also resumes a stopped native
 Goal, while a running native Goal receives the new allowance without a restart.
+A soft limit pauses the pod when the worker finishes over budget (`ap status`
+shows `Paused: token budget (used/limit counted)`). Raising the limit alone does not
+continue it: `ap budget <pod> <tokens> --continue` raises the limit and approves one
+extension in one step, and `ap resume <pod>` approves without changing the limit.
+`ap tell` still approves for compatibility. Approval returns once it is recorded;
+validation then runs in the background, so follow `ap status` or `ap logs -f` for the
+outcome. A failure in that validation is recorded on the pod. `maxBudgetExtensions`,
+infrastructure blockers and native Goal controls still apply.
 These changes retain original launch settings, operator identity, and measured usage.
 They do not reset counters or remove a separately configured reviewer sublimit.
 Recorded aggregate tokens include input/context usage and are not a billing estimate.

@@ -9,6 +9,7 @@ import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import { legacyRespondedBy, parseValidationOverrideResponse } from './approval-policy.js';
+import { sanitizeFailureReason } from './completion-diagnostics.js';
 import {
   AgentContinuationSupersededError,
   prepareRetainedAgentContinuation,
@@ -16,6 +17,8 @@ import {
 import { resolvePrBaseBranch } from './delivery-policy.js';
 import { assertNoInfrastructureBlocker, persistCompletionReply } from './escalation-coordinator.js';
 import type {
+  BudgetApprovalOptions,
+  BudgetApprovalResult,
   OperatorMessageCalls,
   OperatorMessageLiveDependencies,
   OperatorMessagesCaptured,
@@ -25,6 +28,7 @@ import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { canReceiveMessage, isTerminalState } from './state-machine.js';
 import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
 import { captureValidationDispatchGuard } from './validation-recovery-policy.js';
+
 export function createOperatorMessages(
   deps: OperatorMessageLiveDependencies,
   captured: OperatorMessagesCaptured,
@@ -77,11 +81,128 @@ export function createOperatorMessages(
       logger.warn({ err, podId: pod.id }, 'Reported execution remains held after reply failure');
     }
   }
+  /**
+   * Approve one soft token-budget extension for a pod paused at completion and
+   * continue to validation. The extension gate, infrastructure gate and the
+   * running transition are applied before this returns; with
+   * `backgroundCompletion` the completion workflow continues afterwards and
+   * records its own failure instead of holding the caller.
+   */
+  async function continueBudgetPause(
+    this: OperatorMessageCalls,
+    pod: Pod,
+    options: BudgetApprovalOptions = {},
+  ): Promise<BudgetApprovalResult> {
+    const podId = pod.id;
+    assertNoInfrastructureBlocker(podRepo, podId);
+    const profile = executionForPod(pod);
+    const maxExtensions = profile.maxBudgetExtensions;
+    const newExtensionsUsed = pod.budgetExtensionsUsed + 1;
+
+    if (maxExtensions !== null && newExtensionsUsed > maxExtensions) {
+      throw new AutopodError(
+        `Pod ${podId} has reached the maximum budget extensions (${maxExtensions})`,
+        'BUDGET_EXHAUSTED',
+        409,
+      );
+    }
+
+    emitActivityStatus(
+      podId,
+      `Budget extension approved (${newExtensionsUsed}${maxExtensions === null ? '' : `/${maxExtensions}`}). Proceeding to validation…`,
+    );
+    podRepo.update(podId, {
+      budgetExtensionsUsed: newExtensionsUsed,
+      pauseReason: null,
+    });
+
+    const refreshed = podRepo.getOrThrow(podId);
+    transition(refreshed, 'running');
+
+    // Started synchronously so the control-operation registry owns the
+    // completion from the moment the pod is running again.
+    const completion = this.handleCompletion(podId).catch(async (err: unknown) => {
+      if (
+        err instanceof AgentContinuationSupersededError ||
+        err instanceof ValidationSupersededError
+      )
+        throw err;
+      logger.error({ err, podId }, 'Failed to handle completion after budget approval');
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await retainReportedFailure(pod);
+        throw err;
+      }
+      const s = podRepo.getOrThrow(podId);
+      if (!isTerminalState(s.status)) {
+        transition(s, 'failed', {
+          completedAt: new Date().toISOString(),
+          failureReason: sanitizeFailureReason(err, 'Validation after budget approval failed'),
+        });
+      }
+      throw err;
+    });
+    const result = {
+      action: 'continue-budget' as const,
+      budgetExtensionsUsed: newExtensionsUsed,
+      maxBudgetExtensions: maxExtensions,
+    };
+    if (!options.backgroundCompletion) {
+      await completion;
+      return { ...result, validation: 'finished' };
+    }
+    completion.catch((err: unknown) => {
+      // The failure is already recorded on the pod; a superseding invocation
+      // owns its own outcome. Surface real failures in the activity stream.
+      logger.warn({ err, podId }, 'Completion after accepted budget approval failed');
+      if (
+        err instanceof AgentContinuationSupersededError ||
+        err instanceof ValidationSupersededError
+      )
+        return;
+      emitActivityStatus(
+        podId,
+        sanitizeFailureReason(err, 'Validation after budget approval failed'),
+      );
+    });
+    return { ...result, validation: 'started' };
+  }
+
+  /** First-class budget-pause approval (`ap budget --continue`, `ap resume`). */
+  async function approveBudgetPause(
+    this: OperatorMessageCalls,
+    podId: string,
+    actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    options: BudgetApprovalOptions = {},
+  ): Promise<BudgetApprovalResult> {
+    if (pauseIntents.has(podId)) {
+      throw new AutopodError(
+        `Pod ${podId} pause is still settling; resume is not yet allowed`,
+        'PAUSE_SETTLING',
+        409,
+      );
+    }
+    const pod = podRepo.getOrThrow(podId);
+    if (deps.launchConfiguration?.read(podId)?.intent === 'goal')
+      throw new AutopodError(
+        `Pod ${podId} runs a native Goal; raise its limit and resume with: ap budget ${podId} <tokens> --resume`,
+        'GOAL_NATIVE_RESUME_REQUIRED',
+        409,
+      );
+    if (pod.status !== 'paused' || pod.pauseReason !== 'budget')
+      throw new AutopodError(
+        `Pod ${podId} is not paused on its token budget (status: ${pod.status}${pod.pauseReason ? `, pause reason: ${pod.pauseReason}` : ''}); there is no budget extension to approve`,
+        'NOT_BUDGET_PAUSED',
+        409,
+      );
+    logger.info({ podId, actorType: actor.type }, 'Budget extension approval requested');
+    return continueBudgetPause.call(this, pod, options);
+  }
   async function sendMessage(
     this: OperatorMessageCalls,
     podId: string,
     message: string,
     actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    options: BudgetApprovalOptions = {},
   ): Promise<void> {
     if (pauseIntents.has(podId)) {
       throw new AutopodError(
@@ -128,52 +249,9 @@ export function createOperatorMessages(
       );
     }
 
-    // ── Budget pause approval ──────────────────────────────────────────
+    // ── Budget pause approval (compatibility path for `ap tell`) ───────
     if (pod.pauseReason === 'budget') {
-      assertNoInfrastructureBlocker(podRepo, podId);
-      const profile = executionForPod(pod);
-      const maxExtensions = profile.maxBudgetExtensions;
-      const newExtensionsUsed = pod.budgetExtensionsUsed + 1;
-
-      if (maxExtensions !== null && newExtensionsUsed > maxExtensions) {
-        throw new AutopodError(
-          `Pod ${podId} has reached the maximum budget extensions (${maxExtensions})`,
-          'BUDGET_EXHAUSTED',
-          409,
-        );
-      }
-
-      emitActivityStatus(
-        podId,
-        `Budget extension approved (${newExtensionsUsed}). Proceeding to validation…`,
-      );
-      podRepo.update(podId, {
-        budgetExtensionsUsed: newExtensionsUsed,
-        pauseReason: null,
-      });
-
-      const refreshed = podRepo.getOrThrow(podId);
-      transition(refreshed, 'running');
-
-      try {
-        await this.handleCompletion(podId);
-      } catch (err) {
-        if (
-          err instanceof AgentContinuationSupersededError ||
-          err instanceof ValidationSupersededError
-        )
-          throw err;
-        logger.error({ err, podId }, 'Failed to handle completion after budget approval');
-        if (podRepo.hasInfrastructureBlocker?.(podId)) {
-          await retainReportedFailure(pod);
-          throw err;
-        }
-        const s = podRepo.getOrThrow(podId);
-        if (!isTerminalState(s.status)) {
-          transition(s, 'failed');
-        }
-        throw err;
-      }
+      await continueBudgetPause.call(this, pod, options);
       return;
     }
 
@@ -715,5 +793,5 @@ export function createOperatorMessages(
       throw err;
     }
   }
-  return { sendMessage };
+  return { sendMessage, approveBudgetPause };
 }

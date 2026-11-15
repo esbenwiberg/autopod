@@ -1,6 +1,7 @@
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   AgentEvent,
+  BudgetContinuationResponse,
   EffectiveLaunchConfig,
   ExecutionTarget,
   Pod,
@@ -31,6 +32,16 @@ import type { createProvisioningToolInstallation } from './provisioning-tool-ins
 import type { createRuntimeResumeContext } from './runtime-resume-context.js';
 import type { createValidationWorkflowState } from './validation-workflow-state.js';
 import type { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
+
+export interface BudgetApprovalOptions {
+  /**
+   * Acknowledge once the approval and `running` transition are recorded and
+   * continue completion (validation) in the background. HTTP callers opt in;
+   * ordinary in-process callers still await the completion outcome.
+   */
+  backgroundCompletion?: boolean;
+}
+export type BudgetApprovalResult = Omit<BudgetContinuationResponse, 'ok'>;
 
 export interface OperatorWorkflowCalls {
   handleCompletion(podId: string): Promise<void>;
