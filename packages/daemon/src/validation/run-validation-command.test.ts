@@ -36,7 +36,8 @@ it.each([
   if (mode === 'exit') {
     const observed = await result;
     expect(observed.exitCode).toBe(7);
-    expect(observed.stdout).toHaveLength(50_000);
+    expect(observed.stdout.length).toBeLessThanOrEqual(50_000);
+    expect(observed.stdout).toMatch(/^x{10000}\n\n\[\.\.\. \d+ characters omitted/);
     expect(observed.stdout).toMatch(/last stdout$/);
     expect(observed.stderr).toBe('first stderr last stderr');
   } else {

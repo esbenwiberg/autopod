@@ -2,6 +2,7 @@ import type { Pod, ValidationResult } from '@autopod/shared';
 import { AutopodError, MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { boundedDiagnosticOutput } from './diagnostic-output.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import { requiresValidationSettlement } from './validation-recovery-policy.js';
@@ -68,20 +69,26 @@ export async function buildCorrectionContext(
   // Setup failures
   if (validationResult.setup?.status === 'fail') {
     const out = validationResult.setup.output?.trim();
-    screenshotDescriptions.push(out ? `Setup failed:\n${out.slice(0, 2_000)}` : 'Setup failed');
+    screenshotDescriptions.push(
+      out ? `Setup failed:\n${boundedDiagnosticOutput(out, 2_000)}` : 'Setup failed',
+    );
   }
 
   // Lint failures
   if (validationResult.lint?.status === 'fail') {
     const out = validationResult.lint.output?.trim();
-    screenshotDescriptions.push(out ? `Lint failed:\n${out.slice(0, 2_000)}` : 'Lint failed');
+    screenshotDescriptions.push(
+      out ? `Lint failed:\n${boundedDiagnosticOutput(out, 2_000)}` : 'Lint failed',
+    );
   }
 
   // SAST failures
   if (validationResult.sast?.status === 'fail') {
     const out = validationResult.sast.output?.trim();
     screenshotDescriptions.push(
-      out ? `Security scan failed:\n${out.slice(0, 2_000)}` : 'Security scan failed',
+      out
+        ? `Security scan failed:\n${boundedDiagnosticOutput(out, 2_000)}`
+        : 'Security scan failed',
     );
   }
 
@@ -92,7 +99,7 @@ export async function buildCorrectionContext(
       .join('\n')
       .trim();
     screenshotDescriptions.push(
-      testOutput ? `Tests failed:\n${testOutput.slice(0, 2_000)}` : 'Tests failed',
+      testOutput ? `Tests failed:\n${boundedDiagnosticOutput(testOutput, 2_000)}` : 'Tests failed',
     );
   }
 
