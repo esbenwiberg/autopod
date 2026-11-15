@@ -1,22 +1,22 @@
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
+import { runMigrationsWithBackups } from '../db/migrate.js';
+import {
+  createHistoricalDiskDatabase,
+  MIGRATIONS_DIR,
+  openTestDiskDatabase,
+} from '../test-utils/disk-database.js';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
-// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
+// On-disk upgrade with cutover backups and a reopen; a functional, not a latency, test.
 it('upgrades schema 180, blocks old destructive deletion, and retains event/progress rows through reopen', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'retained-history-upgrade-'));
-  const migrations = resolve(import.meta.dirname, '../db/migrations');
-  for (const file of readdirSync(migrations))
-    if (Number.parseInt(file, 10) <= 180) copyFileSync(join(migrations, file), join(dir, file));
-  let db = new Database(join(dir, 'state.db'));
+  const migrations = MIGRATIONS_DIR;
+  let db = createHistoricalDiskDatabase(join(dir, 'state.db'), [{ dir: migrations, through: 180 }]);
   try {
-    db.pragma('foreign_keys = ON');
-    runMigrations(db, dir, logger);
     insertTestProfile(db);
     db.prepare(
       "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,max_validation_attempts,skip_validation,output_mode) VALUES ('legacy','test-profile','Retain observations','failed','model','codex','legacy','operator',3,0,'pr')",
@@ -50,7 +50,7 @@ it('upgrades schema 180, blocks old destructive deletion, and retains event/prog
     const snapshot = join(dir, 'reopened.db');
     writeFileSync(snapshot, db.serialize());
     db.close();
-    db = new Database(snapshot);
+    db = openTestDiskDatabase(snapshot);
     expect(db.prepare('SELECT * FROM retained_events').all()).toEqual(events);
     expect(db.prepare('SELECT * FROM retained_session_progress_events').all()).toEqual(progress);
     expect(() => db.prepare("UPDATE task_history_events SET payload='rewritten'").run()).toThrow(

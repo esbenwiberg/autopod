@@ -103,6 +103,18 @@ then explicitly seals it back to DELETE and verifies no sidecars remain before
 capturing the immutable input bytes. The actual conversion, backups, packaged CLI,
 negative cases and 30-second deadline remain unchanged.
 
+`packages/daemon/src/test-utils/disk-database.ts` is the shared entry point:
+`openTestDiskDatabase` opens writable on-disk test files with the production
+policy, and `createHistoricalDiskDatabase` writes a historical schema built once
+per selection by the real runner in memory, so a legacy upgrade test replays
+neither its old prefix per test nor one fsync per migration; the upgrade under
+test, its cutover backups and reopen still run on disk. A guard test lists the
+remaining deliberate bare constructors (offline tools, backup/cutover, runner
+and legacy-checkpoint tests) and fails on new ones. Measured with an fsync
+counter, the historical-upgrade tests had issued about 10,000 of the suite's
+24,500 fsyncs; with a simulated 20 ms per fsync they took 23-25 s each (30 s
+budget) and now take 0.6-2 s.
+
 Ordinary in-memory unit fixtures now migrate one empty template per test module
 instance and deserialize a private copy for each caller. They do not share a live
 connection, rows, transactions, or mutable schema. Foreign keys are enabled on

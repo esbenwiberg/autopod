@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { createEscalationMcpServer, PendingRequests } from '@autopod/escalation-mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import {
   completeEvent,
   createMockRuntime,
@@ -193,7 +193,7 @@ it.each(
       const dir = mkdtempSync(join(tmpdir(), 'attached-reply-reopen-'));
       const file = join(dir, 'state.db');
       writeFileSync(file, ctx.db.serialize());
-      const reopened = new Database(file);
+      const reopened = openTestDiskDatabase(file);
       try {
         const saved = createNudgeRepository(reopened).readPending(pod.id);
         expect(saved?.messages).toEqual(

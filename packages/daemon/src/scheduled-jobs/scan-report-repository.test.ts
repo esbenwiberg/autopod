@@ -1,10 +1,14 @@
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScheduledScanCollection, ScheduledScanPolicy } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
-import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
+import { runMigrationsWithBackups } from '../db/migrate.js';
+import {
+  createHistoricalDiskDatabase,
+  MIGRATIONS_DIR,
+  openTestDiskDatabase,
+} from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createScanOperatorService } from './scan-operator-service.js';
 import { createScanReportRepository } from './scan-report-repository.js';
@@ -238,7 +242,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
       const file = join(directory, 'state.db');
       writeFileSync(file, db.serialize());
       db.close();
-      db = new Database(file);
+      db = openTestDiskDatabase(file);
       const reopened = createScanReportRepository(db);
       const next = reopened.unresolvedPage(report.id, first.nextCursor ?? undefined);
       expect(next.items.map((item) => item.id)).toEqual(['f-050']);
@@ -321,7 +325,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
       const file = join(directory, 'state.db');
       writeFileSync(file, db.serialize());
       db.close();
-      db = new Database(file);
+      db = openTestDiskDatabase(file);
       while (page.nextCursor) {
         page = createScanReportRepository(db).page('job', page.nextCursor);
         actual.push(...page.items.map((item) => item.id));
@@ -477,18 +481,16 @@ describe('scheduled scan reports independent of worker lifetime', () => {
     }
   });
 
-  // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
+  // On-disk upgrade with cutover backups and a reopen; functional, not latency, tests.
   it.each([
     139, 154,
   ])('upgrades existing schema %s while preserving legacy records and durable report recovery', async (version) => {
     const directory = mkdtempSync(join(tmpdir(), 'scan-upgrade-'));
-    const migrations = new URL('../db/migrations', import.meta.url).pathname;
-    for (const file of readdirSync(migrations))
-      if (Number.parseInt(file, 10) <= version)
-        copyFileSync(join(migrations, file), join(directory, file));
-    let db = new Database(join(directory, 'state.db'));
+    const migrations = MIGRATIONS_DIR;
+    let db = createHistoricalDiskDatabase(join(directory, 'state.db'), [
+      { dir: migrations, through: version },
+    ]);
     try {
-      runMigrations(db, directory, logger);
       insertTestProfile(db);
       db.prepare(
         "INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id, last_validation_result) VALUES ('legacy', 'test-profile', 'Historical worker', 'complete', 'fixture', 'codex', 'legacy-branch', 'operator', '{malformed legacy json')",
@@ -499,7 +501,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
       repo.finish(report.id, collection);
       const interrupted = repo.begin('legacy-job', 'interrupted-run', policy);
       db.close();
-      db = new Database(join(directory, 'state.db'));
+      db = openTestDiskDatabase(join(directory, 'state.db'));
       repo = createScanReportRepository(db);
       expect(repo.recoverInterrupted()).toBe(1);
       expect(repo.get(interrupted.id).status).toBe('incomplete');
@@ -612,7 +614,7 @@ describe('scheduled scan reports independent of worker lifetime', () => {
       ).toThrow('dispatch unavailable');
       await db.backup(join(dir, 'state.db'));
       db.close();
-      db = new Database(join(dir, 'state.db'));
+      db = openTestDiskDatabase(join(dir, 'state.db'));
       repo = createScanReportRepository(db);
       expect(repo.triage(input).id).toBe(selection.id);
       const spawn = vi.fn(() => {

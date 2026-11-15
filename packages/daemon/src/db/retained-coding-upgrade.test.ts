@@ -1,26 +1,20 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import pino from 'pino';
 import { expect, it } from 'vitest';
+import {
+  createHistoricalDiskDatabase,
+  MIGRATIONS_DIR as migrations,
+  openTestDiskDatabase,
+} from '../test-utils/disk-database.js';
+import { logger } from '../test-utils/mock-helpers.js';
 import { runMigrations } from './migrate.js';
-
-const migrations = new URL('./migrations', import.meta.url).pathname;
-const logger = pino({ level: 'silent' });
 
 it('upgrades an existing infrastructure-recovery v242 database without losing its custody/events', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'retained-upgrade-'));
-  const oldMigrations = path.join(root, 'v242');
-  fs.mkdirSync(oldMigrations);
-  for (const name of fs.readdirSync(migrations)) {
-    if (name.endsWith('.sql') && Number.parseInt(name, 10) <= 242)
-      fs.copyFileSync(path.join(migrations, name), path.join(oldMigrations, name));
-  }
   const filename = path.join(root, 'existing.db');
-  let db = new Database(filename);
+  let db = createHistoricalDiskDatabase(filename, [{ dir: migrations, through: 242 }]);
   try {
-    runMigrations(db, oldMigrations, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 242 });
     expect(
       db.prepare("SELECT 1 FROM sqlite_master WHERE name='retained_coding_facts'").get(),
@@ -52,7 +46,7 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
       .prepare('SELECT * FROM retained_infrastructure_events ORDER BY kind')
       .all();
     db.close();
-    db = new Database(filename);
+    db = openTestDiskDatabase(filename);
     runMigrations(db, migrations, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 251 });
     expect(db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toEqual([]);

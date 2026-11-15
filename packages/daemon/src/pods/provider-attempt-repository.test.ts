@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
@@ -32,8 +32,8 @@ describe('provider attempt repository', () => {
     const filename = join(directory, 'state.db');
     writeFileSync(filename, seed.serialize());
     seed.close();
-    const db = new Database(filename);
-    const secondConnection = new Database(filename);
+    const db = openTestDiskDatabase(filename);
+    const secondConnection = openTestDiskDatabase(filename);
     try {
       const repository = createProviderAttemptRepository(db);
       const input = {

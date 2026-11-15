@@ -3,12 +3,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { createSourcePublicationLedger } from '../pods/source-publication-ledger.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import {
   createMockWorktreeManager,
   createTestDb,
@@ -207,7 +207,7 @@ describe('LocalWorktreeManager real Git regressions', () => {
       );
       await db.backup(databasePath);
       db.close();
-      const reopened = new Database(databasePath);
+      const reopened = openTestDiskDatabase(databasePath);
       try {
         const resumed = createSourcePublicationLedger(reopened);
         expect(resumed.get(id)).toMatchObject({ state: 'admitted', receipt: null });

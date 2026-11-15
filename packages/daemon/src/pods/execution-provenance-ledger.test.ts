@@ -1,10 +1,14 @@
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { ExecutionProvenanceInput } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
-import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
+import { runMigrationsWithBackups } from '../db/migrate.js';
+import {
+  createHistoricalDiskDatabase,
+  MIGRATIONS_DIR,
+  openTestDiskDatabase,
+} from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 
@@ -131,8 +135,7 @@ it.each([
   const file = join(dir, 'state.db');
   writeFileSync(file, f.serialize());
   f.close();
-  const db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  const db = openTestDiskDatabase(file);
   try {
     expect(createPodRepository(db).executionProvenance?.latest('pod')).toEqual(saved);
     createPodRepository(db).delete('pod');
@@ -147,18 +150,16 @@ it.each([
     rmSync(dir, { recursive: true, force: true });
   }
 });
-// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
+// On-disk upgrade with cutover backups; a functional, not a latency, test.
 it.each([
   139, 157,
 ])('upgrades schema %s without manufacturing missing historical provenance', async (version) => {
   const dir = mkdtempSync(join(tmpdir(), 'provenance-upgrade-'));
-  const migrations = resolve(import.meta.dirname, '../db/migrations');
-  for (const file of readdirSync(migrations))
-    if (Number.parseInt(file, 10) <= version) copyFileSync(join(migrations, file), join(dir, file));
-  const db = new Database(join(dir, 'state.db'));
-  db.pragma('foreign_keys = ON');
+  const migrations = MIGRATIONS_DIR;
+  const db = createHistoricalDiskDatabase(join(dir, 'state.db'), [
+    { dir: migrations, through: version },
+  ]);
   try {
-    runMigrations(db, dir, logger);
     insertTestProfile(db);
     db.prepare(
       "INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')",

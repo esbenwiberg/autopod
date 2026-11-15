@@ -1,28 +1,23 @@
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
+import { createHistoricalDiskDatabase } from '../test-utils/disk-database.js';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
-import { createDatabase } from './connection.js';
 import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
-// Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
+// On-disk upgrades with cutover backups; functional, not latency, tests.
 it.each([
   150, 152, 153,
 ])('upgrades managed schema %s without skipping native reliability tables or changing managed data', async (baseline) => {
   const root = mkdtempSync(join(tmpdir(), 'managed-schema-upgrade-'));
   const migrations = resolve(import.meta.dirname, 'migrations');
   const managed = resolve(import.meta.dirname, 'fixtures/managed-migrations');
-  for (const file of readdirSync(migrations))
-    if (Number.parseInt(file, 10) <= 141) copyFileSync(join(migrations, file), join(root, file));
-  for (const file of readdirSync(managed)) {
-    if (Number.parseInt(file, 10) <= baseline) copyFileSync(join(managed, file), join(root, file));
-  }
-  const db = new Database(join(root, 'existing.db'));
-  db.pragma('foreign_keys=ON');
+  const db = createHistoricalDiskDatabase(join(root, 'existing.db'), [
+    { dir: migrations, through: 141 },
+    { dir: managed, through: baseline },
+  ]);
   try {
-    runMigrations(db, root, logger);
     expect(db.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({
       version: baseline,
     });
@@ -118,14 +113,11 @@ it('refuses an unpublished native checkpoint lineage before changing any migrati
   const root = mkdtempSync(join(tmpdir(), 'native-lineage-'));
   const migrations = resolve(import.meta.dirname, 'migrations');
   const historical = resolve(import.meta.dirname, 'fixtures/native-reliability-151-163');
-  for (const file of readdirSync(migrations))
-    if (Number.parseInt(file, 10) <= 150) copyFileSync(join(migrations, file), join(root, file));
-  for (const file of readdirSync(historical))
-    copyFileSync(join(historical, file), join(root, file));
-  // Production connection policy avoids per-commit fsyncs during the on-disk replay.
-  const db = createDatabase(join(root, 'checkpoint.db'), logger);
+  const db = createHistoricalDiskDatabase(join(root, 'checkpoint.db'), [
+    { dir: migrations, through: 150 },
+    { dir: historical, through: Number.MAX_SAFE_INTEGER },
+  ]);
   try {
-    runMigrations(db, root, logger);
     insertTestProfile(db);
     db.exec(
       "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('retained','test-profile','Keep local work','failed','model','codex','branch','operator','retained summary')",
@@ -152,13 +144,10 @@ it('refuses an unpublished native checkpoint lineage before changing any migrati
 it('upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153', async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-182-upgrade-'));
   const migrations = resolve(import.meta.dirname, 'migrations');
-  const db = new Database(join(root, 'existing.db'));
+  const db = createHistoricalDiskDatabase(join(root, 'existing.db'), [
+    { dir: migrations, through: 182, except: [153] },
+  ]);
   try {
-    for (const name of readdirSync(migrations)) {
-      const version = Number.parseInt(name, 10);
-      if (version <= 182 && version !== 153) copyFileSync(join(migrations, name), join(root, name));
-    }
-    runMigrations(db, root, logger);
     insertTestProfile(db);
     db.exec(
       "INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('retained','test-profile','Keep source and guidance','failed','model','codex','branch','operator','retained summary'); INSERT INTO nudge_messages(pod_id,message) VALUES ('retained','Preserve the unanswered decision');",

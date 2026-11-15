@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { InputBundleRef } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { referencePreview } from '../test-utils/reference-preview-helpers.js';
 import { deferred } from '../test-utils/resource-helpers.js';
@@ -158,7 +159,7 @@ describe('source-bound reference previews', () => {
       s.store.pin(s.ref, 'owner', 'retained');
       const filename = path.join(root, 'backup.db');
       await s.db.backup(filename);
-      restored = new Database(filename);
+      restored = openTestDiskDatabase(filename);
       expect(new InputBundleStore(restored).preview(s.ref, 'owner', 'design.html', image)).toEqual(
         first,
       );
