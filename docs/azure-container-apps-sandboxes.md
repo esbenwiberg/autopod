@@ -3,6 +3,9 @@
 Autopod can provision `executionTarget: sandbox` containers in Azure Container Apps Sandboxes.
 This target is production-supported only with Autopod warm images published to ACR.
 
+For a bounded operator check through review and PR-only handoff, use the
+[hosted sandbox reliability canary](sandbox-reliability-canary.md).
+
 ## Playwright browser cache in new base images
 
 All eight current Playwright base templates (node22-pw, node22-pw-pg,
