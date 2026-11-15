@@ -118,7 +118,11 @@ budget) and now take 0.6-2 s.
 Tests that are long by construction (real Git checkpoint fixtures, real process
 termination grace, production deadlines, production-scale inventories) state
 `INTEGRATION_TEST_TIMEOUT_MS` from `test-utils/test-budgets.ts`, per test or
-file-scoped through `vi.setConfig`. The global 5 s default is unchanged.
+file-scoped through `vi.setConfig`. The global 5 s default is unchanged. The
+daemon suite also prints `[test-budget]` lines after the run: totals, each
+failed test with its first error line, and tests that used at least half of
+their own deadline, so pod validation output shows budget pressure before it
+turns into a timeout.
 
 Ordinary in-memory unit fixtures now migrate one empty template per test module
 instance and deserialize a private copy for each caller. They do not share a live
