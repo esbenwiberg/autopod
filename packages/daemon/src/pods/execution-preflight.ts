@@ -11,8 +11,11 @@ import type {
 } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { daemonRelease } from '../release.js';
-import { verifyAgentCli } from '../runtimes/agent-cli-preflight.js';
+import { describeAgentCliProbeFailure, verifyAgentCli } from '../runtimes/agent-cli-preflight.js';
 import { inspectRequiredCommands } from './required-command-preflight.js';
+
+/** Read-only CLI probes retried when no answer was observed (exec timeout/transport). */
+export const AGENT_CLI_PROBE_ATTEMPTS = 3;
 
 export interface ExecutionPreflightOptions {
   assertCurrent?: () => void;
@@ -104,6 +107,8 @@ export async function inspectExecutionPreflight(
       result,
       await verifyAgentCli(cm, containerId, pod.runtime, pod.model, {
         ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}),
+        // Qualification never re-dispatches after an uncertain observation.
+        ...(options.stopOnProbeError ? {} : { transientAttempts: AGENT_CLI_PROBE_ATTEMPTS }),
         ...(options.user ? { maxOutputBytes: 65536 } : {}),
         ...(options.user
           ? {
@@ -129,7 +134,7 @@ export async function inspectExecutionPreflight(
         ? 'Configured worker CLI is unavailable; this phase does not start a coding agent.'
         : error instanceof AutopodError
           ? error.message
-          : 'Runtime CLI probe unavailable; inspect container connectivity and image capabilities.',
+          : `Runtime CLI probe unavailable after ${AGENT_CLI_PROBE_ATTEMPTS} attempts (${describeAgentCliProbeFailure(error)}); inspect container connectivity and image capabilities.`,
     });
   }
   try {

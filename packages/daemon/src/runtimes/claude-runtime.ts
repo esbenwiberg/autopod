@@ -117,10 +117,12 @@ export class ClaudeRuntime implements Runtime {
 
     const claudeSessionIds = this.claudeSessionIds;
     const podLogger = this.logger;
+    const lifecycle = { sawComplete: false, terminated: false };
     const enriched = (async function* parseWithEnrichments(): AsyncIterable<AgentEvent> {
       for await (const event of ClaudeStreamParser.parse(handle.stdout, config.podId, podLogger)) {
         // Flush any stderr events that arrived before the next stdout event
         for (const e of stderrEvents.splice(0)) yield e;
+        if (event.type === 'complete') lifecycle.sawComplete = true;
 
         // Capture Claude's pod ID from init events for resume support
         if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
@@ -154,15 +156,9 @@ export class ClaudeRuntime implements Runtime {
           },
         ),
         handle.exitCode,
-        { runtimeName: 'claude-runtime', podId: config.podId, logger: this.logger },
+        this.observedExitOptions(config.podId, handle, lifecycle),
       );
-      if (exitCode !== 0)
-        yield {
-          type: 'error',
-          timestamp: new Date().toISOString(),
-          message: `Claude process exited with code ${exitCode}`,
-          fatal: true,
-        };
+      yield* this.exitEvents(exitCode, lifecycle);
     } finally {
       if (this.handles.get(config.podId) === handle) this.handles.delete(config.podId);
     }
@@ -232,9 +228,11 @@ export class ClaudeRuntime implements Runtime {
 
     const claudeSessionIds = this.claudeSessionIds;
     const podLogger = this.logger;
+    const lifecycle = { sawComplete: false, terminated: false };
     const enriched = (async function* parseWithEnrichments(): AsyncIterable<AgentEvent> {
       for await (const event of ClaudeStreamParser.parse(handle.stdout, podId, podLogger)) {
         for (const e of stderrEvents.splice(0)) yield e;
+        if (event.type === 'complete') lifecycle.sawComplete = true;
         // Update Claude pod ID on resume too
         if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
           const match = event.message.match(/\(([^)]+)\)$/);
@@ -266,22 +264,62 @@ export class ClaudeRuntime implements Runtime {
           },
         ),
         handle.exitCode,
-        { runtimeName: 'claude-runtime', podId: podId, logger: this.logger },
+        this.observedExitOptions(podId, handle, lifecycle),
       );
       if (resumeFailure.sessionNotFound) {
         this.claudeSessionIds.delete(podId);
         throw new ResumeSessionNotFoundError(podId, claudeSessionId);
       }
-      if (exitCode !== 0)
-        yield {
-          type: 'error',
-          timestamp: new Date().toISOString(),
-          message: `Claude process exited with code ${exitCode}`,
-          fatal: true,
-        };
+      yield* this.exitEvents(exitCode, lifecycle);
     } finally {
       if (this.handles.get(podId) === handle) this.handles.delete(podId);
     }
+  }
+
+  /**
+   * The CLI can outlive its final result: Claude keeps running while tool
+   * processes it started in the background (Bash `run_in_background`, Monitor)
+   * are alive. When the exit is not observed in time, terminate the CLI's whole
+   * process tree inside the container and then observe the exit — termination
+   * stays verified instead of being abandoned as unknown.
+   */
+  private observedExitOptions(
+    podId: string,
+    handle: StreamingExecResult,
+    lifecycle: { terminated: boolean },
+  ) {
+    return {
+      runtimeName: 'claude-runtime',
+      podId,
+      logger: this.logger,
+      terminate: () => handle.kill(),
+      onTerminated: () => {
+        lifecycle.terminated = true;
+      },
+    };
+  }
+
+  private *exitEvents(
+    exitCode: number,
+    lifecycle: { sawComplete: boolean; terminated: boolean },
+  ): Generator<AgentEvent> {
+    if (exitCode === 0) return;
+    if (lifecycle.terminated && lifecycle.sawComplete) {
+      // The turn finished; only processes it left behind blocked the exit.
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: `Claude did not exit after its final result (background processes still running); the daemon terminated its process tree and observed exit code ${exitCode}. Completed turn retained.`,
+        fatal: false,
+      };
+      return;
+    }
+    yield {
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      message: `Claude process exited with code ${exitCode}`,
+      fatal: true,
+    };
   }
 
   async abort(podId: string): Promise<void> {
