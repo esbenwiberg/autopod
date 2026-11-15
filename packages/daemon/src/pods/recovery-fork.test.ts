@@ -20,6 +20,7 @@ import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { recoveryGit } from '../worktrees/recovery-fork-source.js';
 import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import { QUALIFICATION_SOURCE_PROBE } from './environment-qualification.js';
@@ -40,6 +41,9 @@ import {
   assertSourceDeliveryAllowed,
   assertSourceResourceReleasable,
 } from './source-custody-guards.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const exec = promisify(execFile);
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];

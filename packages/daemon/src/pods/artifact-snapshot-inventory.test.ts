@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import {
   verifyArtifactSnapshot,
   writeArtifactSnapshotReceipt,
@@ -70,17 +71,22 @@ async function setup(files: number, directories: number, links = 0) {
 }
 
 describe('bounded full workspace inventory shape', () => {
-  it('preserves the observed Portfolio files, directories and links without exclusions', async () => {
-    const snapshot = await setup(95_401, 4_775, 50);
-    await writeArtifactSnapshotReceipt(snapshot, snapshot, 1, 0);
-    const receipt = JSON.parse(await readFile(`${snapshot}.receipt.json`, 'utf8'));
-    expect(receipt.entries).toBe(100_227);
-    await expect(verifyArtifactSnapshot(snapshot, directory, 1)).resolves.toBeUndefined();
-    fixture.files++;
-    await expect(verifyArtifactSnapshot(snapshot, directory, 1)).rejects.toMatchObject({
-      code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
-    });
-  });
+  // Production-scale inventory of about 100k entries, written and verified twice (about 2 s).
+  it(
+    'preserves the observed Portfolio files, directories and links without exclusions',
+    async () => {
+      const snapshot = await setup(95_401, 4_775, 50);
+      await writeArtifactSnapshotReceipt(snapshot, snapshot, 1, 0);
+      const receipt = JSON.parse(await readFile(`${snapshot}.receipt.json`, 'utf8'));
+      expect(receipt.entries).toBe(100_227);
+      await expect(verifyArtifactSnapshot(snapshot, directory, 1)).resolves.toBeUndefined();
+      fixture.files++;
+      await expect(verifyArtifactSnapshot(snapshot, directory, 1)).rejects.toMatchObject({
+        code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
+      });
+    },
+    INTEGRATION_TEST_TIMEOUT_MS,
+  );
 
   it('still rejects more than 100000 file or link entries before publishing', async () => {
     const snapshot = await setup(100_000, 0, 1);
