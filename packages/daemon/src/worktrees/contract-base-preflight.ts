@@ -46,6 +46,7 @@ export async function inspectContractBase(
       .split('\0')
       .some((entry) => entry.slice(entry.indexOf('\t') + 1) === artifactPath);
     artifacts.push({ path: artifactPath, exists });
+    // `upsert` (create-or-update) is valid whether or not the base has the file.
     if (
       (fact.artifact.change === 'create' && exists) ||
       (['update', 'delete'].includes(fact.artifact.change) && !exists)

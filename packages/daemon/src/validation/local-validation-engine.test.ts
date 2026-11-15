@@ -155,6 +155,19 @@ index 0000000..3333333
   it('treats touch as an existence-only change requirement', () => {
     expect(artifactChangeSatisfied('', 'Client/src', 'touch')).toBe(true);
   });
+
+  it('accepts created or modified upsert artifacts but not unchanged or deleted ones', () => {
+    expect(artifactChangeSatisfied(diff, 'Client/tests/page.spec.ts', 'upsert')).toBe(true);
+    expect(artifactChangeSatisfied(diff, 'Client/src/Foo.ts', 'upsert')).toBe(true);
+    expect(artifactChangeSatisfied(diff, 'Client/src/Unchanged.ts', 'upsert')).toBe(false);
+    expect(
+      artifactChangeSatisfied(
+        'diff --git a/obsolete.ts b/obsolete.ts\ndeleted file mode 100644\n--- a/obsolete.ts\n+++ /dev/null',
+        'obsolete.ts',
+        'upsert',
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('required fact execution', () => {
@@ -260,6 +273,66 @@ describe('required fact execution', () => {
       },
     });
     expect(result.factValidation?.results[0]?.passed).toBe(passed);
+  });
+
+  describe('upsert (create-or-update) required facts', () => {
+    const created =
+      'diff --git a/config.ts b/config.ts\nnew file mode 100644\n--- /dev/null\n+++ b/config.ts\n@@ -0,0 +1 @@\n+x';
+    const modified =
+      'diff --git a/config.ts b/config.ts\nindex 111..222 100644\n--- a/config.ts\n+++ b/config.ts\n@@ -1 +1 @@\n-x\n+y';
+    const deleted =
+      'diff --git a/config.ts b/config.ts\ndeleted file mode 100644\n--- a/config.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-x';
+
+    it.each([
+      { name: 'absent on base and created', diff: created, exists: true, passed: true },
+      { name: 'present on base and modified', diff: modified, exists: true, passed: true },
+      { name: 'present on base but unchanged', diff: '', exists: true, passed: false },
+      { name: 'deleted', diff: deleted, exists: false, passed: false },
+    ])('$name → passed=$passed', async ({ diff, exists, passed }) => {
+      const cm = {
+        execInContainer: vi.fn(async (_id: string, command: string[]) => {
+          const shell = command[2] ?? '';
+          if (shell.includes('test -e'))
+            return { stdout: '', stderr: '', exitCode: exists ? 0 : 1 };
+          if (shell.includes('sha256sum')) return { stdout: 'abc\n', stderr: '', exitCode: 0 };
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }),
+      } as unknown as ContainerManager;
+      const result = await createLocalValidationEngine(cm).validate({
+        podId: 'upsert',
+        containerId: 'fixture',
+        previewUrl: '',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Create or update config',
+        hasWebUi: false,
+        skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'review'],
+        diff,
+        contract: {
+          contractVersion: 1,
+          title: 'Upsert config',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'config',
+              proves: [],
+              kind: 'custom-command',
+              artifact: { path: 'config.ts', change: 'upsert' },
+              command: 'node verify-config.mjs',
+            },
+          ],
+        },
+      });
+      const fact = result.factValidation?.results[0];
+      expect(fact?.passed).toBe(passed);
+      if (!passed) expect(fact?.reasoning).toContain('does not satisfy upsert requirement');
+    });
   });
 
   async function validateBrowserFact(options: {

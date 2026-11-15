@@ -287,7 +287,15 @@ non-empty. References must name declared scenario IDs, and every scenario must
 be covered by a fact or human review. Fact kinds are `unit-test`,
 `integration-test`, `contract-test`, `browser-test`, `typecheck`, `lint-rule`,
 `smoke-script`, and `custom-command`; artifact changes are `create`, `update`,
-and `touch`.
+`upsert`, `delete`, and `touch`.
+
+At dispatch the daemon checks each artifact against the freshly fetched base:
+`create` requires the path to be absent, `update` and `delete` require it to be
+present, otherwise setup fails with `STALE_CONTRACT`. Use `upsert`
+(create-or-update) when the file must change but may or may not exist on the
+base; it is never stale at dispatch. Validation then requires a non-deletion
+diff for the path and the artifact to exist, so an unchanged or deleted file
+fails. Prefer `upsert` over `touch` for files that must actually change.
 
 Required-fact commands must be executable and scenario-specific: generic
 package-manager `test`, `build`, or `lint` commands and

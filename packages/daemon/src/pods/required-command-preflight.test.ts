@@ -49,6 +49,7 @@ it('keeps an unavailable probe unknown and records explicit dependencies separat
       executionRequirements: { version: 1, executables: ['node'] },
       requiredFacts: [
         { id: 'created', command: './new.sh', artifact: { path: 'new.sh', change: 'create' } },
+        { id: 'upserted', command: './gen.sh', artifact: { path: 'gen.sh', change: 'upsert' } },
         { id: 'dynamic', command: '$RUNNER test', artifact: { path: 'test.ts', change: 'update' } },
       ],
     },
@@ -57,7 +58,7 @@ it('keeps an unavailable probe unknown and records explicit dependencies separat
     buildCommand: 'npm run build',
   } as Profile);
   expect(result.explicitDependencies).toBe(true);
-  expect(result.deferredArtifacts).toEqual(['fact:created']);
+  expect(result.deferredArtifacts).toEqual(['fact:created', 'fact:upserted']);
   expect(result.unresolvedSources).toEqual(['fact:dynamic']);
   expect(result.requirements.every((entry) => entry.available === null)).toBe(true);
   expect(result.requirements.map((entry) => entry.executable)).toEqual(['node', 'npm']);

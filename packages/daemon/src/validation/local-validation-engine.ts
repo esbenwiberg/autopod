@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import type {
   AdvisoryBrowserQaResult,
   DeviationsAssessment,
+  FactArtifactChange,
   FactCheckResult,
   FactValidationResult,
   HealthResult,
@@ -2906,7 +2907,7 @@ function shellQuote(value: string): string {
 export function artifactChangeSatisfied(
   diff: string,
   path: string,
-  change: 'create' | 'update' | 'delete' | 'touch',
+  change: FactArtifactChange,
 ): boolean {
   if (change === 'touch') return true;
   const normalized = normalizeContractPath(path);
@@ -2915,6 +2916,9 @@ export function artifactChangeSatisfied(
   );
   if (change === 'create') return entries.some((entry) => entry.created);
   if (change === 'delete') return entries.some((entry) => entry.deleted);
+  // create-or-update: the path must change relative to base whether or not it
+  // existed there, but a deletion does not count as creating or updating it.
+  if (change === 'upsert') return entries.some((entry) => !entry.deleted);
   return entries.length > 0;
 }
 
