@@ -26,7 +26,9 @@
 #   --full               Force clean clone + full `pnpm install` (no node_modules
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
-#   --keep N             Releases to retain when pruning (default: 5).
+#   --keep N             Additional releases to retain when pruning (default: 2): the N
+#                        newest releases other than current and previous-live, which are
+#                        always kept. Total retained = N + current + previous-live (up to N+2).
 #   --stage-only         Build and prewarm without activation, restart or release pruning.
 #   --verify-release     Require exact clean build identity before releasing maintenance.
 #                        A failed post-swap check retains the existing expiring drain.
@@ -77,7 +79,8 @@ TARGET_REF=""
 ASSUME_YES=0
 FORCE=0
 FULL=0
-KEEP=5
+# Additional releases kept beyond the always-protected current and previous-live.
+KEEP=2
 VERIFY_STRING=""
 STAGE_ONLY=0
 VERIFY_RELEASE=0
@@ -671,19 +674,25 @@ release_hosted_deploy_drain
 trap - EXIT
 
 # ---- prune old releases ---------------------------------------------------
-note "pruning old releases (keep $KEEP, never current or previous-live)"
-PRUNE_OUT="$(remote "
+note "pruning old releases (keep $KEEP newest others, plus current and previous-live)"
+# Emits the remote pruning script (also exercised by deploy-hosted-daemon.test.sh).
+# Protected: current + previous-live, never pruned and not counted against KEEP.
+# Of the rest, the KEEP newest are retained; older ones are removed.
+prune_script() {
+  cat <<PRUNE_EOF
 set -eu
 cur=\$(basename \$(readlink $CURRENT_LINK))
-keep_set=\" \$cur $LIVE_SHA \"
+keep_set=" \$cur $LIVE_SHA "
 i=0
 for d in \$(ls -1dt $RELEASES/*/ 2>/dev/null); do
-  name=\$(basename \"\$d\")
-  case \"\$keep_set\" in *\" \$name \"*) echo \"keep (protected): \$name\"; continue;; esac
+  name=\$(basename "\$d")
+  case "\$keep_set" in *" \$name "*) echo "keep (protected): \$name"; continue;; esac
   i=\$((i+1))
-  if [ \"\$i\" -gt $KEEP ]; then echo \"prune: \$name\"; rm -rf \"\$d\"; else echo \"keep: \$name\"; fi
+  if [ "\$i" -gt $KEEP ]; then echo "prune: \$name"; rm -rf "\$d"; else echo "keep: \$name"; fi
 done
-")"
+PRUNE_EOF
+}
+PRUNE_OUT="$(remote "$(prune_script)")"
 echo "$PRUNE_OUT"
 
 echo
