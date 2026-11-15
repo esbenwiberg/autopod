@@ -8,9 +8,13 @@ import {
   retainedCheckpointFixture,
 } from '../../test-utils/retained-checkpoint-helpers.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../../test-utils/test-budgets.js';
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 describe('human-only retained checkpoint selection', () => {
   let f: Awaited<ReturnType<typeof retainedCheckpointFixture>>;

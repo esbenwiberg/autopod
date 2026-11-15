@@ -24,6 +24,7 @@ import {
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
 import { terminationAuth } from '../test-utils/termination-reconciliation-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
 import { createCompletionGuards } from './completion-guards.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
@@ -36,6 +37,9 @@ import {
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const exec = promisify(execFile);
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];

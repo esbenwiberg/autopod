@@ -19,6 +19,7 @@ import pino from 'pino';
 import tar from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import {
   DockerContainerManager,
   terminateStreamingProcessGroupScript,
@@ -1314,31 +1315,32 @@ describe('DockerContainerManager', () => {
   // ─── execStreaming() ────────────────────────────────────
 
   describe('execStreaming()', () => {
-    it.each([
-      'inspection-failed',
-      'still-running',
-      'missing-code',
-    ] as const)('does not fabricate an observed streaming exit when %s', async (failure) => {
-      const muxStream = new PassThrough();
-      const inspect = vi.fn();
-      if (failure === 'inspection-failed')
-        inspect.mockRejectedValue(new Error('transport unavailable'));
-      else
-        inspect.mockResolvedValue(
-          failure === 'still-running'
-            ? { Running: true, ExitCode: 0 }
-            : { Running: false, ExitCode: null },
-        );
-      container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
-      const result = await manager.execStreaming('abc123', ['cmd']);
-      const observed = expect(result.exitCode).rejects.toMatchObject({
-        code: 'EXEC_EXIT_UNVERIFIED',
-      });
-      muxStream.resume();
-      muxStream.end();
-      await observed;
-      if (failure === 'still-running') expect(inspect).toHaveBeenCalledTimes(11);
-    });
+    // 'still-running' polls the production exit-observation window (about 2.5 s) in real time.
+    it.each(['inspection-failed', 'still-running', 'missing-code'] as const)(
+      'does not fabricate an observed streaming exit when %s',
+      async (failure) => {
+        const muxStream = new PassThrough();
+        const inspect = vi.fn();
+        if (failure === 'inspection-failed')
+          inspect.mockRejectedValue(new Error('transport unavailable'));
+        else
+          inspect.mockResolvedValue(
+            failure === 'still-running'
+              ? { Running: true, ExitCode: 0 }
+              : { Running: false, ExitCode: null },
+          );
+        container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
+        const result = await manager.execStreaming('abc123', ['cmd']);
+        const observed = expect(result.exitCode).rejects.toMatchObject({
+          code: 'EXEC_EXIT_UNVERIFIED',
+        });
+        muxStream.resume();
+        muxStream.end();
+        await observed;
+        if (failure === 'still-running') expect(inspect).toHaveBeenCalledTimes(11);
+      },
+      INTEGRATION_TEST_TIMEOUT_MS,
+    );
 
     it('observes an exit Docker records shortly after a verified kill closed the transport', async () => {
       const muxStream = new PassThrough();
@@ -1499,6 +1501,7 @@ describe('DockerContainerManager', () => {
       expect(muxStream.destroyed).toBe(true);
     });
 
+    // Waits for the production TERM grace before KILL on real processes (about 2.5 s).
     it.skipIf(process.platform !== 'linux')(
       'terminates a surviving child in the dedicated streaming process group',
       async () => {
@@ -1544,8 +1547,10 @@ describe('DockerContainerManager', () => {
           rmSync(testDir, { recursive: true, force: true });
         }
       },
+      INTEGRATION_TEST_TIMEOUT_MS,
     );
 
+    // Waits for the production TERM grace before KILL on real processes (about 2.5 s).
     it.skipIf(process.platform !== 'linux')(
       'terminates a detached background descendant that keeps the CLI alive (broad-earthworm)',
       async () => {
@@ -1621,6 +1626,7 @@ describe('DockerContainerManager', () => {
           rmSync(testDir, { recursive: true, force: true });
         }
       },
+      INTEGRATION_TEST_TIMEOUT_MS,
     );
 
     it('drops late demux output after runtime force-closes output streams', async () => {

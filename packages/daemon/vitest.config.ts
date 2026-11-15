@@ -54,6 +54,9 @@ export default defineConfig({
     // VITEST_MAX_WORKERS override remains available for capacity-qualified runners.
     // Keep every test and its individual deadline instead of retrying into green.
     maxWorkers: 1,
+    // Stable end-of-run `[test-budget]` lines (totals, failures, tests near their deadline) that
+    // survive capped validation output. An explicit --reporter on the CLI replaces both.
+    reporters: ['default', './src/test-utils/budget-reporter.ts'],
     exclude: [
       '**/node_modules/**',
       '**/.turbo/**',

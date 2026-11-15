@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { InputBundleStore } from './input-bundle-store.js';
 
@@ -97,7 +97,7 @@ describe('immutable input bundles', () => {
     directories.push(root);
     const backup = path.join(root, 'backup.db');
     await f.db.backup(backup);
-    const restored = new Database(backup);
+    const restored = openTestDiskDatabase(backup);
     databases.push(restored);
     const store = new InputBundleStore(restored);
     expect(store.read(ref.id, 'owner', 0)).toEqual(f.bytes);

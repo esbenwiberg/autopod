@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import Database from 'better-sqlite3';
 import { afterEach, expect, it, vi } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { fixture, type ManagedFixture } from '../test-utils/managed-fixture.js';
 import { type BoundedProviderTransport, ManagedProviderFailure } from './bounded-provider.js';
 import { ManagedPodService } from './managed-service.js';
@@ -279,7 +279,7 @@ it('refuses a fully reserved budget before effects so the quota watchdog cannot 
 });
 it('independent database connections cannot duplicate or change a pending operation', async () => {
   const x = await setup();
-  const db = new Database(f.db.name);
+  const db = openTestDiskDatabase(f.db.name);
   const g = new ManagedProviderGateway(
     new ManagedPodService(db, f.admission, f.runtime, () => 100, true),
     x.transport,

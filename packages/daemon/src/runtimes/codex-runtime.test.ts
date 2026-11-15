@@ -10,13 +10,14 @@ import type {
   SystemEvent,
 } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { createPodRepository } from '../pods/pod-repository.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { CodexRuntime } from './codex-runtime.js';
 
@@ -2514,7 +2515,7 @@ describe('CodexRuntime', () => {
         expect(cm.execStreaming).toHaveBeenCalledTimes(2);
         await writeFile(join(directory, 'state.db'), db.serialize());
         db.close();
-        reopened = new Database(join(directory, 'state.db'));
+        reopened = openTestDiskDatabase(join(directory, 'state.db'));
         const nextRepo = createPodRepository(reopened);
         vi.mocked(cm.execStreaming)
           .mockResolvedValueOnce(interrupted())

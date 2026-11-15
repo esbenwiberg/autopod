@@ -5,11 +5,15 @@ import {
   blockedCheckpointOutcomeFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import {
   assertCheckpointResourceNotRetained,
   checkpointHash,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];
 async function fixture() {

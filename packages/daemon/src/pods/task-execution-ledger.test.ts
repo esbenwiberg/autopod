@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { aggregateCost } from './cost-aggregation.js';
 import { createPodRepository } from './pod-repository.js';
@@ -350,8 +351,8 @@ describe('task-wide execution accounting', () => {
     const file = path.join(dir, 'state.db');
     writeFileSync(file, db.serialize());
     db.close();
-    const first = new Database(file);
-    const second = new Database(file);
+    const first = openTestDiskDatabase(file);
+    const second = openTestDiskDatabase(file);
     try {
       const a = createPodRepository(first).taskExecutions;
       const b = createPodRepository(second).taskExecutions;
@@ -402,7 +403,7 @@ describe('task-wide execution accounting', () => {
     const file = path.join(dir, 'state.db');
     writeFileSync(file, db.serialize());
     db.close();
-    const reopened = new Database(file);
+    const reopened = openTestDiskDatabase(file);
     try {
       const restored = createPodRepository(reopened).taskExecutions;
       if (!restored) throw new Error('Missing ledger');
@@ -589,7 +590,7 @@ describe('task-wide execution accounting', () => {
     const file = path.join(dir, 'state.db');
     writeFileSync(file, db.serialize());
     db.close();
-    const restored = new Database(file);
+    const restored = openTestDiskDatabase(file);
     try {
       restored.pragma('foreign_keys = ON');
       const next = createPodRepository(restored);
@@ -694,7 +695,7 @@ describe('task-wide execution accounting', () => {
     const filename = path.join(dir, 'restart.db');
     writeFileSync(filename, db.serialize());
     db.close();
-    const restarted = new Database(filename);
+    const restarted = openTestDiskDatabase(filename);
     try {
       const next = createPodRepository(restarted).taskExecutions;
       if (!next) throw new Error('Missing ledger');

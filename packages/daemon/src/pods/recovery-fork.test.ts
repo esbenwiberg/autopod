@@ -5,7 +5,6 @@ import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, type RecoveryForkInput, type RecoveryForkRequest } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import Dockerode from 'dockerode';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,11 +14,13 @@ import { deriveLaunch } from '../configuration/derive-launch.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { DockerContainerManager } from '../containers/docker-container-manager.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { recoveryGit } from '../worktrees/recovery-fork-source.js';
 import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import { QUALIFICATION_SOURCE_PROBE } from './environment-qualification.js';
@@ -40,6 +41,9 @@ import {
   assertSourceDeliveryAllowed,
   assertSourceResourceReleasable,
 } from './source-custody-guards.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const exec = promisify(execFile);
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];
@@ -280,7 +284,7 @@ describe('durable real recovery fork', () => {
     });
     const filename = path.join(f.root, 'restart.db');
     await writeFile(filename, f.ctx.db.serialize());
-    const db = new Database(filename);
+    const db = openTestDiskDatabase(filename);
     try {
       vi.resetModules();
       const { createPodRepository } = await import('./pod-repository.js');

@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControllerFixture } from '../../test-utils/source-controller-helpers.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../../test-utils/test-budgets.js';
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
@@ -32,27 +33,34 @@ describe('authenticated durable source recovery API', () => {
     await rm(s.root, { recursive: true, force: true });
   });
   const url = () => `/pods/${s.podId}/source-adoptions`;
-  it('authenticates status and admits only server-derived human identity; duplicate POST merely observes', async () => {
-    expect((await app.inject({ method: 'GET', url: url(), headers })).json()).toEqual({
-      operations: [],
-    });
-    const response = await app.inject({ method: 'POST', url: url(), headers, payload: s.input });
-    expect(response.statusCode, response.body).toBe(202);
-    expect(response.json()).toMatchObject({
-      actor: { type: 'human', userId: 'operator-oid' },
-      delivery: 'not-authorized',
-      reports: 'not-released',
-    });
-    await s.controller.wait(s.input.id);
-    const count = s.cm.execStreaming.mock.calls.length;
-    const duplicate = await app.inject({ method: 'POST', url: url(), headers, payload: s.input });
-    expect(duplicate.statusCode, duplicate.body).toBe(200);
-    expect(s.cm.execStreaming).toHaveBeenCalledTimes(count);
-    const state = await app.inject({ method: 'GET', url: url(), headers });
-    expect(state.json()).toMatchObject({ operations: [{ stage: 'checked', validation: 'pass' }] });
-    expect(state.body).not.toContain(s.host);
-    expect(state.body).not.toContain(s.root);
-  });
+  // Real Git source-controller fixture through the HTTP API (about 2 s unloaded).
+  it(
+    'authenticates status and admits only server-derived human identity; duplicate POST merely observes',
+    async () => {
+      expect((await app.inject({ method: 'GET', url: url(), headers })).json()).toEqual({
+        operations: [],
+      });
+      const response = await app.inject({ method: 'POST', url: url(), headers, payload: s.input });
+      expect(response.statusCode, response.body).toBe(202);
+      expect(response.json()).toMatchObject({
+        actor: { type: 'human', userId: 'operator-oid' },
+        delivery: 'not-authorized',
+        reports: 'not-released',
+      });
+      await s.controller.wait(s.input.id);
+      const count = s.cm.execStreaming.mock.calls.length;
+      const duplicate = await app.inject({ method: 'POST', url: url(), headers, payload: s.input });
+      expect(duplicate.statusCode, duplicate.body).toBe(200);
+      expect(s.cm.execStreaming).toHaveBeenCalledTimes(count);
+      const state = await app.inject({ method: 'GET', url: url(), headers });
+      expect(state.json()).toMatchObject({
+        operations: [{ stage: 'checked', validation: 'pass' }],
+      });
+      expect(state.body).not.toContain(s.host);
+      expect(state.body).not.toContain(s.root);
+    },
+    INTEGRATION_TEST_TIMEOUT_MS,
+  );
   it('includes bounded read-only approval rewrite state without resource mutation', async () => {
     const state: NonNullable<SourceAdoptionList['approvalRewrite']> = {
       id: 'rewrite-once',

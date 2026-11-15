@@ -5,9 +5,13 @@ import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
+
+// Built on the real-Git retained checkpoint fixture: real pod manager and Git, 1-4 s per test.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];
 afterEach(async () => {

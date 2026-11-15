@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 import { createHistoryExporter } from '../history/history-exporter.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createPassingValidationResult, createTestContext } from '../test-utils/mock-helpers.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import { createEventRepository } from './event-repository.js';
@@ -233,9 +234,8 @@ it('pins the export snapshot when a second SQLite connection changes evidence af
     );
   writeFileSync(file, ctx.db.serialize());
   ctx.db.close();
-  const db = new Database(file);
-  db.pragma('journal_mode = WAL');
-  const writer = new Database(file);
+  const db = openTestDiskDatabase(file);
+  const writer = openTestDiskDatabase(file);
   const exporter = createHistoryExporter({
     podRepo: createPodRepository(db),
     eventRepo: createEventRepository(db),

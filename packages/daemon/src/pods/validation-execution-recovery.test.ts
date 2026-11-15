@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { logger } from '../test-utils/mock-helpers.js';
 import { validationRecoveryFixture } from '../test-utils/validation-recovery-helpers.js';
 import { writeArtifactSnapshotReceipt } from './artifact-snapshot-receipt.js';
@@ -181,7 +181,7 @@ describe('exact validation execution recovery', () => {
     try {
       const file = path.join(root, 'state.db');
       await writeFile(file, f.db.serialize());
-      const restarted = new Database(file);
+      const restarted = openTestDiskDatabase(file);
       try {
         const repo = createPodRepository(restarted);
         const saved = createValidationRepository(restarted);
@@ -242,7 +242,7 @@ describe('exact validation execution recovery', () => {
     try {
       const file = path.join(root, 'state.db');
       await writeFile(file, f.db.serialize());
-      const db = new Database(file);
+      const db = openTestDiskDatabase(file);
       try {
         const repo = createPodRepository(db);
         const saved = createValidationRepository(db);

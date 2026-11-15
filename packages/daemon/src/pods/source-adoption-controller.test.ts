@@ -2,7 +2,11 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControllerFixture } from '../test-utils/source-controller-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { createSourceAdoptionController } from './source-adoption-controller.js';
+
+// Real Git source-controller fixture: real repositories and filesystem, 1-2 s per test unloaded.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 
 const roots: string[] = [];
 afterEach(async () => {

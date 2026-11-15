@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestContext } from '../test-utils/mock-helpers.js';
 import { createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
@@ -74,7 +75,7 @@ it.each([
     ctx.podRepo.delete(pod.id);
     const file = join(dir, 'state.db');
     writeFileSync(file, ctx.db.serialize());
-    reopened = new Database(file);
+    reopened = openTestDiskDatabase(file);
     expect(createPodRepository(reopened).taskRetries?.state(pod.id)).toEqual(before);
     expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
   } finally {
