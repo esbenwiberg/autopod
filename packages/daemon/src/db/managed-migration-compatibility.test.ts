@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { createDatabase } from './connection.js';
 import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
 // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
@@ -121,7 +122,8 @@ it('refuses an unpublished native checkpoint lineage before changing any migrati
     if (Number.parseInt(file, 10) <= 150) copyFileSync(join(migrations, file), join(root, file));
   for (const file of readdirSync(historical))
     copyFileSync(join(historical, file), join(root, file));
-  const db = new Database(join(root, 'checkpoint.db'));
+  // Production connection policy avoids per-commit fsyncs during the on-disk replay.
+  const db = createDatabase(join(root, 'checkpoint.db'), logger);
   try {
     runMigrations(db, root, logger);
     insertTestProfile(db);
@@ -145,7 +147,7 @@ it('refuses an unpublished native checkpoint lineage before changing any migrati
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 it('upgrades the prior native 182 candidate without silently skipping managed GitHub-read migration 153', async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-182-upgrade-'));
