@@ -92,6 +92,19 @@ describe('Trusted Pi worker base image prerequisites', () => {
 });
 
 describe('Playwright base image templates', () => {
+  it.each([
+    'Dockerfile.node22-pw',
+    'Dockerfile.node22-pw-pg',
+    'Dockerfile.node24-pw',
+    'Dockerfile.node24-pw-pg',
+  ])('%s probes Python venv as the runtime user', async (filename) => {
+    const dockerfile = await readBaseTemplate(filename);
+    expect(dockerfile).toMatch(/apt-get install.*?\bpython3-venv\b/s);
+    expect(dockerfile.indexOf('python3 -m venv /tmp/autopod-venv-probe')).toBeGreaterThan(
+      dockerfile.indexOf('USER autopod'),
+    );
+    expect(dockerfile).toContain("import ensurepip, pip");
+  });
   it('covers every template that installs Playwright browsers', async () => {
     const files = await readdir(path.join(repoRoot, 'templates/base'));
     const discovered = [];

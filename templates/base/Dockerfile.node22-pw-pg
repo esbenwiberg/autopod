@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ripgrep \
     tmux \
-    python3 build-essential \
+    python3 python3-venv build-essential \
     libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
@@ -113,6 +113,7 @@ RUN chown autopod:autopod /workspace
 
 USER autopod
 RUN autopod-check-git
+RUN python3 -m venv /tmp/autopod-venv-probe && /tmp/autopod-venv-probe/bin/python -c 'import ensurepip, pip' && rm -rf /tmp/autopod-venv-probe
 
 # Transient validation databases run as the non-root user on the project port.
 ENV PGDATA=/tmp/pgdata

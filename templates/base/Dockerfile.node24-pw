@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     ripgrep \
     tmux \
-    python3 build-essential \
+    python3 build-essential python3-venv \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && command -v ps && ps --version \
@@ -81,6 +81,7 @@ RUN chown autopod:autopod /workspace
 
 USER autopod
 RUN autopod-check-git
+RUN python3 -m venv /tmp/autopod-venv-probe && /tmp/autopod-venv-probe/bin/python -c 'import ensurepip, pip' && rm -rf /tmp/autopod-venv-probe
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts).
