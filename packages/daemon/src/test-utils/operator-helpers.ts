@@ -80,7 +80,10 @@ export function createOperatorFixture(disk = false, target: ExecutionTarget = 'l
     buildRecoveryTask: vi.fn(async () => 'Synthetic recovery'),
     resolveEffectiveBoundProfile: f.captured.resolveEffectiveBoundProfile,
   } satisfies OperatorMessagesCaptured;
-  const rejectionCaptured = { ...messagesCaptured } satisfies OperatorRejectionCaptured;
+  const rejectionCaptured = {
+    ...messagesCaptured,
+    hasLaunchConfiguration: false,
+  } satisfies OperatorRejectionCaptured;
   const pauseCaptured = {
     ...messagesCaptured,
     reconcileInfrastructureBlocker: vi.fn<OperatorPauseCaptured['reconcileInfrastructureBlocker']>(

@@ -130,6 +130,7 @@ export interface OperatorMessagesCaptured {
 }
 
 export interface OperatorRejectionCaptured {
+  hasLaunchConfiguration: boolean;
   reconcileInfrastructureBlocker(podId: string): Promise<void>;
   podRepo: PodRepository;
   resolveEffectiveBoundProfile: OperatorMessagesCaptured['resolveEffectiveBoundProfile'];
