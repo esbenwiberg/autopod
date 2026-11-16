@@ -5,7 +5,7 @@ import type { InputBundleStore } from '../../inputs/input-bundle-store.js';
 import type { ReferencePreviewService } from '../../inputs/reference-preview-service.js';
 import { errorHandler } from '../error-handler.js';
 
-/** Operator-only, owner-scoped input uploads. Never serve active HTML in the daemon origin. */
+/** Operator-only shared sealed reads and owner-bound uploads. Never serve active HTML. */
 export async function inputBundleRoutes(
   app: FastifyInstance,
   store: InputBundleStore,

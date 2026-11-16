@@ -78,8 +78,7 @@ export class InputBundleStore {
 
   readForViewing(id: string, viewer: string, index: number): Buffer {
     const bundle = this.getForViewing(id, viewer);
-    if (bundle.status !== 'sealed')
-      fail('Input upload is incomplete', 'INPUT_UPLOAD_INCOMPLETE');
+    if (bundle.status !== 'sealed') fail('Input upload is incomplete', 'INPUT_UPLOAD_INCOMPLETE');
     return this.readVerified(bundle, index);
   }
 
