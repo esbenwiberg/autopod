@@ -11,6 +11,7 @@ import type {
   PrivateRegistry,
   PublicProviderCatalog,
   ReasoningEffort,
+  RepositoryPreparationEvidence,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
@@ -169,6 +170,7 @@ export interface ProvisioningInput {
 }
 
 export interface PreparedExecution {
+  repositoryPreparation?: RepositoryPreparationEvidence;
   pod: Pod;
   launchConfig: EffectiveLaunchConfig | null;
   containerManager: ContainerManager;

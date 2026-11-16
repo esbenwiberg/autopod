@@ -160,6 +160,7 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     injectionsForPod,
   });
   const agent = createProvisioningAgentMaterials(deps, {
+    podRepo,
     profileStore,
     providerAccountStore,
     providerCatalog,

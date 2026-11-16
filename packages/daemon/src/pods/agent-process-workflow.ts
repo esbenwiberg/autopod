@@ -24,6 +24,7 @@ import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { persistEscalation } from './escalation-coordinator.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
+import { assertPreparationSourceCurrent } from './repository-preparation.js';
 import { canFail, canKill, isTerminalState } from './state-machine.js';
 
 export function createAgentProcessWorkflow(
@@ -147,7 +148,16 @@ export function createAgentProcessWorkflow(
         mcpServers,
         reasoningEffort,
         providerResult,
+        repositoryPreparation,
       } = provisioning.prepared;
+      const assertRepositoryOwner = () => {
+        if (
+          !ownsLifecycle(podId, lifecycleGeneration, containerId) ||
+          podRepo.getOrThrow(podId).status !== 'running'
+        )
+          throw new AgentContinuationSupersededError();
+        resolveEffectiveBoundProfile(podRepo.getOrThrow(podId));
+      };
 
       // skipAgent bypasses the runtime spawn. A queued recovery originates
       // from Resume's fresh-container validation-only path and must enter
@@ -227,7 +237,12 @@ export function createAgentProcessWorkflow(
         containerId,
         pod,
         profile,
+        'coding',
+        'worker',
+        { assertCurrent: assertRepositoryOwner },
       );
+      assertRepositoryOwner();
+      provenance.repositoryPreparation = repositoryPreparation;
       const recordedProvenance = podRepo.executionProvenance?.record(
         podId,
         pod.lifecycleGeneration,
@@ -254,6 +269,44 @@ export function createAgentProcessWorkflow(
 
       emitStatus('Spawning agent…');
       const runtime = runtimeRegistry.get(pod.runtime);
+      const assertPrepared = async () => {
+        try {
+          await assertPreparationSourceCurrent(
+            repositoryPreparation,
+            containerManager,
+            containerId,
+            assertRepositoryOwner,
+          );
+        } catch (error) {
+          assertRepositoryOwner();
+          if (repositoryPreparation)
+            podRepo.executionProvenance?.record(podId, lifecycleGeneration, {
+              ...provenance,
+              status: 'blocked',
+              repositoryPreparation: {
+                ...repositoryPreparation,
+                status: 'unverified',
+                detail:
+                  'Preparation source inputs changed or became unverified before worker dispatch.',
+              },
+            });
+          throw error;
+        }
+      };
+      async function* spawnWorker(
+        ...args: Parameters<typeof runtime.spawn>
+      ): AsyncIterable<AgentEvent> {
+        await assertPrepared();
+        assertRepositoryOwner();
+        yield* runtime.spawn(...args);
+      }
+      async function* resumeWorker(
+        ...args: Parameters<typeof runtime.resume>
+      ): AsyncIterable<AgentEvent> {
+        await assertPrepared();
+        assertRepositoryOwner();
+        yield* runtime.resume(...args);
+      }
       let events: AsyncIterable<AgentEvent>;
       const activeProviderAttemptBeforeStart = deps.providerAttemptRepo?.getActive(podId);
       const hadActiveProviderAttempt = !!activeProviderAttemptBeforeStart;
@@ -289,7 +342,7 @@ export function createAgentProcessWorkflow(
       if (podRepo.recoveryForks?.child(podId)) {
         // Lazy fresh spawn: the exact consumption fence runs before selecting any worker.
         events = (async function* () {
-          yield* runtime.spawn({
+          yield* spawnWorker({
             podId,
             task: pod.task,
             model: pod.model,
@@ -313,7 +366,7 @@ export function createAgentProcessWorkflow(
               : '')
           : 'None';
         const spawn = () =>
-          runtime.spawn({
+          spawnWorker({
             podId,
             task: appendDecisionContext(
               pod,
@@ -342,6 +395,7 @@ export function createAgentProcessWorkflow(
             409,
           );
         const config = launchConfig;
+        await assertPrepared();
         const nativeSession = runtime.nativeGoalSession(
           {
             podId,
@@ -374,6 +428,8 @@ export function createAgentProcessWorkflow(
               );
           };
           try {
+            await assertPrepared();
+            assertCurrent();
             const goal = await goals.run({
               pod: podRepo.getOrThrow(podId),
               config,
@@ -431,7 +487,7 @@ export function createAgentProcessWorkflow(
         emitStatus('Reworking pod…');
         // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true; worktreePath is non-null when isRework=true (rework requires a prior run with a worktree)
         const reworkTask = await buildReworkTask(pod, worktreePath!, pod.reworkReason!);
-        events = runtime.spawn({
+        events = spawnWorker({
           podId,
           task: reworkTask,
           model: pod.model,
@@ -488,7 +544,6 @@ export function createAgentProcessWorkflow(
         // ID, and fall through to a fresh spawn in the same container without
         // dying silently. (The container is still alive after Claude's exit.)
         const podRepoRef = podRepo;
-        const runtimeRef = runtime;
         const containerIdRef = containerId;
         const podModel = pod.model;
         const podRef = pod;
@@ -500,7 +555,7 @@ export function createAgentProcessWorkflow(
         events = (async function* resumeWithFallback() {
           const fallbackRunToken = activeAgentRuns.get(podId)?.token;
           try {
-            yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
+            yield* resumeWorker(podId, continuationPrompt, containerIdRef, secretEnvRef);
           } catch (err) {
             if (!(err instanceof ResumeSessionNotFoundError)) throw err;
             loggerRef.warn(
@@ -531,7 +586,7 @@ export function createAgentProcessWorkflow(
               !activeAgentRuns.get(podId)?.isCurrent?.()
             )
               throw new ProviderAttemptSupersededError();
-            yield* runtimeRef.spawn({
+            yield* spawnWorker({
               podId,
               task: recoveryTask,
               model: podModel,
@@ -564,7 +619,7 @@ export function createAgentProcessWorkflow(
         }
         // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
         const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
-        events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
+        events = resumeWorker(podId, codexContinuationPrompt, containerId, secretEnv);
       } else if (
         isRecovery &&
         !isInfrastructureRecovery &&
@@ -581,7 +636,7 @@ export function createAgentProcessWorkflow(
         await primeRuntimeForResume(pod, runtime, containerId, secretEnv);
         // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
         const piContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
-        events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
+        events = resumeWorker(podId, piContinuationPrompt, containerId, secretEnv);
       } else if (isRecovery && !isInfrastructureRecovery) {
         // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
         rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
@@ -595,7 +650,7 @@ export function createAgentProcessWorkflow(
             ' work may already be on disk — check `git log` and `git diff main`' +
             ' before continuing.';
         }
-        events = runtime.spawn({
+        events = spawnWorker({
           podId,
           task: recoveryTask,
           model: pod.model,
@@ -609,7 +664,7 @@ export function createAgentProcessWorkflow(
         });
       } else {
         // Normal path
-        events = runtime.spawn({
+        events = spawnWorker({
           podId,
           task: appendDecisionContext(pod, pod.task),
           model: pod.model,

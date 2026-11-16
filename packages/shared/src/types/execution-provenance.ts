@@ -1,6 +1,18 @@
 import type { DaemonReleaseInfo } from './release.js';
 import type { RuntimeType } from './runtime.js';
 
+/** Per-candidate observation, never a reusable runner-readiness certificate. */
+export interface RepositoryPreparationEvidence {
+  status: 'not-configured' | 'passed' | 'failed' | 'unverified';
+  containerId: string;
+  commandHash: string | null;
+  /** Hash of effective workdir, timeout and environment; no resolved values are exposed. */
+  configurationHash: string | null;
+  source: { head: string; fingerprint: string } | null;
+  exitCode: number | null;
+  detail?: string;
+}
+
 export interface ExecutionProvenance {
   id: string;
   version: 1 | 2;
@@ -27,6 +39,8 @@ export interface ExecutionProvenance {
   imageDigest: string | null;
   contractHash: string;
   validationImplementationHash: string | null;
+  /** Historical absence is unknown. Launcher checks alone never establish preparation. */
+  repositoryPreparation?: RepositoryPreparationEvidence;
   capabilities: {
     streamingExec: 'supported' | 'unsupported' | 'unverified';
     memoryLimitBytes: number | null;

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -3155,6 +3155,30 @@ describe('validate() — facts + review gate', () => {
     expect(result.factValidation?.status).toBe('skip');
     expect(result.reviewSkipKind).toBe('upstream-failed');
     expect(result.overall).toBe('fail');
+  });
+
+  it('classifies deliberate non-OOM SIGKILL as an unconfirmed resource failure', async () => {
+    const killed = spawnSync(process.execPath, ['-e', "process.kill(process.pid, 'SIGKILL')"], {
+      encoding: 'utf8',
+    });
+    expect(killed.signal).toBe('SIGKILL');
+    expect(killed.status).toBeNull();
+    const base = stubContainerManager();
+    const engine = createLocalValidationEngine({
+      ...base,
+      execInContainer: vi.fn(async (_id: string, argv: string[]) =>
+        argv.join(' ').includes('self-kill-test')
+          ? { stdout: killed.stdout, stderr: killed.stderr, exitCode: 128 + 9 }
+          : { stdout: '', stderr: '', exitCode: 0 },
+      ),
+    } as ContainerManager);
+    const result = await engine.validate(baseConfig({ testCommand: 'self-kill-test' }));
+    expect(result.overall).toBe('fail');
+    expect(result.infrastructureFailure).toMatchObject({
+      code: 'PROCESS_KILLED',
+      retryable: false,
+    });
+    expect(result.infrastructureFailure?.message).toContain('OOM evidence is unavailable');
   });
 
   it('classifies a killed test command without claiming confirmed OOM', async () => {

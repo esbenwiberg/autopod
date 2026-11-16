@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Pod } from '@autopod/shared';
+import type { EffectiveLaunchConfig, Pod } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ReviewerLaunchIdentity } from '../interfaces/reviewer-launch.js';
@@ -9,6 +9,10 @@ import { resolveContainerReviewer } from '../validation/container-reviewer-runne
 import { resolveToolReviewModelId } from '../validation/review-tool-runner.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import type { PodRepository } from './pod-repository.js';
+import {
+  assertPreparationSourceCurrent,
+  prepareLaunchRepository,
+} from './repository-preparation.js';
 import {
   legacyReviewerApiProvenance,
   reviewerApiProvenance,
@@ -21,9 +25,15 @@ interface ValidationProvenanceDependencies {
   podRepo: Pick<PodRepository, 'getOrThrow' | 'executionProvenance'>;
   containerManagerFactory: { get(target: Pod['executionTarget']): ContainerManager };
   resolveEffectiveBoundProfile(pod: Pod): PodExecutionSettings;
+  readLaunch?(podId: string): EffectiveLaunchConfig | null;
+  preparationSecrets?(launch: EffectiveLaunchConfig): Promise<string[]>;
 }
 
 export function createValidationProvenance(deps: ValidationProvenanceDependencies): {
+  prepareValidationRepository(
+    config: Parameters<ValidationEngine['validate']>[0],
+    assertCurrent: () => Pod,
+  ): Promise<void>;
   recordValidationProvenance(
     config: Parameters<ValidationEngine['validate']>[0],
     purpose?: 'validation' | 'review',
@@ -36,6 +46,75 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
   ): Parameters<ValidationEngine['validate']>[0];
 } {
   const { podRepo, containerManagerFactory, resolveEffectiveBoundProfile } = deps;
+
+  async function prepareValidationRepository(
+    config: Parameters<ValidationEngine['validate']>[0],
+    assertCurrent: () => Pod,
+  ): Promise<void> {
+    const pod = assertCurrent();
+    const launch = deps.readLaunch?.(pod.id) ?? null;
+    if (!launch?.repository?.setup.prepareCommand) return;
+    if (!podRepo.executionProvenance)
+      throw new TaskRetryBlockedError('Repository preparation provenance is unavailable');
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    const profile = resolveEffectiveBoundProfile(pod);
+    const guard = () => {
+      resolveEffectiveBoundProfile(assertCurrent());
+    };
+    const secrets = (await deps.preparationSecrets?.(launch)) ?? [];
+    guard();
+    const provenance = await inspectExecutionPreflight(
+      cm,
+      config.containerId,
+      pod,
+      profile,
+      'validation',
+      'worker',
+      { assertCurrent: guard },
+    );
+    guard();
+    if (provenance.status === 'blocked') {
+      podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, provenance);
+      throw new TaskRetryBlockedError(
+        'Validation candidate launcher/resource checks require reconciliation before preparation.',
+      );
+    }
+    const evidence = await prepareLaunchRepository(
+      launch,
+      cm,
+      config.containerId,
+      config.extraExecEnv ?? {},
+      {
+        assertCurrent: guard,
+        sensitiveValues: [...secrets, ...(profile.registryPat ? [profile.registryPat] : [])],
+        record(evidence) {
+          guard();
+          provenance.repositoryPreparation = evidence;
+          if (evidence.status !== 'passed') provenance.status = 'blocked';
+          const ledger = podRepo.executionProvenance;
+          if (!ledger)
+            throw new TaskRetryBlockedError('Repository preparation provenance is unavailable');
+          ledger.record(pod.id, pod.lifecycleGeneration, provenance);
+        },
+      },
+    );
+    try {
+      await assertPreparationSourceCurrent(evidence, cm, config.containerId, guard);
+    } catch (error) {
+      guard();
+      podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, {
+        ...provenance,
+        status: 'blocked',
+        repositoryPreparation: {
+          ...evidence,
+          status: 'unverified',
+          detail: 'Preparation inputs changed or became unverified before validation dispatch.',
+        },
+      });
+      throw error;
+    }
+    guard();
+  }
 
   async function recordValidationProvenance(
     config: Parameters<ValidationEngine['validate']>[0],
@@ -99,8 +178,26 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
       },
       purpose,
       purpose === 'review' ? 'reviewer' : 'worker',
+      {
+        assertCurrent: () => {
+          assertCurrent?.();
+        },
+      },
     );
     if (assertCurrent) resolveEffectiveBoundProfile(assertCurrent());
+    if (purpose === 'validation') {
+      const command = deps.readLaunch?.(pod.id)?.repository?.setup.prepareCommand;
+      provenance.repositoryPreparation = {
+        status: command ? 'unverified' : 'not-configured',
+        containerId: config.containerId,
+        commandHash: command
+          ? createHash('sha256').update(JSON.stringify(command)).digest('hex')
+          : null,
+        configurationHash: null,
+        source: null,
+        exitCode: null,
+      };
+    }
     provenance.contractHash = createHash('sha256')
       .update(JSON.stringify(config.contract ?? null))
       .digest('hex');
@@ -194,5 +291,5 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
     };
   }
 
-  return { recordValidationProvenance, withReviewerLaunchPreflight };
+  return { recordValidationProvenance, withReviewerLaunchPreflight, prepareValidationRepository };
 }

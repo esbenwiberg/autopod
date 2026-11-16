@@ -1,16 +1,185 @@
-import { AutopodError, type EffectiveLaunchConfig } from '@autopod/shared';
+import { createHash } from 'node:crypto';
+import {
+  AutopodError,
+  type EffectiveLaunchConfig,
+  type RepositoryPreparationEvidence,
+} from '@autopod/shared';
+import { redactActionValue } from '../actions/action-diagnostics.js';
+import { ExecInterruptedError, isObservedExitCode } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { sanitizeProviderMessage } from '../runtimes/provider-error-classifier.js';
+import { boundOutput } from '../util/bounded-output.js';
 import { wrapValidationExecCommand } from './registry-injector.js';
+
+/** Uses existing validation termination gates when preparation may still be running. */
+export class RepositoryPreparationError extends AutopodError {
+  constructor(
+    detail: string,
+    readonly terminationUnverified: boolean,
+  ) {
+    super(detail, 'REPOSITORY_PREPARATION_FAILED', 409);
+  }
+}
+
+/** Read bytes without invoking repository programs, Git filters, hooks or a status refresh.
+ * Ignored installation/build artifacts are deliberately excluded. All tracked files
+ * and nonignored untracked inputs (including new lockfiles) contribute to the hash.
+ */
+export const PREPARATION_SOURCE_PROBE = `
+const fs=require('node:fs'), path=require('node:path'), cp=require('node:child_process'), crypto=require('node:crypto');
+const root='/workspace', real=fs.realpathSync(root), env={...process.env};
+for(const key of Object.keys(env)) if(key.startsWith('GIT_')) delete env[key];
+Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_NO_REPLACE_OBJECTS:'1',GIT_NO_LAZY_FETCH:'1'});
+const git=args=>cp.execFileSync('/usr/bin/git',['--no-replace-objects','--no-optional-locks','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',...args],{cwd:root,env,encoding:'utf8',timeout:5000,maxBuffer:4*1024*1024});
+const head=git(['rev-parse','--verify','HEAD']).trim();
+if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) process.exit(2);
+const names=[...new Set(git(['ls-files','-z','--cached','--others','--exclude-standard']).split(String.fromCharCode(0)).filter(Boolean))].sort();
+if(names.length>30000) process.exit(2);
+const hash=crypto.createHash('sha256'); let total=0;
+for(const name of names){
+ if(path.isAbsolute(name)||name.split('/').some(p=>p==='..'||p==='.'||!p)) process.exit(2);
+ const file=path.join(root,name); let stat;
+ try { const parent=fs.realpathSync(path.dirname(file)); if(parent!==real&&!parent.startsWith(real+'/')) process.exit(2); stat=fs.lstatSync(file); }
+ catch(e){ if(e.code==='ENOENT'){hash.update(JSON.stringify([name,'missing']));continue;} throw e; }
+ let content;
+ if(stat.isSymbolicLink()) content=Buffer.from(fs.readlinkSync(file));
+ else { if(!stat.isFile()||stat.size>16*1024*1024) process.exit(2); total+=stat.size; if(total>64*1024*1024) process.exit(2);
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK); try {content=fs.readFileSync(fd);} finally {fs.closeSync(fd);} }
+ hash.update(JSON.stringify([name,stat.isSymbolicLink()?'link':(stat.mode&0o111),content.length])); hash.update(content);
+}
+process.stdout.write(JSON.stringify({head,fingerprint:hash.digest('hex')}));
+`;
+
+export async function inspectPreparationSource(
+  cm: ContainerManager,
+  containerId: string,
+  assertCurrent: () => void = () => {},
+): Promise<NonNullable<RepositoryPreparationEvidence['source']>> {
+  assertCurrent();
+  const result = await cm.execInContainer(containerId, ['node', '-e', PREPARATION_SOURCE_PROBE], {
+    cwd: '/workspace',
+    timeout: 15000,
+    assertCurrent,
+    requireObservedExit: true,
+    maxOutputBytes: 4096,
+  });
+  assertCurrent();
+  if (result.exitCode !== 0 || result.stdout.length > 1024)
+    throw new Error('Source inputs unverified');
+  const source = JSON.parse(result.stdout) as { head?: unknown; fingerprint?: unknown };
+  if (
+    typeof source.head !== 'string' ||
+    !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(source.head) ||
+    typeof source.fingerprint !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(source.fingerprint)
+  )
+    throw new Error('Source inputs unverified');
+  return { head: source.head, fingerprint: source.fingerprint };
+}
+
+export async function assertPreparationSourceCurrent(
+  evidence: RepositoryPreparationEvidence | undefined,
+  cm: ContainerManager,
+  containerId: string,
+  assertCurrent: () => void,
+): Promise<void> {
+  assertCurrent();
+  if (!evidence || evidence.status === 'not-configured') return;
+  let source: RepositoryPreparationEvidence['source'] = null;
+  try {
+    source = await inspectPreparationSource(cm, containerId, assertCurrent);
+  } catch {
+    assertCurrent();
+  }
+  assertCurrent();
+  if (
+    evidence.status !== 'passed' ||
+    evidence.containerId !== containerId ||
+    !source ||
+    JSON.stringify(source) !== JSON.stringify(evidence.source)
+  )
+    throw new AutopodError(
+      'Repository preparation inputs changed or are unverified; prepare this candidate again before execution.',
+      'REPOSITORY_PREPARATION_FAILED',
+      409,
+    );
+}
+
+function failureDetail(
+  raw: string,
+  command: string,
+  env: Record<string, string>,
+  secrets: string[],
+): string {
+  // Command literals may themselves be credentials. Suppress command words as
+  // well as the full command, xtrace lines, resolved env values and registry secrets.
+  const hidden = new Set([
+    ...Object.values(env),
+    ...secrets,
+    command,
+    ...command.split(/[\s'"`=;|&()]+/).filter(Boolean),
+  ]);
+  const text = raw
+    .replace(/^\s*\+.*$/gm, '[shell trace withheld]')
+    .replace(
+      /^.*(?:_auth|password|passwd|secret|token|authorization|credential|bearer|api[_ -]?key).*$/gim,
+      '[credential-bearing line withheld]',
+    )
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL withheld]');
+  return boundOutput(sanitizeProviderMessage(String(redactActionValue(text, hidden))), 1200, 300);
+}
 
 /** Source-dependent preparation runs only in this pod after checkout and scoped feed setup. */
 export async function prepareLaunchRepository(
-  config: EffectiveLaunchConfig,
+  config: EffectiveLaunchConfig | null,
   containerManager: ContainerManager,
   containerId: string,
   env: Record<string, string>,
-): Promise<void> {
-  const setup = config.repository?.setup;
-  if (!setup?.prepareCommand) return;
+  options: {
+    assertCurrent?(): void;
+    record?(evidence: RepositoryPreparationEvidence): void;
+    sensitiveValues?: string[];
+  } = {},
+): Promise<RepositoryPreparationEvidence> {
+  const assertCurrent = options.assertCurrent ?? (() => {});
+  assertCurrent();
+  const setup = config?.repository?.setup;
+  const command = setup?.prepareCommand;
+  const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const evidence: RepositoryPreparationEvidence = {
+    status: command ? 'unverified' : 'not-configured',
+    containerId,
+    commandHash: command ? hash(command) : null,
+    configurationHash: command
+      ? hash([
+          setup?.buildWorkDir,
+          setup?.buildTimeout,
+          Object.entries(env).sort(([a], [b]) => a.localeCompare(b)),
+        ])
+      : null,
+    source: null,
+    exitCode: null,
+  };
+  const finish = () => {
+    assertCurrent();
+    options.record?.(evidence);
+    return evidence;
+  };
+  const fail = (detail: string, terminationUnverified = false): never => {
+    evidence.detail = detail;
+    finish();
+    throw new RepositoryPreparationError(
+      `Repository preparation ${evidence.status}: ${detail}`,
+      terminationUnverified,
+    );
+  };
+  if (!setup || !command) return finish();
+  try {
+    evidence.source = await inspectPreparationSource(containerManager, containerId, assertCurrent);
+  } catch {
+    assertCurrent();
+    return fail('Source/dependency inputs could not be verified before preparation.');
+  }
   const literals = Object.fromEntries(
     Object.entries(setup.buildEnv).flatMap(([key, binding]) =>
       'value' in binding ? [[key, binding.value]] : [],
@@ -20,25 +189,44 @@ export async function prepareLaunchRepository(
   try {
     result = await containerManager.execInContainer(
       containerId,
-      wrapValidationExecCommand(`set -e\n${setup.prepareCommand}`, env, literals),
+      wrapValidationExecCommand(`set -e\n${command}`, env, literals),
       {
         cwd: setup.buildWorkDir ? `/workspace/${setup.buildWorkDir}` : '/workspace',
         timeout: (setup.buildTimeout ?? 300) * 1000,
         env,
+        assertCurrent,
+        requireObservedExit: true,
+        maxOutputBytes: 65536,
       },
     );
-  } catch {
-    // Transport exceptions can contain the command, environment, and output.
-    throw new AutopodError(
-      'Repository preparation did not complete with a verified exit. Check the repository setup and execution environment.',
-      'REPOSITORY_PREPARATION_FAILED',
-      409,
+    assertCurrent();
+  } catch (error) {
+    assertCurrent();
+    const category =
+      error instanceof ExecInterruptedError && error.execution?.cause === 'timeout'
+        ? 'timed out'
+        : 'exit unverified';
+    return fail(
+      `${category}; ${failureDetail(error instanceof Error ? error.message : 'transport unavailable', command, env, options.sensitiveValues ?? [])}`,
+      true,
     );
   }
-  if (result.exitCode !== 0)
-    throw new AutopodError(
-      `Repository preparation failed with ${Number.isInteger(result.exitCode) ? `exit code ${result.exitCode}` : 'an unverified exit'}. Check the repository setup command.`,
-      'REPOSITORY_PREPARATION_FAILED',
-      409,
+  evidence.exitCode = isObservedExitCode(result.exitCode) ? result.exitCode : null;
+  if (evidence.exitCode !== 0) {
+    evidence.status = evidence.exitCode === null ? 'unverified' : 'failed';
+    return fail(
+      `${evidence.exitCode === null ? 'exit unverified' : `exit code ${evidence.exitCode}`}; ${failureDetail(`${result.stdout}\n${result.stderr}`, command, env, options.sensitiveValues ?? [])}`,
+      evidence.exitCode === null,
     );
+  }
+  let after: RepositoryPreparationEvidence['source'] = null;
+  try {
+    after = await inspectPreparationSource(containerManager, containerId, assertCurrent);
+  } catch {
+    assertCurrent();
+  }
+  if (!after || JSON.stringify(after) !== JSON.stringify(evidence.source))
+    return fail('Source/dependency inputs changed or became unverified during preparation.');
+  evidence.status = 'passed';
+  return finish();
 }

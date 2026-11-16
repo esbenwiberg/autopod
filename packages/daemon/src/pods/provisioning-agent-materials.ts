@@ -4,6 +4,8 @@ import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { buildProviderEnv } from '../providers/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { AgentContinuationSupersededError } from './continuation-preflight.js';
+import { inspectExecutionPreflight } from './execution-preflight.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
 import { selectRelevantMemories } from './memory-selector.js';
 import { projectMemoryScope } from './project-memory-scope.js';
@@ -35,6 +37,7 @@ import { generateSystemInstructions } from './system-instructions-generator.js';
 type Captured = Pick<
   ProvisioningCaptured,
   | 'profileStore'
+  | 'podRepo'
   | 'providerAccountStore'
   | 'providerCatalog'
   | 'mcpBaseUrl'
@@ -58,6 +61,7 @@ export function createProvisioningAgentMaterials(
   captured: Captured,
 ) {
   const {
+    podRepo,
     profileStore,
     providerAccountStore,
     providerCatalog,
@@ -535,16 +539,63 @@ export function createProvisioningAgentMaterials(
       }
     }
 
+    const assertCurrent = () => {
+      const current = podRepo.getOrThrow(podId);
+      if (
+        current.lifecycleGeneration !== input.lifecycleGeneration ||
+        current.containerId !== containerId ||
+        current.status !== 'running'
+      )
+        throw new AgentContinuationSupersededError();
+    };
+    assertCurrent();
+    let preparationProvenance: Awaited<ReturnType<typeof inspectExecutionPreflight>> | undefined;
     if (launchConfig?.repository?.setup.prepareCommand) {
       emitStatus('Preparing repository dependencies…');
-      await prepareLaunchRepository(launchConfig, containerManager, containerId, {
+      if (!podRepo.executionProvenance)
+        throw new Error('Repository preparation provenance ledger is unavailable');
+      preparationProvenance = await inspectExecutionPreflight(
+        containerManager,
+        containerId,
+        pod,
+        profile,
+        'coding',
+        'worker',
+        { assertCurrent },
+      );
+      assertCurrent();
+    }
+    const repositoryPreparation = await prepareLaunchRepository(
+      launchConfig,
+      containerManager,
+      containerId,
+      {
         ...profile.buildEnv,
         ...(launchRegistry?.nugetSecret
           ? { [launchRegistry.nugetSecret.envKey]: launchRegistry.nugetSecret.content }
           : buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat)),
-      });
-    }
+      },
+      {
+        assertCurrent,
+        sensitiveValues: [
+          ...(effectiveRegistryPat ? [effectiveRegistryPat] : []),
+          ...(launchRegistry?.redactionSecrets ?? []),
+        ],
+        record(evidence) {
+          assertCurrent();
+          if (!preparationProvenance) return;
+          preparationProvenance.repositoryPreparation = evidence;
+          if (evidence.status === 'failed' || evidence.status === 'unverified')
+            preparationProvenance.status = 'blocked';
+          const ledger = podRepo.executionProvenance;
+          if (!ledger) throw new Error('Repository preparation provenance ledger is unavailable');
+          ledger.record(podId, pod.lifecycleGeneration, preparationProvenance);
+        },
+      },
+    );
+    assertCurrent();
     return {
+      repositoryPreparation,
       pod,
       launchConfig,
       containerManager,
