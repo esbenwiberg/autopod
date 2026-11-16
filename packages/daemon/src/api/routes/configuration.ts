@@ -142,7 +142,7 @@ export function configurationRoutes(
           'INPUT_BUNDLES_UNAVAILABLE',
           503,
         );
-      deps.inputBundles.assert(config.work.inputBundle, request.user.oid);
+      deps.inputBundles.assertForViewing(config.work.inputBundle, request.user.oid);
     }
     return config;
   });
