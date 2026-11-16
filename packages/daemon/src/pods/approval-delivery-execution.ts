@@ -1,9 +1,17 @@
 import { AutopodError } from '@autopod/shared';
 import type { PrManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-import { mergePublishedSource } from '../worktrees/durable-merge.js';
+import {
+  inspectRetainedMergeSource,
+  mergePublishedSource,
+  reconcileMerge,
+} from '../worktrees/durable-merge.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
-import { assertMergeRepository, mergeReconciliation } from '../worktrees/merge-source-identity.js';
+import {
+  assertMergeRepository,
+  assertMergeTarget,
+  mergeReconciliation,
+} from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js';
 import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
@@ -145,6 +153,68 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           prManager.getPrStatus({ prUrl, worktreePath }),
         );
         if (options.publishOnly) assertPublishedPr(initialStatus, mergeBaseBranch);
+        if (initialStatus.merged && pod.executionTarget === 'local') {
+          const journal = podRepo.mergeJournal;
+          const current = podRepo.getOrThrow(podId);
+          const currentActor = current.readinessReview?.approval?.actor;
+          if (
+            options.publishOnly ||
+            pod.options.agentMode !== 'auto' ||
+            pod.options.output !== 'pr' ||
+            current.worktreeCompromised ||
+            currentActor?.type !== 'human' ||
+            !currentActor.userId.trim() ||
+            initialStatus.open !== false ||
+            pod.lastValidationResult?.overall !== 'pass' ||
+            !journal ||
+            journal.find(mergingAnchor)
+          )
+            mergeReconciliation(
+              'External local delivery requires human approval of verified published source.',
+            );
+          const publication = podRepo.sourcePublications?.latestConfirmedForMerge?.(mergingAnchor);
+          if (!publication)
+            mergeReconciliation(
+              'Confirmed source publication is unavailable for this external merge.',
+            );
+          const target = {
+            repository: approveProfile.repoUrl ?? '',
+            branch: pod.branch,
+            baseBranch: mergeBaseBranch,
+          };
+          assertMergeRepository(target, publication.repository);
+          assertMergeTarget(target, initialStatus.sourceTarget ?? {});
+          // Reuse the real publication, not a new push or fabricated receipt.
+          // Planning records identity only: no merge request is admitted.
+          const entry = journal.plan(
+            mergingAnchor,
+            { ...mergingAnchor, prUrl: publication.publicationPrUrl },
+            publication.publicationId,
+            {
+              prUrl,
+              expectedHeadSha: publication.commitSha,
+              expectedTarget: target,
+              squash: options.squash,
+            },
+          );
+          await deliveryOperation(() =>
+            reconcileMerge(journal, mergingAnchor, entry, prManager, initialStatus),
+          );
+          await deliveryOperation(() =>
+            inspectRetainedMergeSource(
+              journal,
+              podRepo.sourcePublications,
+              mergingAnchor,
+              entry,
+              captured.worktreeManager,
+            ),
+          );
+          emitActivityStatus(
+            podId,
+            'Externally merged local PR verified from its recorded source publication; no push or merge requested',
+          );
+          return { kind: 'ready' };
+        }
         if (initialStatus.merged || !initialStatus.open)
           failDelivery(
             'The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source.',
@@ -153,6 +223,8 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         // failDelivery already moved the original lifecycle back to validated.
         if (error instanceof AutopodError && error.code === 'APPROVAL_DELIVERY_FAILED') throw error;
         assertApprovalCurrent(mergingAnchor);
+        if (error instanceof AutopodError && error.code === 'DELIVERY_RECONCILIATION_REQUIRED')
+          failDelivery(error.message, error);
         failDelivery('The current PR disposition or source binding is unavailable.', error);
       }
 

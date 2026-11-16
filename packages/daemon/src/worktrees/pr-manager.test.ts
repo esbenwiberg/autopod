@@ -37,6 +37,89 @@ describe('GhPrManager', () => {
     execCalls.length = 0;
   });
 
+  it.each(['', '{"state":'])('retries one malformed read-only PR response (%j)', async (stdout) => {
+    execResponses.push(
+      { stdout, stderr: '' },
+      { stdout: JSON.stringify({ state: 'MERGED', headRefOid: 'a'.repeat(40) }), stderr: '' },
+    );
+    await expect(
+      new GhPrManager({ logger, githubAuth }).getPrStatus({
+        prUrl: 'https://github.com/org/repo/pull/42',
+      }),
+    ).resolves.toMatchObject({ merged: true, headSha: 'a'.repeat(40) });
+    expect(execCalls).toHaveLength(2);
+    expect(
+      execCalls.every((call) => (call[1] as string[]).slice(0, 2).join(' ') === 'pr view'),
+    ).toBe(true);
+  });
+
+  it.each([
+    '',
+    'not-json-secret-output',
+    'null',
+    '[]',
+    '{}',
+  ])('fails closed with safe diagnostics on invalid PR JSON (%j)', async (stdout) => {
+    execResponses.push({ stdout, stderr: '' }, { stdout, stderr: '' });
+    const result = new GhPrManager({ logger, githubAuth }).getPrStatus({
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+    await expect(result).rejects.toMatchObject({
+      code: 'DELIVERY_RECONCILIATION_REQUIRED',
+      statusCode: 409,
+    });
+    await expect(result).rejects.not.toThrow('not-json-secret-output');
+    expect(execCalls.length).toBeLessThanOrEqual(2);
+  });
+
+  it.each([
+    true,
+    false,
+  ])('only retries reads when comparison JSON is empty (recovers: %s)', async (recovers) => {
+    const manager = new GhPrManager({ logger, githubAuth });
+    const base = 'a'.repeat(40);
+    const head = 'b'.repeat(40);
+    const target = {
+      repository: 'https://github.com/org/repo',
+      branch: 'feature',
+      baseBranch: 'main',
+    };
+    vi.spyOn(manager, 'getPrStatus').mockResolvedValue({
+      merged: true,
+      open: false,
+      headSha: head,
+      sourceTarget: target,
+      blockReason: null,
+      ciFailures: [],
+      reviewComments: [],
+    });
+    execResponses.push(
+      { stdout: '', stderr: '' },
+      {
+        stdout: recovers
+          ? JSON.stringify({
+              status: 'ahead',
+              behind_by: 0,
+              base_commit: { sha: base },
+              merge_base_commit: { sha: base },
+            })
+          : '',
+        stderr: '',
+      },
+    );
+    const result = manager.verifyMergedSourceAncestry({
+      prUrl: 'https://github.com/org/repo/pull/113',
+      publishedHeadSha: base,
+      mergedHeadSha: head,
+      expectedTarget: target,
+    });
+    if (recovers)
+      await expect(result).resolves.toMatchObject({ publishedHeadSha: base, mergedHeadSha: head });
+    else await expect(result).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    expect(execCalls).toHaveLength(2);
+    expect(execCalls.every((call) => (call[1] as string[])[0] === 'api')).toBe(true);
+  });
+
   it('proves merged descendant inclusion through authenticated exact-SHA gh reads only', async () => {
     const manager = new GhPrManager({ logger, githubAuth });
     const publishedHeadSha = 'a'.repeat(40);

@@ -115,6 +115,28 @@ Do not run against a scheduled or in-flight completion. Do not delete journal
 rows, insert a fake merge response, or set pod status directly. Provider policies
 still govern merging, and CI failures still flow through the normal fix-pod path.
 
+## Published local PRs merged before Autopod approval
+
+A validated local Docker task can have a confirmed daemon publication but no
+merge journal when a human merges its PR outside Autopod. Ordinary authenticated
+human approval now adopts that existing publication and records provider-confirmed
+delivery without another push or merge request. It supports publications made
+before PR creation, but only the same lifecycle, source and resource binding.
+No historical publication or merge-request receipt is fabricated.
+
+The frozen repository/source/base must match, validation must already pass, and
+the retained checkout must be clean at the recorded published commit/tree.
+Additional merged commits require the provider's existing exact-SHA ancestry
+proof. Missing receipts, changed/dirty source, compromised worktrees, automation,
+closed-unmerged PRs and unavailable proof remain blocked with resources retained.
+Successful approval uses normal completion cleanup; this is distinct from the
+legacy sandbox reports-pending retention protocol below.
+
+Empty/truncated GitHub CLI JSON during read-only PR/ancestry lookup gets at most
+one fresh read. Persistent malformed data or an unknown PR disposition produces
+`DELIVERY_RECONCILIATION_REQUIRED`, without exposing raw provider output. Neither
+this read retry nor an open PR clears or replays an admitted merge request.
+
 ## Already-merged PRs (normal polling)
 
 Do **not** authorize another merge request for an already-merged PR.
