@@ -93,6 +93,20 @@ import Testing
     #expect(model.bytes.isEmpty && model.fileErrors.isEmpty && model.loadingFiles.isEmpty)
   }
 
+  @Test func cancelledManifestDoesNotConfirmEmpty() async throws {
+    let fixture = try ReferenceFixture()
+    var pending: CheckedContinuation<EffectiveLaunchPreview, Never>?
+    var actions = fixture.actions
+    actions.readLaunch = { _ in await withCheckedContinuation { pending = $0 } }
+    let model = ReferenceAttachmentsModel(actions: actions)
+    let task = Task { await model.load(podId: "fixture") }
+    while pending == nil { await Task.yield() }
+    task.cancel()
+    pending?.resume(returning: try referenceLaunch(.object([:])))
+    await task.value
+    #expect(!model.hasLoaded && model.bundle == nil && model.error == nil)
+  }
+
   @Test func closingAndImmediatelyReopeningPreviewSharesThePendingRead() async throws {
     let fixture = try ReferenceFixture()
     var pending: CheckedContinuation<Data, Never>?
@@ -126,6 +140,7 @@ import Testing
     defer { host.close() }
     try await host.wait { host.has("reference-attachment-0") && fixture.reads.contains(0) }
     #expect(host.has("reference-attachments-card"))
+    #expect(!host.has("reference-attachments-empty"))
     #expect(host.text.contains("Provided inputs · not added to source"))
     #expect(host.text.contains("reference-screen.png"))
     #expect(host.text.contains("design.html"))
@@ -163,21 +178,24 @@ import Testing
     try host.captureSheet(index == 1 ? "source-preview" : "file-details")
   }
 
-  @Test func emptyInputsHideCardAndLoadFailureIsNotMisrepresentedAsEmpty() async throws {
+  @Test func emptyInputsShowZeroAndLoadFailureIsNotMisrepresentedAsEmpty() async throws {
     let fixture = try ReferenceFixture()
     var loads = 0
     var actions = fixture.actions
     actions.readLaunch = { _ in loads += 1; return try referenceLaunch(.object([:])) }
     let empty = ReferenceHost(VStack { Text("Task"); ReferenceAttachmentsCard(podId: "old", actions: actions) })
     defer { empty.close() }
-    try await empty.wait { loads == 1 }
-    try await Task.sleep(for: .milliseconds(50))
-    #expect(!empty.has("reference-attachments-card"))
+    try await empty.wait { loads == 1 && empty.has("reference-attachments-empty") }
+    #expect(empty.has("reference-attachments-card"))
+    #expect(empty.text.contains("0 attachments"))
+    #expect(!empty.has("reference-attachments-retry"))
     actions.readLaunch = { _ in throw DaemonError.serverError(403, "Private references") }
     let denied = ReferenceHost(VStack { Text("Task"); ReferenceAttachmentsCard(podId: "private", actions: actions) })
     defer { denied.close() }
     try await denied.wait { denied.has("reference-attachments-retry") }
     #expect(denied.text.contains("Couldn't load references"))
+    #expect(!denied.has("reference-attachments-empty"))
+    #expect(!denied.text.contains("0 attachments"))
   }
 }
 

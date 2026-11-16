@@ -20,7 +20,7 @@ struct ReferenceAttachmentsCard: View {
 
   var body: some View {
     Group {
-      if model.isLoading || model.error != nil || model.bundle != nil {
+      if model.isLoading || model.error != nil || model.hasLoaded {
         VStack(alignment: .leading, spacing: 12) {
           Label("Reference attachments", systemImage: "paperclip")
             .font(.subheadline.weight(.semibold))
@@ -33,6 +33,9 @@ struct ReferenceAttachmentsCard: View {
             Text("Couldn't load references: \(error)").font(.caption).foregroundStyle(.secondary)
             Button("Retry") { retry += 1 }
               .accessibilityIdentifier("reference-attachments-retry")
+          } else if model.hasLoaded && (model.bundle?.files.isEmpty ?? true) {
+            Text("0 attachments").font(.caption).foregroundStyle(.secondary)
+              .accessibilityIdentifier("reference-attachments-empty")
           } else if let bundle = model.bundle {
             ForEach(Array(bundle.files.enumerated()), id: \.offset) { index, file in
               attachmentRow(file, index: index)
