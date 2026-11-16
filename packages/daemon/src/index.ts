@@ -75,6 +75,10 @@ import {
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
 import { assertFinalizationPathAvailable } from './pods/retained-finalization-repository.js';
+import {
+  captureSandboxCheckpointAuthority,
+  unpublishedSandboxSourceBase,
+} from './pods/sandbox-checkpoint-policy.js';
 import { SandboxOrphanReaper } from './pods/sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
@@ -756,7 +760,10 @@ function prManagerFactory(
 const pendingRequestsByPod = new Map<string, PendingRequests>();
 let preCleanupMemoryExtraction: (podId: string) => Promise<void> = async () => {};
 const workspaceCheckpointController = new WorkspaceCheckpointController({
-  captureAuthority: (podId) => captureValidationMutationGuard(podRepo, podRepo.getOrThrow(podId)),
+  captureAuthority: (podId) => {
+    const pod = podRepo.getOrThrow(podId);
+    return captureSandboxCheckpointAuthority(pod, captureValidationMutationGuard(podRepo, pod));
+  },
   records: createWorkspaceCheckpointRepository(db),
   observe: async (podId, assertCurrent) => {
     assertCurrent();
@@ -779,6 +786,7 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
       worktreePath: pod.worktreePath,
       sequence,
       assertCurrent,
+      unpublishedSourceBase: unpublishedSandboxSourceBase(pod),
     });
   },
   emit: (event) => logger.info({ checkpoint: event }, 'Sandbox workspace checkpoint'),

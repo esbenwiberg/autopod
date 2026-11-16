@@ -5,10 +5,14 @@ import {
   checkpointSandboxWorkspace,
   type WorkspaceCheckpointResult,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
+import {
+  captureSandboxCheckpointAuthority,
+  unpublishedSandboxSourceBase,
+} from './sandbox-checkpoint-policy.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 
 interface WorkspacePreservationDependencies {
-  captureAuthority(pod: Pod): () => void;
+  captureAuthority(pod: Pod): () => Pod;
   getContainerManager(target: Pod['executionTarget']): ContainerManager;
   syncWorkspaceBack(
     containerId: string,
@@ -87,7 +91,7 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
   }
 
   async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
-    const assertCurrent = deps.captureAuthority(pod);
+    const assertCurrent = captureSandboxCheckpointAuthority(pod, deps.captureAuthority(pod));
     assertCurrent();
     if (!pod.containerId || !pod.worktreePath) {
       return {
@@ -130,6 +134,7 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
       worktreePath: pod.worktreePath,
       sequence: Date.now(),
       assertCurrent,
+      unpublishedSourceBase: unpublishedSandboxSourceBase(pod),
     }).finally(() => sandboxCheckpointRuns.delete(pod.id));
     sandboxCheckpointRuns.set(pod.id, run);
     return run;
