@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Keep Git integration capabilities independent of the Debian package version.
 COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
 RUN sh /tmp/install-worker-git.sh && rm /tmp/install-worker-git.sh
+COPY templates/base/check-worker-jq.sh /usr/local/bin/autopod-check-jq
+RUN chmod 0755 /usr/local/bin/autopod-check-jq
 COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
 # Bounded workers must not acquire untracked background Git writers.
 RUN chmod 0755 /usr/local/bin/autopod-check-git \
@@ -113,6 +115,7 @@ RUN chown autopod:autopod /workspace
 
 USER autopod
 RUN autopod-check-git
+RUN autopod-check-jq
 RUN python3 -m venv /tmp/autopod-venv-probe && /tmp/autopod-venv-probe/bin/python -c 'import ensurepip, pip' && rm -rf /tmp/autopod-venv-probe
 
 # Transient validation databases run as the non-root user on the project port.
