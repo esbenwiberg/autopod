@@ -279,4 +279,33 @@ describe('repository readiness production runtime admission', () => {
       retryable: false,
     });
   });
+
+  it('rejects a passing validation result when its final source or lock inputs drifted', async () => {
+    const t = await admitted();
+    t.f.podRepo.update(t.id, {
+      status: 'failed',
+      containerId: 'container-123',
+      worktreePath: '/tmp/readiness-final-source',
+      startCommitSha: 'a'.repeat(40),
+    });
+    const validate = vi.mocked(t.f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(t.f.ctx.validationEngine.validate).mockImplementationOnce(async (...args) => {
+      const result = await validate(...args);
+      t.state.source.fingerprint = 'f'.repeat(64);
+      return result;
+    });
+    expect(
+      await t.manager.revalidateSession(t.id, { force: true, checksOnly: true }),
+    ).toMatchObject({ result: 'fail' });
+    expect(t.f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+    expect(t.rows().at(-1)).toMatchObject({
+      status: 'blocked',
+      repositoryPreparation: { status: 'unverified' },
+    });
+    expect(t.f.podRepo.getOrThrow(t.id).lastValidationResult?.infrastructureFailure).toMatchObject({
+      code: 'REPOSITORY_PREPARATION_FAILED',
+      retryable: false,
+    });
+    expect(t.f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
 });

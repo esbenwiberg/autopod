@@ -34,7 +34,7 @@ interface ValidationExecutionDependencies {
   prepareValidationRepository?(
     config: ValidationEngineConfig,
     assertCurrent: () => Pod,
-  ): Promise<void>;
+  ): Promise<(() => Promise<void>) | void>;
   logger: Logger;
   containerManagerFactory: {
     get(target: ExecutionTarget): ContainerManager;
@@ -343,8 +343,12 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         const started = performance.now();
         let result: ValidationResult;
         let engineStarted = false;
+        let engineSettled = false;
         try {
-          await deps.prepareValidationRepository?.(validationConfig, ownership.assertCurrent);
+          const assertPreparationCurrent = await deps.prepareValidationRepository?.(
+            validationConfig,
+            ownership.assertCurrent,
+          );
           ownership.assertCurrent();
           engineStarted = true;
           result = await validationEngine.validate(
@@ -355,26 +359,36 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             validationController.signal,
             ownedValidationCallbacks(ownership, callbacks),
           );
+          engineSettled = true;
+          if (result.overall === 'pass') await assertPreparationCurrent?.();
         } catch (validateErr) {
           logger.error({ err: validateErr, podId, attempt }, logMessage);
-          result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+          const preparationFailure =
+            validateErr instanceof AutopodError &&
+            validateErr.code === 'REPOSITORY_PREPARATION_FAILED';
+          result = makeUnexpectedValidationFailureResult(
+            podId,
+            attempt,
+            preparationFailure ? new Error(validateErr.message) : validateErr,
+          );
           // A thrown engine has not supplied termination evidence. Keep the
           // synthetic failure distinct from a completed engine outcome.
           result.infrastructureFailure = {
-            phase: engineStarted ? 'build' : 'setup',
+            phase: engineStarted && !engineSettled ? 'build' : 'setup',
             code:
               !engineStarted &&
               validateErr instanceof RepositoryPreparationError &&
               validateErr.terminationUnverified
                 ? 'EXEC_EXIT_UNVERIFIED'
-                : !engineStarted &&
+                : (!engineStarted || engineSettled) &&
                     validateErr instanceof AutopodError &&
                     validateErr.code === 'REPOSITORY_PREPARATION_FAILED'
                   ? validateErr.code
                   : 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
-            message: !engineStarted
-              ? 'Repository preparation did not qualify this validation candidate; inspect preparation provenance before retrying.'
-              : 'Validation engine threw without verified execution termination.',
+            message:
+              !engineStarted || engineSettled
+                ? 'Repository preparation did not qualify this validation candidate; inspect preparation provenance before retrying.'
+                : 'Validation engine threw without verified execution termination.',
             retryable: false,
           };
         }

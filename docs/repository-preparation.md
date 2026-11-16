@@ -28,7 +28,8 @@ inputs unchanged; generated installation outputs should follow repository-owned
 ignore rules. Coding checks the fingerprint again immediately before runtime
 dispatch. Each independent/final validation invocation runs preparation again
 inside its existing retry/dispatch admission; no cached readiness certificate is
-reused for a later candidate.
+reused for a later candidate. A successful validation result is rejected if its
+final source/lock fingerprint differs from the prepared candidate.
 
 Workers are instructed to serialize install, typecheck, build, test and browser
 workloads within admitted memory/CPU limits and prefer a repository-owned serial

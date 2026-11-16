@@ -33,7 +33,7 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
   prepareValidationRepository(
     config: Parameters<ValidationEngine['validate']>[0],
     assertCurrent: () => Pod,
-  ): Promise<void>;
+  ): Promise<(() => Promise<void>) | undefined>;
   recordValidationProvenance(
     config: Parameters<ValidationEngine['validate']>[0],
     purpose?: 'validation' | 'review',
@@ -50,7 +50,7 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
   async function prepareValidationRepository(
     config: Parameters<ValidationEngine['validate']>[0],
     assertCurrent: () => Pod,
-  ): Promise<void> {
+  ): Promise<(() => Promise<void>) | undefined> {
     const pod = assertCurrent();
     const launch = deps.readLaunch?.(pod.id) ?? null;
     if (!launch?.repository?.setup.prepareCommand) return;
@@ -98,22 +98,30 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
         },
       },
     );
-    try {
-      await assertPreparationSourceCurrent(evidence, cm, config.containerId, guard);
-    } catch (error) {
+    const assertPrepared = async () => {
+      try {
+        await assertPreparationSourceCurrent(evidence, cm, config.containerId, guard);
+      } catch (error) {
+        guard();
+        const ledger = podRepo.executionProvenance;
+        if (!ledger)
+          throw new TaskRetryBlockedError('Repository preparation provenance is unavailable');
+        ledger.record(pod.id, pod.lifecycleGeneration, {
+          ...provenance,
+          status: 'blocked',
+          repositoryPreparation: {
+            ...evidence,
+            status: 'unverified',
+            detail:
+              'Preparation inputs changed or became unverified for this validation candidate.',
+          },
+        });
+        throw error;
+      }
       guard();
-      podRepo.executionProvenance.record(pod.id, pod.lifecycleGeneration, {
-        ...provenance,
-        status: 'blocked',
-        repositoryPreparation: {
-          ...evidence,
-          status: 'unverified',
-          detail: 'Preparation inputs changed or became unverified before validation dispatch.',
-        },
-      });
-      throw error;
-    }
-    guard();
+    };
+    await assertPrepared();
+    return assertPrepared;
   }
 
   async function recordValidationProvenance(
