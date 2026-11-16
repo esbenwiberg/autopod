@@ -203,15 +203,19 @@ import Testing
     defer { host.close() }
     try await host.wait { host.has("reference-attachment-0") }
     try host.press("reference-attachment-0")
-    try await host.wait { host.sheetHas("reference-attachment-source") }
+    let expected = String(decoding: bytes.prefix(256 * 1024), as: UTF8.self)
+    // SwiftUI can publish AX nodes before attaching the represented AppKit view.
+    try await host.wait {
+      guard let text = host.sourceTextView else { return false }
+      return text.string == expected && text.visibleRect.width > 0 && text.visibleRect.height > 0
+    }
     let sheet = try #require(host.window.attachedSheet?.contentView)
-    let text = try #require(referenceViews(sheet).compactMap { $0 as? NSTextView }.first)
+    let text = try #require(host.sourceTextView)
     let scroll = try #require(text.enclosingScrollView)
     let layout = try #require(text.layoutManager)
     let container = try #require(text.textContainer)
     sheet.layoutSubtreeIfNeeded()
     layout.ensureLayout(for: container)
-    let expected = String(decoding: bytes.prefix(256 * 1024), as: UTF8.self)
     #expect(text.string == expected)
     #expect(text.isSelectable && !text.isEditable && !text.isRichText)
     #expect(!scroll.hasHorizontalScroller && scroll.hasVerticalScroller)
@@ -249,6 +253,8 @@ import Testing
     text.setSelectedRange(NSRange(location: 0, length: (expected as NSString).length))
     let pasteboard = NSPasteboard.withUniqueName()
     defer { pasteboard.releaseGlobally() }
+    // writeSelection(to:type:) fills a declared type; it does not declare one.
+    pasteboard.declareTypes([.string], owner: nil)
     #expect(text.writeSelection(to: pasteboard, type: .string))
     #expect(pasteboard.string(forType: .string) == expected)
     #expect(host.sheetText.contains("Preview limited to 256 KiB") == (bytes.count > 256 * 1024))
@@ -352,6 +358,12 @@ private func referenceLaunch(_ value: ConfigurationJSON) throws -> EffectiveLaun
     guard let content = window.attachedSheet?.contentView else { return false }
     return referenceNodes(content).contains { referenceValue($0, "accessibilityIdentifier") as? String == id }
   }
+  var sourceTextView: NSTextView? {
+    guard let content = window.attachedSheet?.contentView else { return nil }
+    return referenceViews(content).compactMap { $0 as? NSTextView }.first {
+      $0.accessibilityIdentifier() == "reference-attachment-source"
+    }
+  }
   var sheetText: String {
     guard let content = window.attachedSheet?.contentView else { return "" }
     return referenceNodes(content).flatMap { [referenceValue($0, "accessibilityLabel") as? String, referenceValue($0, "accessibilityValue") as? String].compactMap { $0 } }.joined(separator: "\n")
@@ -363,7 +375,12 @@ private func referenceLaunch(_ value: ConfigurationJSON) throws -> EffectiveLaun
     #expect(referenceValue(button, "accessibilityPerformPress") as? Bool == true)
   }
   func wait(_ predicate: () -> Bool) async throws {
-    for _ in 0..<150 { view.layoutSubtreeIfNeeded(); if predicate() { return }; try await Task.sleep(for: .milliseconds(20)) }
+    for _ in 0..<150 {
+      view.layoutSubtreeIfNeeded()
+      window.attachedSheet?.contentView?.layoutSubtreeIfNeeded()
+      if predicate() { return }
+      try await Task.sleep(for: .milliseconds(20))
+    }
     try capture("timeout")
     throw ReferenceTestError.timeout
   }
