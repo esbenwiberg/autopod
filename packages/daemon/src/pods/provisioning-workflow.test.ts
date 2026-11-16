@@ -75,6 +75,18 @@ describe('provisioning workflow', () => {
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
+  it('does not return a candidate superseded during qualification', async () => {
+    const f = fixture();
+    f.captured.qualifyCodingCandidate = vi.fn(async () => {
+      f.db
+        .prepare('UPDATE pods SET lifecycle_generation = lifecycle_generation + 1 WHERE id = ?')
+        .run('prepare');
+    });
+    await expect(f.workflow().preparePodExecution(f.input())).rejects.toMatchObject({
+      code: 'STALE_AGENT_CONTINUATION',
+    });
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
   it('halts interactive setup before automatic credentials or dispatch material', async () => {
     const f = fixture();
     f.podRepo.update('prepare', {

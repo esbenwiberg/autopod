@@ -103,7 +103,7 @@ describe('Playwright base image templates', () => {
     expect(dockerfile.indexOf('python3 -m venv /tmp/autopod-venv-probe')).toBeGreaterThan(
       dockerfile.indexOf('USER autopod'),
     );
-    expect(dockerfile).toContain("import ensurepip, pip");
+    expect(dockerfile).toContain('import ensurepip, pip');
   });
   it('covers every template that installs Playwright browsers', async () => {
     const files = await readdir(path.join(repoRoot, 'templates/base'));

@@ -18,20 +18,36 @@ describe('repository preparation', () => {
               prepareCommand: 'pnpm install --frozen-lockfile',
               buildWorkDir: 'app',
               buildTimeout: 120,
+              buildEnv: { PUBLIC_VALUE: { value: 'visible' }, PRIVATE_VALUE: { secretId: 's' } },
             },
           },
         },
         services,
       );
       const cm = createMockContainerManager();
-      await prepareLaunchRepository(config, cm, 'pod-container', { FEED_TOKEN: 'fixture-secret' });
+      await prepareLaunchRepository(config, cm, 'pod-container', {
+        FEED_TOKEN: 'fixture-secret',
+        PUBLIC_VALUE: 'visible',
+        PRIVATE_VALUE: 'private-fixture',
+      });
       expect(cm.execInContainer).toHaveBeenCalledWith(
         'pod-container',
-        ['sh', '-e', '-c', 'pnpm install --frozen-lockfile'],
+        [
+          '/usr/bin/env',
+          '--',
+          'PUBLIC_VALUE=visible',
+          'sh',
+          '-c',
+          'set -e\npnpm install --frozen-lockfile',
+        ],
         {
           cwd: '/workspace/app',
           timeout: 120000,
-          env: { FEED_TOKEN: 'fixture-secret' },
+          env: {
+            FEED_TOKEN: 'fixture-secret',
+            PUBLIC_VALUE: 'visible',
+            PRIVATE_VALUE: 'private-fixture',
+          },
         },
       );
       vi.mocked(cm.execInContainer).mockResolvedValue({
@@ -43,6 +59,12 @@ describe('repository preparation', () => {
         code: 'REPOSITORY_PREPARATION_FAILED',
       });
       expect(JSON.stringify(config)).not.toContain('fixture-secret');
+      vi.mocked(cm.execInContainer).mockRejectedValue(
+        new Error('private-fixture https://user:password@example.test/?token=secret'),
+      );
+      await expect(prepareLaunchRepository(config, cm, 'pod-container', {})).rejects.toThrow(
+        'Repository preparation did not complete with a verified exit',
+      );
     } finally {
       db.close();
     }

@@ -1,3 +1,4 @@
+import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { createProvisioningAgentMaterials } from './provisioning-agent-materials.js';
 import { createProvisioningContainer } from './provisioning-container.js';
 import type {
@@ -170,16 +171,24 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     emitActivityStatus,
   });
   async function preparePodExecution(input: ProvisioningInput): Promise<ProvisioningResult> {
+    const assertCurrent = () => {
+      const current = podRepo.getOrThrow(input.podId);
+      if (current.lifecycleGeneration !== input.lifecycleGeneration || current.status !== 'running')
+        throw new AgentContinuationSupersededError();
+    };
     const workspaceResult = await workspace.prepareWorkspace(input);
     if (workspaceResult.kind === 'halted') return workspaceResult;
     const containerResult = await container.prepareContainer(workspaceResult);
     const populationResult = await population.populateWorkspace(containerResult);
     const materialsResult = await materials.prepareSessionMaterials(populationResult);
     if (materialsResult.kind === 'halted') return materialsResult;
+    assertCurrent();
     const prepared = await agent.prepareAgentMaterials(materialsResult);
+    assertCurrent();
     // Normal repository preparation precedes actual-resource qualification; no
     // runtime has been selected or its lazy iterator pulled at this boundary.
     await qualifyCodingCandidate?.(prepared);
+    assertCurrent();
     return { kind: 'ready', prepared };
   }
   return { preparePodExecution };
