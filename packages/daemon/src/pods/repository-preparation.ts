@@ -24,10 +24,13 @@ export class RepositoryPreparationError extends AutopodError {
 /** Read bytes without invoking repository programs, Git filters, hooks or a status refresh.
  * Ignored installation/build artifacts are deliberately excluded. All tracked files
  * and nonignored untracked inputs (including new lockfiles) contribute to the hash.
+ * Stream regular files through one 64 KiB buffer: repository bytes are not a memory
+ * budget. The exec deadline, manifest/file-count bounds and containment checks remain.
  */
 export const PREPARATION_SOURCE_PROBE = `
 const fs=require('node:fs'), path=require('node:path'), cp=require('node:child_process'), crypto=require('node:crypto');
-const root='/workspace', real=fs.realpathSync(root), env={...process.env};
+const root='/workspace', real=fs.realpathSync(root), env={...process.env}, deadline=Date.now()+12000;
+const checkDeadline=()=>{if(Date.now()>=deadline) process.exit(2);};
 for(const key of Object.keys(env)) if(key.startsWith('GIT_')) delete env[key];
 Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_NO_REPLACE_OBJECTS:'1',GIT_NO_LAZY_FETCH:'1'});
 const git=args=>cp.execFileSync('/usr/bin/git',['--no-replace-objects','--no-optional-locks','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',...args],{cwd:root,env,encoding:'utf8',timeout:5000,maxBuffer:4*1024*1024});
@@ -35,17 +38,35 @@ const head=git(['rev-parse','--verify','HEAD']).trim();
 if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) process.exit(2);
 const names=[...new Set(git(['ls-files','-z','--cached','--others','--exclude-standard']).split(String.fromCharCode(0)).filter(Boolean))].sort();
 if(names.length>30000) process.exit(2);
-const hash=crypto.createHash('sha256'); let total=0;
+const hash=crypto.createHash('sha256'), buffer=Buffer.allocUnsafe(64*1024);
+const sameFile=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.mode===b.mode&&a.size===b.size&&a.mtimeMs===b.mtimeMs&&a.ctimeMs===b.ctimeMs;
 for(const name of names){
+ checkDeadline();
  if(path.isAbsolute(name)||name.split('/').some(p=>p==='..'||p==='.'||!p)) process.exit(2);
  const file=path.join(root,name); let stat;
  try { const parent=fs.realpathSync(path.dirname(file)); if(parent!==real&&!parent.startsWith(real+'/')) process.exit(2); stat=fs.lstatSync(file); }
  catch(e){ if(e.code==='ENOENT'){hash.update(JSON.stringify([name,'missing']));continue;} throw e; }
- let content;
- if(stat.isSymbolicLink()) content=Buffer.from(fs.readlinkSync(file));
- else { if(!stat.isFile()||stat.size>16*1024*1024) process.exit(2); total+=stat.size; if(total>64*1024*1024) process.exit(2);
-  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK); try {content=fs.readFileSync(fd);} finally {fs.closeSync(fd);} }
- hash.update(JSON.stringify([name,stat.isSymbolicLink()?'link':(stat.mode&0o111),content.length])); hash.update(content);
+ if(stat.isSymbolicLink()){
+  const content=Buffer.from(fs.readlinkSync(file));
+  hash.update(JSON.stringify([name,'link',content.length])); hash.update(content);
+ } else {
+  if(!stat.isFile()) process.exit(2);
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+  try {
+   const opened=fs.fstatSync(fd);
+   if(!opened.isFile()||!sameFile(stat,opened)) process.exit(2);
+   hash.update(JSON.stringify([name,stat.mode&0o111,stat.size]));
+   let offset=0;
+   while(offset<stat.size){
+    checkDeadline();
+    const count=fs.readSync(fd,buffer,0,Math.min(buffer.length,stat.size-offset),null);
+    if(count<=0) process.exit(2);
+    hash.update(buffer.subarray(0,count)); offset+=count;
+   }
+   if(!sameFile(stat,fs.fstatSync(fd))) process.exit(2);
+  } finally {fs.closeSync(fd);}
+ }
+ if(!sameFile(stat,fs.lstatSync(file))) process.exit(2);
 }
 process.stdout.write(JSON.stringify({head,fingerprint:hash.digest('hex')}));
 `;

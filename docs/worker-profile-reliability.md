@@ -14,6 +14,23 @@ For a new task using today's repository defaults, preview with `--repo` instead 
 copying an older pod. Keep actual validation, source custody and delivery evidence
 separate from the worker's final prose or terminal pod status.
 
+## Repository preparation source evidence
+
+When `prepareCommand` is configured, preparation is bound to the checked-out
+source, including tracked files and nonignored untracked dependency inputs.
+Regular files are hashed in 64 KiB chunks; there is no per-file or aggregate
+source-byte cutoff. In particular, a checkout larger than 64 MiB is not itself
+unverifiable. Ignored installation/build output remains excluded.
+
+This is bounded work, not an unrestricted scan: the 30,000-file and 4 MiB Git
+manifest bounds remain, along with a 12-second in-process deadline and the
+existing 15-second container-exec timeout. Unreadable/nonregular inputs, paths
+escaping the checkout, changing files, timeout or unverified execution still
+fail closed. Symlink target strings are hashed without reading their targets.
+Stable source retains the existing fingerprint framing; no receipt migration or
+live preparation-policy override is needed. A source probe alone does not prove
+that preparation or the project's browser/module checks passed.
+
 ## Autopod
 
 - Full-repository work uses the Docker (`local`) profile rather than overriding it
