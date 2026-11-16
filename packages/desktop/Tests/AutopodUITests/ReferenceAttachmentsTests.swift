@@ -255,8 +255,11 @@ import Testing
     #expect(text.selectedRange() == selection)
     let pasteboard = NSPasteboard.withUniqueName()
     defer { pasteboard.releaseGlobally() }
-    // AppKit requires the single-type export hook to be called via this entry point.
-    #expect(text.writeSelection(to: pasteboard, types: [.string]))
+    // Export the formats AppKit advertises for this selection, as Copy does.
+    // NSTextView may advertise legacy string identifiers rather than `.string`.
+    let types = text.writablePasteboardTypes
+    try #require(!types.isEmpty)
+    #expect(text.writeSelection(to: pasteboard, types: types), "Advertised types: \(types)")
     #expect(pasteboard.string(forType: .string) == expected)
     #expect(host.sheetText.contains("Preview limited to 256 KiB") == (bytes.count > 256 * 1024))
     // Display truncation must never mutate the bytes backing Save.
