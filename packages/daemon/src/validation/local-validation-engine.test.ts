@@ -3157,7 +3157,7 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('fail');
   });
 
-  it('classifies an OOM-killed test command as infrastructure instead of agent rework', async () => {
+  it('classifies a killed test command without claiming confirmed OOM', async () => {
     const base = stubContainerManager();
     const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
       const shell = command[2] ?? '';
@@ -3173,14 +3173,14 @@ describe('validate() — facts + review gate', () => {
     expect(result.test?.status).toBe('skip');
     expect(result.infrastructureFailure).toMatchObject({
       phase: 'test',
-      code: 'CONTAINER_OOM',
+      code: 'PROCESS_KILLED',
       retryable: false,
     });
     expect(result.overall).toBe('fail');
     expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
   });
 
-  it('classifies an OOM-killed build command as infrastructure instead of agent rework', async () => {
+  it('classifies a killed build command without claiming confirmed OOM', async () => {
     const base = stubContainerManager();
     const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
       const shell = command[2] ?? '';
@@ -3196,7 +3196,7 @@ describe('validate() — facts + review gate', () => {
     expect(result.smoke.build.status).toBe('fail');
     expect(result.infrastructureFailure).toMatchObject({
       phase: 'build',
-      code: 'CONTAINER_OOM',
+      code: 'PROCESS_KILLED',
       retryable: false,
     });
     expect(result.overall).toBe('fail');

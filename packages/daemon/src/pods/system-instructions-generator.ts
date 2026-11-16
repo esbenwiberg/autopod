@@ -891,7 +891,10 @@ function generateOperatingEnvironment(
       );
     }
     lines.push(
-      '- If a tool dies with a native memory/allocation error (`Array buffer allocation failed`, `ENOMEM`, OOM kill, `Killed`), treat it as an environment blocker, not a defect in your change. Do not rewrite working code, downgrade dependencies, or edit tool configs to dodge it — verify the failure is independent of your diff, then report it via `report_blocker` and continue with the remaining checks.',
+      '- Serialize install, typecheck, build, test and browser workloads under the admitted memory and CPU limits; prefer a repository-owned serial verifier when available.',
+    );
+    lines.push(
+      '- If a tool dies with a native memory/allocation error (`Array buffer allocation failed`, `ENOMEM`) or is killed, investigate the environment and verify whether the failure is independent of your diff. A kill alone does not prove OOM. Report genuine environment blockers via `report_blocker`; do not rewrite working code or weaken checks to dodge them.',
     );
     lines.push('');
   }

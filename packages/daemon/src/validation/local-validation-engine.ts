@@ -1930,7 +1930,7 @@ async function runTests(
   };
 }
 
-function isOomKilled(exitCode: number, output: string): boolean {
+function isPossiblyKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
@@ -1950,20 +1950,20 @@ function classifyCommandResourceFailure(
   if (result.exitCode === 0) return null;
 
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  if (isOomKilled(result.exitCode, output)) return containerOomFailure(phase);
+  if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
   if (executionTarget !== 'sandbox' || !hasFatalSandboxMemorySignature(output)) return null;
 
   return sandboxMemoryExhaustedFailure(phase);
 }
 
-function containerOomFailure(
+function killedProcessFailure(
   phase: ValidationInfrastructureFailure['phase'],
 ): ValidationInfrastructureFailure {
   return {
     phase,
-    code: 'CONTAINER_OOM',
+    code: 'PROCESS_KILLED',
     message:
-      'Validation was OOM-killed (exit 137 / "Killed") after exhausting the container memory ceiling. Retry only after changing the runner or execution resources; repository rework is not indicated.',
+      'Validation was killed (exit 137 or "Killed"). Resource pressure is possible, but OOM evidence is unavailable; investigate the runner before retrying. Repository rework is not automatically indicated.',
     retryable: false,
   };
 }
