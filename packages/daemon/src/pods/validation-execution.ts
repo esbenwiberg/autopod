@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { ExecutionTarget, Pod, TaskRetryIdentity, ValidationResult } from '@autopod/shared';
+import {
+  AutopodError,
+  type ExecutionTarget,
+  type Pod,
+  type TaskRetryIdentity,
+  type ValidationResult,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
@@ -16,6 +22,7 @@ import { captureValidationRetryIdentity } from '../validation/retry-identity.js'
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import type { PodRepository } from './pod-repository.js';
 import { observeRecoveryCheckSource } from './recovery-fork-checks.js';
+import { RepositoryPreparationError } from './repository-preparation.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
@@ -23,6 +30,11 @@ import { requiresValidationSettlement } from './validation-recovery-policy.js';
 import { captureDockerValidationResourceScope } from './validation-resource-scope.js';
 
 interface ValidationExecutionDependencies {
+  /** Runs only after the existing durable dispatch/retry admission has started. */
+  prepareValidationRepository?(
+    config: ValidationEngineConfig,
+    assertCurrent: () => Pod,
+  ): Promise<(() => Promise<void>) | void>;
   logger: Logger;
   containerManagerFactory: {
     get(target: ExecutionTarget): ContainerManager;
@@ -330,7 +342,15 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         }
         const started = performance.now();
         let result: ValidationResult;
+        let engineStarted = false;
+        let engineSettled = false;
         try {
+          const assertPreparationCurrent = await deps.prepareValidationRepository?.(
+            validationConfig,
+            ownership.assertCurrent,
+          );
+          ownership.assertCurrent();
+          engineStarted = true;
           result = await validationEngine.validate(
             withReviewerLaunchPreflight(validationConfig, ownership),
             (phase) => {
@@ -339,15 +359,36 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             validationController.signal,
             ownedValidationCallbacks(ownership, callbacks),
           );
+          engineSettled = true;
+          if (result.overall === 'pass') await assertPreparationCurrent?.();
         } catch (validateErr) {
           logger.error({ err: validateErr, podId, attempt }, logMessage);
-          result = makeUnexpectedValidationFailureResult(podId, attempt, validateErr);
+          const preparationFailure =
+            validateErr instanceof AutopodError &&
+            validateErr.code === 'REPOSITORY_PREPARATION_FAILED';
+          result = makeUnexpectedValidationFailureResult(
+            podId,
+            attempt,
+            preparationFailure ? new Error(validateErr.message) : validateErr,
+          );
           // A thrown engine has not supplied termination evidence. Keep the
           // synthetic failure distinct from a completed engine outcome.
           result.infrastructureFailure = {
-            phase: 'build',
-            code: 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
-            message: 'Validation engine threw without verified execution termination.',
+            phase: engineStarted && !engineSettled ? 'build' : 'setup',
+            code:
+              !engineStarted &&
+              validateErr instanceof RepositoryPreparationError &&
+              validateErr.terminationUnverified
+                ? 'EXEC_EXIT_UNVERIFIED'
+                : (!engineStarted || engineSettled) &&
+                    validateErr instanceof AutopodError &&
+                    validateErr.code === 'REPOSITORY_PREPARATION_FAILED'
+                  ? validateErr.code
+                  : 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
+            message:
+              !engineStarted || engineSettled
+                ? 'Repository preparation did not qualify this validation candidate; inspect preparation provenance before retrying.'
+                : 'Validation engine threw without verified execution termination.',
             retryable: false,
           };
         }

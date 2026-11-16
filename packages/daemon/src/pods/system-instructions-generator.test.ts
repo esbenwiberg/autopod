@@ -1182,6 +1182,9 @@ human_review: []
       expect(md).toContain('largest tier this execution target offers');
       expect(md).toContain('The profile asked for 10 GB');
       expect(md).toContain('Array buffer allocation failed');
+      expect(md).toContain('Serialize install, typecheck, build, test and browser workloads');
+      expect(md).toContain('prefer a repository-owned serial verifier');
+      expect(md).toContain('A kill alone does not prove OOM');
     });
 
     it('states the requested ceiling on docker without a clamp warning', () => {

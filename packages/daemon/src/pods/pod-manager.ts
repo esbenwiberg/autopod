@@ -782,11 +782,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     eventBus,
   });
 
-  const { recordValidationProvenance, withReviewerLaunchPreflight } = createValidationProvenance({
-    podRepo,
-    containerManagerFactory,
-    resolveEffectiveBoundProfile,
-  });
+  const { recordValidationProvenance, withReviewerLaunchPreflight, prepareValidationRepository } =
+    createValidationProvenance({
+      podRepo,
+      containerManagerFactory,
+      resolveEffectiveBoundProfile,
+      readLaunch: (id) => deps.launchConfiguration?.read(id) ?? null,
+      preparationSecrets: async (launch) =>
+        (await executionCredentialsFor(launch)?.registries(launch))?.redactionSecrets ?? [],
+    });
 
   const { publishValidationResult } = createValidationPublication({
     podRepo,
@@ -795,6 +799,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const { validateWithInfrastructureRetries } = createValidationExecution({
+    prepareValidationRepository,
     verifySelectedSource: (podId) => checkpointRecovery?.verifySource(podId) ?? Promise.resolve(),
     logger,
     containerManagerFactory,

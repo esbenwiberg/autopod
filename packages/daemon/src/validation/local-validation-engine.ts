@@ -1788,13 +1788,8 @@ async function runBuild(
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
   const warningCount = parseWarningCount(rawOutput);
 
-  // Exit 137 from an in-container exec is overwhelmingly the kernel OOM killer
-  // (SIGKILL). Combined with a bare trailing "Killed" line and no Node stack
-  // trace, it's a near-certain memory exhaustion. Surface this clearly so the
-  // failure points at memory headroom instead of looking like a generic build
-  // bug. Common cause on Docker Desktop: the Linux VM's memory ceiling is
-  // smaller than the container's requested limit, so the per-container cgroup
-  // limit is fake headroom.
+  // A kill is a runner failure requiring investigation. Exit 137 and a trailing
+  // "Killed" cannot establish OOM: the child may have deliberately sent SIGKILL.
   const commandInfrastructureFailure = classifyCommandResourceFailure(
     'build',
     result,
@@ -1808,7 +1803,7 @@ async function runBuild(
     output = `${hint}\n\n--- build output ---\n${rawOutput}`;
     log?.warn(
       { exitCode: result.exitCode, duration, infrastructureFailure },
-      'build failed because validation resources were exhausted',
+      'build encountered a validation process or resource failure',
     );
   } else if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
@@ -1930,7 +1925,7 @@ async function runTests(
   };
 }
 
-function isOomKilled(exitCode: number, output: string): boolean {
+function isPossiblyKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
@@ -1950,20 +1945,20 @@ function classifyCommandResourceFailure(
   if (result.exitCode === 0) return null;
 
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  if (isOomKilled(result.exitCode, output)) return containerOomFailure(phase);
-  if (executionTarget !== 'sandbox' || !hasFatalSandboxMemorySignature(output)) return null;
-
-  return sandboxMemoryExhaustedFailure(phase);
+  if (executionTarget === 'sandbox' && hasFatalSandboxMemorySignature(output))
+    return sandboxMemoryExhaustedFailure(phase);
+  if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
+  return null;
 }
 
-function containerOomFailure(
+function killedProcessFailure(
   phase: ValidationInfrastructureFailure['phase'],
 ): ValidationInfrastructureFailure {
   return {
     phase,
-    code: 'CONTAINER_OOM',
+    code: 'PROCESS_KILLED',
     message:
-      'Validation was OOM-killed (exit 137 / "Killed") after exhausting the container memory ceiling. Retry only after changing the runner or execution resources; repository rework is not indicated.',
+      'Validation was killed (exit 137 or "Killed"). Resource pressure is possible, but OOM evidence is unavailable; investigate the runner before retrying. Repository rework is not automatically indicated.',
     retryable: false,
   };
 }

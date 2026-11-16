@@ -12,6 +12,8 @@ import { resolveLaunchValues } from './credential-references.js';
 import type { ConfigurationCredentialStore } from './credential-store.js';
 
 export interface LaunchRegistryMaterial {
+  /** Execution-only known values for diagnostic redaction; never persisted. */
+  redactionSecrets?: string[];
   files: RegistryFile[];
   nugetSecret: ReturnType<typeof buildNuGetSecretFile>;
 }
@@ -83,6 +85,7 @@ export function createLaunchExecutionCredentials(
       const files: RegistryFile[] = [];
       const npm: string[] = [];
       const endpoints: Array<{ endpoint: string; username: string; password: string }> = [];
+      const redactionSecrets: string[] = [];
       for (const registry of entries) {
         if (!registry.credential) continue;
         const values = await resolveLaunchValues(
@@ -105,6 +108,7 @@ export function createLaunchExecutionCredentials(
             'CONFIG_CREDENTIAL_INVALID',
             403,
           );
+        redactionSecrets.push(token);
         if (registry.type === 'npm') npm.push(generateNpmrc([registry], token));
         else
           endpoints.push({ endpoint: registry.url, username: 'VssSessionToken', password: token });
@@ -117,7 +121,7 @@ export function createLaunchExecutionCredentials(
       const nugetSecret = descriptor
         ? { ...descriptor, content: JSON.stringify({ endpointCredentials: endpoints }) }
         : null;
-      return { files, nugetSecret };
+      return { files, nugetSecret, redactionSecrets };
     },
   };
 }
