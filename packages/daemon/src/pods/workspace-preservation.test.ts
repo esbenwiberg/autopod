@@ -13,6 +13,7 @@ import {
 } from '../test-utils/mock-helpers.js';
 import { checkpointSandboxWorkspace } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { createPodRepository } from './pod-repository.js';
+import { unpublishedSandboxSourceBase } from './sandbox-checkpoint-policy.js';
 import {
   type CheckpointRecord,
   WorkspaceCheckpointController,
@@ -129,6 +130,7 @@ describe('workspace preservation boundary', () => {
             podId,
             worktreePath: host,
             sequence,
+            unpublishedSourceBase: unpublishedSandboxSourceBase(pod),
           }),
         records: {
           save: async (record) => {
@@ -145,7 +147,7 @@ describe('workspace preservation boundary', () => {
         throw new Error('Unexpected local synchronization');
       });
       const preservation = createWorkspacePreservation({
-        captureAuthority: () => () => {},
+        captureAuthority: () => () => pod,
         getContainerManager: () => cm,
         syncWorkspaceBack: sync,
         ...(routing === 'controller' && { workspaceCheckpointController: controller }),
@@ -189,6 +191,36 @@ describe('workspace preservation boundary', () => {
         expect(records[1]?.result).toBe(proof);
         expect(records.every((record) => record.verifiedAt !== null)).toBe(true);
       }
+
+      // Exercise the same preservation path after the worker rewrites captured
+      // unpublished history. The frozen task base is not a caller-supplied ref.
+      pod.startCommitSha = sourceHead;
+      await git(sandbox, ['add', '.']);
+      await git(sandbox, ['commit', '-m', 'draft implementation']);
+      const draft = await preservation.checkpointSandboxWorkspaceForPod(pod);
+      expect(draft.materialized).toBe(true);
+      await git(sandbox, ['commit', '--amend', '-m', 'final implementation']);
+      await writeFile(path.join(sandbox, 'final.txt'), 'final correction\n');
+      const rewritten = await preservation.checkpointSandboxWorkspaceForPod(pod);
+      expect(rewritten).toMatchObject({
+        promoted: true,
+        materialized: true,
+        rewrittenFrom: {
+          checkpoint: draft.snapshotCommit,
+          sourceHead: draft.sourceHead,
+          base: sourceHead,
+        },
+      });
+      expect(await git(host, ['rev-parse', draft.quarantineRef])).toBe(draft.snapshotCommit);
+      expect(await readFile(path.join(host, 'final.txt'), 'utf8')).toBe('final correction\n');
+      // Publication closes this exception even if the generation is unchanged.
+      pod.prUrl = 'https://github.com/owner/repo/pull/1';
+      await git(sandbox, ['commit', '--amend', '-m', 'rewrite after publication']);
+      const refused = await preservation.checkpointSandboxWorkspaceForPod(pod);
+      expect(refused).toMatchObject({ promoted: false, error: { code: 'LINEAGE_CONFLICT' } });
+      expect(await git(host, ['rev-parse', 'HEAD'])).toBe(rewritten.snapshotCommit);
+      expect(cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      expect(cm.kill).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -201,7 +233,7 @@ describe('workspace preservation boundary', () => {
     const pod = { ...workspacePod('missing-source', '/unused'), [missing]: null };
     const getContainerManager = vi.fn(() => createMockContainerManager());
     const preservation = createWorkspacePreservation({
-      captureAuthority: () => () => {},
+      captureAuthority: () => () => pod,
       getContainerManager,
       syncWorkspaceBack: async () => ({ pushed: false }),
       logger,
