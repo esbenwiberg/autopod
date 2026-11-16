@@ -182,8 +182,12 @@ It acquires custody before one non-destructive stop, reconciles uncertain stop
 outcomes without replay, and independently provisions either checks-only source
 or one owned coding repair. Repair candidates must be clean descendants and still
 pass fresh checks/review/report capture. There is no budget reset, original wake,
-automatic second repair worker or delivery authority. See
-`docs/infrastructure-recovery.md` at the repository root for input qualification,
+automatic second repair worker or delivery authority. A canonical linked PR-fix
+can use this explicit protocol only while its same-task/PR/branch root parent is
+settled failed; that parent binding is rechecked through recovery. Automatic fix
+recycling parks the parent rather than spending another attempt after an
+infrastructure report or retained-checkpoint hold. Ordinary continuation/rewrite
+still excludes linked fixes. See `docs/infrastructure-recovery.md` at the repository root for input qualification,
 exact-request reconciliation, limitations and honest test evidence scope.
 
 ## Database

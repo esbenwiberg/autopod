@@ -100,6 +100,48 @@ export function createRetainedCheckpointRecovery(deps: {
   const pending = new Map<string, Promise<void>>();
   const executions = new Map<string, Promise<void>>();
   const reconciliations = new Map<string, Promise<CheckpointRecoveryRecord>>();
+  // Linked fixes share delivery/source authority with their parent. Freeze that
+  // relationship in new recovery bindings, without changing historical root hashes.
+  function fixParentBinding(pod: Pod) {
+    if (!pod.linkedPodId) return [];
+    const parent = deps.podRepo.getOrThrow(pod.linkedPodId);
+    const tasks = deps.podRepo.taskExecutions ?? checkpointError('Task ledger unavailable');
+    const repository = deps.executionForPod(pod).repoUrl;
+    const parentRepository = deps.executionForPod(parent).repoUrl;
+    if (
+      parent.id === pod.id ||
+      parent.linkedPodId ||
+      parent.status !== 'failed' ||
+      parent.fixPodId !== pod.id ||
+      !pod.prUrl ||
+      parent.prUrl !== pod.prUrl ||
+      !pod.branch ||
+      parent.branch !== pod.branch ||
+      (parent.baseBranch ?? deps.executionForPod(parent).defaultBranch ?? 'main') !==
+        (pod.baseBranch ?? deps.executionForPod(pod).defaultBranch ?? 'main') ||
+      !repository ||
+      !parentRepository ||
+      repository.replace(/\.git$/, '') !== parentRepository.replace(/\.git$/, '') ||
+      tasks.snapshot(parent.id).taskId !== tasks.snapshot(pod.id).taskId ||
+      parent.pendingEscalation ||
+      deps.podRepo.hasUnansweredDecision?.(parent.id)
+    )
+      checkpointError(
+        'Linked infrastructure recovery requires the same settled failed parent, canonical fix, repository, branch and PR',
+      );
+    return [
+      parent.id,
+      parent.lifecycleGeneration,
+      parent.launchConfigDigest,
+      parent.branch,
+      parent.baseBranch,
+      parent.prUrl,
+      parent.fixPodId,
+      parent.prFixAttempts,
+      parent.maxPrFixAttempts,
+      parentRepository,
+    ];
+  }
   const configuration = (pod: Pod, settings = deps.executionForPod(pod)) =>
     checkpointHash([
       pod.launchConfigDigest,
@@ -114,6 +156,7 @@ export function createRetainedCheckpointRecovery(deps: {
       pod.providerIdSnapshot,
       pod.providerAccountIdSnapshot,
       settings,
+      ...(pod.linkedPodId ? [fixParentBinding(pod)] : []),
     ]);
   /** A sealed failed repair is separate positive evidence, never an invented blocker/marker. */
   function failedRepairPredecessor(
@@ -271,6 +314,9 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Approval rewrite owns this source; a competing checkpoint recovery is not authorized',
       );
+    // Only the explicit infrastructure protocol may admit a linked fix. Ordinary
+    // continuation/rewrite recovery remains excluded; no delivery grant is added.
+    if (pod.linkedPodId && infrastructure) fixParentBinding(pod);
     if (
       (!continuation && pod.executionTarget !== 'sandbox') ||
       deps.isGoal(pod.id) ||
@@ -285,7 +331,7 @@ export function createRetainedCheckpointRecovery(deps: {
       isPodValidationDisabled(pod) ||
       pod.validationWaiver ||
       (pod.validationOverrides?.length ?? 0) > 0 ||
-      pod.linkedPodId ||
+      (pod.linkedPodId && !infrastructure) ||
       (pod.sidecarContainerIds && Object.keys(pod.sidecarContainerIds).length > 0)
     )
       checkpointError(
@@ -500,6 +546,22 @@ export function createRetainedCheckpointRecovery(deps: {
       selection && !pod.lastValidationResult && !selection.infrastructureReports,
     );
     const infrastructure = repo.infrastructureNeeds(pod);
+    // Ordinary continuation can remain blocked while explicit infrastructure
+    // repair may collect pending guidance. These are policy observations only:
+    // no source, environment or operation has been qualified or admitted.
+    const infrastructurePolicies = Object.fromEntries(
+      (['checks', 'rework'] as const).map((mode) => [
+        mode,
+        check(`infrastructure_${mode}`, () =>
+          policy(pod, true, undefined, true, {
+            version: 1,
+            mode,
+            qualification: '',
+            originalTree: '',
+          }),
+        ),
+      ]),
+    );
     const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
     return {
       version: 1 as const,
@@ -517,6 +579,7 @@ export function createRetainedCheckpointRecovery(deps: {
       infrastructure: {
         state: infrastructure.needs.length ? ('reported' as const) : ('none_recorded' as const),
         ...infrastructure,
+        policies: infrastructurePolicies,
       },
       prerequisites: {
         hostPathRecorded: Boolean(pod.worktreePath),
@@ -1041,6 +1104,7 @@ export function createRetainedCheckpointRecovery(deps: {
         selection,
         assertCurrent,
         Boolean(codingClaim),
+        infrastructure?.mode,
       );
     }
     if (codingClaim) {
@@ -1222,11 +1286,28 @@ export function createRetainedCheckpointRecovery(deps: {
     podId: string,
     profileId: string,
     buildOnlyEnvironmentKeys?: string[],
+    infrastructureMode: 'checks' | 'rework' = 'checks',
   ) {
     if (!profileId.trim() || profileId.length > 128)
       checkpointError('Explicit replacement profile required');
     const pod = deps.podRepo.getOrThrow(podId);
-    policy(pod, true, undefined, true);
+    // Preview grants software/resource selection only. For a linked fix it must
+    // use the same settled infrastructure policy as explicit repair, not relax
+    // ordinary continuation or assert that the environment is already qualified.
+    policy(
+      pod,
+      true,
+      undefined,
+      true,
+      pod.linkedPodId
+        ? {
+            version: 1,
+            mode: infrastructureMode,
+            qualification: '',
+            originalTree: '',
+          }
+        : undefined,
+    );
     const preview =
       deps.previewExecution ?? checkpointError('Explicit execution selection is unavailable');
     const execution = await preview(podId, profileId);
@@ -1269,11 +1350,13 @@ export function createRetainedCheckpointRecovery(deps: {
     >,
     assertCurrent: () => void,
     coding = false,
+    infrastructureMode: 'checks' | 'rework' = 'checks',
   ): Promise<RetainedExecutionSelection> {
     const execution = await previewExecution(
       pod.id,
       input.executionProfileId!,
       input.buildOnlyEnvironmentKeys,
+      infrastructureMode,
     );
     assertCurrent();
     if (execution.digest !== input.expectedExecutionDigest)

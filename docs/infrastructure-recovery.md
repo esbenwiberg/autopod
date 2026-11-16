@@ -69,6 +69,29 @@ asynchronous final source inspection. Ordinary retained-continuation inspection
 still describes checks-only eligibility; its unread-guidance refusal is not a
 refusal of the separate explicitly selected one-worker `rework` operation.
 
+## Linked PR-fix tasks
+
+The explicit infrastructure protocol also supports a canonical linked fix when
+its root parent is settled and **failed**, still names that exact fix, and owns
+the same logical task, repository, branch/base and existing PR. Parent identity,
+generation, frozen launch and PR-attempt limits are bound into the recovery's
+configuration hash and rechecked across asynchronous source/provider operations.
+A changed parent or active/uncertain task execution remains blocked. Series
+branch redirection and chains of fix parents are not supported by this path.
+
+Ordinary retained continuation and rewrite recovery still reject linked fixes.
+The infrastructure repair retains its parent and original resources, uses normal
+task/retry accounting, and stops at fresh validation/review without pushing,
+creating a PR or restarting parent merge polling. Recovery does not grant new
+publication or merge authority. A fix with a current infrastructure report or
+retained-checkpoint custody is no longer automatically recycled by the parent;
+the parent parks failed without spending another PR-fix attempt.
+
+Read-only inspection includes separate `infrastructure.policies.checks` and
+`infrastructure.policies.rework` observations. In particular, unread guidance may
+block ordinary/checks-only continuation while one explicit repair can collect it.
+These observations do not qualify source/software, authorize a retry or admit work.
+
 ## Inspect, qualify, select
 
 ```sh
