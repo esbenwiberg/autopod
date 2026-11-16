@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import type { OperatorActor } from '@autopod/shared';
 import { vi } from 'vitest';
 import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
+import { deriveLaunch } from '../configuration/derive-launch.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { resolveLaunchExecutionSettings } from '../configuration/launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
@@ -225,6 +226,7 @@ export async function retainedCheckpointFixture(
     Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
   >,
   originalHandoff?: string,
+  linkedFix = false,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -366,9 +368,39 @@ export async function retainedCheckpointFixture(
           createPod: (config) => manager.createResolvedSession(config, 'operator').id,
         })
       : null;
-  const created = nativeAdmission
+  let created = nativeAdmission
     ? ctx.podRepo.getOrThrow(nativeAdmission.podId)
     : manager.createSession({ profileName: 'test-profile', task }, 'operator');
+  if (linkedFix) {
+    if (!nativeAdmission || !snapshots || !manager.createResolvedSession)
+      throw new Error('Linked fixture requires native derived admission');
+    const parent = created;
+    const config = deriveLaunch(nativeAdmission.config, {
+      source: { podId: parent.id, digest: nativeAdmission.config.digest, kind: 'fix' },
+      task: 'Repair the existing PR',
+      work: {
+        linkedPodId: parent.id,
+        branch: parent.branch,
+        baseBranch: parent.baseBranch ?? 'main',
+      },
+    });
+    const create = manager.createResolvedSession;
+    const admitted = snapshots.admit({
+      config,
+      requestDigest: config.digest,
+      createPod: () => create(config, 'operator').id,
+    });
+    created = ctx.podRepo.getOrThrow(admitted.podId);
+    const prUrl = 'https://github.com/org/repo/pull/590';
+    ctx.podRepo.update(parent.id, {
+      status: 'failed',
+      fixPodId: created.id,
+      prUrl,
+      prFixAttempts: 3,
+      maxPrFixAttempts: 3,
+    });
+    ctx.podRepo.update(created.id, { prUrl });
+  }
   // macOS temporary directories may be reached through /var or /tmp aliases.
   // Fixtures must bind canonical storage without weakening production alias guards.
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'checkpoint-controller-')));
