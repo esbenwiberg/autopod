@@ -331,6 +331,22 @@ export class GhPrManager implements PrManager {
     return execFileAsync('gh', args, { ...execOptions, env });
   }
 
+  /** Safe GETs only: one fresh read can recover an empty/truncated provider response. */
+  private async readGhJson(args: string[], timeout: number): Promise<unknown> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { stdout } = await this.execGh(args, { timeout });
+      try {
+        return JSON.parse(stdout) as unknown;
+      } catch {
+        // Never include provider output or parser previews (potential secrets).
+        // This is NOT a retry of an admitted merge mutation.
+      }
+    }
+    return mergeReconciliation(
+      'GitHub returned empty or malformed JSON during a read-only delivery lookup.',
+    );
+  }
+
   async findPr(
     config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
   ): Promise<FoundPr | null> {
@@ -562,11 +578,10 @@ export class GhPrManager implements PrManager {
       config,
       () => this.getPrStatus({ prUrl: config.prUrl }),
       async (base, head) => {
-        const result = await this.execGh(
+        return this.readGhJson(
           ['api', `repos/${owner}/${repo}/compare/${base}...${head}?per_page=1`],
-          { timeout: 30_000 },
+          30_000,
         );
-        return JSON.parse(result.stdout) as unknown;
       },
     );
   }
@@ -580,11 +595,19 @@ export class GhPrManager implements PrManager {
       'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository,mergeStateStatus,isDraft',
     ];
 
-    const { stdout } = await this.execGh(args, {
-      timeout: 15_000,
-    });
+    const data = await this.readGhJson(args, 15_000);
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data) ||
+      !('state' in data) ||
+      !['OPEN', 'CLOSED', 'MERGED'].includes(String(data.state))
+    )
+      mergeReconciliation(
+        'GitHub did not return a recognized PR disposition during a read-only delivery lookup.',
+      );
 
-    const pr = JSON.parse(stdout) as {
+    const pr = data as {
       url?: string;
       headRefName?: string;
       baseRefName?: string;

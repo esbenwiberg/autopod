@@ -35,6 +35,62 @@ function fixture(db = createTestDb()) {
   return { db, repo, ledger: createSourcePublicationLedger(db), pod: repo.getOrThrow('source') };
 }
 describe('durable source publication', () => {
+  it.each([
+    null,
+    'https://github.com/org/repo/pull/27',
+  ])('selects only the original confirmed receipt across PR creation (%s)', (prUrl) => {
+    const f = fixture();
+    try {
+      f.repo.update('source', { prUrl });
+      const pod = f.repo.getOrThrow('source');
+      const id = f.ledger.admit(pod, proof);
+      expect(f.ledger.latestConfirmedForMerge?.(pod)).toBeNull();
+      f.ledger.confirm(pod, id, proof);
+      f.repo.update('source', { prUrl: 'https://github.com/org/repo/pull/27' });
+      expect(f.ledger.latestConfirmedForMerge?.(f.repo.getOrThrow('source'))).toMatchObject({
+        ...proof,
+        publicationId: id,
+        publicationPrUrl: prUrl,
+      });
+      expect(f.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get()).toEqual({
+        n: 1,
+      });
+      expect(f.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get()).toEqual({
+        n: 1,
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it.each([
+    'pr',
+    'container',
+    'worktree',
+    'branch',
+    'generation',
+  ] as const)('does not adopt another source/resource binding (%s)', (change) => {
+    const f = fixture();
+    try {
+      f.repo.update('source', { prUrl: 'https://github.com/org/repo/pull/27' });
+      const pod = f.repo.getOrThrow('source');
+      const id = f.ledger.admit(pod, proof);
+      f.ledger.confirm(pod, id, proof);
+      if (change === 'pr')
+        f.repo.update('source', { prUrl: 'https://github.com/org/repo/pull/28' });
+      if (change === 'container') f.repo.update('source', { containerId: 'replacement' });
+      if (change === 'worktree') f.repo.update('source', { worktreePath: '/tmp/replacement' });
+      if (change === 'branch')
+        f.db.prepare("UPDATE pods SET branch = 'replacement' WHERE id = 'source'").run();
+      if (change === 'generation') f.repo.incrementLifecycleGeneration('source');
+      const current = f.repo.getOrThrow('source');
+      if (change === 'generation') expect(f.ledger.latestConfirmedForMerge?.(current)).toBeNull();
+      else expect(() => f.ledger.latestConfirmedForMerge?.(current)).toThrow();
+    } finally {
+      f.db.close();
+    }
+  });
+
   it('refuses admission inside an uncommitted outer transaction', () => {
     const f = fixture();
     try {
