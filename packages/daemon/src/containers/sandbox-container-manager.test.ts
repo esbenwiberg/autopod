@@ -1040,6 +1040,23 @@ describe('SandboxContainerManager', () => {
       expect(code).toBe(7);
     });
 
+    it('preserves concrete non-dispatch evidence without inventing an exit', async () => {
+      const { ExecNotDispatchedError } = await import('./exec-exit-evidence.js');
+      const client = new StreamingFakeClient();
+      const failure = new ExecNotDispatchedError(
+        'wrapper-staging',
+        new AutopodError('Upload rejected', 'AZURE_SANDBOX_API', 403),
+      );
+      // biome-ignore lint/correctness/useYield: a pre-dispatch failure yields no process output
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        throw failure;
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const stream = await mgr.execStreaming(await mgr.spawn(baseConfig), ['target']);
+      await expect(stream.exitCode).rejects.toBe(failure);
+      await expect(readStream(stream.stdout)).resolves.toBe('');
+    });
+
     it('retains an observed native exit despite a subsequent transport error', async () => {
       const client = new StreamingFakeClient();
       vi.spyOn(client, 'execStream').mockImplementation(async function* () {

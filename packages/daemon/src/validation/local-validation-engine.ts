@@ -28,7 +28,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
+import { ExecInterruptedError, ExecNotDispatchedError } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { REVIEW_RETRY_BLOCKED } from '../interfaces/reviewer-executor.js';
 import type {
@@ -1999,6 +1999,17 @@ function classifyValidationInfrastructureFailure(
   executionTarget?: ValidationEngineConfig['executionTarget'],
 ): ValidationInfrastructureFailure | null {
   if (error instanceof ValidationCommandInfrastructureError) return error.failure;
+
+  if (error instanceof ExecNotDispatchedError) {
+    return {
+      phase,
+      code: error.code,
+      statusCode: error.statusCode,
+      message: error.message,
+      retryable: false,
+      nonDispatch: error.nonDispatch,
+    };
+  }
 
   if (
     error instanceof AutopodError &&

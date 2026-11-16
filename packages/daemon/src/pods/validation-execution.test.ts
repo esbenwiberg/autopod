@@ -7,6 +7,7 @@ import type { TaskRetryIdentity, ValidationResult } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ExecNotDispatchedError } from '../containers/exec-exit-evidence.js';
 import { createDatabase } from '../db/connection.js';
 import type {
   ValidationEngine,
@@ -383,6 +384,50 @@ describe('validation execution durable effects', () => {
       expect(f.engine).not.toHaveBeenCalled();
       expect(f.ledger.state('worker').executedCount).toBe(0);
       expect(f.config.testTimeout).toBe(900000);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('publishes a proven non-dispatch outcome without automatic retry or unknown custody', async () => {
+    const f = fixture(true);
+    try {
+      Object.assign(f.config, {
+        testCommand: 'test',
+        buildCommand: '',
+        startCommand: '',
+        hasWebUi: false,
+      });
+      const exitCode = Promise.reject(
+        new ExecNotDispatchedError(
+          'wrapper-staging',
+          new AutopodError('Upload rejected', 'AZURE_SANDBOX_API', 403),
+        ),
+      );
+      void exitCode.catch(() => {});
+      vi.mocked(f.cm.execStreaming).mockResolvedValue({
+        stdout: Readable.from([]),
+        stderr: Readable.from([]),
+        exitCode,
+        kill: vi.fn(),
+      });
+      const engine = createLocalValidationEngine(f.cm);
+      f.engine.mockImplementation((...args) => engine.validate(...args));
+      const output = await f.run();
+      expect(output.infrastructureFailure).toMatchObject({
+        code: 'EXEC_NOT_DISPATCHED',
+        statusCode: 403,
+        retryable: false,
+      });
+      expect(f.engine).toHaveBeenCalledTimes(1);
+      expect(f.ledger.state('worker')).toMatchObject({
+        executedCount: 1,
+        latest: { outcome: 'nonretryable' },
+      });
+      expect(f.repo.validationExecutions?.unsettled('worker')).toBeNull();
+      expect(() => f.repo.validationExecutions?.assertTaskSettled('worker')).not.toThrow();
+      expect(f.db().prepare('SELECT * FROM validation_dispatch_outcomes').all()).toHaveLength(1);
+      expect(f.db().prepare('SELECT * FROM validation_dispatch_results').all()).toHaveLength(1);
     } finally {
       f.close();
     }

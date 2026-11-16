@@ -24,6 +24,14 @@ export interface ValidationInfrastructureFailure {
   message: string;
   /** Whether an explicit validation retry may succeed without changing repository code. */
   retryable: boolean;
+  /** Positive adapter evidence for this failed target command, never inferred from HTTP status.
+   * Earlier commands in the validation may have completed with observed exits.
+   */
+  nonDispatch?: {
+    provider: 'azure-sandbox';
+    boundary: 'wrapper-staging' | 'authentication' | 'socket-creation' | 'before-start';
+    causeCode?: string;
+  };
   /** Optional for old records. Cleanup never implies a successful test outcome. */
   execution?: {
     cause: 'timeout' | 'cancelled';

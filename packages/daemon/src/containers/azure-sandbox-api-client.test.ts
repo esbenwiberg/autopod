@@ -1270,6 +1270,33 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it.each([
+    false,
+    true,
+  ])('never sends start after pre-open error or cancellation=%s', async (cancelled) => {
+    const { client, sockets } = makeStreamingClient((socket) => {
+      if (!cancelled) socket.onerror?.({});
+      // A late open event must not dispatch a failed or cancelled operation.
+      socket.onopen?.({});
+    });
+    const drain = async () => {
+      for await (const _chunk of client.execStream('sbx-1', ['target'], {
+        onCancelReady: cancelled
+          ? (cancel) => {
+              void cancel();
+            }
+          : undefined,
+      })) {
+        /* drain */
+      }
+    };
+    await expect(drain()).rejects.toMatchObject({
+      code: 'EXEC_NOT_DISPATCHED',
+      nonDispatch: { boundary: 'before-start' },
+    });
+    expect(sockets[0]?.sent).toEqual([]);
+  });
+
   it('stages a wrapper script then streams stdout/stderr and exit code over the exec WebSocket', async () => {
     const { client, sockets, wsUrls, wsHeaders, requests } = makeStreamingClient((socket) => {
       socket.onopen?.({});
@@ -1654,10 +1681,14 @@ describe('AzureSandboxApiClient', () => {
       .next()
       .catch((err: Error) => err);
     expect(error).toMatchObject({
-      code: 'AZURE_SANDBOX_EXEC_STREAM',
-      transport: { startSent: false, closeSource: 'remote', closeReason: 'normal closure' },
+      code: 'EXEC_NOT_DISPATCHED',
+      nonDispatch: { boundary: 'before-start' },
+      cause: {
+        transport: { startSent: false, closeSource: 'remote', closeReason: 'normal closure' },
+      },
     });
-    const diagnostic = (error as Error & { transport: { closeCode?: number } }).transport;
+    const diagnostic = (error as Error & { cause: { transport: { closeCode?: number } } }).cause
+      .transport;
     expect(diagnostic.closeCode).toBe(
       code !== undefined && code >= 1000 && code <= 4999 ? code : undefined,
     );
