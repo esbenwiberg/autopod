@@ -8,7 +8,7 @@ import {
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import type { ContainerStartOptions } from '../interfaces/container-manager.js';
-import { isObservedExitCode } from './exec-exit-evidence.js';
+import { ExecNotDispatchedError, isObservedExitCode } from './exec-exit-evidence.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
@@ -605,11 +605,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       // Persist before obtaining a socket or sending any remote start request.
       options?.onProcessCreated?.(identity);
     } else {
-      scriptPath = await this.stageExecutableWrapper(
-        sandboxId,
-        streamExecScript(command, options?.cwd),
-        options?.beforeSend,
-      );
+      try {
+        scriptPath = await this.stageExecutableWrapper(
+          sandboxId,
+          streamExecScript(command, options?.cwd),
+          options?.beforeSend,
+        );
+      } catch (error) {
+        throw new ExecNotDispatchedError('wrapper-staging', error);
+      }
     }
     const pidPath = `${scriptPath}.pid`;
     const transport: ExecStreamTransport = {
@@ -632,18 +636,35 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         { transport },
       );
 
-    const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
+    let token: AccessToken;
+    try {
+      token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
+    } catch (error) {
+      throw new ExecNotDispatchedError('authentication', error);
+    }
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
-    options?.beforeSend?.();
-    const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    try {
+      options?.beforeSend?.();
+    } catch (error) {
+      throw new ExecNotDispatchedError('before-start', error);
+    }
+    let socket: WebSocketLike;
+    try {
+      socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    } catch (error) {
+      throw new ExecNotDispatchedError('socket-creation', error);
+    }
     let startSent = false;
     let cancellation: Promise<void> | null = null;
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
-          if (!startSent) throw new Error('Sandbox exec was not dispatched');
+          if (!startSent) {
+            fail(new ExecNotDispatchedError('before-start', new Error('Sandbox exec cancelled')));
+            return;
+          }
           if (identity) {
             const exitCode = await this.terminateRecordedExec(identity);
             exitReceived = true;
@@ -669,8 +690,6 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       })();
       return cancellation;
     };
-    options?.onCancelReady?.(cancelRemote);
-
     const queue: SandboxExecChunk[] = [];
     let failure: Error | null = null;
     let exitReceived = false;
@@ -706,7 +725,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       : null;
 
     socket.onopen = () => {
-      if (closed) return;
+      if (closed || failure) return;
       try {
         options?.beforeSend?.();
       } catch (error) {
@@ -716,21 +735,27 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       }
       startSent = true;
       transport.startSent = true;
-      socket.send(
-        JSON.stringify({
-          type: 'start',
-          start: {
-            command: scriptPath,
-            environment: identity
-              ? SANDBOX_GOAL_SUPERVISOR_ENV
-              : { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
-            tty: false,
-            stdin: !identity && options?.stdin === true,
-            height: 24,
-            width: 80,
-          },
-        }),
-      );
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'start',
+            start: {
+              command: scriptPath,
+              environment: identity
+                ? SANDBOX_GOAL_SUPERVISOR_ENV
+                : { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
+              tty: false,
+              stdin: !identity && options?.stdin === true,
+              height: 24,
+              width: 80,
+            },
+          }),
+        );
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error('Sandbox start send failed'));
+        socket.close();
+        return;
+      }
       if (identity) {
         try {
           options?.onProcessStarted?.(identity);
@@ -820,6 +845,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       wake();
     };
 
+    // Cancellation may be requested synchronously; initialize handlers first.
+    options?.onCancelReady?.(cancelRemote);
+
     try {
       while (true) {
         const chunk = queue.shift();
@@ -851,6 +879,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         });
       }
     } catch (error) {
+      // Before the send attempt, this adapter can prove the target never started.
+      // Setting startSent before send deliberately keeps a throwing send ambiguous.
+      if (!startSent) throw new ExecNotDispatchedError('before-start', error);
       if (timeoutFailure) {
         let cleanup: 'confirmed' | 'failed' = 'failed';
         try {

@@ -18,6 +18,11 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import {
+  GITHUB_DRAFT_REASON,
+  GitHubDraftMergeRefusal,
+  isGitHubDraftRefusal,
+} from './github-draft-gate.js';
 import { verifyGitHubMergedSourceAncestry } from './github-merge-ancestry.js';
 import { parseGitHubRepoUrl, parseGitHubPrUrl as parsePrUrl } from './github-url-identity.js';
 import {
@@ -310,12 +315,18 @@ export class GhPrManager implements PrManager {
 
   private async execGh(
     args: string[],
-    options: { cwd?: string; timeout: number; onPrepared?: () => void },
+    options: {
+      cwd?: string;
+      timeout: number;
+      onPrepared?: () => void;
+      beforePrepared?: () => Promise<void>;
+    },
   ) {
     const credential = await this.githubAuth.resolveCredential();
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
-    const { onPrepared, ...execOptions } = options;
+    const { onPrepared, beforePrepared, ...execOptions } = options;
+    await beforePrepared?.();
     onPrepared?.();
     return execFileAsync('gh', args, { ...execOptions, env });
   }
@@ -454,7 +465,7 @@ export class GhPrManager implements PrManager {
           'view',
           config.prUrl,
           '--json',
-          'url,state,headRefOid,headRefName,baseRefName,isCrossRepository',
+          'url,state,headRefOid,headRefName,baseRefName,isCrossRepository,isDraft',
         ],
         { timeout: 15_000 },
       );
@@ -465,6 +476,7 @@ export class GhPrManager implements PrManager {
         headRefName?: string;
         baseRefName?: string;
         isCrossRepository?: boolean;
+        isDraft?: boolean;
       } | null;
       if (!observed?.url || observed.isCrossRepository !== false)
         mergeReconciliation('The PR source repository is unavailable or differs from its target.');
@@ -479,9 +491,21 @@ export class GhPrManager implements PrManager {
       });
       if (!['OPEN', 'CLOSED', 'MERGED'].includes(observed.state ?? ''))
         mergeReconciliation('The provider PR disposition is unavailable.');
+      if (observed.state === 'OPEN' && observed.isDraft === true)
+        throw new Error(GITHUB_DRAFT_REASON);
       return observed.state;
     };
-    if (config.expectedTarget) await checkTarget();
+    const checkDraftBeforeAdmission = async () => {
+      if (config.expectedTarget) {
+        await checkTarget();
+        return;
+      }
+      const { stdout } = await this.execGh(['pr', 'view', config.prUrl, '--json', 'isDraft'], {
+        timeout: 15_000,
+      });
+      if ((JSON.parse(stdout) as { isDraft?: boolean }).isDraft === true)
+        throw new Error(GITHUB_DRAFT_REASON);
+    };
     const args = [
       'pr',
       'merge',
@@ -498,10 +522,12 @@ export class GhPrManager implements PrManager {
     try {
       await this.execGh(args, {
         timeout: 30_000,
+        beforePrepared: checkDraftBeforeAdmission,
         onPrepared: config.onPrepared,
       });
     } catch (err) {
       this.logger.error({ err, prUrl: config.prUrl }, 'Failed to merge pull request');
+      if (isGitHubDraftRefusal(err)) throw new GitHubDraftMergeRefusal();
       throw err;
     }
 
@@ -551,7 +577,7 @@ export class GhPrManager implements PrManager {
       'view',
       config.prUrl,
       '--json',
-      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository,mergeStateStatus',
+      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository,mergeStateStatus,isDraft',
     ];
 
     const { stdout } = await this.execGh(args, {
@@ -567,6 +593,7 @@ export class GhPrManager implements PrManager {
       state: string;
       mergedAt: string | null;
       mergeStateStatus?: string;
+      isDraft?: boolean;
       statusCheckRollup: Array<{
         name?: string;
         context?: string;
@@ -621,6 +648,7 @@ export class GhPrManager implements PrManager {
 
     // PR is still open — build a block reason from checks + review status
     const reasons: string[] = [];
+    if (pr.isDraft === true) reasons.push('Pull request is still a draft');
     const ciFailures: CiFailureDetail[] = [];
 
     // Both CheckRun and legacy StatusContext entries occur in this union.
@@ -1017,9 +1045,10 @@ export class GitHubApiPrManager implements PrManager {
       const text = await prResponse.text();
       throw new Error(`GitHub API error fetching PR ${prResponse.status}: ${text}`);
     }
-    const pr = (await prResponse.json()) as GitHubTargetObservation | null;
+    const pr = (await prResponse.json()) as (GitHubTargetObservation & { draft?: boolean }) | null;
     assertMergeSource(expectedHeadSha, pr?.head?.sha);
     assertGitHubTarget(config.expectedTarget, pr);
+    if (pr?.draft === true) throw new Error(GITHUB_DRAFT_REASON);
 
     config.onPrepared?.();
     const mergeResponse = await fetch(
@@ -1111,6 +1140,7 @@ export class GitHubApiPrManager implements PrManager {
       number?: number;
       state: string;
       merged: boolean;
+      draft?: boolean;
       head: { sha: string };
     };
     let sourceTarget: MergePrTarget | undefined;
@@ -1171,6 +1201,7 @@ export class GitHubApiPrManager implements PrManager {
     );
 
     const reasons: string[] = [];
+    if (pr.draft === true) reasons.push('Pull request is still a draft');
     const ciFailures: CiFailureDetail[] = [];
     if (statusResponse.ok) {
       const data = (await statusResponse.json()) as {
@@ -1325,6 +1356,7 @@ export class GitHubApiPrManager implements PrManager {
       sourceTarget,
       merged: false,
       open: true,
+      mergeBlocked: pr.draft === true || undefined,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
       ciFailures,
       reviewComments,

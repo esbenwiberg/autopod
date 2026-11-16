@@ -9,6 +9,7 @@ import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { MergeJournal, MergeJournalEntry } from '../pods/merge-journal.js';
 import type { SourcePublicationLedger } from '../pods/source-publication-ledger.js';
 import type { ConfirmedSourcePublication } from './durable-source-publication.js';
+import { GitHubDraftMergeRefusal } from './github-draft-gate.js';
 import {
   assertMergeSource,
   assertMergeTarget,
@@ -153,7 +154,17 @@ export async function mergePublishedSource(
   } catch (error) {
     if (attemptId) {
       const admitted = journal.find(pod);
-      if (admitted) return reconcileMerge(journal, pod, admitted, provider);
+      if (admitted) {
+        try {
+          return await reconcileMerge(journal, pod, admitted, provider);
+        } catch (reconciliationError) {
+          if (error instanceof GitHubDraftMergeRefusal)
+            return mergeReconciliation(
+              `${error.message} The admitted merge request remains unresolved; this refusal does not authorize replay.`,
+            );
+          throw reconciliationError;
+        }
+      }
     }
     throw error;
   }

@@ -56,7 +56,11 @@ import {
   parseCgroupExecutionMetadata,
 } from './cgroup-execution-metadata.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
-import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
+import {
+  ExecNotDispatchedError,
+  isObservedExitCode,
+  unverifiedExecExit,
+} from './exec-exit-evidence.js';
 import {
   parseRecoveryContent,
   parseRecoveryListing,
@@ -843,6 +847,10 @@ for root in sys.argv[1:]:
         : undefined;
     const streamOptions: SandboxExecOptions = {
       ...options,
+      beforeSend: () => {
+        options.beforeSend?.();
+        if (cancelled) throw new Error('Sandbox exec cancelled before dispatch');
+      },
       onCancelReady: (cancel) => {
         cancelRemote = cancel;
         resolveCancelReady?.(cancel);
@@ -877,7 +885,10 @@ for root in sys.argv[1:]:
         if (!streamsFinalized && !stderr.destroyed && !stderr.readableEnded) {
           stderr.push(String(err instanceof Error ? err.message : err));
         }
-        if (code === undefined) throw unverifiedExecExit(err, cancelled);
+        if (code === undefined) {
+          if (err instanceof ExecNotDispatchedError) throw err;
+          throw unverifiedExecExit(err, cancelled);
+        }
       } finally {
         finalizeStreams();
       }

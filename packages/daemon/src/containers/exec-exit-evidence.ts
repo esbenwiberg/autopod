@@ -2,6 +2,32 @@ import { AutopodError, type ValidationInfrastructureFailure } from '@autopod/sha
 
 export type ExecInterruption = NonNullable<ValidationInfrastructureFailure['execution']>;
 
+/** Construct only at a concrete adapter boundary before attempting target start.
+ * This is evidence about the target, not an exit code or settlement of old work.
+ */
+export class ExecNotDispatchedError extends AutopodError {
+  readonly nonDispatch: NonNullable<ValidationInfrastructureFailure['nonDispatch']>;
+
+  constructor(
+    boundary: NonNullable<ValidationInfrastructureFailure['nonDispatch']>['boundary'],
+    readonly cause: unknown,
+  ) {
+    const underlying = cause as { code?: unknown; statusCode?: unknown } | null;
+    super(
+      `Sandbox target command was not dispatched (${boundary}): ${cause instanceof Error ? cause.message : String(cause)}`,
+      'EXEC_NOT_DISPATCHED',
+      typeof underlying?.statusCode === 'number' ? underlying.statusCode : 502,
+    );
+    this.nonDispatch = {
+      provider: 'azure-sandbox',
+      boundary,
+      ...(typeof underlying?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(underlying.code)
+        ? { causeCode: underlying.code }
+        : {}),
+    };
+  }
+}
+
 /** An interruption and cleanup are separate from an observed command exit. */
 export class ExecInterruptedError extends AutopodError {
   constructor(readonly execution?: ExecInterruption) {
