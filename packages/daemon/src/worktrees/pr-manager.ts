@@ -18,6 +18,11 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import {
+  GITHUB_DRAFT_REASON,
+  GitHubDraftMergeRefusal,
+  isGitHubDraftRefusal,
+} from './github-draft-gate.js';
 import { verifyGitHubMergedSourceAncestry } from './github-merge-ancestry.js';
 import { parseGitHubRepoUrl, parseGitHubPrUrl as parsePrUrl } from './github-url-identity.js';
 import {
@@ -310,12 +315,18 @@ export class GhPrManager implements PrManager {
 
   private async execGh(
     args: string[],
-    options: { cwd?: string; timeout: number; onPrepared?: () => void },
+    options: {
+      cwd?: string;
+      timeout: number;
+      onPrepared?: () => void;
+      beforePrepared?: () => Promise<void>;
+    },
   ) {
     const credential = await this.githubAuth.resolveCredential();
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
-    const { onPrepared, ...execOptions } = options;
+    const { onPrepared, beforePrepared, ...execOptions } = options;
+    await beforePrepared?.();
     onPrepared?.();
     return execFileAsync('gh', args, { ...execOptions, env });
   }
@@ -481,10 +492,20 @@ export class GhPrManager implements PrManager {
       if (!['OPEN', 'CLOSED', 'MERGED'].includes(observed.state ?? ''))
         mergeReconciliation('The provider PR disposition is unavailable.');
       if (observed.state === 'OPEN' && observed.isDraft === true)
-        throw new Error('Pull request is still a draft. Mark it ready for review before merging.');
+        throw new Error(GITHUB_DRAFT_REASON);
       return observed.state;
     };
-    if (config.expectedTarget) await checkTarget();
+    const checkDraftBeforeAdmission = async () => {
+      if (config.expectedTarget) {
+        await checkTarget();
+        return;
+      }
+      const { stdout } = await this.execGh(['pr', 'view', config.prUrl, '--json', 'isDraft'], {
+        timeout: 15_000,
+      });
+      if ((JSON.parse(stdout) as { isDraft?: boolean }).isDraft === true)
+        throw new Error(GITHUB_DRAFT_REASON);
+    };
     const args = [
       'pr',
       'merge',
@@ -501,10 +522,12 @@ export class GhPrManager implements PrManager {
     try {
       await this.execGh(args, {
         timeout: 30_000,
+        beforePrepared: checkDraftBeforeAdmission,
         onPrepared: config.onPrepared,
       });
     } catch (err) {
       this.logger.error({ err, prUrl: config.prUrl }, 'Failed to merge pull request');
+      if (isGitHubDraftRefusal(err)) throw new GitHubDraftMergeRefusal();
       throw err;
     }
 
@@ -1025,8 +1048,7 @@ export class GitHubApiPrManager implements PrManager {
     const pr = (await prResponse.json()) as (GitHubTargetObservation & { draft?: boolean }) | null;
     assertMergeSource(expectedHeadSha, pr?.head?.sha);
     assertGitHubTarget(config.expectedTarget, pr);
-    if (pr?.draft === true)
-      throw new Error('Pull request is still a draft. Mark it ready for review before merging.');
+    if (pr?.draft === true) throw new Error(GITHUB_DRAFT_REASON);
 
     config.onPrepared?.();
     const mergeResponse = await fetch(

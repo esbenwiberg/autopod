@@ -82,6 +82,7 @@ describe('GhPrManager', () => {
   it('pins an expected source commit without scheduling a later merge or deleting the branch', async () => {
     const sha = 'a'.repeat(40);
     execResponses.push(
+      { stdout: JSON.stringify({ isDraft: false }), stderr: '' },
       { stdout: '', stderr: '' },
       {
         stdout: JSON.stringify({
@@ -97,9 +98,9 @@ describe('GhPrManager', () => {
       expectedHeadSha: sha,
     });
     expect(result.merged).toBe(true);
-    expect(execCalls[0]?.[1]).toEqual(expect.arrayContaining(['--match-head-commit', sha]));
-    expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--auto']));
-    expect(execCalls[0]?.[1]).not.toEqual(expect.arrayContaining(['--delete-branch']));
+    expect(execCalls[1]?.[1]).toEqual(expect.arrayContaining(['--match-head-commit', sha]));
+    expect(execCalls[1]?.[1]).not.toEqual(expect.arrayContaining(['--auto']));
+    expect(execCalls[1]?.[1]).not.toEqual(expect.arrayContaining(['--delete-branch']));
   });
 
   it.each([
@@ -107,6 +108,7 @@ describe('GhPrManager', () => {
     'b'.repeat(40),
   ])('rejects a merged CLI observation with unconfirmed source %s', async (headRefOid) => {
     execResponses.push(
+      { stdout: JSON.stringify({ isDraft: false }), stderr: '' },
       { stdout: '', stderr: '' },
       {
         stdout: JSON.stringify({
@@ -229,8 +231,9 @@ describe('GhPrManager', () => {
   });
 
   it('honors a rejected final CLI admission before executing a merge', async () => {
+    execResponses.push({ stdout: JSON.stringify({ isDraft: false }), stderr: '' });
     const onPrepared = vi.fn(() => {
-      expect(githubAuth.resolveCredential).toHaveBeenCalledOnce();
+      expect(githubAuth.resolveCredential).toHaveBeenCalledTimes(2);
       throw new Error('admission rejected');
     });
     await expect(
@@ -240,7 +243,14 @@ describe('GhPrManager', () => {
         onPrepared,
       }),
     ).rejects.toThrow('admission rejected');
-    expect(execCalls).toHaveLength(0);
+    expect(execCalls).toHaveLength(1);
+    expect(execCalls[0]?.[1]).toEqual([
+      'pr',
+      'view',
+      'https://github.com/org/repo/pull/42',
+      '--json',
+      'isDraft',
+    ]);
     expect(onPrepared).toHaveBeenCalledOnce();
   });
 
@@ -351,6 +361,7 @@ describe('GhPrManager', () => {
   });
 
   it('mergePr returns merged:true when PR merges immediately', async () => {
+    execResponses.push({ stdout: JSON.stringify({ isDraft: false }), stderr: '' });
     // First call: gh pr merge (succeeds)
     execResponses.push({ stdout: '', stderr: '' });
     // Second call: gh pr view (status check — PR is merged)
@@ -377,6 +388,7 @@ describe('GhPrManager', () => {
   });
 
   it('mergePr returns merged:false when auto-merge is scheduled', async () => {
+    execResponses.push({ stdout: JSON.stringify({ isDraft: false }), stderr: '' });
     // First call: gh pr merge --auto (succeeds but schedules auto-merge)
     execResponses.push({ stdout: '', stderr: '' });
     // Second call: gh pr view (PR still open, auto-merge scheduled)
