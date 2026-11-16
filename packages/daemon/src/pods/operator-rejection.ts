@@ -24,6 +24,7 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
     logger,
     taskFeedbackEvents,
     persistRuntimeCredentialsForPod,
+    hasLaunchConfiguration,
   } = captured;
   async function rejectSession(
     this: OperatorRejectionCalls,
@@ -76,7 +77,6 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
     // Reset validation attempts — human is giving a fresh chance
     podRepo.update(podId, {
       validationAttempts: 0,
-      lastValidationResult: null,
       lastCorrectionMessage: [
         REWORK_IN_PROGRESS_PREFIX,
         reason ? `${actorLabel(actor)} rejection: ${reason}` : `${actorLabel(actor)} rejection`,
@@ -110,7 +110,7 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
         { podId, containerId: pod.containerId },
         'Retained resource verified running for feedback continuation',
       );
-      if (pod.executionTarget === 'local') {
+      if (pod.executionTarget === 'local' && !hasLaunchConfiguration) {
         await this.refreshNetworkPolicy(pod.profileName);
       }
 
@@ -127,6 +127,7 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
         'Failed to persist rotated credentials after rejection resume',
       );
       if (outcome === 'completed') {
+        podRepo.update(podId, { lastValidationResult: null });
         await this.handleCompletion(podId);
       }
     } catch (err) {
@@ -153,6 +154,9 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
       }
       const s = podRepo.getOrThrow(podId);
       if (!isTerminalState(s.status) && !podRepo.hasInfrastructureBlocker?.(podId)) {
+        if (s.lifecycleGeneration === pod.lifecycleGeneration && s.lastValidationResult == null) {
+          podRepo.update(podId, { lastValidationResult: pod.lastValidationResult });
+        }
         transition(s, 'failed');
         emitActivityStatus(
           podId,

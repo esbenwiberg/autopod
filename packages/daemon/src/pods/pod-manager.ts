@@ -1266,6 +1266,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     resolveEffectiveBoundProfile,
   });
   const operatorRejection = createOperatorRejection({
+    hasLaunchConfiguration: Boolean(deps.launchConfiguration),
     reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     podRepo,
     resolveEffectiveBoundProfile,
