@@ -201,9 +201,9 @@ struct ReferenceSourcePreview: NSViewRepresentable {
     text.isHorizontallyResizable = false
     text.isVerticallyResizable = true
     text.autoresizingMask = [.width]
-    text.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+    text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     text.textContainer?.widthTracksTextView = true
-    text.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: .greatestFiniteMagnitude)
+    text.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
     let paragraph = NSMutableParagraphStyle()
     paragraph.lineBreakMode = .byCharWrapping
     text.defaultParagraphStyle = paragraph
