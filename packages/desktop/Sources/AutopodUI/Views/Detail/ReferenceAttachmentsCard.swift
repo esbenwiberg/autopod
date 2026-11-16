@@ -165,11 +165,7 @@ struct ReferenceAttachmentPreview: View {
         VStack(alignment: .leading, spacing: 8) {
           Text("Source preview · active content is not executed")
             .font(.caption).foregroundStyle(.secondary)
-          ScrollView([.horizontal, .vertical]) {
-            Text(String(decoding: data.prefix(256 * 1024), as: UTF8.self))
-              .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-              .frame(maxWidth: .infinity, alignment: .topLeading)
-          }
+          ReferenceSourcePreview(data: data)
           if data.count > 256 * 1024 {
             Text("Preview limited to 256 KiB. Save to view the complete file.").font(.caption)
           }
@@ -179,6 +175,52 @@ struct ReferenceAttachmentPreview: View {
       }
     } else {
       ProgressView("Loading reference…")
+    }
+  }
+}
+
+/// TextKit lays out large source files without one giant SwiftUI Text surface.
+/// Plain strings only: HTML/SVG remain inert, and copying preserves whitespace.
+struct ReferenceSourcePreview: NSViewRepresentable {
+  let data: Data
+
+  func makeNSView(context: Context) -> NSScrollView {
+    let scroll = NSScrollView()
+    scroll.hasVerticalScroller = true
+    scroll.hasHorizontalScroller = false
+    scroll.drawsBackground = false
+    let text = NSTextView(frame: scroll.contentView.bounds)
+    text.isEditable = false
+    text.isSelectable = true
+    text.isRichText = false
+    text.importsGraphics = false
+    text.drawsBackground = false
+    text.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    text.textColor = .labelColor
+    text.textContainerInset = NSSize(width: 4, height: 4)
+    text.isHorizontallyResizable = false
+    text.isVerticallyResizable = true
+    text.autoresizingMask = [.width]
+    text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    text.textContainer?.widthTracksTextView = true
+    text.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.lineBreakMode = .byCharWrapping
+    text.defaultParagraphStyle = paragraph
+    text.setAccessibilityIdentifier("reference-attachment-source")
+    scroll.documentView = text
+    return scroll
+  }
+
+  func updateNSView(_ scroll: NSScrollView, context: Context) {
+    guard let text = scroll.documentView as? NSTextView else { return }
+    let source = String(decoding: data.prefix(256 * 1024), as: UTF8.self)
+    if text.string != source {
+      text.string = source
+      if let paragraph = text.defaultParagraphStyle {
+        text.textStorage?.addAttribute(.paragraphStyle, value: paragraph,
+          range: NSRange(location: 0, length: (source as NSString).length))
+      }
     }
   }
 }

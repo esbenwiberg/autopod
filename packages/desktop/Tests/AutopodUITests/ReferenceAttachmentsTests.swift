@@ -179,13 +179,126 @@ import Testing
     try await denied.wait { denied.has("reference-attachments-retry") }
     #expect(denied.text.contains("Couldn't load references"))
   }
+
+  @Test(arguments: ["small.txt", "retained-final.patch.txt", "long.txt", "long.md", "unbroken.txt", "limit.txt", "active.svg", "active.html"])
+  func sourcePreviewRendersWrapsAndScrolls(path: String) async throws {
+    let paragraph = "  unchanged whitespace\t" + String(repeating: "long source paragraph ", count: 80)
+    let source: String
+    switch path {
+    case "small.txt": source = "Small plain text\n  indented\tvalue\n"
+    case "retained-final.patch.txt":
+      source = String(repeating: "@@ -1,2 +1,2 @@\n-old source line\n+new source line with retained whitespace\n", count: 1500)
+    case "unbroken.txt": source = String(repeating: "x", count: 8000)
+    case "limit.txt": source = String(repeating: "bounded source\n", count: 22000)
+    case "active.svg": source = "<svg onload=\"alert('inert')\"><script>neverExecute()</script></svg>"
+    case "active.html": source = "<script>neverExecute()</script><p>Literal source</p>"
+    default: source = paragraph + "\n\n" + paragraph
+    }
+    let bytes = Data((source + "\nEND OF SOURCE").utf8)
+    let attachment = try InputAttachment(path: path, bytes: bytes)
+    #expect(attachment.file.hasTextPreview && !attachment.file.hasRasterPreview)
+    if path == "retained-final.patch.txt" { #expect(bytes.count > 100 * 1024 && bytes.count < 110 * 1024) }
+    let fixture = try ReferenceFixture(attachments: [attachment])
+    let host = ReferenceHost(ReferenceAttachmentsCard(podId: "fixture", actions: fixture.actions))
+    defer { host.close() }
+    try await host.wait { host.has("reference-attachment-0") }
+    try host.press("reference-attachment-0")
+    let expected = String(decoding: bytes.prefix(256 * 1024), as: UTF8.self)
+    // SwiftUI can publish AX nodes before attaching the represented AppKit view.
+    try await host.wait {
+      guard let text = host.sourceTextView else { return false }
+      return text.string == expected && text.visibleRect.width > 0 && text.visibleRect.height > 0
+    }
+    let sheet = try #require(host.window.attachedSheet?.contentView)
+    let text = try #require(host.sourceTextView)
+    let scroll = try #require(text.enclosingScrollView)
+    let layout = try #require(text.layoutManager)
+    let container = try #require(text.textContainer)
+    sheet.layoutSubtreeIfNeeded()
+    layout.ensureLayout(for: container)
+    #expect(text.string == expected)
+    #expect(text.isSelectable && !text.isEditable && !text.isRichText)
+    #expect(!scroll.hasHorizontalScroller && scroll.hasVerticalScroller)
+    #expect(text.bounds.width <= scroll.contentSize.width + 1)
+    #expect(layout.usedRect(for: container).width <= container.containerSize.width + 1)
+    let firstGlyph = layout.boundingRect(forGlyphRange: NSRange(location: 0, length: 1), in: container)
+      .offsetBy(dx: text.textContainerOrigin.x, dy: text.textContainerOrigin.y)
+    #expect(firstGlyph.width > 0 && firstGlyph.height > 0 && firstGlyph.intersects(text.visibleRect))
+    try expectVisibleInk(text)
+    try host.captureSheet("source-\(path)-top")
+
+    if ["long.txt", "long.md", "unbroken.txt"].contains(path) {
+      let firstNewline = (expected as NSString).range(of: "\n").location
+      let line = layout.glyphRange(forCharacterRange: NSRange(location: 0, length: firstNewline), actualCharacterRange: nil)
+      var fragments = 0
+      layout.enumerateLineFragments(forGlyphRange: line) { rect, used, _, _, _ in
+        fragments += 1
+        #expect(used.maxX <= container.containerSize.width + 1)
+        #expect(rect.height > 0)
+      }
+      #expect(fragments > 1, "One physical source line must occupy multiple visual lines")
+    }
+    let last = NSRange(location: (expected as NSString).length - 1, length: 1)
+    let lastGlyph = layout.glyphRange(forCharacterRange: last, actualCharacterRange: nil)
+    let endRect = layout.boundingRect(forGlyphRange: lastGlyph, in: container)
+      .offsetBy(dx: text.textContainerOrigin.x, dy: text.textContainerOrigin.y)
+    if path == "retained-final.patch.txt" || path == "limit.txt" || path == "unbroken.txt" {
+      #expect(!endRect.intersects(text.visibleRect))
+      text.scrollRangeToVisible(last)
+      #expect(scroll.contentView.bounds.minY > 0)
+      #expect(endRect.intersects(text.visibleRect))
+      try expectVisibleInk(text)
+      try host.captureSheet("source-\(path)-bottom")
+    }
+    let selection = NSRange(location: 0, length: (expected as NSString).length)
+    text.setSelectedRange(selection)
+    #expect(text.selectedRange() == selection)
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
+    // Export the formats AppKit advertises for this selection, as Copy does.
+    // NSTextView may advertise legacy string identifiers rather than `.string`.
+    let types = text.writablePasteboardTypes
+    try #require(!types.isEmpty)
+    #expect(text.writeSelection(to: pasteboard, types: types), "Advertised types: \(types)")
+    #expect(pasteboard.string(forType: .string) == expected)
+    #expect(host.sheetText.contains("Preview limited to 256 KiB") == (bytes.count > 256 * 1024))
+    // Display truncation must never mutate the bytes backing Save.
+    let model = ReferenceAttachmentsModel(actions: fixture.actions)
+    await model.load(podId: "fixture")
+    await model.loadFile(0)
+    #expect(model.bytes[0] == bytes)
+    #expect(host.sheetHas("reference-attachment-save") && host.sheetHas("reference-attachment-close"))
+  }
+}
+
+@MainActor private func referenceViews(_ view: NSView) -> [NSView] {
+  [view] + view.subviews.flatMap(referenceViews)
+}
+
+/// Check painted pixels as well as glyph geometry: AX strings alone can pass for a blank view.
+@MainActor private func expectVisibleInk(_ text: NSTextView) throws {
+  let rect = text.visibleRect
+  let bitmap = try #require(text.bitmapImageRepForCachingDisplay(in: rect))
+  text.cacheDisplay(in: rect, to: bitmap)
+  var minimum: CGFloat = 1
+  var maximum: CGFloat = 0
+  for y in 0..<min(bitmap.pixelsHigh, 100) {
+    for x in 0..<bitmap.pixelsWide {
+      if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) {
+        let value = color.alphaComponent * (color.redComponent + color.greenComponent + color.blueComponent) / 3
+        minimum = min(minimum, value)
+        maximum = max(maximum, value)
+      }
+    }
+  }
+  #expect(maximum - minimum > 0.1, "Visible source viewport must contain painted text")
 }
 
 @MainActor private final class ReferenceFixture {
   let files: [InputAttachment]
   let launch: EffectiveLaunchPreview
   var reads: [Int] = []
-  init() throws {
+  init(attachments: [InputAttachment]? = nil) throws {
     let png: Data
     if let path = ProcessInfo.processInfo.environment["AUTOPOD_REFERENCE_IMAGE"] {
       png = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -196,7 +309,7 @@ import Testing
       for x in 0..<80 { for y in 0..<60 { bitmap.setColor(NSColor(deviceRed: 0.5, green: 0.2, blue: 0.8, alpha: 1), atX: x, y: y) } }
       png = bitmap.representation(using: .png, properties: [:])!
     }
-    files = try [InputAttachment(path: "reference-screen.png", bytes: png),
+    files = try attachments ?? [InputAttachment(path: "reference-screen.png", bytes: png),
       InputAttachment(path: "design.html", bytes: Data("<script>fetch('https://do-not-execute.invalid')</script>".utf8)),
       InputAttachment(path: "guide.pdf", bytes: Data("%PDF-1.7".utf8))]
     let value: ConfigurationJSON = .object(["work": .object(["inputBundle": .object([
@@ -249,6 +362,12 @@ private func referenceLaunch(_ value: ConfigurationJSON) throws -> EffectiveLaun
     guard let content = window.attachedSheet?.contentView else { return false }
     return referenceNodes(content).contains { referenceValue($0, "accessibilityIdentifier") as? String == id }
   }
+  var sourceTextView: NSTextView? {
+    guard let content = window.attachedSheet?.contentView else { return nil }
+    return referenceViews(content).compactMap { $0 as? NSTextView }.first {
+      $0.accessibilityIdentifier() == "reference-attachment-source"
+    }
+  }
   var sheetText: String {
     guard let content = window.attachedSheet?.contentView else { return "" }
     return referenceNodes(content).flatMap { [referenceValue($0, "accessibilityLabel") as? String, referenceValue($0, "accessibilityValue") as? String].compactMap { $0 } }.joined(separator: "\n")
@@ -260,7 +379,12 @@ private func referenceLaunch(_ value: ConfigurationJSON) throws -> EffectiveLaun
     #expect(referenceValue(button, "accessibilityPerformPress") as? Bool == true)
   }
   func wait(_ predicate: () -> Bool) async throws {
-    for _ in 0..<150 { view.layoutSubtreeIfNeeded(); if predicate() { return }; try await Task.sleep(for: .milliseconds(20)) }
+    for _ in 0..<150 {
+      view.layoutSubtreeIfNeeded()
+      window.attachedSheet?.contentView?.layoutSubtreeIfNeeded()
+      if predicate() { return }
+      try await Task.sleep(for: .milliseconds(20))
+    }
     try capture("timeout")
     throw ReferenceTestError.timeout
   }
