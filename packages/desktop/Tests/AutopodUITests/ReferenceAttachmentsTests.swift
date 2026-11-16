@@ -250,12 +250,13 @@ import Testing
       try expectVisibleInk(text)
       try host.captureSheet("source-\(path)-bottom")
     }
-    text.setSelectedRange(NSRange(location: 0, length: (expected as NSString).length))
+    let selection = NSRange(location: 0, length: (expected as NSString).length)
+    text.setSelectedRange(selection)
+    #expect(text.selectedRange() == selection)
     let pasteboard = NSPasteboard.withUniqueName()
     defer { pasteboard.releaseGlobally() }
-    // writeSelection(to:type:) fills a declared type; it does not declare one.
-    pasteboard.declareTypes([.string], owner: nil)
-    #expect(text.writeSelection(to: pasteboard, type: .string))
+    // AppKit requires the single-type export hook to be called via this entry point.
+    #expect(text.writeSelection(to: pasteboard, types: [.string]))
     #expect(pasteboard.string(forType: .string) == expected)
     #expect(host.sheetText.contains("Preview limited to 256 KiB") == (bytes.count > 256 * 1024))
     // Display truncation must never mutate the bytes backing Save.
