@@ -1212,11 +1212,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch));
 
     if (!base) {
-      this.logger.warn(
-        { worktreePath, baseBranch },
-        'getDiff: could not resolve base ref — returning empty diff',
-      );
-      return '';
+      throw new Error('getDiff: could not resolve base ref');
     }
 
     try {
@@ -1250,21 +1246,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         purpose === 'preview' ? DIFF_EXCLUDE_PATHSPECS : REVIEW_DIFF_EXCLUDE_PATHSPECS;
       const { stdout: rawDiff } = await git(['diff', base, ...excludes], bufOpts);
 
-      // If sinceCommit produced an empty diff, fall back to merge-base.
-      // This handles the case where the worktree wasn't synced from the container
-      // (git history didn't carry over) but the branch diverged from defaultBranch.
-      if (!rawDiff.trim() && sinceCommit) {
-        const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
-        if (mergeBase && mergeBase !== sinceCommit) {
-          const { stdout: mbDiff } = await git(['diff', mergeBase, ...excludes], bufOpts);
-          return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbDiff), maxLength);
-        }
-      }
-
       return truncateDiffAtFileBoundary(stripModeOnlyChanges(rawDiff), maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
-      return '';
+      throw sanitizeGitError(err);
     }
   }
 

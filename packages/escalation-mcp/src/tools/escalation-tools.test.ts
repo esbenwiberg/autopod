@@ -316,6 +316,30 @@ describe('reportBlocker', () => {
     vi.useRealTimers();
   });
 
+  it('records an explicit external deferral as a non-proof claim', async () => {
+    const bridge = makeBridge();
+    await reportBlocker(
+      'sess-1',
+      {
+        description: 'Mac check deferred',
+        attempted: [],
+        needs: 'Mac runner',
+        deferral: { check: 'xcodebuild test', expectedExecutor: 'Mac CI' },
+      },
+      bridge,
+      pendingRequests,
+    );
+    expect(bridge.createEscalation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          kind: 'expected-external-deferral',
+          requiresResponse: false,
+          deferral: { check: 'xcodebuild test', expectedExecutor: 'Mac CI' },
+        }),
+      }),
+    );
+  });
+
   it('returns a non-blocking message when below autopause threshold', async () => {
     const bridge = makeBridge({
       getAutoPauseCount: vi.fn().mockReturnValue(0),

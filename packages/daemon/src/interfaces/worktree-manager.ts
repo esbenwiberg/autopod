@@ -310,7 +310,8 @@ export interface WorktreeManager {
    */
   getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
   mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> | Promise<void>;
-  /** Net unified diff against the base, including lockfile hunks by default.
+  /** Net unified diff against sinceCommit when supplied, otherwise the branch merge-base.
+   * Empty is verified empty; unresolved refs and inspection errors throw.
    * Only explicit display previews may omit noisy source files.
    */
   getDiff(

@@ -40,7 +40,9 @@ export interface ReportBlockerPayload {
   /** Prospective launcher-only claim; daemon validates against the original frozen v2 manifest. */
   prerequisiteBlocker?: import('../schemas/repair-continuation.schema.js').PrerequisiteBlockerV1;
   /** New reports are noninteractive; omitted legacy records retain their reply flow. */
-  kind?: 'infrastructure';
+  kind?: 'infrastructure' | 'expected-external-deferral';
+  /** A worker claim, never evidence that the check passed or may be waived. */
+  deferral?: { check: string; expectedExecutor: string; requiredFactId?: string };
   owner?: 'autopod' | 'parent' | 'validation';
   phase?: string;
   /** Daemon stamps the owning lifecycle; workers cannot select another generation. */
