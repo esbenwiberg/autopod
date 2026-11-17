@@ -233,7 +233,7 @@ export class DockerNetworkManager {
 
   /** Automatic GC is not the exact owner's teardown authority. */
   private assertNetworkPrunable(name: string): void {
-    const refuse = (): never => {
+    const refuse: () => never = () => {
       throw new AutopodError(
         'Network has a live or unverified allocation owner; retain it for owner cleanup.',
         'NETWORK_OWNER_RETAINED',
