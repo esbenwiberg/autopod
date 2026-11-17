@@ -3,6 +3,10 @@ import { budgetCountedTaskTokens } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationError } from '../configuration/configuration-store.js';
 import type { CodexReviewTokenUsage } from './review-codex-runner.js';
+import { effectiveReviewerBudget } from './reviewer-budget-revisions.js';
+import { UNRECONCILED_REVIEWER_RUN } from './reviewer-run-policy.js';
+
+export { UNRECONCILED_REVIEWER_RUN };
 
 export interface ReviewerRunRow {
   id: string;
@@ -36,6 +40,8 @@ export interface ReviewerRunRecord {
   reconciledBy: string | null;
   reconciliationNote: string | null;
   usageBasis: 'operator-reported' | 'unknown-accepted' | null;
+  /** Immutable finite allowance approval used for admission, or the frozen default. */
+  reviewerBudgetRevisionId: number | null;
   /** True while this run blocks new reviewers and task-budget accounting. */
   requiresReconciliation: boolean;
 }
@@ -45,16 +51,13 @@ type ReviewerRunSqlRecord = Omit<ReviewerRunRecord, 'requiresReconciliation' | '
   requiresReconciliation: number;
 };
 
-/** A run blocks new reviewers until it is finished, cleaned and its usage is known or accepted. */
-export const UNRECONCILED_REVIEWER_RUN = `(state IN ('preparing','running')
-  OR (state='uncertain' AND reconciled_at IS NULL) OR cleanup!='clean')`;
-
 const RECORD_COLUMNS = `id, pod_id AS podId, execution_target AS executionTarget,
   container_id AS containerId, runtime, model,
   state, cleanup, failure_kind AS failureKind, input_evidence AS inputEvidence, input_tokens AS inputTokens,
   output_tokens AS outputTokens, created_at AS createdAt, updated_at AS updatedAt,
   reconciled_at AS reconciledAt, reconciled_by AS reconciledBy,
   reconciliation_note AS reconciliationNote, usage_basis AS usageBasis,
+  reviewer_budget_revision_id AS reviewerBudgetRevisionId,
   ${UNRECONCILED_REVIEWER_RUN} AS requiresReconciliation`;
 
 function decodeReviewerRun(row: ReviewerRunSqlRecord): ReviewerRunRecord {
@@ -138,9 +141,22 @@ export class ReviewerRunRepository {
           409,
         );
       }
-      if (budget.reviewerTokenBudget !== null && totals.tokens >= budget.reviewerTokenBudget)
+      const reviewerAllowance = effectiveReviewerBudget(this.db, pod, config, route);
+      if (
+        reviewerAllowance.revision &&
+        this.db
+          .prepare(`SELECT id FROM isolated_reviewer_runs
+        WHERE pod_id=? AND (input_tokens IS NULL OR output_tokens IS NULL OR usage_basis='operator-reported') LIMIT 1`)
+          .get(pod.id)
+      )
         configurationError(
-          `Reviewer token limit ${budget.reviewerTokenBudget} exhausted (${totals.tokens} recorded tokens). Reviewer not started; inspect reviewer usage and explicitly revise the reviewer budget before retrying.`,
+          'Increased reviewer allowance requires native measured counters for every run; unknown and operator-reported usage remain retained',
+          'REVIEWER_RECONCILIATION_REQUIRED',
+          409,
+        );
+      if (reviewerAllowance.limit !== null && totals.tokens >= reviewerAllowance.limit)
+        configurationError(
+          `Reviewer token limit ${reviewerAllowance.limit} exhausted (${totals.tokens} recorded tokens). Reviewer not started; inspect reviewer usage and explicitly revise the reviewer budget before retrying.`,
           'REVIEWER_BUDGET_EXHAUSTED',
           409,
         );
@@ -153,8 +169,8 @@ export class ReviewerRunRepository {
       const now = new Date().toISOString();
       this.db
         .prepare(`INSERT INTO isolated_reviewer_runs
-        (id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at,request_id,ordinal,input_evidence)
-        VALUES(?,?,?,?,?,?,?,?,'preparing','pending',?,?,?,?,?)`)
+        (id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at,request_id,ordinal,input_evidence,reviewer_budget_revision_id)
+        VALUES(?,?,?,?,?,?,?,?,'preparing','pending',?,?,?,?,?,?)`)
         .run(
           id,
           pod.id,
@@ -169,6 +185,7 @@ export class ReviewerRunRepository {
           attempt?.requestId ?? null,
           attempt?.ordinal ?? null,
           inputEvidence ? JSON.stringify(inputEvidence) : null,
+          reviewerAllowance.revision?.id ?? null,
         );
     })();
   }

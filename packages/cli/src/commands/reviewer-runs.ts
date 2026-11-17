@@ -1,3 +1,4 @@
+import { reviewerBudgetRevisionRequestSchema } from '@autopod/shared';
 import type { Command } from 'commander';
 import type { AutopodClient, ReviewerRun } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
@@ -28,6 +29,79 @@ export function registerReviewerRunsCommand(
   program: Command,
   getClient: () => AutopodClient,
 ): void {
+  program
+    .command('reviewer-budget <pod>')
+    .description(
+      'Inspect or explicitly increase a finite reviewer admission ceiling; preserve cumulative usage',
+    )
+    .option('--apply', 'Record a human-approved increase; never starts review')
+    .option('--limit <n>', 'New finite reviewer token ceiling')
+    .option('--request-id <id>', 'Stable idempotent approval request ID')
+    .option('--generation <n>', 'Exact inspected lifecycle generation')
+    .option('--expected-limit <n>', 'Exact inspected effective reviewer ceiling')
+    .option('--evidence-hash <sha256>', 'Exact inspected reviewer usage evidence')
+    .option('--reason <text>', 'Reason for this spending increase')
+    .option('--ack-usage-retained', 'Acknowledge all existing usage and other limits remain')
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        pod: string,
+        opts: {
+          apply?: boolean;
+          limit?: string;
+          requestId?: string;
+          generation?: string;
+          expectedLimit?: string;
+          evidenceHash?: string;
+          reason?: string;
+          ackUsageRetained?: boolean;
+          json?: boolean;
+        },
+      ) => {
+        const client = getClient();
+        if (
+          !opts.apply &&
+          (opts.limit ||
+            opts.requestId ||
+            opts.generation ||
+            opts.expectedLimit ||
+            opts.evidenceHash ||
+            opts.reason ||
+            opts.ackUsageRetained)
+        )
+          throw new Error('Reviewer allowance changes require explicit --apply.');
+        const request = opts.apply
+          ? reviewerBudgetRevisionRequestSchema.parse({
+              requestId: opts.requestId,
+              expectedGeneration:
+                opts.generation === undefined ? undefined : parseTokenCount(opts.generation),
+              expectedLimit:
+                opts.expectedLimit === undefined ? undefined : parseTokenCount(opts.expectedLimit),
+              expectedEvidenceHash: opts.evidenceHash,
+              limit: opts.limit === undefined ? undefined : parseTokenCount(opts.limit),
+              reason: opts.reason,
+              acknowledgement: opts.ackUsageRetained ? 'increase-only-usage-retained' : undefined,
+            })
+          : null;
+        const id = await resolvePodId(client, pod);
+        if (!request) {
+          const view = await client.inspectReviewerBudget(id);
+          withJsonOutput(opts, view, (v) =>
+            console.log(
+              `Reviewer tokens recorded: ${v.recordedTokens}; ceiling: ${v.effectiveLimit ?? 'unlimited'}; generation: ${v.generation}; evidence: ${v.evidenceHash}. Inspection does not start review.`,
+            ),
+          );
+        } else {
+          const receipt = await client.reviseReviewerBudget(id, request);
+          withJsonOutput(opts, receipt, (r) =>
+            console.log(
+              `Reviewer ceiling increased ${r.previousLimit} -> ${r.limit}; retained ${r.recordedTokens} recorded tokens. Review not started; all other admission holds remain.`,
+            ),
+          );
+        }
+      },
+    );
+
   program
     .command('reviewer-runs <pod>')
     .description('List isolated reviewer runs, or reconcile one whose usage was never measured')

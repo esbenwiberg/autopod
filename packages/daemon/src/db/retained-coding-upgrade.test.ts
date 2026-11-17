@@ -48,7 +48,7 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = openTestDiskDatabase(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 251 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 252 });
     expect(db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_network_releases').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_network_release_outcomes').all()).toEqual([]);
