@@ -1,9 +1,10 @@
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import type { HandledElsewhereArchiveRequest, PodStatus } from '@autopod/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { podRoutes } from '../api/routes/pods.js';
+import { createSecretlintDetector } from '../security/detectors/secretlint-detector.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type { PodManager } from './pod-manager.js';
@@ -115,17 +116,35 @@ it('keeps ordinary archive restrictive and requires a separate explicit visibili
       })
     ).statusCode,
   ).toBe(409);
+  // Build deliberately invalid userinfo with the URL API: it is test data, not
+  // a credential-bearing URL literal that should block scans of the source.
+  const credentialedReference = new URL('https://example.com/pr/1');
+  credentialedReference.username = 'fixture-user';
+  credentialedReference.password = 'fixture-password';
   for (const body of [
     { ...input, acknowledgement: undefined },
     { ...input, retainResources: false },
     { ...input, force: true },
-    { ...input, reference: 'https://user:secret@example.com/pr/1' },
+    { ...input, reference: credentialedReference.href },
   ]) {
     expect((await archive('delivered', body)).statusCode).toBe(400);
     expect(repo.fleetArchives!.archivedAt('delivered')).toBeNull();
   }
   expect((await archive('delivered')).statusCode).toBe(200);
   expect(effects).not.toHaveBeenCalled();
+});
+
+it('keeps these negative URL fixtures clean under the actual pre-push secrets detector', async () => {
+  const file = new URL('./handled-elsewhere-archive.test.ts', import.meta.url);
+  const content = await readFile(file, 'utf8');
+  // The baseline-aware method returns null on detector failure, unlike the
+  // public fail-open scan. Require a successful scan with zero findings.
+  const findings = await createSecretlintDetector().scanWithBaselineIdentity?.({
+    path: file.pathname,
+    content,
+    sizeBytes: Buffer.byteLength(content),
+  });
+  expect(findings).toEqual([]);
 });
 
 it('requires an authenticated actor before accepting a visibility disposition', async () => {
