@@ -172,18 +172,30 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
       await publishApprovalBranch(pod, { pat });
       assertApprovalCurrent(pod);
     }
-    if (
-      !options.publishOnly &&
-      (await reconcileExternalApproval(captured, {
-        podId,
-        options,
-        pod,
-        readiness,
-        actor,
-        approvalReason,
-      }))
-    )
-      return { kind: 'halted' };
+    if (!options.publishOnly) {
+      try {
+        if (
+          await reconcileExternalApproval(captured, {
+            podId,
+            options,
+            pod,
+            readiness,
+            actor,
+            approvalReason,
+          })
+        )
+          return { kind: 'halted' };
+      } catch (error) {
+        if (error instanceof AutopodError) throw error;
+        assertApprovalCurrent(pod);
+        const reason =
+          'Approval delivery observation unavailable. Original resources retained; restore provider availability and retry approval, not coding.';
+        logger.warn({ err: error, podId }, 'Pre-approval delivery observation failed');
+        podRepo.update(podId, { failureReason: reason });
+        emitActivityError(podId, reason, false);
+        throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
+      }
+    }
 
     // Git checkpoints omit ignored reports. Preserve the complete sandbox
     // workspace before publication or either approval cleanup path removes it.

@@ -465,7 +465,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logger,
   });
 
-  const { ensurePrBaseBranchOnOrigin, pushAndCreatePr, retryCreatePr } = createDeliveryPr({
+  const {
+    ensurePrBaseBranchOnOrigin,
+    pushAndCreatePr,
+    retryCreatePr,
+    reconcilePendingPublication,
+  } = createDeliveryPr({
     worktreeManager,
     logger,
     resolveGitCredential,
@@ -698,6 +703,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     completeFixPodAfterPush,
     emitActivityStatus,
     pushAndCreatePr,
+    reconcilePendingPublication,
     transition,
   });
 

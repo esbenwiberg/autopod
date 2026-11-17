@@ -102,6 +102,7 @@ export interface ContinuationCaptured {
   validationResumeRuns: Map<string, Promise<void>>;
   hasDurableAgentExecutionEvidence: (pod: Pod) => boolean;
   pushAndCreatePr: (pod: Pod, callerLabel: string) => Promise<string>;
+  reconcilePendingPublication: (pod: Pod) => Promise<void>;
 }
 
 export interface ContinuationResumeCalls {

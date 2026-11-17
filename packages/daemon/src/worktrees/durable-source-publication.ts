@@ -75,7 +75,8 @@ export function publishSource(
   );
 }
 
-async function reconcilePublication(
+/** Observe an already-admitted push; this entry point cannot dispatch a new push. */
+export async function reconcilePublication(
   ledger: SourcePublicationLedger,
   pod: Pod,
   repository: string,

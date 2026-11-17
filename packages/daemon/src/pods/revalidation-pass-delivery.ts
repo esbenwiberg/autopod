@@ -63,6 +63,20 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     let prUrl: string | null = s2.prUrl ?? null;
     const prManager = !deliveryHeld && prManagerFactory ? prManagerFactory(profile) : null;
     if (!checksOnly && prManager && s2.worktreePath && s2.options.output === 'pr') {
+      if (s2.prUrl) {
+        try {
+          podRepo.mergeJournal?.assertPublicationAllowed?.(s2.prUrl);
+        } catch (error) {
+          // Passing checks do not authorize replacing an ambiguous merge. Keep
+          // the passing result visible, but leave that owner and source intact.
+          assertCurrent();
+          const failureReason = `Checks passed; publication remains held by the original merge owner. ${error instanceof Error ? error.message : String(error)}`;
+          transition(s2, 'validated', { failureReason });
+          emitActivityStatus(podId, failureReason);
+          refreshReadiness(podId, { advisoryQaInFlight: false });
+          return { newCommits, result: 'pass' };
+        }
+      }
       // Same artifact ref as the validation-pass path — never the reviewed
       // branch. This path builds no PR body, so the ref is simply where a
       // reviewer can find the screenshots.

@@ -100,7 +100,12 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       .get(id) as { context_hash: string } | undefined;
     if (row) requireEvidence(row.context_hash === contextHash(pod));
   };
-  function assertCurrent(pod: Pod, allowCompletedFix = false, allowCheckedFailure = false) {
+  function assertCurrent(
+    pod: Pod,
+    allowCompletedFix = false,
+    allowCheckedRetry = false,
+    observationOnly = false,
+  ) {
     createDeletionOwnership(db).assertTaskAvailable(pod.id);
     assertSourceDeliveryAllowed(db, pod.id);
     const row = db
@@ -146,7 +151,8 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     requireEvidence(
       (['validating', 'validated', 'merging', 'merge_pending', 'running'].includes(pod.status) ||
         (allowCompletedFix && pod.status === 'complete') ||
-        (allowCheckedFailure && pod.status === 'failed')) &&
+        (allowCheckedRetry && ['failed', 'complete'].includes(pod.status)) ||
+        (observationOnly && ['failed', 'review_required', 'complete'].includes(pod.status))) &&
         !hasUnansweredDecision(db, pod.id),
     );
   }
@@ -174,7 +180,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
   const ledger: SourcePublicationLedger = {
     pending(pod) {
       // Read-only inspection also serves checked downstream-failure recovery.
-      assertCurrent(pod, false, true);
+      assertCurrent(pod, false, false, true);
       const rows = db
         .prepare(`SELECT i.id,i.identity,i.source_identity FROM source_publication_intents i
         LEFT JOIN source_publication_receipts r ON r.intent_id=i.id
@@ -445,10 +451,9 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     confirm(pod, id, receipt) {
       requireEvidence(!db.inTransaction);
       db.transaction(() => {
-        const checkedPublication = db
-          .prepare('SELECT 1 FROM validation_source_publications WHERE publication_id=?')
-          .get(id);
-        assertCurrent(pod, false, Boolean(checkedPublication));
+        // Confirmation records an observed fact against an existing exact
+        // intent. It grants no new push, passing checks or other custody release.
+        assertCurrent(pod, false, false, true);
         assertContext(pod, id);
         const admitted = db
           .prepare('SELECT identity FROM source_publication_intents WHERE id = ?')

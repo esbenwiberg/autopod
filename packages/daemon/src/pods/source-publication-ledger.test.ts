@@ -41,6 +41,35 @@ function fixture(db = createTestDb()) {
   return { db, repo, ledger: createSourcePublicationLedger(db), pod: repo.getOrThrow('source') };
 }
 describe('durable source publication', () => {
+  it.each([
+    'failed',
+    'review_required',
+    'complete',
+  ] as const)('allows only factual settlement of an existing push from %s without another admission', (status) => {
+    const f = fixture();
+    try {
+      const id = f.ledger.admit(f.pod, proof);
+      f.repo.update('source', {
+        status,
+        lastValidationResult: { ...createPassingValidationResult('source'), overall: 'fail' },
+      });
+      const current = f.repo.getOrThrow('source');
+      expect(f.ledger.pending?.(current)?.id).toBe(id);
+      expect(() => f.ledger.admit(current, proof)).toThrow();
+      f.ledger.confirm(current, id, proof);
+      expect(f.ledger.get(id)?.state).toBe('confirmed');
+      expect(f.repo.getOrThrow('source')).toMatchObject({
+        status,
+        lastValidationResult: { overall: 'fail' },
+      });
+      expect(f.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get()).toEqual({
+        n: 1,
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+
   it('uses the immutable resolved validation target for a legacy non-main profile', () => {
     const f = fixture();
     try {

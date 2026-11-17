@@ -34,6 +34,7 @@ import { CodexRuntime } from '../runtimes/codex-runtime.js';
 import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
   collectAndAcknowledgeGuidance,
+  createMockContainerManager as createSharedMockContainerManager,
   mockBranchPublication,
   mockCommittedPublication,
   mockPrMerge,
@@ -369,23 +370,9 @@ function createMockContainerManager(): ContainerManager {
     readFile: vi.fn(async () => ''),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
-    execInContainer: vi.fn(async (_containerId, command) => {
-      if (command[2]?.includes('autopod-command-preflight-v1')) {
-        const names = JSON.parse(command[3] ?? '[]') as string[];
-        return {
-          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
-          stderr: '',
-          exitCode: 0,
-        };
-      }
-      if (command.join(' ') === 'codex --version') {
-        return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
-      }
-      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
-        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
-      }
-      return { stdout: '', stderr: '', exitCode: 0 };
-    }),
+    // Keep the native checked-source protocol consistent with the central
+    // infrastructure fake, rather than returning empty successful Git reads.
+    execInContainer: createSharedMockContainerManager().execInContainer,
     execStreaming: vi.fn(),
     attachTerminal: vi.fn(async () => ({
       onData: vi.fn(),
@@ -669,7 +656,12 @@ function makeSetupFailure(): ValidationResult {
 function createMockValidationEngine(result?: Partial<ValidationResult>): ValidationEngine {
   return {
     validate: vi.fn(async (config: Parameters<ValidationEngine['validate']>[0]) =>
-      makeValidationResult({ validationSuite: config.validationSuite, ...result }),
+      makeValidationResult({
+        podId: config.podId,
+        attempt: config.attempt,
+        validationSuite: config.validationSuite,
+        ...result,
+      }),
     ),
     runAdvisoryBrowserQa: vi.fn(async () => null),
   };
@@ -2890,76 +2882,86 @@ describe('PodManager', () => {
           else finish();
           return undefined as never;
         });
-        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (_id, command) => {
-          const workspaceIndex = command.indexOf('/workspace');
-          const args = workspaceIndex === -1 ? [] : command.slice(workspaceIndex + 1);
-          if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
-            trace.push('container-head');
-            await options.gate?.promise;
-            if (options.failure === 'container-head') throw new Error('HEAD transport failure');
-            return {
-              ...ok,
-              stdout: options.containerHead ?? (options.sameHead ? host : container),
-              exitCode: options.failure === 'container-head-exit' ? 128 : 0,
-            };
-          }
-          if (args[0] === 'status') {
-            trace.push('container-status');
-            await options.gate?.promise;
-            return {
-              ...ok,
-              stdout: options.containerStatus ?? '',
-              exitCode: options.containerStatus === null ? 128 : 0,
-            };
-          }
-          if (args[0] === 'merge-base') {
-            trace.push('ancestry');
-            if (options.failure === 'ancestry') throw new Error('ancestry transport failure');
-            const first = args[2] === container;
-            const ancestor =
-              options.ancestry === 'host'
-                ? first
-                : options.ancestry === 'container'
-                  ? !first
-                  : false;
-            return { ...ok, exitCode: options.ancestry === 'unknown' ? 128 : ancestor ? 0 : 1 };
-          }
-          if (args[0] === 'reset' || args[0] === 'clean') {
-            const action = args[0];
-            trace.push(action);
-            if (options.failure === `${action}-transport`)
-              throw new Error(`${action} transport failure`);
-            return {
-              ...ok,
-              exitCode: options.failure === action ? 1 : 0,
-              stderr: 'controlled command failure',
-            };
-          }
-          if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
-            return {
-              ...ok,
-              stdout: options.missingObject
-                ? options.failure === 'mismatch'
-                  ? '/untrusted/repo.git'
-                  : bare
-                : '',
-            };
-          }
-          if (args[0] === 'push') {
-            trace.push('import');
-            if (options.failure === 'import') return { ...ok, exitCode: 1 };
-            objectPresent = true;
-          }
-          if (args[0] === 'fetch') {
-            trace.push('fetch');
-            return { ...ok, exitCode: options.failure === 'fetch' ? 1 : 0 };
-          }
-          if (args[0] === 'cat-file')
-            return { ...ok, exitCode: options.failure === 'verify' ? 1 : 0 };
-          if (command[0] === 'rm') trace.push('cleanup-container-bundle');
-          if (command[2]?.includes('STAGING=')) trace.push('sync');
-          return ok;
-        });
+        const sourceExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+          async (_id, command, execOptions) => {
+            // Compatibility faults below model the pre-sync probes. Native
+            // post-preparation source certification keeps the standard fake Git
+            // premise, separately exercised against real Git by delivery incidents.
+            if (command[2]?.includes('autopod-validation-source-v1')) {
+              if (!sourceExec) throw new Error('Missing checked-source observer fixture');
+              return sourceExec(_id, command, execOptions);
+            }
+            const workspaceIndex = command.indexOf('/workspace');
+            const args = workspaceIndex === -1 ? [] : command.slice(workspaceIndex + 1);
+            if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+              trace.push('container-head');
+              await options.gate?.promise;
+              if (options.failure === 'container-head') throw new Error('HEAD transport failure');
+              return {
+                ...ok,
+                stdout: options.containerHead ?? (options.sameHead ? host : container),
+                exitCode: options.failure === 'container-head-exit' ? 128 : 0,
+              };
+            }
+            if (args[0] === 'status') {
+              trace.push('container-status');
+              await options.gate?.promise;
+              return {
+                ...ok,
+                stdout: options.containerStatus ?? '',
+                exitCode: options.containerStatus === null ? 128 : 0,
+              };
+            }
+            if (args[0] === 'merge-base') {
+              trace.push('ancestry');
+              if (options.failure === 'ancestry') throw new Error('ancestry transport failure');
+              const first = args[2] === container;
+              const ancestor =
+                options.ancestry === 'host'
+                  ? first
+                  : options.ancestry === 'container'
+                    ? !first
+                    : false;
+              return { ...ok, exitCode: options.ancestry === 'unknown' ? 128 : ancestor ? 0 : 1 };
+            }
+            if (args[0] === 'reset' || args[0] === 'clean') {
+              const action = args[0];
+              trace.push(action);
+              if (options.failure === `${action}-transport`)
+                throw new Error(`${action} transport failure`);
+              return {
+                ...ok,
+                exitCode: options.failure === action ? 1 : 0,
+                stderr: 'controlled command failure',
+              };
+            }
+            if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
+              return {
+                ...ok,
+                stdout: options.missingObject
+                  ? options.failure === 'mismatch'
+                    ? '/untrusted/repo.git'
+                    : bare
+                  : '',
+              };
+            }
+            if (args[0] === 'push') {
+              trace.push('import');
+              if (options.failure === 'import') return { ...ok, exitCode: 1 };
+              objectPresent = true;
+            }
+            if (args[0] === 'fetch') {
+              trace.push('fetch');
+              return { ...ok, exitCode: options.failure === 'fetch' ? 1 : 0 };
+            }
+            if (args[0] === 'cat-file')
+              return { ...ok, exitCode: options.failure === 'verify' ? 1 : 0 };
+            if (command[0] === 'rm') trace.push('cleanup-container-bundle');
+            if (command[2]?.includes('STAGING=')) trace.push('sync');
+            return ok;
+          },
+        );
         vi.mocked(ctx.containerManager.writeFile).mockImplementation(async () => {
           trace.push('upload');
           if (options.failure === 'upload') throw new Error('bundle upload failure');
@@ -3007,7 +3009,10 @@ describe('PodManager', () => {
         expect(trace.indexOf('sync')).toBeGreaterThanOrEqual(0);
         expect(trace.indexOf('sync')).toBeLessThan(trace.indexOf('validate'));
         expect(trace).not.toContain('reset');
-        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(
+          manager.getSession(pod.id).status,
+          manager.getSession(pod.id).failureReason ?? undefined,
+        ).toBe('validated');
       });
     });
 
@@ -5205,7 +5210,7 @@ describe('PodManager', () => {
       '/home/autopod/.codex/auth.json',
       '{"token":"stale"}',
     );
-    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/fallback-worktree' });
     await manager.triggerValidation(pod.id);
     expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -9706,10 +9711,12 @@ describe('PodManager', () => {
           ciFailures: [],
           reviewComments: [],
         });
+        const readsBeforeIdle = vi.mocked(ctx.prManager.getPrStatus).mock.calls.length;
+        expect(readsBeforeIdle).toBeGreaterThan(0);
         const restarted = createPodManager(ctx.deps);
         await vi.advanceTimersByTimeAsync(120_000);
         expect(restarted.getSession(pod.id).status).toBe('validated');
-        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(readsBeforeIdle);
         expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
         expect(completed).toEqual([]);
@@ -9960,7 +9967,7 @@ describe('PodManager', () => {
       expect(completedEvent.finalStatus).toBe('complete');
     });
 
-    it('readiness approval enforces manual reason rules and stores approval metadata', async () => {
+    it('readiness approval records reasons without waiving compromised-source custody', async () => {
       const cases: Array<{
         status: ReadinessStatus;
         updates?: Parameters<TestContext['podRepo']['update']>[1];
@@ -10002,6 +10009,14 @@ describe('PodManager', () => {
         const events: unknown[] = [];
         ctx.eventBus.subscribe((event) => events.push(event));
         const reason = testCase.reasonRequired ? `Accept ${testCase.status}` : undefined;
+        if (testCase.status === 'risky') {
+          await expect(manager.approveSession(pod.id, { reason })).rejects.toMatchObject({
+            code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+          });
+          expect(manager.getSession(pod.id).status).toBe('validated');
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          continue;
+        }
         await manager.approveSession(pod.id, { reason });
 
         const approved = manager.getSession(pod.id).readinessReview?.approval;
@@ -11566,7 +11581,11 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
+      });
 
       await manager.rejectSession(pod.id, 'Button color wrong');
 
@@ -11594,6 +11613,7 @@ describe('PodManager', () => {
         status: 'validated',
         validationAttempts: 2,
         containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
       });
 
       await manager.rejectSession(pod.id, 'Needs more work');
@@ -11616,6 +11636,7 @@ describe('PodManager', () => {
         status: 'failed',
         validationAttempts: 3,
         containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
       });
 
       await manager.rejectSession(pod.id, 'Try a different approach');
@@ -14856,7 +14877,11 @@ describe('PodManager', () => {
               { axis: 'tests_integration', status: 'queued', attempt: 0 },
             ],
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -14920,7 +14945,11 @@ describe('PodManager', () => {
             issues: [],
             model: 'reviewer',
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -15765,7 +15794,11 @@ describe('PodManager', () => {
             issues: [],
             model: 'reviewer',
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -16019,14 +16052,14 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      // Branch was pushed — must target the feature branch so `gh pr create --head` can
-      // reference it; the PR itself targets baseBranch separately via prManager.createPr.
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/wt',
-          targetBranch: pod.branch,
-        }),
+      // Publish only checked committed source to the feature branch. PR target
+      // selection is separate; no post-review auto-commit is permitted.
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
 
       // PR was created
       expect(ctx.prManager.createPr).toHaveBeenCalledWith(

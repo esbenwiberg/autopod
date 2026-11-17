@@ -27,6 +27,39 @@ describe('delivery PR commands', () => {
     expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
     expect(f.pod().status).toBe('validated');
   });
+  it('supports completed-pod PR retry only with current immutable checked source', async () => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', { status: 'complete' });
+    await f.pr().retryCreatePr('prepare');
+    expect(f.pod().status).toBe('complete');
+    expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it('settles an original completed-pod push without certifying a changed failing result', async () => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', { status: 'complete' });
+    const push = vi.mocked(f.worktreeManager.pushBranch).getMockImplementation();
+    if (!push) throw new Error('Missing native publication fixture');
+    vi.mocked(f.worktreeManager.pushBranch).mockImplementationOnce(async (...args) => {
+      await push(...args);
+      f.podRepo.update('prepare', {
+        lastValidationResult: { ...f.pod().lastValidationResult!, overall: 'fail' },
+      });
+      throw new Error('Original push response lost');
+    });
+    await expect(f.pr().retryCreatePr('prepare')).rejects.toBeDefined();
+    f.worktreeManager.observeSourceBranch = vi.fn(async () => 'a'.repeat(40));
+    await expect(f.pr().retryCreatePr('prepare')).rejects.toMatchObject({
+      code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+    });
+    expect(f.podRepo.sourcePublications?.pending?.(f.pod())).toBeNull();
+    expect(f.pod().lastValidationResult?.overall).toBe('fail');
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+  });
+
   it('rejects active, existing-PR and missing-worktree retry admission before mutation', async () => {
     const f = createDeliveryFixture();
     const pr = f.pr();

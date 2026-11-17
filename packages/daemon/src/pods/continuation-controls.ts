@@ -40,6 +40,7 @@ type Captured = Pick<
   | 'completeFixPodAfterPush'
   | 'emitActivityStatus'
   | 'pushAndCreatePr'
+  | 'reconcilePendingPublication'
   | 'transition'
 >;
 
@@ -71,6 +72,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     completeFixPodAfterPush,
     emitActivityStatus,
     pushAndCreatePr,
+    reconcilePendingPublication,
     transition,
   } = captured;
 
@@ -323,6 +325,20 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       return { action: 'retry-fix-delivery' };
     }
 
+    if (
+      pod.options.output === 'pr' &&
+      ['failed', 'review_required'].includes(pod.status) &&
+      podRepo.sourcePublications?.pending?.(pod)
+    ) {
+      assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
+      // Observe the existing publication before deciding whether current checks
+      // permit any continuation. This can never submit another push or worker.
+      await reconcilePendingPublication(pod);
+      if (validationResumeRuns.has(podId)) {
+        logger.info({ podId }, 'Coalesced validation Resume after publication observation');
+        return { action: 'revalidate' };
+      }
+    }
     const lastValidationResult = pod.lastValidationResult;
     const isInfrastructureReviewResume =
       pod.status === 'review_required' &&

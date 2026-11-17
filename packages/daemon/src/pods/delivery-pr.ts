@@ -1,6 +1,7 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { reconcilePublication } from '../worktrees/durable-source-publication.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { DeliveryPrCaptured } from './delivery-contracts.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
@@ -58,6 +59,27 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         'Failed to ensure PR base branch exists on origin',
       );
     }
+  }
+
+  async function reconcilePendingPublication(pod: Pod): Promise<void> {
+    const ledger = podRepo.sourcePublications;
+    const pending = ledger?.pending?.(pod);
+    if (!ledger || !pending) return;
+    assertGuidanceCollected(pod.id);
+    const profile = executionForPod(pod);
+    await reconcilePublication(
+      ledger,
+      pod,
+      profile.repoUrl ?? '',
+      worktreeManager,
+      pending,
+      () => assertGuidanceCollected(pod.id),
+      await resolveGitCredential(profile),
+    );
+    emitActivityStatus(
+      pod.id,
+      'Original publication observed; current checks and all other recovery holds remain unchanged.',
+    );
   }
 
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
@@ -200,11 +222,17 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         409,
       );
     }
+    if (podRepo.sourcePublications?.pending?.(pod)) await reconcilePendingPublication(pod);
     emitActivityStatus(podId, 'Retrying PR creation…');
     const newPrUrl = await pushAndCreatePr(pod, 'retryCreatePr');
     podRepo.update(podId, { prUrl: newPrUrl });
     emitActivityStatus(podId, `PR created: ${newPrUrl}`);
     logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
   }
-  return { ensurePrBaseBranchOnOrigin, pushAndCreatePr, retryCreatePr };
+  return {
+    ensurePrBaseBranchOnOrigin,
+    pushAndCreatePr,
+    retryCreatePr,
+    reconcilePendingPublication,
+  };
 }

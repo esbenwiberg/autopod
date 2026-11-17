@@ -12,7 +12,10 @@ import {
 } from '../test-utils/mock-helpers.js';
 import { inspectAdoptionGit } from '../worktrees/source-adoption-git.js';
 import { createPodManager } from './pod-manager.js';
-import { assertSourceResourceReleasable } from './source-custody-guards.js';
+import {
+  assertPublicationMutationAllowed,
+  assertSourceResourceReleasable,
+} from './source-custody-guards.js';
 
 const cleanup: Array<() => void> = [];
 const directories: string[] = [];
@@ -493,6 +496,37 @@ describe('composed delivery incidents', () => {
     expect(f.current().status).toBe('complete');
     expect(count(f, 'source_publication_receipts')).toBe(1);
     noExtraDelivery(f, 1, 1);
+  });
+
+  it('observes a lost push from a review hold without certifying changed checks or replaying publication', async () => {
+    const f = fixture();
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementationOnce(
+      async (worktree, branch, options) => {
+        await mockBranchPublication(worktree, branch, options);
+        const result = f.current().lastValidationResult;
+        if (!result) throw new Error('Missing native validation');
+        f.ctx.podRepo.update(f.pod.id, { lastValidationResult: { ...result, overall: 'fail' } });
+        throw new Error('Push response lost after validation changed');
+      },
+    );
+    await f.process();
+    expect(f.current().status).toBe('review_required');
+    expect(count(f, 'source_publication_receipts')).toBe(0);
+    expect(() => assertPublicationMutationAllowed(f.ctx.db, f.pod.id)).toThrow();
+    f.ctx.worktreeManager.observeSourceBranch = vi.fn(async () => 'c'.repeat(40));
+    await expect(f.manager.resumePod(f.pod.id)).rejects.toBeDefined();
+    expect(count(f, 'source_publication_receipts')).toBe(0);
+    f.ctx.worktreeManager.observeSourceBranch = vi.fn(async () => 'a'.repeat(40));
+    // Factual settlement is not a passing-check override or a new retry grant.
+    await expect(f.manager.resumePod(f.pod.id)).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(() => assertPublicationMutationAllowed(f.ctx.db, f.pod.id)).not.toThrow();
+    expect(f.current().status).toBe('review_required');
+    expect(f.current().lastValidationResult?.overall).toBe('fail');
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    noExtraDelivery(f, 1);
   });
 
   it('does not adopt a pending push from another generation', async () => {
