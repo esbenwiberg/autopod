@@ -4,6 +4,8 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { DeliveryPrCaptured } from './delivery-contracts.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
+import { publishValidatedSource } from './validated-source-publication.js';
+import { validationSourceError } from './validation-source-evidence.js';
 
 export function createDeliveryPr(captured: DeliveryPrCaptured) {
   const {
@@ -86,28 +88,25 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     }
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
+    const assertCurrent = () => {
+      assertGuidanceCollected(podId);
+      if (!podRepo.validationSources)
+        validationSourceError('Checked publication support is unavailable.');
+      podRepo.validationSources.checked(pod, profile);
+    };
+    assertCurrent();
     const pat = await resolveGitCredential(profile);
     try {
-      await worktreeManager.mergeBranch({
-        worktreePath: pod.worktreePath,
-        // Push the feature branch up so PR creation can reference it. Using the
-        // feature branch (not baseBranch) avoids force-pushing the work onto main.
-        targetBranch: pod.branch,
-        pat,
-        // Block auto-commit deletions: this helper runs post-container with no
-        // fresh sync-back, so any "missing files" almost certainly means a sync
-        // ghost rather than the operator wanting to ship a mass-delete.
-        maxDeletions: 0,
-        podTask: pod.task,
-        profile,
-        podModel: pod.model,
-      });
+      await publishValidatedSource({ pod, profile, podRepo, worktreeManager, pat, assertCurrent });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: branch push failed');
       // Bubble GitCredentialError up untouched so the caller can park the pod
       // in awaiting_input instead of failing terminally on a fixable PAT issue.
-      if (err instanceof GitCredentialError) {
+      if (
+        err instanceof GitCredentialError ||
+        (err instanceof AutopodError && err.code === 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED')
+      ) {
         throw err;
       }
       if (handleDeletionGuardError(podId, err)) {
@@ -118,7 +117,9 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     }
 
     try {
+      assertCurrent();
       await ensurePrBaseBranchOnOrigin(pod, profile, baseBranch, callerLabel);
+      assertCurrent();
       const result = await prManager.createPr({
         worktreePath: pod.worktreePath,
         repoUrl: profile.repoUrl ?? undefined,
@@ -142,6 +143,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         seriesName: pod.seriesName ?? undefined,
         securityFindings: getLatestPushFindings(podId),
       });
+      assertCurrent();
       if (result.usedFallback) {
         const which = result.narrativeUsedFallback
           ? result.titleUsedFallback

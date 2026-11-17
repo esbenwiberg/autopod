@@ -583,28 +583,20 @@ describe('validation inputs persisted effects', () => {
     }
   });
 
-  it('keeps no-worktree inputs empty while resolving review, history and queue', async () => {
+  it('rejects missing source before consuming queued overrides or reviewer inputs', async () => {
     const f = fixture();
     try {
       f.pod.worktreePath = null;
       f.queue();
       f.dependencies.validationRepo = undefined;
-      const out = await f.run();
-      expect(out.previousValidation).toBeNull();
-      expect(out.validationConfig).toMatchObject({
-        diff: '',
-        commitLog: undefined,
-        codeReviewSkill: undefined,
-        worktreePath: undefined,
-        priorReviewBatch: undefined,
-      });
+      await expect(f.run()).rejects.toMatchObject({ code: 'REVIEW_SOURCE_UNAVAILABLE' });
       expect(f.diff).not.toHaveBeenCalled();
       expect(f.log).not.toHaveBeenCalled();
       expect(f.paths).not.toHaveBeenCalled();
       expect(f.skill).not.toHaveBeenCalled();
-      expect(f.reviewerEnv).toHaveBeenCalledWith(f.pod);
-      expect(f.flush).toHaveBeenCalledWith('worker');
-      expect(f.reopen().pending.list('worker')).toEqual([]);
+      expect(f.reviewerEnv).not.toHaveBeenCalled();
+      expect(f.flush).not.toHaveBeenCalled();
+      expect(f.reopen().pending.list('worker')).toHaveLength(1);
     } finally {
       f.close();
     }

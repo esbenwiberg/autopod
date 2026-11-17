@@ -85,7 +85,7 @@ describe('review diffs versus noise-filtered previews (real Git)', () => {
     expectReviewHunks(await manager.getDiff(directory, 'main', undefined, base, 'review'));
   });
 
-  it('passes the review policy to container Git and to the host fallback', async () => {
+  it('requires observed review source instead of silently substituting stale host bytes', async () => {
     const containerManager = {
       execInContainer: vi.fn(async (_id: string, args: string[]) => {
         const { stdout, stderr } = await git(...args.slice(1));
@@ -105,9 +105,32 @@ describe('review diffs versus noise-filtered previews (real Git)', () => {
     vi.mocked(containerManager.execInContainer).mockRejectedValue(
       new Error('fixture disconnected'),
     );
-    const saved = await computePodDiff(input);
+    await expect(computePodDiff(input)).rejects.toMatchObject({
+      code: 'REVIEW_SOURCE_UNAVAILABLE',
+    });
+    // An explicitly selected host-only source is still reviewable. Display
+    // previews may retain their best-effort fallback, but are not review proof.
+    const saved = await computePodDiff({ ...input, pod: { ...input.pod, containerId: null } });
     expect(saved.source).toBe('worktree');
     expectReviewHunks(saved.diff);
+    expect((await computePodDiff({ ...input, purpose: 'preview' })).source).toBe('none');
+  });
+
+  it('distinguishes verified empty host review from missing or unreadable source', async () => {
+    const input = {
+      pod: { containerId: null, worktreePath: directory, startCommitSha: base },
+      defaultBranch: 'main',
+      purpose: 'review' as const,
+      worktreeManager: manager,
+    };
+    await git('checkout', '--', '.');
+    expect(await computePodDiff(input)).toEqual({ diff: '', source: 'worktree' });
+    await expect(
+      computePodDiff({ ...input, pod: { ...input.pod, worktreePath: null } }),
+    ).rejects.toMatchObject({ code: 'REVIEW_SOURCE_UNAVAILABLE' });
+    await expect(
+      computePodDiff({ ...input, pod: { ...input.pod, startCommitSha: 'missing-ref' } }),
+    ).rejects.toThrow();
   });
 
   it('does not classify lockfile-only changes as no work', async () => {

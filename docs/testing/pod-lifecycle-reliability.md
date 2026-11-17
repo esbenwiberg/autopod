@@ -6,11 +6,31 @@ executed passing tests. It covers the runway regressions, state transitions,
 composed agent and validation workflows, infrastructure classifiers, and the
 ordinary lifecycle e2e using migrated SQLite and mocked infrastructure.
 
+Routing incidents compose the real review producer, tool/bridge, persisted reports
+and manager decision. They cover one bounded inner reviewer retry, reconciliation
+refusal without coding or fix-attempt burn, explicit external NOT RUN claims, and
+required Mac Facts remaining pending rather than waived. Real Git verifies empty
+incremental versus inherited changes. Missing live/host review source is not an
+empty packet; display previews retain their separate best-effort fallback.
+
+Network incidents interleave allocation and pressure cleanup across separate
+managers sharing migrated SQLite. A provisioning bridge is not orphaned merely
+because its first container has not attached. GC rechecks durable pod/reviewer
+ownership and live network identity; unavailable ownership/inspection fails
+closed. Unknown isolated system/deployment/artifact-check owners require their
+own cleanup protocol, not ordinary pod GC. Exact-owner teardown remains distinct,
+and genuine ordinary unowned bridges can still be reclaimed.
+
 Delivery incidents run the real composed create/process/validation producer with
 SQLite publication and merge journals. They require an immutable validation-source
 binding before the initial committed-source push, exercise ordinary approval and
 read-only external-merge observation, and keep lost publication/merge responses
 distinct from confirmed outcomes. Local Git fixtures check actual source identity.
+PR retries and failed post-check publication use the same checked-source ledger,
+without auto-committing unreviewed bytes. A failed-state push needs an immutable
+current passing certificate; a passing mutable projection is insufficient.
+An ambiguous PR create still needs provider lookup and never authorizes duplicate
+creation merely because a search returns no match.
 
 Approval observes provider disposition before base preparation and again before
 activating a prepared candidate. A merged predecessor is recorded separately from

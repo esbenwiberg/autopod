@@ -17,6 +17,7 @@ import { rewriteError } from './approval-source-rewrite-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
+import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { StoredValidation, ValidationRepository } from './validation-repository.js';
 
 // Matches the manager's existing default app-server port.
@@ -91,6 +92,12 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
     validationSuite: NonNullable<PodOptions['validationSuite']>,
   ): Promise<PreparedValidationInputs> {
     const podId = pod.id;
+    const worktreePath = pod.worktreePath;
+    if (!worktreePath)
+      throw new TaskRetryBlockedError(
+        'Review source is unavailable: restore the owned worktree before validation. No checks or reviewer approval were produced.',
+        'REVIEW_SOURCE_UNAVAILABLE',
+      );
     // Get the actual diff and commit log for AI task review.
     // Always scope to the agent's own commits via startCommitSha. The reviewer
     // should only evaluate what this agent changed — pre-existing code on a
@@ -112,22 +119,20 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
         startCommitSha: diffSinceCommit ?? null,
       }),
     };
-    const [diff, commitLog] = pod.worktreePath
-      ? await Promise.all([
-          worktreeManager.getDiff(
-            pod.worktreePath,
-            validationDefaultBranch,
-            isolatedReviewDiffLimit(pod.launchConfigDigest),
-            diffSinceCommit,
-          ),
-          worktreeManager.getCommitLog(
-            pod.worktreePath,
-            validationDefaultBranch,
-            undefined,
-            diffSinceCommit,
-          ),
-        ])
-      : ['', ''];
+    const [diff, commitLog] = await Promise.all([
+      worktreeManager.getDiff(
+        worktreePath,
+        validationDefaultBranch,
+        isolatedReviewDiffLimit(pod.launchConfigDigest),
+        diffSinceCommit,
+      ),
+      worktreeManager.getCommitLog(
+        worktreePath,
+        validationDefaultBranch,
+        undefined,
+        diffSinceCommit,
+      ),
+    ]);
     const changedPathsAgainstBase =
       pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
         ? await worktreeManager.getChangedPathsAgainstBase(

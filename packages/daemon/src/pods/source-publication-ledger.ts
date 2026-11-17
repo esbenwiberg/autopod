@@ -100,7 +100,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       .get(id) as { context_hash: string } | undefined;
     if (row) requireEvidence(row.context_hash === contextHash(pod));
   };
-  function assertCurrent(pod: Pod, allowCompletedFix = false) {
+  function assertCurrent(pod: Pod, allowCompletedFix = false, allowCheckedFailure = false) {
     createDeletionOwnership(db).assertTaskAvailable(pod.id);
     assertSourceDeliveryAllowed(db, pod.id);
     const row = db
@@ -145,7 +145,8 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     requireEvidence(!row?.compromised);
     requireEvidence(
       (['validating', 'validated', 'merging', 'merge_pending', 'running'].includes(pod.status) ||
-        (allowCompletedFix && pod.status === 'complete')) &&
+        (allowCompletedFix && pod.status === 'complete') ||
+        (allowCheckedFailure && pod.status === 'failed')) &&
         !hasUnansweredDecision(db, pod.id),
     );
   }
@@ -172,7 +173,8 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
   }
   const ledger: SourcePublicationLedger = {
     pending(pod) {
-      assertCurrent(pod);
+      // Read-only inspection also serves checked downstream-failure recovery.
+      assertCurrent(pod, false, true);
       const rows = db
         .prepare(`SELECT i.id,i.identity,i.source_identity FROM source_publication_intents i
         LEFT JOIN source_publication_receipts r ON r.intent_id=i.id
@@ -359,8 +361,11 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       requireEvidence(!db.inTransaction);
       return db
         .transaction(() => {
-          assertCurrent(pod);
-          if (pod.status === 'validating') requireEvidence(Boolean(checked));
+          // Failed is admitted only with the immutable exact-source passing
+          // certificate below, never the mutable lastValidationResult alone.
+          assertCurrent(pod, false, Boolean(checked));
+          if (pod.status === 'validating' || pod.status === 'failed')
+            requireEvidence(Boolean(checked));
           const target = {
             repoUrl: source.repository,
             defaultBranch: pod.baseBranch ?? pod.profileSnapshot?.defaultBranch ?? 'main',
@@ -382,6 +387,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
             .prepare('SELECT id FROM source_publication_intents WHERE identity = ?')
             .get(hash) as { id: string } | undefined;
           if (previous) {
+            assertContext(pod, previous.id);
             if (checked)
               validationSources.bindPublication(
                 pod,
@@ -423,7 +429,10 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     confirm(pod, id, receipt) {
       requireEvidence(!db.inTransaction);
       db.transaction(() => {
-        assertCurrent(pod);
+        const checkedPublication = db
+          .prepare('SELECT 1 FROM validation_source_publications WHERE publication_id=?')
+          .get(id);
+        assertCurrent(pod, false, Boolean(checkedPublication));
         assertContext(pod, id);
         const admitted = db
           .prepare('SELECT identity FROM source_publication_intents WHERE id = ?')

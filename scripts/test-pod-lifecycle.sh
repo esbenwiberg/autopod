@@ -6,6 +6,14 @@ tests=(
   src/pods/pod-lifecycle-runway.test.ts
   src/pods/pod-lifecycle-routing-incidents.test.ts
   src/pods/pod-lifecycle-delivery-incidents.test.ts
+  src/pods/validation-inputs.test.ts
+  src/pods/delivery-pr.test.ts
+  src/pods/source-publication-ledger.test.ts
+  src/worktrees/review-diff-policy.test.ts
+  src/containers/pod-network-provisioning-race.test.ts
+  src/containers/docker-network-manager.test.ts
+  src/containers/retained-network-release.test.ts
+  src/validation/local-validation-engine.test.ts
   src/pods/state-machine.test.ts
   src/pods/agent-process-workflow.test.ts
   src/pods/validation-execution.test.ts

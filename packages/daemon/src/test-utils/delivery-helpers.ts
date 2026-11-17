@@ -49,6 +49,14 @@ export function pendingStatus(overrides: Partial<PrMergeStatus> = {}): PrMergeSt
 export function createDeliveryFixture(disk = false) {
   const f = createApprovalFixture(disk);
   f.validated();
+  // PR retry unit fixtures start from actual checked-source evidence. Composed
+  // lifecycle tests produce this through the real validation owner instead.
+  seedCheckedValidationSource(
+    f.podRepo,
+    f.pod(),
+    f.captured.resolveEffectiveBoundProfile(f.pod()),
+    f.pod().lastValidationResult!,
+  );
   cleanup.push(() => f.close());
   const provider = {
     findPr: vi.fn<NonNullable<PrManager['findPr']>>(async () => null),

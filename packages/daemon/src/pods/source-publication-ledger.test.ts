@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
-import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import {
+  createMockProfileStore,
+  createPassingValidationResult,
+  createTestDb,
+  insertTestProfile,
+} from '../test-utils/mock-helpers.js';
+import { seedCheckedValidationSource } from '../test-utils/validation-source-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
@@ -35,6 +41,43 @@ function fixture(db = createTestDb()) {
   return { db, repo, ledger: createSourcePublicationLedger(db), pod: repo.getOrThrow('source') };
 }
 describe('durable source publication', () => {
+  it.each([
+    false,
+    true,
+  ])('keeps historical publication evidence across a fresh same-source check (context changed=%s)', (changed) => {
+    const f = fixture();
+    try {
+      const profile = createMockProfileStore(f.db).get('test-profile');
+      seedCheckedValidationSource(f.repo, f.pod, profile, createPassingValidationResult('source'));
+      let pod = f.repo.getOrThrow('source');
+      const first = f.repo.validationSources!.checked(pod, profile);
+      const id = f.ledger.admit(pod, proof, { validationId: first.validationId, checkpoints: [] });
+      f.ledger.confirm(pod, id, proof);
+      if (changed)
+        f.repo.update('source', { task: 'A different task is not prior publication authority' });
+      seedCheckedValidationSource(f.repo, f.repo.getOrThrow('source'), profile, {
+        ...createPassingValidationResult('source'),
+        duration: 2,
+      });
+      pod = f.repo.getOrThrow('source');
+      const next = f.repo.validationSources!.checked(pod, profile);
+      expect(next.validationId).not.toBe(first.validationId);
+      const admit = () =>
+        f.ledger.admit(pod, proof, { validationId: next.validationId, checkpoints: [] });
+      if (changed) expect(admit).toThrow();
+      else expect(admit()).toBe(id);
+      expect(
+        f.db
+          .prepare(
+            'SELECT validation_id FROM validation_source_publications WHERE publication_id=?',
+          )
+          .get(id),
+      ).toEqual({ validation_id: first.validationId });
+    } finally {
+      f.db.close();
+    }
+  });
+
   it.each([
     null,
     'https://github.com/org/repo/pull/27',

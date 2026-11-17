@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PrMergeStatus } from '../interfaces/pr-manager.js';
+import type { PrManager, PrMergeStatus } from '../interfaces/pr-manager.js';
 import {
   createTestContext,
   mockBranchPublication,
@@ -39,7 +39,7 @@ function fixture() {
     reviewComments: [],
   });
   const provider = {
-    findPr: vi.fn(async () => null),
+    findPr: vi.fn<NonNullable<PrManager['findPr']>>(async () => null),
     createPr: vi.fn(async () => ({
       url: 'https://github.com/org/repo/pull/42',
       usedFallback: false,
@@ -92,6 +92,42 @@ function noExtraDelivery(f: ReturnType<typeof fixture>, pushes: number, merges =
 }
 
 describe('composed delivery incidents', () => {
+  it.each([
+    'metadata',
+    'preparation',
+  ] as const)('recovers %s failure through checked publication without coding or fabricated receipts', async (phase) => {
+    const f = fixture();
+    if (phase === 'metadata')
+      f.provider.createPr.mockRejectedValueOnce(new Error('metadata temporarily unavailable'));
+    // No onPrepared/admission and therefore no uncertain external push.
+    else
+      vi.mocked(f.ctx.worktreeManager.pushBranch).mockRejectedValueOnce(
+        new Error('publication preparation unavailable'),
+      );
+    await f.process();
+    expect(f.current().status).toBe(phase === 'metadata' ? 'validated' : 'failed');
+    expect(f.current().lastValidationResult?.overall).toBe('pass');
+    expect(count(f, 'source_publication_receipts')).toBe(phase === 'metadata' ? 1 : 0);
+    const checks = vi.mocked(f.ctx.validationEngine.validate).mock.calls.length;
+    if (phase === 'metadata') {
+      // The first response was ambiguous. Only provider lookup, not a second
+      // create request or a null search result, can settle that operation.
+      f.provider.findPr.mockResolvedValue({
+        url: 'https://github.com/org/repo/pull/42',
+        disposition: 'open',
+      });
+      await f.manager.retryCreatePr(f.pod.id);
+    } else await f.manager.resumePod(f.pod.id);
+    expect(f.current().status).toBe('validated');
+    expect(f.current().prUrl).toBe('https://github.com/org/repo/pull/42');
+    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(checks);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.provider.createPr).toHaveBeenCalledTimes(1);
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+  });
+
   it.each([
     false,
     true,
