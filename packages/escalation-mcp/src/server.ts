@@ -149,7 +149,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   const executionPrerequisites = bridge.getExecutionPrerequisites?.(podId);
   server.tool(
     'report_blocker',
-    'Report a true executor/environment failure or missing required input without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles. Do not use for expected host-only macOS checks explicitly deferred to a Mac or other expected external verification: record those as not run in report_task_summary.deferredChecks; required gates still apply. Required Mac runner failures remain blockers.',
+    'Report a true executor/environment failure or missing required input; Autopod holds completion. For an expected external check, supply explicit deferral context and record it in report_task_summary.deferredChecks. A deferral is not proof or a gate waiver; required runner failures remain blockers.',
     {
       description: z
         .string()
@@ -164,6 +164,15 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Required repair or missing input; say when no supported recovery exists'),
       owner: z.enum(['autopod', 'parent', 'validation']).default('autopod'),
       phase: z.string().optional().describe('Failing execution or validation phase'),
+      deferral: z
+        .object({
+          check: z.string().trim().min(1).max(4000),
+          expectedExecutor: z.string().trim().min(1).max(256),
+          requiredFactId: z.string().trim().min(1).max(256).optional(),
+        })
+        .strict()
+        .optional()
+        .describe('Explicit expected external NOT RUN claim; never a proof or waiver'),
       prerequisiteBlocker: prerequisiteBlockerV1Schema
         .optional()
         .describe(

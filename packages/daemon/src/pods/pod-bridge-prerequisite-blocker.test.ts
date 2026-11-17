@@ -68,6 +68,36 @@ function fixture() {
 }
 
 describe('daemon typed blocker ingestion', () => {
+  it('stamps external deferral without creating an infrastructure hold', () => {
+    const f = fixture();
+    try {
+      f.report.payload = {
+        kind: 'expected-external-deferral',
+        requiresResponse: false,
+        description: 'Mac check',
+        attempted: [],
+        needs: 'Mac CI',
+        deferral: {
+          check: 'xcodebuild test',
+          expectedExecutor: 'Mac CI',
+          requiredFactId: 'native',
+        },
+        lifecycleGeneration: 999,
+      };
+      f.bridge.createEscalation(f.report);
+      expect(f.escalationRepo.getOrThrow('report').payload).toMatchObject({
+        lifecycleGeneration: f.podRepo.getOrThrow('pod').lifecycleGeneration,
+        deferral: {
+          check: 'xcodebuild test',
+          expectedExecutor: 'Mac CI',
+          requiredFactId: 'native',
+        },
+      });
+      expect(f.podRepo.hasInfrastructureBlocker('pod')).toBe(false);
+    } finally {
+      f.db.close();
+    }
+  });
   it('validates frozen manifest, stamps generation and preserves original narrative without clearing blocker guard', () => {
     const f = fixture();
     try {

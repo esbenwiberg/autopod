@@ -61,6 +61,20 @@ function expectReviewHunks(diff: string) {
 }
 
 describe('review diffs versus noise-filtered previews (real Git)', () => {
+  it('keeps an empty incremental diff distinct from the cumulative parent diff', async () => {
+    await git('checkout', '-b', 'fix');
+    await git('add', '.');
+    await git('commit', '-m', 'inherited parent');
+    const parent = (await git('rev-parse', 'HEAD')).stdout.trim();
+    expect(await manager.getDiff(directory, 'main', undefined, parent)).toBe('');
+    expectReviewHunks(await manager.getDiff(directory, 'main'));
+    await fs.writeFile(path.join(directory, 'repair.ts'), 'repair\n');
+    await git('add', 'repair.ts');
+    const own = await manager.getDiff(directory, 'main', undefined, parent);
+    expect(own).toContain('repair.ts');
+    expect(own).not.toContain('package-lock.json');
+    await expect(manager.getDiff(directory, 'main', undefined, 'missing-ref')).rejects.toThrow();
+  });
   it('includes changed lockfile hunks by default on the host, not the entire large file', async () => {
     expectReviewHunks(await manager.getDiff(directory, 'main', undefined, base));
   });

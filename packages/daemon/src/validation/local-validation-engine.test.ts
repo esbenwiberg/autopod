@@ -3891,6 +3891,11 @@ human_review: []
     expect(result.overall).toBe('fail');
     expect(result.taskReview?.status).toBe('fail');
     expect(result.reviewSkipReason).toContain('incomplete');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'review',
+      code: 'REVIEW_INPUT_UNAVAILABLE',
+      retryable: false,
+    });
   });
 
   it('rejects oversized isolated review prompt even when the complete diff fits', async () => {

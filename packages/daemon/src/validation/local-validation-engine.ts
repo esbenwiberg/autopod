@@ -897,6 +897,14 @@ export function createLocalValidationEngine(
                   MAX_ISOLATED_REVIEW_INPUT_BYTES));
           const inputFailure =
             'Review failed: incomplete isolated reviewer input (truncated or oversized packet); complete bounded source capture is required.';
+          if (incompleteInput) {
+            infrastructureFailure = {
+              phase: 'review',
+              code: 'REVIEW_INPUT_UNAVAILABLE',
+              message: inputFailure,
+              retryable: false,
+            };
+          }
           let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = incompleteInput
             ? {
                 requiredReviewUnavailable: true,
@@ -1365,7 +1373,8 @@ export function createLocalValidationEngine(
         const { infrastructureFailure: _healthInfrastructureFailure, ...storedHealthResult } =
           infrastructureAwareHealth;
 
-        if (!infrastructureFailure) boundary?.assertVerified();
+        if (!infrastructureFailure || infrastructureFailure.phase === 'review')
+          boundary?.assertVerified();
         return {
           podId: config.podId,
           attempt: config.attempt,
