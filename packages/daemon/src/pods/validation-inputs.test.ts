@@ -1073,7 +1073,9 @@ describe('validation inputs persisted effects', () => {
         f.skip.mockImplementationOnce(() => {
           throw fault;
         });
-      await expect(f.run()).rejects.toBe(fault);
+      if (['diff', 'log', 'paths'].includes(stage))
+        await expect(f.run()).rejects.toMatchObject({ code: 'REVIEW_SOURCE_UNAVAILABLE' });
+      else await expect(f.run()).rejects.toBe(fault);
       const persisted = f.reopen();
       const afterFlush = ['write', 'executor', 'skip'].includes(stage);
       const afterWrite = ['executor', 'skip'].includes(stage);

@@ -13,6 +13,96 @@ import { createPodManager } from './pod-manager.js';
 
 describe('review routing incidents', () => {
   it.each([
+    'validation',
+    'revalidation',
+  ] as const)('holds unreadable source on %s without starting checks or consuming an attempt', async (entry) => {
+    for (const method of ['getDiff', 'getCommitLog', 'getChangedPathsAgainstBase'] as const) {
+      const ctx = createTestContext();
+      try {
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Check exact source' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'original-container',
+          worktreePath: '/tmp/owned-source',
+        });
+        const read = ctx.worktreeManager[method];
+        if (!read) throw new Error('Missing source-reader fixture');
+        vi.mocked(read).mockRejectedValueOnce(new Error('Git reference unavailable'));
+        if (entry === 'validation') await manager.triggerValidation(pod.id);
+        else {
+          ctx.podRepo.update(pod.id, { status: 'review_required' });
+          await manager.revalidateSession(pod.id, { force: true });
+        }
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'review_required',
+          validationAttempts: 0,
+          worktreePath: '/tmp/owned-source',
+          containerId: 'original-container',
+        });
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(ctx.podRepo.taskRetries?.state(pod.id).executedCount).toBe(0);
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      } finally {
+        ctx.db.close();
+      }
+    }
+  });
+
+  it.each([
+    'validation',
+    'revalidation',
+  ] as const)('refuses a container source different from the captured %s packet before checks/publication', async (entry) => {
+    const ctx = createTestContext();
+    try {
+      const execute = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!execute) throw new Error('Missing source probe adapter');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (...args) => {
+        const value = await execute(...args);
+        return args[1][2]?.includes('autopod-validation-source-v1')
+          ? {
+              ...value,
+              stdout: value.stdout
+                .replaceAll('a'.repeat(40), 'c'.repeat(40))
+                .replaceAll('b'.repeat(40), 'd'.repeat(40)),
+            }
+          : value;
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Review packet A is not source B' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'original-container',
+        worktreePath: '/tmp/owned-source',
+      });
+      if (entry === 'validation') await manager.triggerValidation(pod.id);
+      else {
+        ctx.podRepo.update(pod.id, { status: 'review_required' });
+        await manager.revalidateSession(pod.id, { force: true });
+      }
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'review_required',
+        validationAttempts: 0,
+      });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.podRepo.taskRetries?.state(pod.id).executedCount).toBe(0);
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM validation_source_results').get()).toEqual({
+        n: 0,
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    } finally {
+      ctx.db.close();
+    }
+  });
+  it.each([
     false,
     true,
   ])('bounds real reviewer recovery without coding (reconciliation blocked=%s)', async (blocked) => {

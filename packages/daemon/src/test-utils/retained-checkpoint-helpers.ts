@@ -65,6 +65,24 @@ export async function materializeCheckpointFixture(
     treeSha: await git(cwd, 'rev-parse', 'HEAD^{tree}'),
     worktreeClean: (await git(cwd, 'status', '--porcelain')).length === 0,
   }));
+  const execute = vi.mocked(f.cm.execInContainer).getMockImplementation();
+  if (!execute) throw new Error('Missing guest transport fixture');
+  vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
+    if (!args[1][2]?.includes('autopod-validation-source-v1')) return execute(...args);
+    try {
+      const result = await exec(
+        '/usr/bin/git',
+        args[1].slice(args[1].indexOf('/usr/bin/git') + 3),
+        {
+          cwd: f.pod().worktreePath!,
+          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+        },
+      );
+      return { ...result, exitCode: 0 };
+    } catch {
+      return { stdout: '', stderr: 'Guest source unavailable', exitCode: 1 };
+    }
+  });
   f.deps.prepare = undefined; // Real independent archive/bundle/worktree, not an injected receipt.
   // Execute the maintained checkpoint shell/bundle/import implementation against
   // a local guest clone. Only the provider transport is replaced, not its Git semantics.

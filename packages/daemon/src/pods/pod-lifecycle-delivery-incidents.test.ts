@@ -88,11 +88,11 @@ function fixture() {
 function count(f: ReturnType<typeof fixture>, table: string) {
   return (f.ctx.db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
-function noExtraDelivery(f: ReturnType<typeof fixture>, pushes: number, merges = 0) {
+function noExtraDelivery(f: ReturnType<typeof fixture>, pushes: number, merges = 0, spawns = 1) {
   expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(pushes);
   expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
   expect(f.provider.mergePr).toHaveBeenCalledTimes(merges);
-  expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+  expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(spawns);
 }
 
 describe('composed delivery incidents', () => {
@@ -177,6 +177,9 @@ describe('composed delivery incidents', () => {
       const source = await inspectAdoptionGit(git, branch);
       return { branch, commitSha: source.head, treeSha: source.tree, worktreeClean: true };
     });
+    const inspect = vi.mocked(f.ctx.worktreeManager.inspectSource!).getMockImplementation();
+    if (!inspect) throw new Error('Missing real Git source inspector');
+    vi.mocked(f.ctx.worktreeManager.inspectSourceAdoption!).mockImplementation(inspect);
     vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementation(
       async (_root, branch, options) => {
         const source = await inspectAdoptionGit(git, branch);
@@ -348,7 +351,17 @@ describe('composed delivery incidents', () => {
     vi.mocked(f.ctx.worktreeManager.pushBranch).mockRejectedValueOnce(
       new Error('Historical producer did not admit publication'),
     );
-    await f.process();
+    if (proven) await f.process();
+    else {
+      // Explicit legacy mutable projection: no current source witness or native
+      // check is invented to reconstruct an unavailable historical run.
+      f.ctx.podRepo.update(f.pod.id, {
+        status: 'validated',
+        containerId: 'historical-container',
+        worktreePath: '/tmp/historical-source',
+        lastValidationResult: createPassingValidationResult(f.pod.id),
+      });
+    }
     expect(f.current().lastValidationResult?.overall).toBe('pass');
     expect(count(f, 'source_publication_intents')).toBe(0);
     // Historical projection: a PR exists, but no publication receipt ever existed.
@@ -375,7 +388,7 @@ describe('composed delivery incidents', () => {
     expect(count(f, 'source_publication_receipts')).toBe(0);
     expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
     expect(f.ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
-    noExtraDelivery(f, proven ? 1 : 0);
+    noExtraDelivery(f, proven ? 1 : 0, 0, proven ? 1 : 0);
   });
 
   it.each([
@@ -686,6 +699,56 @@ describe('composed delivery incidents', () => {
     expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
     expect(f.provider.createPr).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    false,
+    true,
+  ])('existing-PR approval cannot publish source changed after checks (during selection=%s)', async (late) => {
+    const f = fixture();
+    await f.process();
+    if (late) {
+      vi.mocked(f.ctx.worktreeManager.prepareApprovalRebase!).mockRejectedValueOnce(
+        new Error('Known pre-dispatch preparation failure'),
+      );
+      await expect(f.approve()).rejects.toThrow('preparation');
+      expect(f.current().status).toBe('validated');
+    }
+    const originalPushes = late ? 2 : 1;
+    const changed = {
+      branch: f.pod.branch,
+      commitSha: 'c'.repeat(40),
+      treeSha: 'd'.repeat(40),
+      worktreeClean: true,
+    };
+    vi.mocked(f.ctx.worktreeManager.inspectSource!).mockResolvedValue(changed);
+    if (late)
+      vi.mocked(f.ctx.worktreeManager.inspectSource!).mockResolvedValueOnce({
+        branch: f.pod.branch,
+        commitSha: 'a'.repeat(40),
+        treeSha: 'b'.repeat(40),
+        worktreeClean: true,
+      });
+    vi.mocked(f.ctx.worktreeManager.inspectSourceAdoption!).mockResolvedValue(changed);
+    let physicalPushes = originalPushes; // Real initial/PR-bound producer publications above.
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementation(
+      async (root, branch, options) => {
+        const receipt = {
+          ...(await mockBranchPublication(root, branch, { ...options, onPrepared: undefined })),
+          ...changed,
+          observedRemoteCommitSha: changed.commitSha,
+        };
+        options?.onPrepared?.(receipt);
+        physicalPushes++;
+        return receipt;
+      },
+    );
+    await f.approve().catch(() => {});
+    expect(count(f, 'source_publication_receipts')).toBe(originalPushes);
+    expect(count(f, 'source_publication_intents')).toBe(originalPushes);
+    expect(physicalPushes).toBe(originalPushes);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
   });
 
   it('approval cannot turn a legacy passing projection without native source proof into publication', async () => {

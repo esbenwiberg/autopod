@@ -10,7 +10,6 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
-import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { isolatedReviewDiffLimit } from '../validation/reviewer-input-bounds.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
@@ -19,13 +18,17 @@ import type { PodRepository } from './pod-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { StoredValidation, ValidationRepository } from './validation-repository.js';
+import { captureReviewSource } from './validation-review-source.js';
 
 // Matches the manager's existing default app-server port.
 const CONTAINER_APP_PORT = 3000;
 
 interface ValidationInputsDependencies {
   logger: Logger;
-  worktreeManager: Pick<WorktreeManager, 'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase'>;
+  worktreeManager: Pick<
+    WorktreeManager,
+    'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase' | 'inspectSourceAdoption'
+  >;
   podRepo: Pick<
     PodRepository,
     'update' | 'approvalRewrites' | 'retainedCheckpoints' | 'retainedCoding'
@@ -119,27 +122,14 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
         startCommitSha: diffSinceCommit ?? null,
       }),
     };
-    const [diff, commitLog] = await Promise.all([
-      worktreeManager.getDiff(
-        worktreePath,
-        validationDefaultBranch,
-        isolatedReviewDiffLimit(pod.launchConfigDigest),
-        diffSinceCommit,
-      ),
-      worktreeManager.getCommitLog(
-        worktreePath,
-        validationDefaultBranch,
-        undefined,
-        diffSinceCommit,
-      ),
-    ]);
-    const changedPathsAgainstBase =
-      pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
-        ? await worktreeManager.getChangedPathsAgainstBase(
-            pod.worktreePath,
-            validationDefaultBranch,
-          )
-        : parseDiffFilePaths(diff);
+    const { diff, commitLog, changedPathsAgainstBase, reviewSource } = await captureReviewSource(
+      worktreeManager,
+      worktreePath,
+      pod.branch,
+      validationDefaultBranch,
+      isolatedReviewDiffLimit(pod.launchConfigDigest),
+      diffSinceCommit,
+    );
     assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
     // Try to load a repo-specific code-review skill from the worktree
@@ -196,6 +186,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
           ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.${requiredRecoveryReview ? '\nMandatory additional recovery check: independent-v1. Run fresh independent review even if the original workflow omitted it; this is not historical review evidence.' : ''}\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${podRepo.retainedCoding?.latest(podId)?.context.taskSummary?.actualSummary ?? pod.taskSummary?.actualSummary ?? 'None'}`
           : pod.task,
       diff,
+      ...(reviewSource ? { reviewSource } : {}),
       testCommand: profile.testCommand,
       buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
       testTimeout: (profile.testTimeout ?? 600) * 1_000,

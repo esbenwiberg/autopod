@@ -143,7 +143,14 @@ export function createValidationSourceEvidence(db: Database.Database) {
           "SELECT 1 FROM task_retry_attempts WHERE id=? AND pod_id=? AND generation=? AND stage='validation' AND started_at IS NOT NULL AND ended_at IS NULL",
         )
         .get(admissionId, pod.id, pod.lifecycleGeneration);
-      if (!started || result.podId !== pod.id || result.infrastructureFailure) return;
+      if (
+        !started ||
+        result.podId !== pod.id ||
+        result.infrastructureFailure ||
+        (result.taskReview?.reviewBatch &&
+          result.taskReview.reviewBatch.reviewedHead !== source.head)
+      )
+        return;
       db.prepare('INSERT INTO validation_source_results VALUES(?,?,?,?)').run(
         id,
         recoveryCheckHash(result),

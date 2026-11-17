@@ -147,6 +147,19 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         podRepo.validationExecutions?.assertTaskSettled(podId);
         if (validationConfig.containerId !== pod.containerId)
           throw new TaskRetryBlockedError('Validation resource differs from current lifecycle');
+        if (validationConfig.reviewSource) {
+          const source = await observeValidationSource(cm, pod);
+          ownership.assertCurrent();
+          if (
+            !source ||
+            source.head !== validationConfig.reviewSource.head ||
+            source.tree !== validationConfig.reviewSource.tree
+          )
+            throw new TaskRetryBlockedError(
+              'Review input no longer matches the owned source. Refresh source inputs before validation; no checks ran.',
+              'REVIEW_SOURCE_UNAVAILABLE',
+            );
+        }
         const retainedBudget = podRepo.retainedCheckpoints?.testBudget(pod, originalTestTimeout);
         retainedBudgetWasSelected = Boolean(retainedBudget);
         if (
@@ -358,7 +371,17 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             ? await observeValidationSource(cm, sourcePod)
             : null;
           ownership.assertCurrent();
-          if (checkedSource && admission)
+          if (
+            validationConfig.reviewSource &&
+            (!checkedSource ||
+              checkedSource.head !== validationConfig.reviewSource.head ||
+              checkedSource.tree !== validationConfig.reviewSource.tree)
+          )
+            throw new TaskRetryBlockedError(
+              'Repository preparation changed source after review input capture; no checks ran.',
+              'REVIEW_SOURCE_UNAVAILABLE',
+            );
+          if (checkedSource && admission && validationConfig.reviewSource)
             sourceAdmission = podRepo.validationSources?.begin(
               sourcePod,
               resolveEffectiveBoundProfile(sourcePod),
@@ -381,27 +404,45 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           const preparationFailure =
             validateErr instanceof AutopodError &&
             validateErr.code === 'REPOSITORY_PREPARATION_FAILED';
+          const sourceUnavailable =
+            !engineStarted &&
+            validateErr instanceof TaskRetryBlockedError &&
+            validateErr.code === 'REVIEW_SOURCE_UNAVAILABLE';
           result = makeUnexpectedValidationFailureResult(
             podId,
             attempt,
             preparationFailure ? new Error(validateErr.message) : validateErr,
           );
+          if (sourceUnavailable) {
+            result.smoke.build = {
+              status: 'skip',
+              output: 'Not run: review source changed',
+              duration: 0,
+            };
+            result.smoke.health = { status: 'skip', url: '', responseCode: null, duration: 0 };
+          }
           // A thrown engine has not supplied termination evidence. Keep the
           // synthetic failure distinct from a completed engine outcome.
           result.infrastructureFailure = {
-            phase: engineStarted && !engineSettled ? 'build' : 'setup',
-            code:
-              !engineStarted &&
-              validateErr instanceof RepositoryPreparationError &&
-              validateErr.terminationUnverified
+            phase: sourceUnavailable
+              ? 'review'
+              : engineStarted && !engineSettled
+                ? 'build'
+                : 'setup',
+            code: sourceUnavailable
+              ? 'REVIEW_SOURCE_UNAVAILABLE'
+              : !engineStarted &&
+                  validateErr instanceof RepositoryPreparationError &&
+                  validateErr.terminationUnverified
                 ? 'EXEC_EXIT_UNVERIFIED'
                 : (!engineStarted || engineSettled) &&
                     validateErr instanceof AutopodError &&
                     validateErr.code === 'REPOSITORY_PREPARATION_FAILED'
                   ? validateErr.code
                   : 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
-            message:
-              !engineStarted || engineSettled
+            message: sourceUnavailable
+              ? validateErr.message
+              : !engineStarted || engineSettled
                 ? 'Repository preparation did not qualify this validation candidate; inspect preparation provenance before retrying.'
                 : 'Validation engine threw without verified execution termination.',
             retryable: false,

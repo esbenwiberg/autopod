@@ -8,6 +8,7 @@ export function seedCheckedValidationSource(
   pod: Pod,
   profile: PodExecutionSettings,
   result: ValidationResult,
+  source = { head: 'a'.repeat(40), tree: 'b'.repeat(40) },
 ) {
   const retries = repo.taskRetries;
   const sources = repo.validationSources;
@@ -20,7 +21,6 @@ export function seedCheckedValidationSource(
     [],
   );
   retries.start(attempt.id);
-  const source = { head: 'a'.repeat(40), tree: 'b'.repeat(40) };
   const id = sources.begin(pod, profile, source, attempt.id);
   sources.finish(id, pod, profile, source, result);
   retries.finish(attempt.id, 'pass', 1);

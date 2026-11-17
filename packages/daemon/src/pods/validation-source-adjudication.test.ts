@@ -34,6 +34,8 @@ describe('native source evidence for independently adjudicated review', () => {
     'before-drift',
     'after-drift',
     'foreign-review-head',
+    'foreign-primary-head',
+    'missing-primary-head',
     'failed-test',
     'foreign-pod',
     'override',
@@ -85,6 +87,9 @@ describe('native source evidence for independently adjudicated review', () => {
           reviewBatch: batch('primary'),
         },
       };
+      if (scenario === 'foreign-primary-head')
+        original.taskReview!.reviewBatch!.reviewedHead = 'c'.repeat(40);
+      if (scenario === 'missing-primary-head') original.taskReview!.reviewBatch!.reviewedHead = '';
       if (scenario === 'failed-test')
         original.test = { status: 'fail', stdout: 'Real failing test', duration: 1 };
       const independent: ValidationResult = {

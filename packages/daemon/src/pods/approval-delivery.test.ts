@@ -122,7 +122,8 @@ describe('approval delivery stages', () => {
     });
     await expect(entry.approveSession('prepare')).rejects.toMatchObject({ code: 'STALE_APPROVAL' });
     expect(f.pod().status).toBe('merging');
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
     expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
   });
   it('returns halted only after the no-change lifecycle completed and dependent effects ran', async () => {

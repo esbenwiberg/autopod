@@ -13,6 +13,7 @@ export async function publishValidatedSource(input: {
   podRepo: PodRepository;
   worktreeManager: WorktreeManager;
   pat?: string;
+  pushOptions?: { force?: boolean; expectedRemoteCommitSha?: string };
   assertCurrent(): void;
 }) {
   const { pod, profile, podRepo, worktreeManager, assertCurrent } = input;
@@ -57,7 +58,7 @@ export async function publishValidatedSource(input: {
     pod,
     repository,
     worktreeManager,
-    { pat: input.pat },
+    { ...input.pushOptions, pat: input.pat },
     (source) => {
       assertCurrent();
       podRepo.validationSources?.checked(pod, profile);

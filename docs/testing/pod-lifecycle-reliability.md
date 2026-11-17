@@ -78,7 +78,18 @@ Approval's missing-PR path uses checked committed publication for ordinary agent
 work, never a post-review auto-commit. Reusing a historical publication for PR
 creation requires a fresh exact remote/local observation. A moved or deleted
 remote ref does not authorize replacement publication. Interactive and owned
-rewrite publication retain their separate explicit authority.
+rewrite publication retain their separate explicit authority. The same checked-source
+rule covers new ordinary pushes for existing PRs, branch output and no-PR-provider
+fallbacks. A projection waiver alone is not new committed-source proof. Choosing
+an unchanged historical publication remains read-only even if source changes
+between that choice and the fresh observation; it cannot fall through to a push.
+
+Initial validation and revalidation capture diff/log/path inputs between host
+source observations and compare that immutable identity with the owned guest
+before admission and after repository preparation. A changed or unreadable input
+parks as review-source infrastructure trouble without spending a coding or
+validation-correction attempt. Legacy/dirty unbound packets cannot mint a native
+committed-source certificate; returned council heads must match that source.
 
 This selection is not proof of live containers, live external delivery,
 platform-specific behavior, or every recovery route. Extend the existing
