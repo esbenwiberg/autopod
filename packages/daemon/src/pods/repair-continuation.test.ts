@@ -168,6 +168,8 @@ async function fixture(
         stderr: '',
       };
     }
+    if (command[2]?.includes('autopod-validation-source-v1'))
+      return defaultExec(id, command, options);
     if (command.includes('HEAD'))
       return { exitCode: 0, stdout: f.input.checkpointHead, stderr: '' };
     return defaultExec(id, command, options);

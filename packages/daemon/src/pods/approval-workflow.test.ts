@@ -43,7 +43,7 @@ describe('complete approval workflow', () => {
   });
   it('does not block another pod while readiness is pending', async () => {
     const f = fixture();
-    f.validated();
+    f.checked();
     let finish!: () => void;
     const gate = new Promise<void>((resolve) => {
       finish = resolve;
@@ -60,17 +60,19 @@ describe('complete approval workflow', () => {
     });
     finish();
     await pending;
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
   });
   it('publishes changed source through real durable admission before completion and cleanup', async () => {
     const f = fixture();
-    f.validated();
+    f.checked();
     const ledger = f.podRepo.sourcePublications;
     if (!ledger) throw new Error('Missing publication fixture');
     const admit = vi.spyOn(ledger, 'admit');
     await f.workflow().approveSession('prepare');
     expect(f.pod().status).toBe('complete');
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
     expect(admit).toHaveBeenCalledOnce();
     const id = admit.mock.results[0]?.value;
     if (typeof id !== 'string') throw new Error('Missing publication id');
@@ -116,7 +118,7 @@ describe('complete approval workflow', () => {
   });
   it('persists confirmed publication/readiness/events through actual private SQLite close and reopen', async () => {
     const f = fixture(true);
-    f.validated();
+    f.checked();
     const ledger = f.podRepo.sourcePublications;
     if (!ledger) throw new Error('Missing ledger');
     const admit = vi.spyOn(ledger, 'admit');

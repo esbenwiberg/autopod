@@ -45,6 +45,8 @@ import {
   mockPrMerge,
 } from './test-utils/mock-helpers.js';
 
+import { seedCheckedValidationSource } from './test-utils/validation-source-helpers.js';
+
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
 const MIGRATION_FILES = fs
   .readdirSync(migrationsDir)
@@ -1123,10 +1125,21 @@ describe('Extended Route Tests', () => {
         linesRemoved: 0,
       });
       (worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-      if (delivery !== 'missing-worktree')
-        vi.mocked(
-          delivery === 'branch' ? worktreeManager.mergeBranch : worktreeManager.pushBranch,
-        ).mockRejectedValueOnce(new Error('remote unavailable'));
+      const checkedPremise = () => {
+        const current = repo.getOrThrow('approval-preserved');
+        seedCheckedValidationSource(
+          repo,
+          current,
+          createProfileStore(db).get(current.profileName),
+          current.lastValidationResult!,
+        );
+      };
+      if (delivery !== 'missing-worktree') {
+        checkedPremise(); // Explicit native-check unit premise before simulating transport failure.
+        vi.mocked(worktreeManager.pushBranch).mockRejectedValueOnce(
+          new Error('remote unavailable'),
+        );
+      }
       const first = await app.inject({
         method: 'POST',
         url: '/pods/approval-preserved/approve',
@@ -1149,8 +1162,10 @@ describe('Extended Route Tests', () => {
         worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
       });
       expect(containerManager.kill).not.toHaveBeenCalled();
-      if (delivery === 'missing-worktree')
+      if (delivery === 'missing-worktree') {
         repo.update('approval-preserved', { worktreePath: '/tmp/preserved-approval' });
+        checkedPremise(); // Restoring a path alone is not checked-source authority.
+      }
       const retry = await app.inject({
         method: 'POST',
         url: '/pods/approval-preserved/approve',
@@ -1162,11 +1177,10 @@ describe('Extended Route Tests', () => {
         status: 'complete',
         failureReason: null,
       });
-      expect(
-        delivery === 'no-changes' || delivery === 'existing-pr-push'
-          ? worktreeManager.pushBranch
-          : worktreeManager.mergeBranch,
-      ).toHaveBeenCalledTimes(delivery === 'missing-worktree' ? 1 : 2);
+      expect(worktreeManager.pushBranch).toHaveBeenCalledTimes(
+        delivery === 'missing-worktree' ? 1 : 2,
+      );
+      expect(worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
     it('returns 409 when pod is not in validated state', async () => {

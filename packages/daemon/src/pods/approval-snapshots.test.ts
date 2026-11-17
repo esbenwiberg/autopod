@@ -43,7 +43,7 @@ describe('approval workspace snapshots', () => {
   it('preserves a real private report snapshot and receipt before source publication and cleanup', async () => {
     const f = fixture();
     f.podRepo.update('prepare', { executionTarget: 'sandbox' });
-    f.validated();
+    f.checked();
     vi.mocked(f.cm.extractDirectoryFromContainer).mockImplementation(
       async (_container, _source, destination) => {
         writeFileSync(join(destination, 'report.txt'), 'Private synthetic report');
@@ -65,13 +65,13 @@ describe('approval workspace snapshots', () => {
       }),
     );
     expect(vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(f.worktreeManager.mergeBranch).mock.invocationCallOrder[0] ?? 0,
+      vi.mocked(f.worktreeManager.pushBranch).mock.invocationCallOrder[0] ?? 0,
     );
   });
   it('admits only one same-pod snapshot and merge across concurrent approvals', async () => {
     const f = fixture();
     f.podRepo.update('prepare', { executionTarget: 'sandbox' });
-    f.validated();
+    f.checked();
     let finish!: () => void;
     const gate = new Promise<void>((resolve) => {
       finish = resolve;
@@ -97,7 +97,7 @@ describe('approval workspace snapshots', () => {
     expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
     finish();
     await first;
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
     expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).toHaveBeenCalledOnce();
   });
   it('rejects stale ownership during wakeup without export publication or cleanup', async () => {
