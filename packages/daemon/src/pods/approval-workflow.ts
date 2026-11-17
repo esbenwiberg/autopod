@@ -10,6 +10,7 @@ import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';
 import { validateTransition } from './state-machine.js';
+import { validationSourceError } from './validation-source-evidence.js';
 
 export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
   const {
@@ -112,6 +113,8 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     const recovery = podRepo.recoveryForks?.child(podId);
     assertApprovalCurrent(pod, { approvalEntry: !!recovery });
     const approvalReason = assertApprovalAllowed(podId, readiness, options);
+    if (podRepo.getOrThrow(podId).worktreeCompromised)
+      validationSourceError('Compromised source cannot be authorized by a readiness reason.');
     if (recovery) {
       if (actor.type !== 'human' || !actor.userId.trim() || options.automation)
         throw new AutopodError(

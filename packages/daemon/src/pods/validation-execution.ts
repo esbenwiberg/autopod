@@ -411,7 +411,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         // Source certification is separate from the actual engine outcome. A
         // superseded observer cannot turn completed checks into a synthetic
         // failure or publish source proof into the replacement invocation.
-        if (sourceAdmission && result.overall === 'pass' && ownership.isCurrent()) {
+        if (sourceAdmission && !result.infrastructureFailure && ownership.isCurrent()) {
           try {
             const afterPod = ownership.assertCurrent();
             const afterSource = await observeValidationSource(cm, afterPod);

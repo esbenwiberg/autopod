@@ -8,6 +8,18 @@ import type { BranchPublicationSource } from '../interfaces/worktree-manager.js'
 import { assertMergeTarget } from '../worktrees/merge-source-identity.js';
 import { inspectAdoptionGit } from '../worktrees/source-adoption-git.js';
 import { recoveryCheckHash } from './recovery-fork-checks.js';
+import { failedValidationPhases, hasPendingFactDecision } from './validation-workflow-policy.js';
+
+function deterministicCheckHash(result: ValidationResult): string {
+  const value = structuredClone(result);
+  value.taskReview = null;
+  value.overall = 'pass';
+  value.duration = 0;
+  delete value.reviewTokenUsage;
+  delete value.reviewSkipKind;
+  delete value.reviewSkipReason;
+  return recoveryCheckHash(value);
+}
 
 export interface CheckedSource {
   head: string;
@@ -131,19 +143,104 @@ export function createValidationSourceEvidence(db: Database.Database) {
           "SELECT 1 FROM task_retry_attempts WHERE id=? AND pod_id=? AND generation=? AND stage='validation' AND started_at IS NOT NULL AND ended_at IS NULL",
         )
         .get(admissionId, pod.id, pod.lifecycleGeneration);
-      if (
-        !started ||
-        result.podId !== pod.id ||
-        result.overall !== 'pass' ||
-        result.infrastructureFailure
-      )
-        return;
+      if (!started || result.podId !== pod.id || result.infrastructureFailure) return;
       db.prepare('INSERT INTO validation_source_results VALUES(?,?,?,?)').run(
         id,
         recoveryCheckHash(result),
         JSON.stringify(result),
         new Date().toISOString(),
       );
+    },
+    /** Append a NEW native adjudication witness; never rewrite the failed check or its accounting. */
+    adjudicate(
+      pod: Pod,
+      profile: PodExecutionSettings,
+      before: CheckedSource,
+      after: CheckedSource,
+      original: ValidationResult,
+      independent: ValidationResult,
+      effective: ValidationResult,
+    ): void {
+      const adjudication = effective.taskReview?.reviewBatch?.adjudication;
+      if (
+        pod.skipValidation ||
+        pod.validationWaiver ||
+        pod.validationOverrides?.length ||
+        original.overall !== 'fail' ||
+        original.infrastructureFailure ||
+        original.taskReview?.reviewBatch?.quality !== 'healthy' ||
+        original.taskReview.reviewBatch.infrastructureUnavailable ||
+        original.taskReview.reviewBatch.reviewedHead !== before.head ||
+        failedValidationPhases(original).join(',') !== 'review' ||
+        hasPendingFactDecision(original) ||
+        effective.podId !== pod.id ||
+        effective.overall !== 'pass' ||
+        effective.taskReview?.status !== 'pass' ||
+        effective.taskReview.issues.length ||
+        effective.taskReview.requirementsCheck?.some((item) => !item.met) ||
+        deterministicCheckHash(original) !== deterministicCheckHash(effective) ||
+        independent.podId !== pod.id ||
+        independent.attempt !== original.attempt ||
+        effective.attempt !== original.attempt ||
+        independent.infrastructureFailure ||
+        independent.taskReview?.reviewBatch?.quality !== 'healthy' ||
+        independent.taskReview.reviewBatch.infrastructureUnavailable ||
+        independent.taskReview.reviewBatch.reviewedHead !== before.head ||
+        adjudication?.kind !== 'recurrence-hoist' ||
+        !adjudication.candidateFindingIds.length ||
+        adjudication.confirmedFindingIds.length ||
+        adjudication.originalReviewBatchId !== original.taskReview?.reviewBatch?.id ||
+        configurationDigest(before) !== configurationDigest(after)
+      )
+        return;
+      const expected = configurationDigest({ ...binding(pod, profile), source: before });
+      const rows = db
+        .prepare(`SELECT i.id,i.binding,r.result_hash FROM validation_source_intents i
+        JOIN validation_source_results r ON r.intent_id=i.id WHERE i.pod_id=? AND i.generation=? ORDER BY i.rowid DESC`)
+        .all(pod.id, pod.lifecycleGeneration) as Array<{
+        id: string;
+        binding: string;
+        result_hash: string;
+      }>;
+      for (const row of rows) {
+        const { admissionId, ...saved } = JSON.parse(row.binding);
+        if (
+          row.result_hash !== recoveryCheckHash(original) ||
+          configurationDigest(saved) !== expected
+        )
+          continue;
+        const settled = db
+          .prepare(`SELECT 1 FROM task_retry_attempts a WHERE id=? AND pod_id=? AND generation=?
+          AND stage='validation' AND outcome='nonretryable' AND started_at IS NOT NULL AND ended_at IS NOT NULL
+          AND id=(SELECT id FROM task_retry_attempts WHERE task_id=a.task_id AND stage='validation' ORDER BY rowid DESC LIMIT 1)`)
+          .get(admissionId, pod.id, pod.lifecycleGeneration);
+        if (!settled) return;
+        const id = randomUUID();
+        db.transaction(() => {
+          db.prepare('INSERT INTO validation_source_intents VALUES(?,?,?,?,?)').run(
+            id,
+            pod.id,
+            pod.lifecycleGeneration,
+            JSON.stringify({
+              ...saved,
+              admissionId,
+              adjudication: {
+                originalIntentId: row.id,
+                originalResultHash: row.result_hash,
+                independentReview: independent,
+              },
+            }),
+            new Date().toISOString(),
+          );
+          db.prepare('INSERT INTO validation_source_results VALUES(?,?,?,?)').run(
+            id,
+            recoveryCheckHash(effective),
+            JSON.stringify(effective),
+            new Date().toISOString(),
+          );
+        })();
+        return;
+      }
     },
     checked(
       pod: Pod,
@@ -154,6 +251,20 @@ export function createValidationSourceEvidence(db: Database.Database) {
         task,branch,base_branch,launch_config_digest,last_validation_result,agent_mode,output_target,validate,validation_suite
         FROM pods WHERE id=?`)
         .get(pod.id) as Record<string, unknown> | undefined;
+      let projectedHash: string;
+      let currentHash: string;
+      try {
+        projectedHash = recoveryCheckHash(pod.lastValidationResult);
+        currentHash = recoveryCheckHash(
+          current?.last_validation_result
+            ? JSON.parse(String(current.last_validation_result))
+            : null,
+        );
+      } catch {
+        return validationSourceError(
+          'The stored validation projection is malformed or incomplete.',
+        );
+      }
       if (
         !current ||
         current.status !== pod.status ||
@@ -170,11 +281,7 @@ export function createValidationSourceEvidence(db: Database.Database) {
         Boolean(current.validate) !== pod.options.validate ||
         (current.validation_suite ?? (current.validate ? 'full' : 'off')) !==
           pod.options.validationSuite ||
-        recoveryCheckHash(
-          current.last_validation_result
-            ? JSON.parse(String(current.last_validation_result))
-            : null,
-        ) !== recoveryCheckHash(pod.lastValidationResult)
+        currentHash !== projectedHash
       )
         validationSourceError(
           'Current validation projection or source ownership changed after source certification.',
@@ -190,12 +297,17 @@ export function createValidationSourceEvidence(db: Database.Database) {
       }[];
       for (const row of rows) {
         const saved = JSON.parse(row.binding);
-        const { source, admissionId, ...identity } = saved;
+        const { source, admissionId, adjudication, ...identity } = saved;
         const settled = db
           .prepare(
-            "SELECT 1 FROM task_retry_attempts a WHERE id=? AND pod_id=? AND generation=? AND stage='validation' AND outcome='pass' AND ended_at IS NOT NULL AND id=(SELECT id FROM task_retry_attempts WHERE task_id=a.task_id AND stage='validation' ORDER BY rowid DESC LIMIT 1)",
+            "SELECT 1 FROM task_retry_attempts a WHERE id=? AND pod_id=? AND generation=? AND stage='validation' AND outcome=? AND ended_at IS NOT NULL AND id=(SELECT id FROM task_retry_attempts WHERE task_id=a.task_id AND stage='validation' ORDER BY rowid DESC LIMIT 1)",
           )
-          .get(admissionId, pod.id, pod.lifecycleGeneration);
+          .get(
+            admissionId,
+            pod.id,
+            pod.lifecycleGeneration,
+            adjudication ? 'nonretryable' : 'pass',
+          );
         if (!settled) continue;
         if (
           row.result_hash !== recoveryCheckHash(pod.lastValidationResult) ||

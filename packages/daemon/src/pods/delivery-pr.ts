@@ -13,6 +13,7 @@ const deliveryHoldCodes = new Set([
   'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
   'TASK_EXECUTION_TERMINATION_UNVERIFIED',
   'VALIDATION_EXECUTION_UNVERIFIED',
+  'WORKTREE_COMPROMISED',
 ]);
 
 export function createDeliveryPr(captured: DeliveryPrCaptured) {
@@ -118,6 +119,12 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
     const assertCurrent = () => {
+      if (podRepo.getOrThrow(podId).worktreeCompromised)
+        throw new AutopodError(
+          'Recover the compromised worktree before new publication or PR delivery.',
+          'WORKTREE_COMPROMISED',
+          409,
+        );
       assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
       podRepo.validationExecutions?.assertTaskSettled(podId);
       assertGuidanceCollected(podId);
