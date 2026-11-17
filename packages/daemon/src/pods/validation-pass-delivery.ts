@@ -14,6 +14,7 @@ import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
+import { publishValidatedSource } from './validated-source-publication.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
@@ -53,11 +54,9 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     this: Pick<ValidationWorkflowCalls, 'approveSession'>,
     {
       podId,
-      pod,
       profile,
       s2,
       result,
-      validationSyncOk,
       attempt,
       validationConfig,
       validationRecord,
@@ -127,34 +126,37 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
               pat: screenshotPat,
             });
 
-      // Push branch so `gh pr create --head` can reference it. If sync-back failed
-      // earlier in this validation run, tighten the deletion guard so a ghost
-      // mass-deletion cannot ship as "chore: auto-commit …".
-      // Rethrow on non-guard errors: a swallowed push lets the carry-forward
-      // path approve & merge a PR whose tip never advanced (real bug from
-      // misrouted fix pods writing to the wrong branch).
+      // Publish only the committed source actually checked. Dirty/changed source
+      // cannot be auto-committed after review or admitted to the push ledger.
       emitActivityStatus(podId, 'Branch validated — pushing…');
       const pushPat = await resolveGitCredential(profile);
       assertCurrent();
       try {
-        await worktreeManager.mergeBranch({
-          worktreePath: s2.worktreePath,
-          // Push the feature branch up so `gh pr create --head <branch>` can reference it.
-          // The PR is opened against passDefaultBranch separately by prManager.createPr.
-          targetBranch: s2.branch,
-          // Pass the PAT explicitly — the in-memory cache may be cold after a daemon
-          // restart or for recovery pods that mount an existing worktree without
-          // re-warming via create(). Without this, ADO URLs of the form
-          // https://<org>@dev.azure.com/... cause git to prompt for a password.
-          pat: pushPat,
-          maxDeletions: validationSyncOk ? 100 : 0,
-          podTask: pod.task,
+        await publishValidatedSource({
+          pod: s2,
+          podRepo,
+          worktreeManager,
           profile,
-          podModel: pod.model,
+          assertCurrent,
+          pat: pushPat,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.warn({ err, podId }, 'Failed to push branch for PR');
+        if (podRepo.sourcePublications?.pending?.(s2)) {
+          const failureReason =
+            'Source publication outcome is unconfirmed. Validated source and original resources are retained. Use human approval to observe the original publication before any PR creation or merge; no coding rerun or second push is authorized.';
+          transition(
+            s2,
+            podRepo.getOrThrow(podId).lastValidationResult?.overall === 'pass'
+              ? 'validated'
+              : 'review_required',
+            { failureReason },
+          );
+          emitActivityStatus(podId, failureReason);
+          refreshReadiness(podId, { advisoryQaInFlight: false });
+          return;
+        }
         // Credential-class failures are recoverable: park the pod in
         // awaiting_input so the operator can update the PAT and resume,
         // instead of burning the validated work on a fixable error.
@@ -174,7 +176,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       }
 
       assertCurrent();
-      // Re-compute diff stats now that auto-commit has run.
+      // Refresh presentation statistics after confirmed publication.
       try {
         const prSinceCommit = s2.startCommitSha ?? undefined;
         const prBaseBranch = s2.baseBranch ?? passDefaultBranch;

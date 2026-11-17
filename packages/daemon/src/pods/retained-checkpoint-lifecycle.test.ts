@@ -73,7 +73,7 @@ describe('retained checkpoint through the real manager workflow (provider and ch
     const snapshot = f.pod().artifactsPath;
     const extractionCount = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls.length;
     f.ctx.worktreeManager.inspectSource = f.worktrees.inspectSourceAdoption;
-    vi.mocked(f.ctx.worktreeManager.mergeBranch).mockRejectedValue(
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockRejectedValue(
       new Error('Fixture stops at external delivery boundary'),
     );
     await expect(
@@ -82,7 +82,8 @@ describe('retained checkpoint through the real manager workflow (provider and ch
         reason: 'Explicit fixture approval; external delivery is deliberately not executed',
       }),
     ).rejects.toThrow();
-    expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
     expect(f.cm.start).not.toHaveBeenCalled();
     expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(extractionCount);
     expect(f.pod().artifactsPath).toBe(snapshot);

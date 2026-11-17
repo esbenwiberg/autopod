@@ -90,6 +90,9 @@ export interface ApprovalReadinessCaptured {
 
 export interface ApprovalWorkflowCaptured {
   podRepo: PodRepository;
+  assertExecutionTerminationVerified: ReturnType<
+    typeof createCompletionGuards
+  >['assertExecutionTerminationVerified'];
   resolveApprovalReadiness: ReturnType<typeof createApprovalReadiness>['resolveApprovalReadiness'];
   assertApprovalCurrent: ReturnType<typeof createApprovalReadiness>['assertApprovalCurrent'];
   executionForPod: (pod: Pod) => PodExecutionSettings;
@@ -159,6 +162,7 @@ export type ApprovalDeliveryPreparationCaptured = Pick<
   | 'cleanupContainerAfterAdvisorySettles'
   | 'eventBus'
   | 'maybeTriggerDependents'
+  | 'resolveGitCredential'
 >;
 
 export type ApprovalDeliveryExecutionCaptured = Pick<
@@ -183,11 +187,17 @@ export type ApprovalDeliveryExecutionCaptured = Pick<
   | 'ensurePrBaseBranchOnOrigin'
   | 'getLatestPushFindings'
   | 'handleDeletionGuardError'
+  | 'eventBus'
+  | 'maybeTriggerDependents'
 >;
 
 export type ApprovalEntryCaptured = Pick<
   ApprovalWorkflowCaptured,
   | 'podRepo'
+  | 'assertExecutionTerminationVerified'
+  | 'executionForPod'
+  | 'worktreeManager'
+  | 'resolveGitCredential'
   | 'resolveApprovalReadiness'
   | 'assertApprovalCurrent'
   | 'logger'

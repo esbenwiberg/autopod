@@ -16,8 +16,36 @@ import {
 import { sourceAdoptionError } from './source-adoption-identity.js';
 import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-repository.js';
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
+import { validationSourceError } from './validation-source-evidence.js';
 
+export function assertPublicationResourceReleasable(
+  db: Database.Database,
+  containerId: string,
+): void {
+  if (
+    db
+      .prepare(`SELECT 1 FROM source_publication_resources s
+    LEFT JOIN source_publication_receipts r ON r.intent_id=s.intent_id
+    WHERE s.container_id=? AND r.intent_id IS NULL`)
+      .get(containerId)
+  )
+    validationSourceError(
+      'An unconfirmed publication retains this original resource; read-only reconciliation must settle its actual source/ref outcome before release.',
+    );
+}
+export function assertPublicationMutationAllowed(db: Database.Database, podId: string): void {
+  if (
+    db
+      .prepare(`SELECT 1 FROM source_publication_intents i LEFT JOIN source_publication_receipts r ON r.intent_id=i.id
+    WHERE i.task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) AND r.intent_id IS NULL`)
+      .get(podId)
+  )
+    validationSourceError(
+      'An unconfirmed publication owns this task. Use human approval to observe the original source/ref outcome; mutation, replacement execution and deletion are not authorized.',
+    );
+}
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  assertPublicationResourceReleasable(db, containerId);
   assertArtifactChecksResourceAvailable(db, containerId);
   assertRecoveryForkResourceAvailable(db, containerId);
   assertValidationResourceReleasable(db, containerId);

@@ -1,9 +1,20 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { reconcilePublication } from '../worktrees/durable-source-publication.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { DeliveryPrCaptured } from './delivery-contracts.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
+import { publishValidatedSource } from './validated-source-publication.js';
+import { validationSourceError } from './validation-source-evidence.js';
+
+const deliveryHoldCodes = new Set([
+  'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+  'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+  'VALIDATION_EXECUTION_UNVERIFIED',
+  'WORKTREE_COMPROMISED',
+]);
 
 export function createDeliveryPr(captured: DeliveryPrCaptured) {
   const {
@@ -58,6 +69,26 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     }
   }
 
+  async function reconcilePendingPublication(pod: Pod): Promise<void> {
+    const ledger = podRepo.sourcePublications;
+    const pending = ledger?.pending?.(pod);
+    if (!ledger || !pending) return;
+    const profile = executionForPod(pod);
+    await reconcilePublication(
+      ledger,
+      pod,
+      profile.repoUrl ?? '',
+      worktreeManager,
+      pending,
+      undefined,
+      await resolveGitCredential(profile),
+    );
+    emitActivityStatus(
+      pod.id,
+      'Original publication observed; current checks and all other recovery holds remain unchanged.',
+    );
+  }
+
   async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
     if (pod.options.output !== 'pr') {
       throw new AutopodError(
@@ -66,6 +97,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         409,
       );
     }
+    await reconcilePendingPublication(pod);
     assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
@@ -86,28 +118,33 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     }
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
+    const assertCurrent = () => {
+      if (podRepo.getOrThrow(podId).worktreeCompromised)
+        throw new AutopodError(
+          'Recover the compromised worktree before new publication or PR delivery.',
+          'WORKTREE_COMPROMISED',
+          409,
+        );
+      assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      podRepo.validationExecutions?.assertTaskSettled(podId);
+      assertGuidanceCollected(podId);
+      if (!podRepo.validationSources)
+        validationSourceError('Checked publication support is unavailable.');
+      podRepo.validationSources.checked(pod, profile);
+    };
+    assertCurrent();
     const pat = await resolveGitCredential(profile);
     try {
-      await worktreeManager.mergeBranch({
-        worktreePath: pod.worktreePath,
-        // Push the feature branch up so PR creation can reference it. Using the
-        // feature branch (not baseBranch) avoids force-pushing the work onto main.
-        targetBranch: pod.branch,
-        pat,
-        // Block auto-commit deletions: this helper runs post-container with no
-        // fresh sync-back, so any "missing files" almost certainly means a sync
-        // ghost rather than the operator wanting to ship a mass-delete.
-        maxDeletions: 0,
-        podTask: pod.task,
-        profile,
-        podModel: pod.model,
-      });
+      await publishValidatedSource({ pod, profile, podRepo, worktreeManager, pat, assertCurrent });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: branch push failed');
       // Bubble GitCredentialError up untouched so the caller can park the pod
       // in awaiting_input instead of failing terminally on a fixable PAT issue.
-      if (err instanceof GitCredentialError) {
+      if (
+        err instanceof GitCredentialError ||
+        (err instanceof AutopodError && deliveryHoldCodes.has(err.code))
+      ) {
         throw err;
       }
       if (handleDeletionGuardError(podId, err)) {
@@ -118,7 +155,9 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     }
 
     try {
+      assertCurrent();
       await ensurePrBaseBranchOnOrigin(pod, profile, baseBranch, callerLabel);
+      assertCurrent();
       const result = await prManager.createPr({
         worktreePath: pod.worktreePath,
         repoUrl: profile.repoUrl ?? undefined,
@@ -142,6 +181,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         seriesName: pod.seriesName ?? undefined,
         securityFindings: getLatestPushFindings(podId),
       });
+      assertCurrent();
       if (result.usedFallback) {
         const which = result.narrativeUsedFallback
           ? result.titleUsedFallback
@@ -167,6 +207,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
       return result.url;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof AutopodError && deliveryHoldCodes.has(err.code)) throw err;
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: PR creation failed');
       emitActivityStatus(podId, `PR creation failed: ${message}`);
       throw new AutopodError(message, 'PR_CREATION_FAILED', 502);
@@ -198,11 +239,17 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         409,
       );
     }
+    if (podRepo.sourcePublications?.pending?.(pod)) await reconcilePendingPublication(pod);
     emitActivityStatus(podId, 'Retrying PR creation…');
     const newPrUrl = await pushAndCreatePr(pod, 'retryCreatePr');
     podRepo.update(podId, { prUrl: newPrUrl });
     emitActivityStatus(podId, `PR created: ${newPrUrl}`);
     logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
   }
-  return { ensurePrBaseBranchOnOrigin, pushAndCreatePr, retryCreatePr };
+  return {
+    ensurePrBaseBranchOnOrigin,
+    pushAndCreatePr,
+    retryCreatePr,
+    reconcilePendingPublication,
+  };
 }

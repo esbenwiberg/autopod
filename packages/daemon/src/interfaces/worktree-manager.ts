@@ -264,7 +264,12 @@ export interface WorktreeManager {
     config: PrepareSourceAdoption,
   ): Promise<{ bundle: string; bundleHash: string; tree: string }>;
   applySourceAdoption?(config: PrepareSourceAdoption): Promise<void>;
-  observeSourceBranch?(worktreePath: string, repository: string, branch: string): Promise<string>;
+  observeSourceBranch?(
+    worktreePath: string,
+    repository: string,
+    branch: string,
+    pat?: string,
+  ): Promise<string>;
   /** Daemon-authenticated source-only tarball at an exact commit; no Git metadata or credentials. */
   readSnapshotArchive?(params: { repoUrl: string; revision: string }): Promise<Buffer>;
   /** Read-only local source identity for recovery; unavailable adapters cannot authorize cleanup. */
@@ -310,7 +315,8 @@ export interface WorktreeManager {
    */
   getChangedPathsAgainstBase?(worktreePath: string, baseBranch: string): Promise<string[]>;
   mergeBranch(config: MergeBranchConfig): Promise<BranchPublicationReceipt> | Promise<void>;
-  /** Net unified diff against the base, including lockfile hunks by default.
+  /** Net unified diff against sinceCommit when supplied, otherwise the branch merge-base.
+   * Empty is verified empty; unresolved refs and inspection errors throw.
    * Only explicit display previews may omit noisy source files.
    */
   getDiff(

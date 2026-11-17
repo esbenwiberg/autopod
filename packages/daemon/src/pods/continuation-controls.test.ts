@@ -124,6 +124,7 @@ function fixture(disk = false) {
     completeFixPodAfterPush: vi.fn(async () => {}),
     emitActivityStatus: vi.fn(),
     pushAndCreatePr: vi.fn(async () => 'https://github.com/fixture/repo/pull/1'),
+    reconcilePendingPublication: vi.fn(async () => {}),
     transition: vi.fn<ContinuationCaptured['transition']>((pod, status, extra) => {
       pods.update(pod.id, { ...extra, status });
       return pods.getOrThrow(pod.id);

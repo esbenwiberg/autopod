@@ -7,7 +7,11 @@ import {
   inspectRetainedMergeSource,
   reconcileMerge,
 } from '../worktrees/durable-merge.js';
-import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
+import {
+  publishCommittedSource,
+  publishSource,
+  reconcilePublication,
+} from '../worktrees/durable-source-publication.js';
 import { assertMergeRepository, mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
 import { reconcileExternalApproval } from './approval-external-delivery.js';
@@ -24,6 +28,7 @@ import type {
   ApprovalPreparationContext,
   ApprovalPreparationResult,
 } from './delivery-contracts.js';
+import { publishValidatedSource } from './validated-source-publication.js';
 export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPreparationCaptured) {
   const {
     podRepo,
@@ -104,10 +109,53 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           legacyLease.repository,
         );
       const lease = rewrite?.binding.predecessor.commitSha ?? legacyLease?.commitSha;
-      const published = await publishSource(ledger, anchor, repository, worktreeManager, {
+      const options = {
         ...pushOptions,
         ...(lease ? { force: true, expectedRemoteCommitSha: lease } : {}),
-      });
+      };
+      const prior =
+        !selection && anchor.options.agentMode === 'auto'
+          ? ledger.latestConfirmedForMerge?.(anchor)
+          : null;
+      const local = prior
+        ? await worktreeManager.inspectSource?.(anchor.worktreePath ?? '', anchor.branch)
+        : null;
+      assertApprovalCurrent(anchor);
+      const unchanged =
+        prior &&
+        prior.publicationPrUrl === anchor.prUrl &&
+        local?.worktreeClean &&
+        local.branch === prior.branch &&
+        local.commitSha === prior.commitSha &&
+        local.treeSha === prior.treeSha;
+      // Existing source may be re-observed without inventing old checks. Any
+      // NEW ordinary publication needs current immutable source proof. Owned
+      // rewrite and interactive authority stay in their explicit protocols.
+      const published =
+        !selection && anchor.options.agentMode === 'auto' && !unchanged
+          ? await publishValidatedSource({
+              pod: anchor,
+              podRepo,
+              profile: executionForPod(anchor),
+              worktreeManager,
+              pat: options.pat,
+              pushOptions: options,
+              assertCurrent: () => assertApprovalCurrent(anchor),
+            })
+          : unchanged && prior
+            ? await reconcilePublication(
+                ledger,
+                anchor,
+                repository,
+                worktreeManager,
+                { id: prior.publicationId, source: prior },
+                () => {
+                  assertApprovalCurrent(anchor);
+                  ledger.assertDeliveryAllowed?.(anchor, prior);
+                },
+                options.pat,
+              )
+            : await publishSource(ledger, anchor, repository, worktreeManager, options);
       forceWithLeaseAllowances.delete(anchor.id);
       return published;
     };
@@ -125,6 +173,8 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
           409,
         );
+      if (anchor.options.agentMode !== 'interactive')
+        return publishApprovalBranch(anchor, { pat: config.pat });
       return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
     };
     assertApprovalCurrent(pod);
@@ -164,18 +214,38 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
 
     // A factual, exact-source external merge is observed before any sandbox
     // wakeup. Its durable receipt pins unpreserved reports against all cleanup.
-    if (
-      !options.publishOnly &&
-      (await reconcileExternalApproval(captured, {
-        podId,
-        options,
-        pod,
-        readiness,
-        actor,
-        approvalReason,
-      }))
-    )
-      return { kind: 'halted' };
+    if (podRepo.sourcePublications?.pending?.(pod)) {
+      // The pending ledger forces publishSource down its read-only observation
+      // path. Failure retains the original admission; it never retries a push.
+      const pat = await captured.resolveGitCredential(executionForPod(pod));
+      assertApprovalCurrent(pod);
+      await publishApprovalBranch(pod, { pat });
+      assertApprovalCurrent(pod);
+    }
+    if (!options.publishOnly) {
+      try {
+        if (
+          await reconcileExternalApproval(captured, {
+            podId,
+            options,
+            pod,
+            readiness,
+            actor,
+            approvalReason,
+          })
+        )
+          return { kind: 'halted' };
+      } catch (error) {
+        if (error instanceof AutopodError) throw error;
+        assertApprovalCurrent(pod);
+        const reason =
+          'Approval delivery observation unavailable. Original resources retained; restore provider availability and retry approval, not coding.';
+        logger.warn({ err: error, podId }, 'Pre-approval delivery observation failed');
+        podRepo.update(podId, { failureReason: reason });
+        emitActivityError(podId, reason, false);
+        throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
+      }
+    }
 
     // Git checkpoints omit ignored reports. Preserve the complete sandbox
     // workspace before publication or either approval cleanup path removes it.

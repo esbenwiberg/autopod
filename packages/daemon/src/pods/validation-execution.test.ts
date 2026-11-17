@@ -548,6 +548,52 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
+  it('never certifies a packet-free result even when standalone engine checks pass', async () => {
+    const f = fixture();
+    try {
+      await f.run();
+      expect(f.db().prepare('SELECT count(*) AS n FROM validation_source_results').get()).toEqual({
+        n: 0,
+      });
+    } finally {
+      f.close();
+    }
+  });
+
+  it('records unchanged packet source and refuses source changed by repository preparation before checks', async () => {
+    const f = fixture();
+    try {
+      f.config.reviewSource = { head: 'a'.repeat(40), tree: 'b'.repeat(40) };
+      let changed = false;
+      const execute = vi.mocked(f.cm.execInContainer).getMockImplementation();
+      if (!execute) throw new Error('Missing source probe adapter');
+      vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
+        const value = await execute(...args);
+        return changed && args[1][2]?.includes('autopod-validation-source-v1')
+          ? {
+              ...value,
+              stdout: value.stdout
+                .replaceAll('a'.repeat(40), 'c'.repeat(40))
+                .replaceAll('b'.repeat(40), 'd'.repeat(40)),
+            }
+          : value;
+      });
+      f.dependencies.prepareValidationRepository = async () => {
+        changed = true;
+      };
+      const result = await f.run();
+      expect(result.infrastructureFailure?.code).toBe('REVIEW_SOURCE_UNAVAILABLE');
+      expect(result.smoke.build.status).toBe('skip');
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.db().prepare('SELECT count(*) AS n FROM validation_source_results').get()).toEqual({
+        n: 0,
+      });
+      expect(f.repo.validationExecutions?.unsettled(f.pod.id)).toBeNull();
+    } finally {
+      f.close();
+    }
+  });
+
   it('constructs without I/O and preserves config, collector, signal and engine argument identities', async () => {
     const f = fixture();
     try {
@@ -612,7 +658,11 @@ describe('validation execution durable effects', () => {
         target === 'sandbox' ? 'sandbox' : 'local',
       );
       expect(typeof f.config.captureEvidenceIdentity).toBe('function');
-      expect(f.cm.execInContainer).not.toHaveBeenCalled();
+      expect(f.cm.execInContainer).toHaveBeenCalled();
+      for (const [containerId, command] of vi.mocked(f.cm.execInContainer).mock.calls) {
+        expect(containerId).toBe(f.config.containerId);
+        expect(command[2]).toContain('autopod-validation-source-v1');
+      }
     } finally {
       f.close();
     }

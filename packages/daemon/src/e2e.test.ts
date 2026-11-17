@@ -67,7 +67,8 @@ describe('E2E: happy path lifecycle', () => {
     const final = manager.getSession(pod.id);
     expect(final.status).toBe('complete');
     expect(final.completedAt).not.toBeNull();
-    expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+    expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
   });
 
   it('emits the correct event sequence', async () => {

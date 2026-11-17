@@ -6,6 +6,7 @@ import { AutopodError } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
 import { mockPrMerge } from '../test-utils/mock-helpers.js';
+import { seedCheckedValidationSource } from '../test-utils/validation-source-helpers.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
@@ -407,6 +408,14 @@ describe('ordinary sandbox approval report preservation', () => {
     f.podRepo.update('prepare', {
       lastValidationResult: { ...required(f.pod().lastValidationResult), attempt: 2 },
     });
+    // A fresh passing-check unit premise changes the report binding; merely
+    // editing a projection cannot authorize a new PR-bound publication.
+    seedCheckedValidationSource(
+      f.podRepo,
+      f.pod(),
+      f.captured.resolveEffectiveBoundProfile(f.pod()),
+      required(f.pod().lastValidationResult),
+    );
     await f.workflow().approveSession('prepare');
     expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
     expect(f.pod().artifactsPath).not.toBe(previous);

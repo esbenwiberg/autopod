@@ -63,6 +63,8 @@ export interface ValidationEngineConfig {
   validationSuite?: ValidationSuite;
   task: string;
   diff: string;
+  /** Clean immutable source observed around diff capture; not itself publication authority. */
+  reviewSource?: { head: string; tree: string };
   reviewerModel?: string;
   /** Model provider that owns the reviewer model/auth. Defaults to Anthropic for legacy profiles. */
   reviewerProvider?: ModelProvider | null;

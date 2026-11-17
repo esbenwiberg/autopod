@@ -274,6 +274,15 @@ export function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-validation-source-v1')) {
+        const args = command.slice(command.indexOf('/usr/bin/git') + 3);
+        const stdout = args.includes('symbolic-ref')
+          ? `${command[3]?.slice('AUTOPOD_EXPECTED_BRANCH='.length)}\n`
+          : args.includes('rev-parse')
+            ? `${(args.includes('HEAD^{tree}') ? 'b' : 'a').repeat(40)}\n`
+            : '';
+        return { stdout, stderr: '', exitCode: 0 };
+      }
       if (command[2]?.includes('autopod-command-preflight-v1')) {
         const names = JSON.parse(command[3] ?? '[]') as string[];
         return {
@@ -302,8 +311,34 @@ export function createMockContainerManager(): ContainerManager {
   };
 }
 
+const mockRemoteStates = new WeakMap<object, (receipt: BranchPublicationReceipt) => void>();
+/** Explicit historical unit-fixture premise; composed tests publish through the adapter. */
+export function seedMockRemotePublication(
+  manager: WorktreeManager,
+  receipt: BranchPublicationReceipt,
+): void {
+  const record = manager.observeSourceBranch && mockRemoteStates.get(manager.observeSourceBranch);
+  if (!record) throw new Error('Missing fake remote state');
+  record(receipt);
+}
+
 export function createMockWorktreeManager(): WorktreeManager {
+  // Model actual fake remote state, rather than granting a positive observation
+  // for every branch before any publication has occurred.
+  const remotes = new Map<string, string>();
+  const key = (repository: string, branch: string) =>
+    JSON.stringify([repository.replace(/\.git$/, ''), branch]);
+  const recorded = (receipt: BranchPublicationReceipt) => {
+    remotes.set(key(receipt.repository, receipt.branch), receipt.observedRemoteCommitSha);
+    return receipt;
+  };
+  const observer = vi.fn(
+    async (_root: string, repository: string, branch: string) =>
+      remotes.get(key(repository, branch)) ?? null,
+  );
+  mockRemoteStates.set(observer, recorded);
   return {
+    inspectSourceAdoption: vi.fn(mockSourceSnapshot),
     inspectSource: vi.fn(mockSourceSnapshot),
     inspectContractBase: vi.fn(async (_worktreePath, _baseBranch, facts) => ({
       baseCommitSha: 'a'.repeat(40),
@@ -330,12 +365,15 @@ export function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(mockCommittedPublication),
+    mergeBranch: vi.fn(async (config) => recorded(await mockCommittedPublication(config))),
     commitFiles: vi.fn(async () => {}),
     pushArtifactBranch: vi.fn(async () => true),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(mockBranchPublication),
+    pushBranch: vi.fn(async (...args: Parameters<WorktreeManager['pushBranch']>) =>
+      recorded(await mockBranchPublication(...args)),
+    ),
+    observeSourceBranch: observer,
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     prepareApprovalRebase: vi.fn(async () => ({

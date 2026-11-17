@@ -11,6 +11,7 @@ export interface ReportBlockerInput {
   owner?: 'autopod' | 'parent' | 'validation';
   phase?: string;
   prerequisiteBlocker?: PrerequisiteBlockerV1;
+  deferral?: { check: string; expectedExecutor: string; requiredFactId?: string };
 }
 
 const reportBlockerInputSchema = z
@@ -21,11 +22,23 @@ const reportBlockerInputSchema = z
     owner: z.enum(['autopod', 'parent', 'validation']).optional(),
     phase: z.string().trim().min(1).max(256).optional(),
     prerequisiteBlocker: prerequisiteBlockerV1Schema.optional(),
+    deferral: z
+      .object({
+        check: z.string().trim().min(1).max(4000),
+        expectedExecutor: z.string().trim().min(1).max(256),
+        requiredFactId: z.string().trim().min(1).max(256).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(
     (value) => !value.prerequisiteBlocker || Boolean(value.phase),
     'Typed prerequisite reports require an explicit failing phase',
+  )
+  .refine(
+    (value) => !value.deferral || !value.prerequisiteBlocker,
+    'External deferrals cannot claim missing execution prerequisites',
   );
 
 export async function reportBlocker(
@@ -42,13 +55,14 @@ export async function reportBlocker(
     type: 'report_blocker',
     timestamp: new Date().toISOString(),
     payload: {
-      kind: 'infrastructure',
+      kind: input.deferral ? 'expected-external-deferral' : 'infrastructure',
       owner: input.owner ?? 'autopod',
       phase: input.phase,
       requiresResponse: false,
       description: input.description,
       attempted: input.attempted,
       needs: input.needs,
+      ...(input.deferral ? { deferral: input.deferral } : {}),
       ...(input.prerequisiteBlocker ? { prerequisiteBlocker: input.prerequisiteBlocker } : {}),
     },
     response: null,
@@ -57,5 +71,7 @@ export async function reportBlocker(
   bridge.createEscalation(escalation);
   bridge.incrementEscalationCount(podId);
 
-  return `Infrastructure blocker recorded: ${input.description}. No human answer is requested. Stop blocked attempts; preserve work and report incomplete checks in report_task_summary, then finish. Autopod will hold completion after execution settles. This report is not a validation receipt, permission, or gate waiver. Expected external/Mac checks belong in report_task_summary.deferredChecks; do not report an expected deferral as executor failure.`;
+  if (input.deferral)
+    return `Expected external check recorded as NOT RUN: ${input.deferral.check}. This claim is not proof or a gate waiver; also record it in report_task_summary.deferredChecks.`;
+  return `Infrastructure blocker recorded: ${input.description}. No human answer is requested. Stop blocked attempts; preserve work and report incomplete checks in report_task_summary, then finish. Autopod will hold completion after execution settles. This report is not a validation receipt, permission, or gate waiver.`;
 }

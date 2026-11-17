@@ -372,7 +372,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (
         escalation.type === 'report_blocker' &&
         'kind' in escalation.payload &&
-        escalation.payload.kind === 'infrastructure'
+        (escalation.payload.kind === 'infrastructure' ||
+          escalation.payload.kind === 'expected-external-deferral')
       ) {
         escalation = {
           ...escalation,

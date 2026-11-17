@@ -175,7 +175,7 @@ describe('source-verified external delivery before sandbox preservation', () => 
     await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
     noMutation(f);
     f.provider.getPrStatus.mockRejectedValue(new Error('Provider unavailable'));
-    await expect(f.approve()).rejects.toThrow('Provider unavailable');
+    await expect(f.approve()).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
     noMutation(f);
   });
   it.each([
@@ -235,7 +235,7 @@ describe('source-verified external delivery before sandbox preservation', () => 
       if (next === 'merging') throw new Error('Synthetic settlement failure');
       return transition(pod, next, changes);
     });
-    await expect(f.approve()).rejects.toThrow('Synthetic settlement failure');
+    await expect(f.approve()).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
     expect(f.pod().status).toBe('validated');
     expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
     noMutation(f);

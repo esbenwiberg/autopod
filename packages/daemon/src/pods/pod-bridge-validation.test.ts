@@ -1298,9 +1298,9 @@ describe('PodBridge.runPreSubmitReview', () => {
     expect(worktreeGetDiffMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to the host worktree when the in-container diff fails', async () => {
+  it('refuses stale host substitution when the live review source is unavailable', async () => {
     const { bridge, podId, worktreeGetDiffMock } = buildBridgeWithWorktree({
-      // containerDiff is undefined → exec returns exitCode=1, fetcher falls back.
+      // Missing live Git output cannot certify the host snapshot as current.
       worktreeDiff: SAMPLE_DIFF,
       runResult: {
         status: 'pass',
@@ -1312,19 +1312,11 @@ describe('PodBridge.runPreSubmitReview', () => {
       },
     });
 
-    await bridge.runPreSubmitReview(podId, {});
-
-    expect(worktreeGetDiffMock).toHaveBeenCalledWith(
-      '/tmp/worktree',
-      'main',
-      expect.any(Number),
-      'start-sha',
-      'review',
-    );
-    expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
-      expect.objectContaining({ diff: expect.stringContaining('+added') }),
-      expect.anything(),
-    );
+    await expect(bridge.runPreSubmitReview(podId, {})).rejects.toMatchObject({
+      code: 'REVIEW_SOURCE_UNAVAILABLE',
+    });
+    expect(worktreeGetDiffMock).not.toHaveBeenCalled();
+    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
   });
 
   it('echoes scope (filesReviewed / linesAdded / linesRemoved) in the response', async () => {

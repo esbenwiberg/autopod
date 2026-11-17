@@ -205,6 +205,22 @@ function codingTransport(
   );
   const execute = f.cm.execInContainer.bind(f.cm);
   f.cm.execInContainer = vi.fn(async (id, command, options) => {
+    if (command[2]?.includes('autopod-validation-source-v1')) {
+      const p = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.prepared!;
+      try {
+        const result = await exec(
+          '/usr/bin/git',
+          command.slice(command.indexOf('/usr/bin/git') + 3),
+          {
+            cwd: p.worktree,
+            env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+          },
+        );
+        return { ...result, exitCode: 0 };
+      } catch {
+        return { exitCode: 1, stdout: '', stderr: 'Actual candidate source unavailable' };
+      }
+    }
     if (command[2] === QUALIFICATION_SOURCE_PROBE) {
       if (outcome === 'unknown') return { exitCode: 1, stdout: '', stderr: 'Unverified probe' };
       const p = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.prepared!;
@@ -344,7 +360,7 @@ describe('durable real recovery fork', () => {
       .run('publication', 'identity', f.podId, task.taskId, 1, 'source', 'now');
     const view = await f.manager.inspectRecoveryFork(f.podId);
     expect(view.available).toBe(false);
-    expect(view.blockers.join(' ')).toContain('publication/delivery/merge custody');
+    expect(view.blockers.join(' ')).toContain('unconfirmed publication');
     expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
   });
   it('rejects unsupported tracked credential paths rather than omitting committed code', async () => {
@@ -1000,7 +1016,11 @@ async function filesystemCodingTransport(
         return { exitCode: 1, stdout: '', stderr: 'Candidate bytes failed actual probe' };
       }
     }
-    if (prepared && !cleaned && command.some((arg) => arg.includes('/workspace'))) {
+    if (
+      prepared &&
+      (!cleaned || command[2]?.includes('autopod-validation-source-v1')) &&
+      command.some((arg) => arg.includes('/workspace'))
+    ) {
       const [program, ...args] = command.map((arg) =>
         arg.replaceAll('/mnt/worktree', prepared.worktree).replaceAll('/workspace', candidate),
       );

@@ -1,5 +1,6 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
+import { reconcilePublication } from '../worktrees/durable-source-publication.js';
 import {
   inspectRecoveryForkFiles,
   recoveryGit,
@@ -9,6 +10,7 @@ import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';
 import { validateTransition } from './state-machine.js';
+import { validationSourceError } from './validation-source-evidence.js';
 
 export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
   const {
@@ -85,10 +87,34 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
       );
     validateTransition(pod.id, pod.status, 'approved');
     emitActivityStatus(podId, 'Preparing approval…');
+    const publication = podRepo.sourcePublications;
+    const pending = publication?.pending?.(pod);
+    if (publication && pending) {
+      // The owning approval path may observe its already-admitted physical
+      // operation before evaluating NEW delivery permission. Do not reuse the
+      // failed check projection as authority or release any other custody.
+      captured.assertExecutionTerminationVerified(podId);
+      const profile = captured.executionForPod(pod);
+      await reconcilePublication(
+        publication,
+        pod,
+        profile.repoUrl ?? '',
+        captured.worktreeManager,
+        pending,
+        undefined,
+        await captured.resolveGitCredential(profile),
+      );
+      emitActivityStatus(
+        podId,
+        'Original publication observed; current checks and approval authority remain unchanged.',
+      );
+    }
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
     const recovery = podRepo.recoveryForks?.child(podId);
     assertApprovalCurrent(pod, { approvalEntry: !!recovery });
     const approvalReason = assertApprovalAllowed(podId, readiness, options);
+    if (podRepo.getOrThrow(podId).worktreeCompromised)
+      validationSourceError('Compromised source cannot be authorized by a readiness reason.');
     if (recovery) {
       if (actor.type !== 'human' || !actor.userId.trim() || options.automation)
         throw new AutopodError(
