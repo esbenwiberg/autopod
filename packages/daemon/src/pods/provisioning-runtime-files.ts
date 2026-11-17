@@ -4,6 +4,7 @@ import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js'
 import type { ContainerManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { shellQuote } from '../util/shell-quote.js';
+import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 
 /** Path to the agent shim script inside every pod container. */
 export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -125,7 +126,7 @@ export async function repairSandboxAgentHomeOwnership(
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await containerManager.execInContainer(containerId, ['sh', '-c', script], {
-      timeout: 10_000,
+      timeout: provisioningExecTimeout(executionTarget, 10_000),
       user: 'root',
     });
   } catch (err) {

@@ -501,6 +501,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     };
     if (options?.cwd) body.workingDirectory = options.cwd;
     if (options?.user) body.user = options.user;
+    const startedAt = Date.now();
+    const operationId = randomUUID();
+    let dispatchAttempted = false;
+    let responseStatus: number | undefined;
+    let responseHeaders: Record<string, string> = {};
     let response: ExecResponse;
     try {
       response = await this.requestData<ExecResponse>(
@@ -510,7 +515,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           json: body,
           timeoutMs: options?.timeoutMs,
           singleAttempt: options?.singleAttempt,
-          beforeSend: options?.beforeSend,
+          beforeSend: () => {
+            options?.beforeSend?.();
+            dispatchAttempted = true;
+          },
+          onResponse: (observed) => {
+            responseStatus = observed.status;
+            responseHeaders = safeBufferedExecHeaders(observed);
+          },
         },
       );
     } catch (err) {
@@ -524,10 +536,26 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       ) {
         throw err;
       }
-      throw new AutopodError(
-        'Buffered sandbox execution result was not observed; reconcile before another execution.',
-        'EXEC_EXIT_UNVERIFIED',
-        409,
+      // Never attach the raw cause: SDK/fetch errors may contain credentials,
+      // commands, URLs or response bodies. Persist only fixed-vocabulary evidence.
+      const transport = {
+        operation: 'exec',
+        operationId,
+        sandboxId,
+        dispatchAttempted,
+        failure: bufferedExecFailure(err, dispatchAttempted),
+        timeoutMs: options?.timeoutMs ?? null,
+        elapsedMs: Math.max(0, Date.now() - startedAt),
+        ...(responseStatus !== undefined ? { responseStatus, responseHeaders } : {}),
+      };
+      this.logger.warn({ transport }, 'Buffered sandbox execution result unverified');
+      throw Object.assign(
+        new AutopodError(
+          `Buffered sandbox execution result was not observed; reconcile before another execution. ${JSON.stringify(transport)}`,
+          'EXEC_EXIT_UNVERIFIED',
+          409,
+        ),
+        { transport },
       );
     }
     const rawExitCode = response.exitCode ?? response.exit_code;
@@ -2430,6 +2458,40 @@ function safeAzureResponseDiagnostics(response: Response): Record<string, string
   for (const name of safeHeaders) {
     const value = response.headers.get(name)?.trim();
     if (value) diagnostics[name] = value.slice(0, 256);
+  }
+  return diagnostics;
+}
+
+function bufferedExecFailure(err: unknown, dispatchAttempted: boolean): string {
+  if (err instanceof AutopodError) {
+    if (err.code === 'AZURE_SANDBOX_TIMEOUT') return 'timeout';
+    if (err.code === 'AZURE_AUTH') return 'authentication';
+    if (err.code === 'AZURE_SANDBOX_HTTP_ERROR') return 'http';
+  }
+  if (!dispatchAttempted) return 'pre_dispatch';
+  if (err instanceof SyntaxError) return 'invalid_response';
+  if (err instanceof TypeError) return 'network';
+  return 'unknown';
+}
+
+/** Correlation IDs only, not arbitrary values from nominally safe header names. */
+function safeBufferedExecHeaders(response: Response): Record<string, string> {
+  const diagnostics: Record<string, string> = {};
+  for (const name of [
+    'x-ms-request-id',
+    'x-ms-correlation-request-id',
+    'request-id',
+    'traceparent',
+  ]) {
+    const value = response.headers.get(name)?.trim();
+    if (
+      value &&
+      /^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{2}-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2})$/i.test(
+        value,
+      )
+    ) {
+      diagnostics[name] = value;
+    }
   }
   return diagnostics;
 }

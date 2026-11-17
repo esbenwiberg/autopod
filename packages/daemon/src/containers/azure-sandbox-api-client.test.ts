@@ -1259,6 +1259,176 @@ describe('AzureSandboxApiClient', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('allows a slow successful setup probe within its sandbox transport budget', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(
+        (_input: string | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve(new Response(JSON.stringify({ exitCode: 0, stdout: 'tracked-file' })));
+            }, 8_000);
+            init?.signal?.addEventListener('abort', () => {
+              clearTimeout(timer);
+              reject(new DOMException('aborted', 'AbortError'));
+            });
+          }),
+      );
+      const { client } = makeClient([], { fetch });
+      const result = client.exec('sbx-1', ['git', 'ls-files'], { timeoutMs: 60_000 });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(result).resolves.toMatchObject({ exitCode: 0, stdout: 'tracked-file' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains sanitized timeout diagnostics and never replays an unknown buffered exit', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(logger, 'warn');
+    try {
+      const fetch = vi.fn(
+        (_input: string | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('secret timeout details', 'AbortError'));
+            });
+          }),
+      );
+      const { client } = makeClient([], { fetch });
+      const result = client
+        .exec('sbx-1', ['secret-command'], {
+          timeoutMs: 60_000,
+          env: { SECRET: 'secret-value' },
+        })
+        .catch((err: unknown) => err);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const error = await result;
+      expect(error).toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        statusCode: 409,
+        transport: {
+          operation: 'exec',
+          sandboxId: 'sbx-1',
+          operationId: expect.any(String),
+          failure: 'timeout',
+          timeoutMs: 60_000,
+          elapsedMs: 60_000,
+        },
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        { transport: expect.objectContaining({ failure: 'timeout', elapsedMs: 60_000 }) },
+        expect.any(String),
+      );
+      expect(JSON.stringify({ error, logs: warn.mock.calls })).not.toContain('secret');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { status: 503, rawText: 'secret Azure response', failure: 'http' },
+    { status: 200, rawText: '{secret invalid JSON', failure: 'invalid_response' },
+  ])('preserves bounded response diagnostics for $failure without leaking bodies or headers', async ({
+    status,
+    rawText,
+    failure,
+  }) => {
+    const requestId = '0d844c84-f4e1-4ccc-b8dd-d0e7fbf8179a';
+    const { client, requests } = makeClient([
+      {
+        status,
+        rawText,
+        headers: {
+          'x-ms-request-id': requestId,
+          'x-ms-correlation-request-id': 'secret-header-value',
+          'request-id': 'Bearer secret',
+          authorization: 'Bearer secret',
+        },
+      },
+    ]);
+    const error: unknown = await client
+      .exec('sbx-1', ['secret-command'])
+      .catch((err: unknown) => err);
+    expect(error).toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+      statusCode: 409,
+      transport: {
+        operation: 'exec',
+        failure,
+        responseStatus: status,
+        responseHeaders: { 'x-ms-request-id': requestId },
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(error)).not.toContain('secret');
+  });
+
+  it('distinguishes network and credential failures without retaining raw causes', async () => {
+    const network = makeClient([], {
+      fetch: async () => {
+        throw new TypeError('secret URL');
+      },
+    });
+    const auth = makeClient([], {
+      credential: {
+        getToken: async () => {
+          throw new Error('secret credential');
+        },
+      },
+    });
+    for (const [fixture, failure] of [
+      [network, 'network'],
+      [auth, 'pre_dispatch'],
+    ] as const) {
+      const error: unknown = await fixture.client
+        .exec('sbx-1', ['secret-command'])
+        .catch((err: unknown) => err);
+      expect(error).toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED', transport: { failure } });
+      expect(JSON.stringify(error)).not.toContain('secret');
+      expect(error).not.toHaveProperty('cause');
+    }
+    expect(auth.requests).toHaveLength(0);
+  });
+
+  it('identifies credential timeouts as pre-dispatch authentication failures without sending exec', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn();
+      const { client } = makeClient([], {
+        fetch,
+        credential: { getToken: () => new Promise(() => {}) },
+      });
+      const result = client
+        .exec('sbx-1', ['test'], { timeoutMs: 60_000 })
+        .catch((err: unknown) => err);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await result).toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        transport: { failure: 'authentication', dispatchAttempted: false, elapsedMs: 30_000 },
+      });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves explicit buffered exec refusals without converting them into unknown exits', async () => {
+    const { client, requests } = makeClient([{ status: 403, body: { error: 'denied' } }]);
+    await expect(client.exec('sbx-1', ['test'])).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_HTTP_ERROR',
+      statusCode: 403,
+    });
+    expect(requests).toHaveLength(1);
+  });
+
   it('rejects buffered exec responses that omit the exit code', async () => {
     const { client } = makeClient([
       { status: 200, body: { stdout: 'partial output', stderr: '' } },

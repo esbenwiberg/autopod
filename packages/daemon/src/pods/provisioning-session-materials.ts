@@ -8,6 +8,7 @@ import {
 import { buildClaudeConfigFiles } from '../providers/index.js';
 import { mergeMcpServers, mergeSkills } from './injection-merger.js';
 import { memoryMatchesProjectSetup, projectMemoryScope } from './project-memory-scope.js';
+import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provisioning-ports.js';
 import { buildCodeIntelligenceServers } from './provisioning-runtime-files.js';
 import type { PopulatedWorkspace } from './provisioning-workspace-population.js';
@@ -60,6 +61,8 @@ export function createProvisioningSessionMaterials(
       launchConfig,
     } = input;
     const { emitStatus, finishStartup } = input.run;
+    const setupTimeout = (localTimeout: number) =>
+      provisioningExecTimeout(pod.executionTarget, localTimeout);
     // Resolve and write skills for all pod types (including workspace)
     const mergedSkills = mergeSkills(injectionsForPod(pod).skills ?? [], profile.skills ?? []);
     let resolvedSkillNames: string[] = [];
@@ -125,7 +128,7 @@ export function createProvisioningSessionMaterials(
         '-c',
         'GIT_DIR=$(git -C /workspace rev-parse --git-dir) && mkdir -p "$GIT_DIR/hooks" && mv /tmp/pre-commit "$GIT_DIR/hooks/pre-commit" && chmod +x "$GIT_DIR/hooks/pre-commit"',
       ],
-      { timeout: 5_000 },
+      { timeout: setupTimeout(5_000) },
     );
 
     // Interactive pods: container stays alive, no agent/validation/PR
@@ -146,7 +149,7 @@ export function createProvisioningSessionMaterials(
         const shaResult = await containerManager.execInContainer(
           containerId,
           ['git', 'rev-parse', 'HEAD'],
-          { cwd: '/workspace', timeout: 5_000 },
+          { cwd: '/workspace', timeout: setupTimeout(5_000) },
         );
         if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
           podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
@@ -189,7 +192,7 @@ export function createProvisioningSessionMaterials(
 
           // Create /history directory
           await containerManager.execInContainer(containerId, ['mkdir', '-p', '/history'], {
-            timeout: 5_000,
+            timeout: setupTimeout(5_000),
           });
 
           await containerManager.writeFile(containerId, '/history/history.db', dbBuffer);
@@ -205,7 +208,7 @@ export function createProvisioningSessionMaterials(
             await containerManager.execInContainer(
               containerId,
               ['mkdir', '-p', '/workspace/.github'],
-              { timeout: 5_000 },
+              { timeout: setupTimeout(5_000) },
             );
           }
           const instructions = generateHistoryInstructions(stats, instructionTarget);
@@ -246,7 +249,7 @@ export function createProvisioningSessionMaterials(
         const directory = await containerManager.execInContainer(
           containerId,
           ['mkdir', '-p', '/history'],
-          { timeout: 5_000 },
+          { timeout: setupTimeout(5_000) },
         );
         if (directory.exitCode !== 0)
           throw new AutopodError('Cannot prepare memory export', 'MEMORY_EXPORT_FAILED', 500);
