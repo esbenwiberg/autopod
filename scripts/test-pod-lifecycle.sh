@@ -6,6 +6,7 @@ tests=(
   src/pods/pod-lifecycle-runway.test.ts
   src/pods/pod-lifecycle-routing-incidents.test.ts
   src/pods/pod-lifecycle-delivery-incidents.test.ts
+  src/pods/retained-continuation-lifecycle.test.ts
   src/pods/validation-inputs.test.ts
   src/pods/delivery-pr.test.ts
   src/pods/source-publication-ledger.test.ts

@@ -40,6 +40,11 @@ export async function publishValidatedSource(input: {
   }
   const boundLedger = {
     ...ledger,
+    assertDeliveryAllowed: (anchor: Pod, source: Parameters<typeof ledger.admit>[1]) => {
+      if (!ledger.assertDeliveryAllowed)
+        validationSourceError('Current delivery authority is unavailable.');
+      ledger.assertDeliveryAllowed(anchor, source, checked.validationId);
+    },
     admit: (anchor: Pod, source: Parameters<typeof ledger.admit>[1]) => {
       return ledger.admit(anchor, source, {
         validationId: checked.validationId,

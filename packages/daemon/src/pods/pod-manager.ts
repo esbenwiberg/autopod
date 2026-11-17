@@ -1210,6 +1210,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   const approvalWorkflow = createApprovalWorkflow({
     podRepo,
+    assertExecutionTerminationVerified,
+    executionForPod,
+    worktreeManager,
+    resolveGitCredential,
     resolveApprovalReadiness,
     assertApprovalCurrent,
     logger,

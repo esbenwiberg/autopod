@@ -29,6 +29,8 @@ export interface FixSourceRecovery {
 }
 export interface SourcePublicationLedger {
   pending?(pod: Pod): { id: string; source: PublicationSource } | null;
+  /** Refresh present delivery authority; an observed old push is not that authority. */
+  assertDeliveryAllowed?(pod: Pod, source: PublicationSource, checkedValidationId?: string): void;
   /** Exact earlier publication for legacy explicitly requested update-from-base; never a tracking ref. */
   latestConfirmed?(pod: Pod): BranchPublicationReceipt | null;
   /** Read-only adoption of an actual publication, including one made before PR creation. */
@@ -107,7 +109,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     observationOnly = false,
   ) {
     createDeletionOwnership(db).assertTaskAvailable(pod.id);
-    assertSourceDeliveryAllowed(db, pod.id);
+    if (!observationOnly) assertSourceDeliveryAllowed(db, pod.id);
     const row = db
       .prepare(
         'SELECT worktree_compromised AS compromised,task,launch_config_digest AS launchDigest,lifecycle_generation AS generation, status, profile_name AS profile, branch, base_branch AS baseBranch, worktree_path AS worktree, container_id AS container, agent_mode AS agentMode, output_target AS output, execution_target AS executionTarget, pr_url AS prUrl FROM pods WHERE id = ?',
@@ -147,17 +149,17 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       ),
     );
     requireEvidence(row?.task === pod.task && row?.launchDigest === pod.launchConfigDigest);
-    requireEvidence(!row?.compromised);
+    if (!observationOnly) requireEvidence(!row?.compromised);
     requireEvidence(
       (['validating', 'validated', 'merging', 'merge_pending', 'running'].includes(pod.status) ||
         (allowCompletedFix && pod.status === 'complete') ||
         (allowCheckedRetry && ['failed', 'complete'].includes(pod.status)) ||
         (observationOnly && ['failed', 'review_required', 'complete'].includes(pod.status))) &&
-        !hasUnansweredDecision(db, pod.id),
+        (observationOnly || !hasUnansweredDecision(db, pod.id)),
     );
   }
-  function identity(pod: Pod, source: PublicationSource): string {
-    createRecoveryForkRepository(db).assertPublicationSource(pod.id, source);
+  function identity(pod: Pod, source: PublicationSource, observationOnly = false): string {
+    if (!observationOnly) createRecoveryForkRepository(db).assertPublicationSource(pod.id, source);
     requireEvidence(source.branch === pod.branch && Boolean(pod.worktreePath));
     return createHash('sha256')
       .update(
@@ -178,6 +180,34 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       .digest('hex');
   }
   const ledger: SourcePublicationLedger = {
+    assertDeliveryAllowed(pod, source, checkedValidationId) {
+      assertCurrent(pod, false, Boolean(checkedValidationId));
+      identity(pod, source);
+      if (['validating', 'failed', 'complete'].includes(pod.status))
+        requireEvidence(Boolean(checkedValidationId));
+      if (checkedValidationId) {
+        const row = db
+          .prepare(
+            'SELECT binding FROM validation_source_intents WHERE id=? AND pod_id=? AND generation=?',
+          )
+          .get(checkedValidationId, pod.id, pod.lifecycleGeneration) as
+          | { binding: string }
+          | undefined;
+        const saved = JSON.parse(row?.binding ?? '{}') as {
+          repository?: unknown;
+          baseBranch?: unknown;
+        };
+        requireEvidence(
+          typeof saved.repository === 'string' && typeof saved.baseBranch === 'string',
+        );
+        requireEvidence(
+          createValidationSourceEvidence(db).checked(pod, {
+            repoUrl: saved.repository,
+            defaultBranch: saved.baseBranch,
+          }).validationId === checkedValidationId,
+        );
+      }
+    },
     pending(pod) {
       // Read-only inspection also serves checked downstream-failure recovery.
       assertCurrent(pod, false, false, true);
@@ -203,7 +233,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
         treeSha,
         worktreeClean: true,
       } as PublicationSource;
-      requireEvidence(row.identity === identity(pod, source));
+      requireEvidence(row.identity === identity(pod, source, true));
       return { id: row.id, source };
     },
     latestConfirmed(pod) {
@@ -222,7 +252,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       return receipt;
     },
     latestConfirmedForMerge(pod) {
-      assertCurrent(pod);
+      assertCurrent(pod, false, false, true);
       const row = db
         .prepare(`SELECT i.id,i.identity,r.receipt FROM source_publication_intents i
         JOIN source_publication_receipts r ON r.intent_id=i.id
@@ -236,9 +266,11 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       const receipt = JSON.parse(row.receipt) as BranchPublicationReceipt;
       // PR creation follows publication. Only that null→current PR identity
       // change is supported; never borrow another lifecycle/resource's receipt.
-      const publicationPrUrl = row.identity === identity(pod, receipt) ? pod.prUrl : null;
-      requireEvidence(row.identity === identity({ ...pod, prUrl: publicationPrUrl }, receipt));
-      ledger.confirmedForMerge({ ...pod, prUrl: publicationPrUrl }, pod, row.id);
+      const publicationPrUrl = row.identity === identity(pod, receipt, true) ? pod.prUrl : null;
+      requireEvidence(
+        row.identity === identity({ ...pod, prUrl: publicationPrUrl }, receipt, true),
+      );
+      // This getter exposes a historical fact, not current delivery permission.
       return { ...receipt, publicationId: row.id, publicationPrUrl };
     },
     admitFix(parent, fix, source, priorMergeIntentId, recovery) {
@@ -459,7 +491,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
           .prepare('SELECT identity FROM source_publication_intents WHERE id = ?')
           .get(id) as { identity: string } | undefined;
         requireEvidence(
-          admitted?.identity === identity(pod, receipt) &&
+          admitted?.identity === identity(pod, receipt, true) &&
             receipt.observedRemoteCommitSha === receipt.commitSha &&
             Number.isFinite(Date.parse(receipt.observedAt)),
         );

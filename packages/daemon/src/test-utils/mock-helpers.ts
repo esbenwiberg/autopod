@@ -312,6 +312,15 @@ export function createMockContainerManager(): ContainerManager {
 }
 
 export function createMockWorktreeManager(): WorktreeManager {
+  // Model actual fake remote state, rather than granting a positive observation
+  // for every branch before any publication has occurred.
+  const remotes = new Map<string, string>();
+  const key = (repository: string, branch: string) =>
+    JSON.stringify([repository.replace(/\.git$/, ''), branch]);
+  const recorded = (receipt: BranchPublicationReceipt) => {
+    remotes.set(key(receipt.repository, receipt.branch), receipt.observedRemoteCommitSha);
+    return receipt;
+  };
   return {
     inspectSourceAdoption: vi.fn(mockSourceSnapshot),
     inspectSource: vi.fn(mockSourceSnapshot),
@@ -340,12 +349,17 @@ export function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(mockCommittedPublication),
+    mergeBranch: vi.fn(async (config) => recorded(await mockCommittedPublication(config))),
     commitFiles: vi.fn(async () => {}),
     pushArtifactBranch: vi.fn(async () => true),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(mockBranchPublication),
+    pushBranch: vi.fn(async (...args: Parameters<WorktreeManager['pushBranch']>) =>
+      recorded(await mockBranchPublication(...args)),
+    ),
+    observeSourceBranch: vi.fn(
+      async (_root, repository, branch) => remotes.get(key(repository, branch)) ?? null,
+    ),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     prepareApprovalRebase: vi.fn(async () => ({

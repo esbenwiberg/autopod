@@ -61,6 +61,7 @@ export function createApprovalFixture(disk = false) {
     enqueueSession: vi.fn(),
     podRepo: f.podRepo,
     resolveApprovalReadiness: context.resolveApprovalReadiness,
+    assertExecutionTerminationVerified: guards.assertExecutionTerminationVerified,
     assertApprovalCurrent: context.assertApprovalCurrent,
     executionForPod: f.captured.resolveEffectiveBoundProfile,
     worktreeManager: f.worktreeManager,

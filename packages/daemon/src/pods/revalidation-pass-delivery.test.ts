@@ -137,16 +137,17 @@ describe('separate human revalidation delivery lifetime', () => {
     f.calls.approveSession = replacement;
     await vi.advanceTimersByTimeAsync(0);
     expect(replacement).toHaveBeenCalledWith('prepare', { automation: true });
-    f.validating();
-    f.podRepo.update('prepare', { prUrl: null, autoApprove: false });
-    f.provider.createPr.mockRejectedValueOnce(new Error('synthetic create'));
+    // A separate delivery identity, not removal of an already-published PR.
+    const fresh = createDeliveryFixture();
+    fresh.validating();
+    fresh.provider.createPr.mockRejectedValueOnce(new Error('synthetic create'));
     await expect(
-      f.repass().completeRevalidationPass.call(f.calls, {
-        ...f.passContext(),
+      fresh.repass().completeRevalidationPass.call(fresh.calls, {
+        ...fresh.passContext(),
         revalDefaultBranch: 'main',
         newCommits: true,
       }),
     ).resolves.toEqual({ newCommits: true, result: 'pass' });
-    expect(f.pod()).toMatchObject({ status: 'validated', prUrl: null });
+    expect(fresh.pod()).toMatchObject({ status: 'validated', prUrl: null });
   });
 });

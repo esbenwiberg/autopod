@@ -35,6 +35,7 @@ import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
   collectAndAcknowledgeGuidance,
   createMockContainerManager as createSharedMockContainerManager,
+  createMockWorktreeManager as createSharedMockWorktreeManager,
   mockBranchPublication,
   mockCommittedPublication,
   mockPrMerge,
@@ -386,6 +387,7 @@ function createMockContainerManager(): ContainerManager {
 }
 
 function createMockWorktreeManager(): WorktreeManager {
+  const publications = createSharedMockWorktreeManager();
   return {
     inspectSource: vi.fn(mockSourceSnapshot),
     inspectContractBase: vi.fn(async (_path, _base, facts) => ({
@@ -414,11 +416,12 @@ function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(mockCommittedPublication),
+    mergeBranch: publications.mergeBranch,
     commitFiles: vi.fn(async () => {}),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(mockBranchPublication),
+    pushBranch: publications.pushBranch,
+    observeSourceBranch: publications.observeSourceBranch,
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     prepareApprovalRebase: vi.fn(async () => ({

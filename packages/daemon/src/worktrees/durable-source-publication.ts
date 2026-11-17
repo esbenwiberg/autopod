@@ -37,6 +37,9 @@ async function performPublication(
       if (repositoryIdentity(source.repository) !== repositoryIdentity(expectedRepository))
         throw failure();
       intentId = ledger.admit(pod, source);
+      // A confirmed content intent cannot describe another external mutation.
+      // Unsupported adapters must fail closed instead of reusing its receipt.
+      if (ledger.get(intentId)?.state === 'confirmed') throw failure();
     },
   });
   if (!intentId || !receipt) throw failure();
@@ -44,7 +47,48 @@ async function performPublication(
   return { ...receipt, publicationId: intentId };
 }
 
-export function publishSource(
+async function reuseConfirmedPublication(
+  ledger: SourcePublicationLedger,
+  pod: Pod,
+  repository: string,
+  manager: WorktreeManager,
+  assertPrepared?: (source: BranchPublicationSource) => void,
+  pat?: string,
+): Promise<ConfirmedSourcePublication | null> {
+  const prior = ledger.latestConfirmedForMerge?.(pod);
+  // The intentional null→PR attachment is a different identity. Existing
+  // approval planning must retain its explicit PR-bound publication contract.
+  if (!prior || prior.publicationPrUrl !== pod.prUrl) return null;
+  if (!manager.inspectSource || !pod.worktreePath || !ledger.assertDeliveryAllowed)
+    throw new AutopodError(
+      'Confirmed publication needs current read-only source/owner verification; no second push is authorized.',
+      'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      409,
+    );
+  ledger.assertDeliveryAllowed(pod, prior);
+  const local = await manager.inspectSource(pod.worktreePath, pod.branch);
+  if (
+    !local.worktreeClean ||
+    local.commitSha !== prior.commitSha ||
+    local.treeSha !== prior.treeSha
+  )
+    return null;
+  // Fresh checks and present ownership are independent of the historical push.
+  assertPrepared?.(prior);
+  const observed = await reconcilePublication(
+    ledger,
+    pod,
+    repository,
+    manager,
+    { id: prior.publicationId, source: prior },
+    assertPrepared,
+    pat,
+  );
+  ledger.assertDeliveryAllowed(pod, prior);
+  return observed;
+}
+
+export async function publishSource(
   ledger: SourcePublicationLedger,
   pod: Pod,
   expectedRepository: string,
@@ -63,6 +107,15 @@ export function publishSource(
       assertPrepared,
       options?.pat,
     );
+  const confirmed = await reuseConfirmedPublication(
+    ledger,
+    pod,
+    expectedRepository,
+    manager,
+    assertPrepared,
+    options?.pat,
+  );
+  if (confirmed) return confirmed;
   return performPublication(ledger, pod, expectedRepository, (admission) =>
     manager.pushBranch(pod.worktreePath ?? '', pod.branch, {
       ...options,
@@ -120,7 +173,7 @@ export async function reconcilePublication(
   return { ...receipt, publicationId: pending.id };
 }
 
-export function publishCommittedSource(
+export async function publishCommittedSource(
   ledger: SourcePublicationLedger,
   pod: Pod,
   expectedRepository: string,
@@ -144,6 +197,15 @@ export function publishCommittedSource(
       undefined,
       config.pat,
     );
+  const confirmed = await reuseConfirmedPublication(
+    ledger,
+    pod,
+    expectedRepository,
+    manager,
+    undefined,
+    config.pat,
+  );
+  if (confirmed) return confirmed;
   return performPublication(ledger, pod, expectedRepository, (admission) =>
     manager.mergeBranch({ ...config, ...admission }),
   );

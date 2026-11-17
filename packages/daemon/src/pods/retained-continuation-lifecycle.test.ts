@@ -29,6 +29,91 @@ afterEach(async () => {
 });
 
 describe('retained repaired source through real manager checks (provider and engine mocked)', () => {
+  it('observes the original publication with changed checks while retaining continuation ownership', async () => {
+    const f = await retainedCheckpointFixture('validation');
+    fixtures.push(f);
+    vi.stubEnv('DATA_DIR', f.root);
+    await materializeCheckpointFixture(f);
+    f.worktrees.selectRetainedContinuationSource = vi.fn(async (input) => {
+      const source = await f.worktrees.inspectSourceAdoption(input.worktreePath, input.branch);
+      return {
+        head: source.commitSha,
+        tree: source.treeSha,
+        baseCommitSha: f.input.checkpointHead,
+      };
+    });
+    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation();
+    if (!validate) throw new Error('Missing checks fixture');
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+      ...(await validate(config)),
+      taskReview: {
+        status: 'pass',
+        reasoning: 'Independent selected-source fixture review',
+        issues: [],
+        model: 'fixture',
+        screenshots: [],
+        diff: config.diff,
+      },
+    }));
+    f.ctx.podRepo.taskRetries!.authorize(
+      f.podId,
+      'observe-retained-publication-check',
+      'One fresh isolated check, preserving original accounting and resources',
+      f.actor,
+    );
+    await f.recovery.continueRetained(f.podId, f.input, f.actor);
+    await f.recovery.wait(f.input.id);
+    await f.manager.processPod(f.podId);
+    const pod = f.pod();
+    const selected = f.recovery.list(f.podId)[0];
+    expect(selected?.checked?.result.overall).toBe('pass');
+    const actual = await f.worktrees.inspectSourceAdoption(pod.worktreePath!, pod.branch);
+    expect(actual.worktreeClean).toBe(true);
+    const repository =
+      pod.profileSnapshot?.repoUrl ?? f.ctx.profileStore.get(pod.profileName).repoUrl;
+    if (!repository) throw new Error('Missing retained repository fixture');
+    const source = {
+      repository: repository.replace(/\.git$/, ''),
+      branch: pod.branch,
+      remoteRef: `refs/heads/${pod.branch}`,
+      commitSha: actual.commitSha,
+      treeSha: actual.treeSha,
+      worktreeClean: true,
+    };
+    const ledger = f.ctx.podRepo.sourcePublications!;
+    const id = ledger.admit(pod, source);
+    // Model the late mutable projection only, not a fabricated native check or
+    // historical publication receipt. The selected immutable result stays intact.
+    f.ctx.db
+      .prepare('UPDATE pods SET last_validation_result=? WHERE id=?')
+      .run(JSON.stringify({ ...pod.lastValidationResult, overall: 'fail' }), f.podId);
+    const held = f.pod();
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).toThrow('current exact-source');
+    const pending = ledger.pending?.(held);
+    expect(pending?.id).toBe(id);
+    if (!pending) throw new Error('Missing original pending publication');
+    f.worktrees.inspectSource = vi.fn(async () => ({
+      ...actual,
+      branch: pod.branch,
+      worktreeClean: true,
+    }));
+    f.worktrees.observeSourceBranch = vi.fn(async () => source.commitSha);
+    await expect(
+      f.manager.approveSession(f.podId, {
+        actor: f.actor,
+        reason: 'Observe the original operation only; failed checks remain blocked',
+      }),
+    ).rejects.toBeDefined();
+    expect(ledger.get(id)?.state).toBe('confirmed');
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).toThrow('current exact-source');
+    expect(f.recovery.list(f.podId)[0]?.id).toBe(selected?.id);
+    expect(f.recovery.list(f.podId)[0]?.checked?.result.overall).toBe('pass');
+    expect(f.pod().lastValidationResult?.overall).toBe('fail');
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+
   it('records failed checks without coding feedback, automatic retries or destructive legacy recovery', async () => {
     const f = await retainedCheckpointFixture('validation');
     fixtures.push(f);

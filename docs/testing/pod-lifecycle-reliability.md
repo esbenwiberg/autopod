@@ -49,7 +49,10 @@ from logs or reruns coding to certify an old merge.
 An admitted initial push with no response leaves validated source retained.
 Human approval observes that original operation using the exact remote ref and
 local source before continuing. Unknown/mismatched observations keep the same
-admission and resource hold; they do not authorize a second push.
+admission and resource hold; they do not authorize a second push. A confirmed
+unchanged publication is reused only after fresh local/remote observation and
+present delivery-authority checks. An already-confirmed intent cannot admit a
+second physical mutation; remote deletion/rewind never silently triggers a push.
 Resume can also observe that original pending publication from a failed/review
 hold before considering continuation. Exact remote/local proof settles only that
 publication; failed checks, retry admission, accounting and other custody remain
@@ -57,6 +60,9 @@ unchanged, and continuation may still be refused. A completed-pod PR retry needs
 the same current immutable certificate and original retained source/resource;
 completion alone cannot authorize another publication. Revalidation can retain a
 passing check result while an ambiguous prior merge still forbids publication.
+The owning approval path can record original-publication facts before rejecting
+changed retained-continuation checks. Observation does not waive those checks or
+retention, and never creates a replacement approval, push or validation attempt.
 
 This selection is not proof of live containers, live external delivery,
 platform-specific behavior, or every recovery route. Extend the existing

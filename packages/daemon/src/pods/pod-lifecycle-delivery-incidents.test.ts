@@ -124,7 +124,7 @@ describe('composed delivery incidents', () => {
     expect(f.current().status).toBe('validated');
     expect(f.current().prUrl).toBe('https://github.com/org/repo/pull/42');
     expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(phase === 'metadata' ? 1 : 2);
     expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(checks);
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
     expect(f.provider.createPr).toHaveBeenCalledTimes(1);
@@ -527,6 +527,32 @@ describe('composed delivery incidents', () => {
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
     expect(f.provider.createPr).not.toHaveBeenCalled();
     noExtraDelivery(f, 1);
+  });
+
+  it.each([
+    false,
+    true,
+  ])('never republishes an observed original push (remote changes again=%s)', async (drift) => {
+    const f = fixture();
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementationOnce(
+      async (root, branch, options) => {
+        await mockBranchPublication(root, branch, options);
+        throw new Error('Original publication response lost');
+      },
+    );
+    await f.process();
+    f.ctx.worktreeManager.observeSourceBranch = vi
+      .fn()
+      .mockResolvedValueOnce('a'.repeat(40))
+      .mockResolvedValue((drift ? 'c' : 'a').repeat(40));
+    if (drift) await expect(f.manager.retryCreatePr(f.pod.id)).rejects.toBeDefined();
+    else await f.manager.retryCreatePr(f.pod.id);
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(count(f, 'source_publication_intents')).toBe(1);
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(f.provider.createPr).toHaveBeenCalledTimes(drift ? 0 : 1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
   });
 
   it('does not adopt a pending push from another generation', async () => {
