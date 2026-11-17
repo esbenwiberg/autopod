@@ -366,10 +366,26 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
           assertCurrent(pod, false, Boolean(checked));
           if (pod.status === 'validating' || pod.status === 'failed')
             requireEvidence(Boolean(checked));
-          const target = {
-            repoUrl: source.repository,
-            defaultBranch: pod.baseBranch ?? pod.profileSnapshot?.defaultBranch ?? 'main',
-          };
+          // Legacy ongoing pods need not have a profile snapshot. The native
+          // certificate already persisted the effective resolved target; do not
+          // substitute main, or accept a caller-selected target as authority.
+          const certified = checked
+            ? (db
+                .prepare(
+                  'SELECT binding FROM validation_source_intents WHERE id=? AND pod_id=? AND generation=?',
+                )
+                .get(checked.validationId, pod.id, pod.lifecycleGeneration) as
+                | { binding: string }
+                | undefined)
+            : undefined;
+          const saved = certified
+            ? (JSON.parse(certified.binding) as { baseBranch?: unknown })
+            : undefined;
+          const defaultBranch = checked
+            ? saved?.baseBranch
+            : (pod.baseBranch ?? pod.profileSnapshot?.defaultBranch ?? 'main');
+          requireEvidence(typeof defaultBranch === 'string' && defaultBranch.length > 0);
+          const target = { repoUrl: source.repository, defaultBranch };
           const validationSources = createValidationSourceEvidence(db);
           if (checked)
             requireEvidence(

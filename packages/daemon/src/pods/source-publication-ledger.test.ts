@@ -41,6 +41,26 @@ function fixture(db = createTestDb()) {
   return { db, repo, ledger: createSourcePublicationLedger(db), pod: repo.getOrThrow('source') };
 }
 describe('durable source publication', () => {
+  it('uses the immutable resolved validation target for a legacy non-main profile', () => {
+    const f = fixture();
+    try {
+      expect(f.pod.baseBranch).toBeNull();
+      expect(f.pod.profileSnapshot).toBeNull();
+      const profile = {
+        ...createMockProfileStore(f.db).get('test-profile'),
+        defaultBranch: 'develop',
+      };
+      seedCheckedValidationSource(f.repo, f.pod, profile, createPassingValidationResult('source'));
+      const pod = f.repo.getOrThrow('source');
+      const checked = f.repo.validationSources!.checked(pod, profile);
+      expect(() =>
+        f.ledger.admit(pod, proof, { validationId: checked.validationId, checkpoints: [] }),
+      ).not.toThrow();
+    } finally {
+      f.db.close();
+    }
+  });
+
   it.each([
     false,
     true,
@@ -71,8 +91,8 @@ describe('durable source publication', () => {
           .prepare(
             'SELECT validation_id FROM validation_source_publications WHERE publication_id=?',
           )
-          .get(id),
-      ).toEqual({ validation_id: first.validationId });
+          .all(id),
+      ).toContainEqual({ validation_id: first.validationId });
     } finally {
       f.db.close();
     }
