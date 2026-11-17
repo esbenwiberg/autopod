@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PrManager, PrMergeStatus } from '../interfaces/pr-manager.js';
 import {
+  createPassingValidationResult,
   createTestContext,
   mockBranchPublication,
   mockPrMerge,
@@ -684,6 +685,55 @@ describe('composed delivery incidents', () => {
     expect(f.current().prUrl).toBeNull();
     expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
     expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+
+  it('approval cannot turn a legacy passing projection without native source proof into publication', async () => {
+    const f = fixture();
+    const projection = {
+      ...createPassingValidationResult(f.pod.id),
+      taskReview: {
+        status: 'pass' as const,
+        reasoning: 'Legacy mutable projection',
+        issues: [],
+        model: 'legacy',
+        screenshots: [],
+      },
+    };
+    f.ctx.podRepo.update(f.pod.id, {
+      status: 'validated',
+      containerId: 'retained-container',
+      worktreePath: '/tmp/retained-source',
+      lastValidationResult: projection,
+    });
+    await expect(f.approve()).rejects.toBeDefined();
+    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(count(f, 'source_publication_intents')).toBe(0);
+    expect(f.current().lastValidationResult).toEqual(projection);
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'advanced',
+    'deleted',
+  ] as const)('approval refuses a %s remote before PR creation instead of reusing historical publication or repushing', async (drift) => {
+    const f = fixture();
+    f.provider.findPr.mockRejectedValueOnce(new Error('PR lookup unavailable before dispatch'));
+    await f.process();
+    expect(f.current().status).toBe('validated');
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    f.ctx.worktreeManager.observeSourceBranch = vi.fn(async () =>
+      drift === 'advanced' ? 'c'.repeat(40) : null,
+    );
+    await expect(f.approve()).rejects.toBeDefined();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(count(f, 'source_publication_intents')).toBe(1);
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
 

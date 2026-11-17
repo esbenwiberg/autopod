@@ -68,6 +68,18 @@ guidance remains unconsumed. A genuine infrastructure report remains a blocker.
 PR retry rechecks worker/validation termination before and after asynchronous
 observations: a historical pass cannot authorize new delivery over unknown execution.
 
+A successful independent retry-finding council produces a new source witness,
+not a rewritten failed admission. The original deterministic checks, healthy
+review results and unchanged source before/after both reviews remain linked;
+required proof, execution uncertainty and explicit overrides cannot be waived by
+that witness.
+
+Approval's missing-PR path uses checked committed publication for ordinary agent
+work, never a post-review auto-commit. Reusing a historical publication for PR
+creation requires a fresh exact remote/local observation. A moved or deleted
+remote ref does not authorize replacement publication. Interactive and owned
+rewrite publication retain their separate explicit authority.
+
 This selection is not proof of live containers, live external delivery,
 platform-specific behavior, or every recovery route. Extend the existing
 production fixtures and selection as further lifecycle regressions are added.

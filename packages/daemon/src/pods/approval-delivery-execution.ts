@@ -7,6 +7,7 @@ import {
   mergePublishedSource,
   reconcileMerge,
 } from '../worktrees/durable-merge.js';
+import { reconcilePublication } from '../worktrees/durable-source-publication.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import {
   assertMergeRepository,
@@ -17,6 +18,7 @@ import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js'
 import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
 import { recoveryCheckHash } from './recovery-fork-checks.js';
+import { publishValidatedSource } from './validated-source-publication.js';
 export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecutionCaptured) {
   const {
     podRepo,
@@ -537,46 +539,52 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       const retryWorktreePath = pod.worktreePath;
       try {
         const retryProfile = executionForPod(pod);
-        const recorded = podRepo.sourcePublications?.latestConfirmedForMerge?.(mergingAnchor);
-        if (recorded) {
-          const source = await deliveryOperation(
-            () =>
-              captured.worktreeManager.inspectSource?.(retryWorktreePath, pod.branch) ??
-              Promise.resolve(null),
-          );
-          if (
-            !source?.worktreeClean ||
-            source.branch !== recorded.branch ||
-            source.commitSha !== recorded.commitSha ||
-            source.treeSha !== recorded.treeSha
-          )
-            mergeReconciliation(
-              'Retained source changed after initial publication. PR creation cannot auto-commit or republish unchecked source.',
+        const publicationLedger = podRepo.sourcePublications;
+        if (!publicationLedger)
+          mergeReconciliation('Durable source evidence is unavailable for PR creation.');
+        const recorded = publicationLedger.latestConfirmedForMerge?.(mergingAnchor);
+        const publishedSource = recorded
+          ? await deliveryOperation(async () =>
+              reconcilePublication(
+                publicationLedger,
+                mergingAnchor,
+                retryProfile.repoUrl ?? '',
+                captured.worktreeManager,
+                { id: recorded.publicationId, source: recorded },
+                () => assertApprovalCurrent(mergingAnchor),
+                await deliveryCredential(retryProfile),
+              ),
+            )
+          : await deliveryOperation(async () =>
+              options.publishOnly
+                ? publishApprovalBranch(mergingAnchor, {
+                    pat: await deliveryCredential(retryProfile),
+                  })
+                : pod.options.agentMode !== 'interactive'
+                  ? publishValidatedSource({
+                      pod: mergingAnchor,
+                      podRepo,
+                      profile: retryProfile,
+                      worktreeManager: captured.worktreeManager,
+                      pat: await deliveryCredential(retryProfile),
+                      assertCurrent: () => assertApprovalCurrent(mergingAnchor),
+                    })
+                  : commitAndPublishApprovalBranch(mergingAnchor, {
+                      worktreePath: retryWorktreePath,
+                      // Push the feature branch up so the PR can be opened against the resolved base.
+                      targetBranch: pod.branch,
+                      // Pass the PAT explicitly — approval retry runs post-container, so the
+                      // in-memory PAT cache may be cold after a daemon restart.
+                      pat: await deliveryCredential(retryProfile),
+                      // Post-container retry: sync-back already happened (or failed silently) upstream;
+                      // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
+                      maxDeletions: 0,
+                      // Provide pod task as context for any auto-generated commit message.
+                      podTask: pod.task,
+                      profile: retryProfile,
+                      podModel: pod.model,
+                    }),
             );
-        }
-        const publishedSource =
-          recorded ??
-          (await deliveryOperation(async () =>
-            options.publishOnly
-              ? publishApprovalBranch(mergingAnchor, {
-                  pat: await deliveryCredential(retryProfile),
-                })
-              : commitAndPublishApprovalBranch(mergingAnchor, {
-                  worktreePath: retryWorktreePath,
-                  // Push the feature branch up so the PR can be opened against the resolved base.
-                  targetBranch: pod.branch,
-                  // Pass the PAT explicitly — approval retry runs post-container, so the
-                  // in-memory PAT cache may be cold after a daemon restart.
-                  pat: await deliveryCredential(retryProfile),
-                  // Post-container retry: sync-back already happened (or failed silently) upstream;
-                  // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
-                  maxDeletions: 0,
-                  // Provide pod task as context for any auto-generated commit message.
-                  podTask: pod.task,
-                  profile: retryProfile,
-                  podModel: pod.model,
-                }),
-          ));
         const baseBranch = resolvePrBaseBranch(pod, retryProfile);
         await deliveryOperation(async () =>
           ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry'),
