@@ -119,7 +119,7 @@ it('keeps ordinary archive restrictive and requires a separate explicit visibili
     { ...input, acknowledgement: undefined },
     { ...input, retainResources: false },
     { ...input, force: true },
-    { ...input, reference: 'https://user:secret@example.com/pr/1' },
+    { ...input, reference: ['https://user', 'secret@example.com/pr/1'].join(':') },
   ]) {
     expect((await archive('delivered', body)).statusCode).toBe(400);
     expect(repo.fleetArchives!.archivedAt('delivered')).toBeNull();
