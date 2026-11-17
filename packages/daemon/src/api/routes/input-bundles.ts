@@ -5,7 +5,7 @@ import type { InputBundleStore } from '../../inputs/input-bundle-store.js';
 import type { ReferencePreviewService } from '../../inputs/reference-preview-service.js';
 import { errorHandler } from '../error-handler.js';
 
-/** Operator-only, owner-scoped input uploads. Never serve active HTML in the daemon origin. */
+/** Operator-only shared sealed reads and owner-bound uploads. Never serve active HTML. */
 export async function inputBundleRoutes(
   app: FastifyInstance,
   store: InputBundleStore,
@@ -73,7 +73,7 @@ export async function inputBundleRoutes(
     });
     scope.get('/input-bundles/:id', async (request) => {
       const { id } = request.params as { id: string };
-      return store.get(id, request.user.oid);
+      return store.getForViewing(id, request.user.oid);
     });
     scope.put(
       '/input-bundles/:id/files/:index',
@@ -115,10 +115,7 @@ export async function inputBundleRoutes(
       const { id, index } = request.params as { id: string; index: string };
       if (!/^\d{1,2}$/.test(index))
         throw new AutopodError('Invalid input index', 'INVALID_INPUT_UPLOAD', 400);
-      const bundle = store.get(id, request.user.oid);
-      if (bundle.status !== 'sealed')
-        throw new AutopodError('Input upload is incomplete', 'INPUT_UPLOAD_INCOMPLETE', 409);
-      const bytes = store.read(id, request.user.oid, Number(index));
+      const bytes = store.readForViewing(id, request.user.oid, Number(index));
       return reply
         .header('Content-Type', 'application/octet-stream')
         .header('Content-Disposition', 'attachment; filename="reference"')

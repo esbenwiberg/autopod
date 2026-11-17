@@ -367,12 +367,13 @@ describe('owner-scoped reference uploads', () => {
     expect(download.headers['content-disposition']).toContain('attachment');
     expect(download.headers['content-type']).toBe('application/octet-stream');
     expect(download.headers['content-security-policy']).toContain('sandbox');
-    const forbidden = await app.inject({
+    const shared = await app.inject({
       method: 'GET',
       url: `/input-bundles/${bundle.id}`,
       headers: { 'x-owner': 'other' },
     });
-    expect(forbidden.statusCode).toBe(404);
+    expect(shared.statusCode).toBe(200);
+    expect(shared.json()).toEqual(seal.json());
     const oversized = await app.inject({
       method: 'PUT',
       url: `/input-bundles/${bundle.id}/files/0`,

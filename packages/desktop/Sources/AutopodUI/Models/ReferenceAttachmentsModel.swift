@@ -7,6 +7,7 @@ import Observation
 final class ReferenceAttachmentsModel {
   private(set) var bundle: InputBundleReference?
   private(set) var isLoading = true
+  private(set) var hasLoaded = false
   private(set) var error: String?
   private(set) var bytes: [Int: Data] = [:]
   private(set) var fileErrors: [Int: String] = [:]
@@ -23,13 +24,14 @@ final class ReferenceAttachmentsModel {
     for download in downloads.values { download.task.cancel() }
     downloads = [:]
     bundle = nil; bytes = [:]; fileErrors = [:]; loadingFiles = []
-    isLoading = true; error = nil
+    isLoading = true; error = nil; hasLoaded = false
     defer { if generation == owner { isLoading = false } }
     do {
       let launch = try await actions.readLaunch(podId)
       try Task.checkCancellation()
       guard generation == owner else { return }
       bundle = try launch.referenceInputBundle()
+      hasLoaded = true
     } catch {
       guard generation == owner, !Task.isCancelled else { return }
       self.error = error.localizedDescription
