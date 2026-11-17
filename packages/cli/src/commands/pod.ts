@@ -7,7 +7,12 @@ import type {
   SystemEvent,
   ValidationExecutionRecoveryState,
 } from '@autopod/shared';
-import { describeBudgetPause, describeTaskBudgetUsage, podStatusSchema } from '@autopod/shared';
+import {
+  describeBudgetPause,
+  describeTaskBudgetUsage,
+  handledElsewhereArchiveRequestSchema,
+  podStatusSchema,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -641,6 +646,57 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         ),
       );
     });
+
+  program
+    .command('archive-handled-elsewhere <id>')
+    .description(
+      'Hide work handled elsewhere; retain native status, unknown execution and all resources',
+    )
+    .requiredOption('--generation <n>', 'Exact lifecycle generation from ap status --json')
+    .requiredOption(
+      '--status <status>',
+      'Exact observed native state; never a desired completion state',
+    )
+    .requiredOption('--reason <text>', 'Human disposition; does not certify native delivery')
+    .requiredOption(
+      '--reference <url>',
+      'Human-supplied delivery reference, not a publication receipt',
+    )
+    .requiredOption(
+      '--ack-retained-execution',
+      'Acknowledge unknown execution/resources remain retained and may incur costs',
+    )
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        opts: {
+          generation: string;
+          status: string;
+          reason: string;
+          reference: string;
+          ackRetainedExecution: boolean;
+          json?: boolean;
+        },
+      ) => {
+        const request = handledElsewhereArchiveRequestSchema.parse({
+          expectedGeneration: Number(opts.generation),
+          expectedStatus: opts.status,
+          reason: opts.reason,
+          reference: opts.reference,
+          retainResources: true,
+          acknowledgement: opts.ackRetainedExecution
+            ? 'visibility-only-unknown-execution-retained'
+            : undefined,
+        });
+        const result = await getClient().archivePodHandledElsewhere(id, request);
+        withJsonOutput(opts, result, () =>
+          console.log(
+            `${id} hidden from fleet; native state, source, unknown execution/accounting and all resources retained. Not marked Complete.`,
+          ),
+        );
+      },
+    );
 
   program
     .command('unarchive <id>')

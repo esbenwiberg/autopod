@@ -7,6 +7,12 @@ import {
   hasInterruptedArtifactCollection,
 } from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
+import {
+  assertFleetRecoveryAllowed,
+  FleetRetentionFence,
+  isOrdinaryFleetTask,
+  retainFleetDisposition,
+} from './fleet-retention-policy.js';
 import type { PodRepository } from './pod-repository.js';
 import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 import { captureValidationMutationGuard } from './validation-recovery-policy.js';
@@ -46,6 +52,7 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
         (pod) =>
           pod.status === status &&
           pod.executionTarget === 'sandbox' &&
+          !retainFleetDisposition(podRepo, pod) &&
           (pod.status === 'provisioning' ||
             Boolean(pod.containerId) ||
             hasInterruptedArtifactCollection(pod)),
@@ -64,6 +71,13 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
     try {
       await reconcileSession(pod, deps);
     } catch (err) {
+      if (
+        err instanceof FleetRetentionFence ||
+        retainFleetDisposition(podRepo, podRepo.getOrThrow(pod.id))
+      ) {
+        logger.info({ err, podId: pod.id }, 'Fleet disposition retained during sandbox recovery');
+        continue;
+      }
       const reason = `Sandbox workspace preservation failed after daemon restart; the sandbox was retained for operator recovery: ${
         err instanceof Error ? err.message : String(err)
       }`;
@@ -75,7 +89,12 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
-  const assertCurrent = captureValidationMutationGuard(podRepo, pod);
+  const assertEpoch = captureValidationMutationGuard(podRepo, pod);
+  const assertCurrent = () => {
+    assertFleetRecoveryAllowed(podRepo, pod.id);
+    assertEpoch();
+  };
+  assertCurrent();
   if (podRepo.hasInfrastructureBlocker?.(pod.id)) {
     podRepo.update(pod.id, {
       lastRecoveryTrigger: 'restart',
@@ -120,6 +139,7 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       await deps.preserveWorkspace(pod.id);
       assertCurrent();
       await deps.suspendSandbox(pod.id);
+      assertCurrent();
       const reason =
         'Sandbox workspace and session were preserved after daemon restart. The sandbox is suspended and will resume in place when work continues.';
       logger.warn({ podId: pod.id, containerId }, reason);
@@ -196,6 +216,7 @@ async function recoverInterruptedProvisioning(
     }
   }
 
+  assertFleetRecoveryAllowed(podRepo, pod.id);
   const reason = survivingWorktreePath
     ? 'Sandbox provisioning was interrupted by a daemon restart; resuming setup with the surviving worktree.'
     : 'Sandbox provisioning was interrupted by a daemon restart before a recoverable worktree was recorded; restarting setup from the original ref.';
@@ -247,8 +268,10 @@ function parkSession(
     pauseReason:
       status === 'paused'
         ? pod.status === 'paused'
-          ? (pod.pauseReason ?? 'manual')
-          : 'manual'
+          ? (pod.pauseReason ?? (isOrdinaryFleetTask(podRepo, pod) ? null : 'manual'))
+          : isOrdinaryFleetTask(podRepo, pod)
+            ? null
+            : 'manual'
         : null,
     lastCorrectionMessage: reason,
     ...(status === 'paused' ? { lastRecoveryTrigger: 'restart' as const } : {}),

@@ -117,6 +117,7 @@ export type { DeploymentRequest } from './schemas/deployment.schema.js';
 export { deploymentRequestSchema } from './schemas/deployment.schema.js';
 export * from './schemas/github-operation.schema.js';
 export * from './schemas/github-read.schema.js';
+export * from './schemas/handled-elsewhere-archive.schema.js';
 export {
   injectedClaudeMdSectionSchema,
   injectedMcpServerSchema,

@@ -12,6 +12,7 @@ import type {
   DispatchPreflightEvidence,
   EffectiveLaunchConfig,
   ExecutionProvenance,
+  HandledElsewhereArchiveRequest,
   IssueWatcherBinding,
   IssueWatcherBindingPayload,
   LaunchRequest,
@@ -440,6 +441,17 @@ export class AutopodClient {
       reason,
       retainResources: true,
     });
+  }
+
+  async archivePodHandledElsewhere(
+    id: string,
+    request: HandledElsewhereArchiveRequest,
+  ): Promise<{ fleetArchivedAt: string; retainedResources: true }> {
+    return this.request(
+      'POST',
+      `/pods/${encodeURIComponent(id)}/archive-handled-elsewhere`,
+      request,
+    );
   }
 
   async unarchivePod(id: string): Promise<{ fleetArchivedAt: null; retainedResources: true }> {
