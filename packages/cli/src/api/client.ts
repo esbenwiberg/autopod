@@ -44,6 +44,9 @@ import type {
   RetainedFinalizationView,
   RetainedNetworkReleasePlan,
   RetainedNetworkReleaseReport,
+  ReviewerBudgetRevision,
+  ReviewerBudgetRevisionRequest,
+  ReviewerBudgetView,
   ReworkEligibility,
   ReworkRequestInput,
   ReworkRequestReceipt,
@@ -117,6 +120,7 @@ export interface ReviewerRun {
   reconciledBy: string | null;
   reconciliationNote: string | null;
   usageBasis: 'operator-reported' | 'unknown-accepted' | null;
+  reviewerBudgetRevisionId?: number | null;
   requiresReconciliation: boolean;
 }
 
@@ -472,6 +476,17 @@ export class AutopodClient {
     expectedBudget: number | null,
   ): Promise<TaskExecutionSummary> {
     return this.request('POST', `/pods/${id}/budget`, { tokenBudget, expectedBudget });
+  }
+
+  async inspectReviewerBudget(id: string): Promise<ReviewerBudgetView> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/reviewer-budget`);
+  }
+
+  async reviseReviewerBudget(
+    id: string,
+    input: ReviewerBudgetRevisionRequest,
+  ): Promise<ReviewerBudgetRevision> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/reviewer-budget`, input);
   }
 
   async listReviewerRuns(id: string): Promise<ReviewerRun[]> {
