@@ -17024,6 +17024,7 @@ describe('PodManager', () => {
         status: 'running',
         containerId: 'ctr-1',
         validationAttempts: 0,
+        worktreePath: '/tmp/checked-source',
       });
 
       await manager.triggerValidation(pod.id);
@@ -17506,6 +17507,7 @@ describe('PodManager', () => {
         status: 'running',
         containerId: 'ctr-1',
         validationAttempts: 0,
+        worktreePath: '/tmp/checked-source',
       });
 
       await manager.triggerValidation(pod.id);
@@ -27219,7 +27221,7 @@ describe('validation attempt start compatibility', () => {
     ctx.podRepo.update(pod.id, {
       status: c.status ?? 'running',
       containerId: 'entry-container',
-      worktreePath: scanner ? '/tmp/validation-entry' : null,
+      worktreePath: '/tmp/validation-entry',
       validationAttempts: c.count ?? 2,
       lastRecoveryTrigger: c.marker ?? null,
       reworkCount: c.reworks ?? 0,
@@ -27826,16 +27828,19 @@ describe('validation inputs compatibility', () => {
     }
   });
 
-  it('keeps empty source inputs without a worktree and still consumes overrides', async () => {
+  it('holds missing review source without consuming queued overrides', async () => {
     const f = fixture({}, false);
     try {
       f.queue();
-      const config = await f.run();
-      expect(config).toMatchObject({ diff: '', commitLog: undefined, worktreePath: undefined });
-      expect(config.overrides?.[0]?.description).toBe('new decision');
+      await f.manager.triggerValidation(f.pod.id);
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.manager.getSession(f.pod.id).status).toBe('review_required');
+      expect(f.manager.getSession(f.pod.id).failureReason).toContain(
+        'Review source is unavailable',
+      );
       expect(f.ctx.worktreeManager.getDiff).not.toHaveBeenCalled();
       expect(f.ctx.worktreeManager.getCommitLog).not.toHaveBeenCalled();
-      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
     } finally {
       f.ctx.db.close();
     }
@@ -27912,7 +27917,7 @@ describe('validation inputs compatibility', () => {
         sastTimeout: null,
         hasWebUi: null,
       },
-      false,
+      true,
     );
     try {
       const config = await f.run();
@@ -28020,7 +28025,7 @@ describe('validation inputs compatibility', () => {
   });
 
   it('replaces queued override values without reordering existing finding IDs', async () => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       f.ctx.podRepo.update(f.pod.id, {
         validationOverrides: [
@@ -28044,7 +28049,7 @@ describe('validation inputs compatibility', () => {
   });
 
   it('does not write overrides when the queue is empty', async () => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       const update = vi.spyOn(f.ctx.podRepo, 'update');
       await f.run();
@@ -28092,7 +28097,7 @@ describe('validation inputs compatibility', () => {
     'reject write',
     'throw after write',
   ] as const)('keeps post-flush effects: %s', async (stage) => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       f.queue();
       if (stage === 'reject write') {

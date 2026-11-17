@@ -407,7 +407,7 @@ describe('retained bridge custody (real SQLite, provider doubles)', () => {
       statusCode: 503,
     });
     await expect(failure).rejects.toThrow(
-      /1 autopod networks exist; 1 are held by retained checkpoints, 0 are attached to containers, 0 unattached were pruned/,
+      /1 autopod networks exist; 1 are held by retained checkpoints, 0 have live or unverified owners, 0 are attached to containers, 0 unattached were pruned/,
     );
     expect(f.network.remove).not.toHaveBeenCalled();
   });

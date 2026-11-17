@@ -351,6 +351,7 @@ export class DockerNetworkManager {
         await Promise.all(
           candidates.map(async (n) => {
             try {
+              this.assertNetworkMutable(n.Name);
               this.assertNetworkPrunable(n.Name);
               const network = this.docker.getNetwork(n.Id);
               const live = await this.inspectNetworkCustody(network, n.Name);

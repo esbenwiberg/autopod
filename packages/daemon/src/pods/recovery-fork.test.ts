@@ -344,7 +344,7 @@ describe('durable real recovery fork', () => {
       .run('publication', 'identity', f.podId, task.taskId, 1, 'source', 'now');
     const view = await f.manager.inspectRecoveryFork(f.podId);
     expect(view.available).toBe(false);
-    expect(view.blockers.join(' ')).toContain('publication/delivery/merge custody');
+    expect(view.blockers.join(' ')).toContain('unconfirmed publication');
     expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
   });
   it('rejects unsupported tracked credential paths rather than omitting committed code', async () => {
