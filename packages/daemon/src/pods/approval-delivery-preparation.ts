@@ -174,7 +174,7 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           409,
         );
       if (anchor.options.agentMode !== 'interactive')
-        return publishApprovalBranch(anchor, { pat: config.pat, force: config.force });
+        return publishApprovalBranch(anchor, { pat: config.pat });
       return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
     };
     assertApprovalCurrent(pod);
