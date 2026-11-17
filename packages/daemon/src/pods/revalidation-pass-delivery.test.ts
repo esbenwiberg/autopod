@@ -87,31 +87,27 @@ describe('separate human revalidation delivery lifetime', () => {
     expect(f.passCaptured.refreshReadiness).toHaveBeenCalledOnce();
     await expect(pending).resolves.toEqual({ newCommits: true, result: 'pass' });
   });
-  it('continues after a handled deletion guard and always sends maxDeletions zero/empty screenshots', async () => {
+  it('halts publication after a handled deletion guard without creating a PR', async () => {
     const f = createDeliveryFixture();
     f.validating();
     f.passCaptured.handleDeletionGuardError = vi.fn(() => true);
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(new Error('synthetic guard'));
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(new Error('synthetic guard'));
     await expect(
       f.repass().completeRevalidationPass.call(f.calls, {
         ...f.passContext(),
         revalDefaultBranch: 'main',
         newCommits: false,
       }),
-    ).resolves.toEqual({ newCommits: false, result: 'pass' });
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-      expect.objectContaining({ maxDeletions: 0 }),
-    );
-    expect(f.provider.createPr).toHaveBeenCalledWith(
-      expect.objectContaining({ screenshots: [], filesChanged: 3 }),
-    );
-    expect(f.pod().status).toBe('validated');
+    ).resolves.toEqual({ newCommits: false, result: 'fail' });
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('failed');
   });
   it('rethrows credential identity without invoking trigger credential parking', async () => {
     const f = createDeliveryFixture();
     f.validating();
     const error = new GitCredentialError('synthetic', 'github', 'push', 'synthetic');
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(error);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(error);
     await expect(
       f.repass().completeRevalidationPass.call(f.calls, {
         ...f.passContext(),

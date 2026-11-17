@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
+import { seedCheckedValidationSource } from '../test-utils/validation-source-helpers.js';
 import { findingId } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
@@ -175,8 +176,15 @@ describe('validation successful delivery lifetime', () => {
     const context = { ...f.passContext(), podId: 'fix', pod: fix, s2: fix };
     context.result = { ...context.result, podId: 'fix' };
     f.podRepo.update('fix', { lastValidationResult: context.result });
+    seedCheckedValidationSource(
+      f.podRepo,
+      f.podRepo.getOrThrow('fix'),
+      context.profile,
+      context.result,
+    );
+    context.s2 = f.podRepo.getOrThrow('fix');
     await f.pass().completeValidationPass.call(f.calls, context);
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalled();
     expect(f.provider.createPr).not.toHaveBeenCalled();
     expect(f.passCaptured.completeFixPodAfterPush).toHaveBeenCalledOnce();
     if (executionTarget === 'sandbox') {
@@ -191,7 +199,7 @@ describe('validation successful delivery lifetime', () => {
   it('parks credential failure and halts before validated/readiness effects', async () => {
     const f = createDeliveryFixture();
     f.validating();
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(
       new GitCredentialError('synthetic', 'ado', 'push', 'synthetic'),
     );
     await f.pass().completeValidationPass.call(f.calls, f.passContext());
@@ -205,25 +213,28 @@ describe('validation successful delivery lifetime', () => {
     f.validating();
     const error = new Error('synthetic push');
     f.passCaptured.handleDeletionGuardError = vi.fn(() => true);
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(error);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(error);
     await f.pass().completeValidationPass.call(f.calls, f.passContext());
     expect(f.pod().status).toBe('failed');
     expect(f.passCaptured.runAdvisoryAfterValidation).not.toHaveBeenCalled();
     f.validating();
     f.passCaptured.handleDeletionGuardError = vi.fn(() => false);
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(error);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(error);
     await expect(f.pass().completeValidationPass.call(f.calls, f.passContext())).rejects.toBe(
       error,
     );
   });
-  it('retains fresh stats/waiver metadata, zero-deletion tightening and PR failure still validated', async () => {
+  it('publishes checked commits without auto-commit and retains fresh PR metadata', async () => {
     const f = createDeliveryFixture();
     f.validating();
     const context = f.passContext();
     context.validationSyncOk = false;
     await f.pass().completeValidationPass.call(f.calls, context);
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-      expect.objectContaining({ targetBranch: 'branch', maxDeletions: 0 }),
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledWith(
+      f.directory,
+      'branch',
+      expect.objectContaining({ onPrepared: expect.any(Function) }),
     );
     expect(f.provider.createPr).toHaveBeenCalledWith(
       expect.objectContaining({

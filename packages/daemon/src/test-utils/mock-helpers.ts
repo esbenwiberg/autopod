@@ -274,6 +274,15 @@ export function createMockContainerManager(): ContainerManager {
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async (_containerId, command) => {
+      if (command[2]?.includes('autopod-validation-source-v1')) {
+        const args = command.slice(command.indexOf('/usr/bin/git') + 3);
+        const stdout = args.includes('symbolic-ref')
+          ? `${command[3]?.slice('AUTOPOD_EXPECTED_BRANCH='.length)}\n`
+          : args.includes('rev-parse')
+            ? `${(args.includes('HEAD^{tree}') ? 'b' : 'a').repeat(40)}\n`
+            : '';
+        return { stdout, stderr: '', exitCode: 0 };
+      }
       if (command[2]?.includes('autopod-command-preflight-v1')) {
         const names = JSON.parse(command[3] ?? '[]') as string[];
         return {
@@ -304,6 +313,7 @@ export function createMockContainerManager(): ContainerManager {
 
 export function createMockWorktreeManager(): WorktreeManager {
   return {
+    inspectSourceAdoption: vi.fn(mockSourceSnapshot),
     inspectSource: vi.fn(mockSourceSnapshot),
     inspectContractBase: vi.fn(async (_worktreePath, _baseBranch, facts) => ({
       baseCommitSha: 'a'.repeat(40),

@@ -1,4 +1,5 @@
 import { AutopodError } from '@autopod/shared';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { PrManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
@@ -15,6 +16,7 @@ import {
 import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js';
 import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
+import { recoveryCheckHash } from './recovery-fork-checks.js';
 export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecutionCaptured) {
   const {
     podRepo,
@@ -140,6 +142,79 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         },
       );
     };
+    const observePublishedExternalMerge = async (
+      status: Awaited<ReturnType<PrManager['getPrStatus']>>,
+    ) => {
+      const journal = podRepo.mergeJournal;
+      const current = podRepo.getOrThrow(podId);
+      const actor = current.readinessReview?.approval?.actor;
+      if (
+        options.publishOnly ||
+        !status.merged ||
+        status.open !== false ||
+        pod.options.agentMode !== 'auto' ||
+        pod.options.output !== 'pr' ||
+        current.worktreeCompromised ||
+        actor?.type !== 'human' ||
+        !actor.userId.trim() ||
+        pod.lastValidationResult?.overall !== 'pass' ||
+        !journal ||
+        !prManager ||
+        !pod.prUrl
+      )
+        mergeReconciliation(
+          'External delivery requires human approval of verified published source.',
+        );
+      if (
+        current.prUrl !== pod.prUrl ||
+        recoveryCheckHash(current.lastValidationResult) !==
+          recoveryCheckHash(pod.lastValidationResult)
+      )
+        mergeReconciliation(
+          'Validation or PR identity changed during external delivery observation; retain the current result and owning source.',
+        );
+      const publication = podRepo.sourcePublications?.latestConfirmedForMerge?.(mergingAnchor);
+      if (!publication)
+        mergeReconciliation(
+          'Confirmed source publication is unavailable for this external merge. Inspect source-recovery and exact validation-source proof; do not rerun coding to infer delivery.',
+        );
+      const target = {
+        repository: approveProfile.repoUrl ?? '',
+        branch: pod.branch,
+        baseBranch: pod.baseBranch ?? approveProfile.defaultBranch ?? 'main',
+      };
+      assertMergeRepository(target, publication.repository);
+      assertMergeTarget(target, status.sourceTarget ?? {});
+      const entry = journal.plan(
+        mergingAnchor,
+        { ...mergingAnchor, prUrl: publication.publicationPrUrl },
+        publication.publicationId,
+        {
+          prUrl: pod.prUrl,
+          expectedHeadSha: publication.commitSha,
+          expectedTarget: target,
+          squash: options.squash,
+        },
+      );
+      await deliveryOperation(() =>
+        reconcileMerge(journal, mergingAnchor, entry, prManager, status),
+      );
+      await deliveryOperation(() =>
+        inspectRetainedMergeSource(
+          journal,
+          podRepo.sourcePublications,
+          mergingAnchor,
+          entry,
+          captured.worktreeManager,
+        ),
+      );
+      if (
+        recoveryCheckHash(podRepo.getOrThrow(podId).lastValidationResult) !==
+        recoveryCheckHash(pod.lastValidationResult)
+      )
+        mergeReconciliation('Validation changed before external delivery could settle.');
+      return entry;
+    };
     if (recoveredMerge) {
       emitActivityStatus(podId, 'Earlier merge confirmed from durable source and target evidence');
     } else if (pod.prUrl && prManager && pod.worktreePath) {
@@ -153,62 +228,8 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           prManager.getPrStatus({ prUrl, worktreePath }),
         );
         if (options.publishOnly) assertPublishedPr(initialStatus, mergeBaseBranch);
-        if (initialStatus.merged && pod.executionTarget === 'local') {
-          const journal = podRepo.mergeJournal;
-          const current = podRepo.getOrThrow(podId);
-          const currentActor = current.readinessReview?.approval?.actor;
-          if (
-            options.publishOnly ||
-            pod.options.agentMode !== 'auto' ||
-            pod.options.output !== 'pr' ||
-            current.worktreeCompromised ||
-            currentActor?.type !== 'human' ||
-            !currentActor.userId.trim() ||
-            initialStatus.open !== false ||
-            pod.lastValidationResult?.overall !== 'pass' ||
-            !journal ||
-            journal.find(mergingAnchor)
-          )
-            mergeReconciliation(
-              'External local delivery requires human approval of verified published source.',
-            );
-          const publication = podRepo.sourcePublications?.latestConfirmedForMerge?.(mergingAnchor);
-          if (!publication)
-            mergeReconciliation(
-              'Confirmed source publication is unavailable for this external merge.',
-            );
-          const target = {
-            repository: approveProfile.repoUrl ?? '',
-            branch: pod.branch,
-            baseBranch: mergeBaseBranch,
-          };
-          assertMergeRepository(target, publication.repository);
-          assertMergeTarget(target, initialStatus.sourceTarget ?? {});
-          // Reuse the real publication, not a new push or fabricated receipt.
-          // Planning records identity only: no merge request is admitted.
-          const entry = journal.plan(
-            mergingAnchor,
-            { ...mergingAnchor, prUrl: publication.publicationPrUrl },
-            publication.publicationId,
-            {
-              prUrl,
-              expectedHeadSha: publication.commitSha,
-              expectedTarget: target,
-              squash: options.squash,
-            },
-          );
-          await deliveryOperation(() =>
-            reconcileMerge(journal, mergingAnchor, entry, prManager, initialStatus),
-          );
-          await deliveryOperation(() =>
-            inspectRetainedMergeSource(
-              journal,
-              podRepo.sourcePublications,
-              mergingAnchor,
-              entry,
-              captured.worktreeManager,
-            ),
-          );
+        if (initialStatus.merged) {
+          await observePublishedExternalMerge(initialStatus);
           emitActivityStatus(
             podId,
             'Externally merged local PR verified from its recorded source publication; no push or merge requested',
@@ -233,6 +254,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       type MergeOutcome =
         | { kind: 'merged' }
         | { kind: 'published' }
+        | { kind: 'predecessor_delivered'; rewriteId: string; mergeIntentId: string }
         | { kind: 'revalidate'; rewriteId: string }
         | { kind: 'merge_pending'; blockReason: string }
         | { kind: 'merge_failed'; reason: string; cause?: unknown };
@@ -240,6 +262,17 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       const outcome = await mergeQueue
         .run<MergeOutcome>(queueKey, async () => {
           assertApprovalCurrent(mergingAnchor);
+          const queuedDisposition = await deliveryOperation(() =>
+            prManager.getPrStatus({ prUrl, worktreePath }),
+          );
+          if (queuedDisposition.merged) {
+            await observePublishedExternalMerge(queuedDisposition);
+            return { kind: 'merged' };
+          }
+          if (!queuedDisposition.open)
+            mergeReconciliation(
+              'The PR closed while approval waited for delivery ownership; no publication was admitted.',
+            );
           // Fix pods make commits in the container but rely on the agent to push.
           // Push explicitly here before attempting to complete the PR so any local
           // commits the agent forgot (or failed) to push are flushed to the remote.
@@ -273,6 +306,16 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             return { kind: 'published' };
           }
 
+          const beforePreparation = await deliveryOperation(() =>
+            prManager.getPrStatus({ prUrl, worktreePath }),
+          );
+          if (beforePreparation.merged) {
+            await observePublishedExternalMerge(beforePreparation);
+            return { kind: 'merged' };
+          }
+          if (!beforePreparation.open)
+            mergeReconciliation('The PR closed before rewrite preparation; retain its source.');
+
           // Never rewrite the approved worktree or publish untested rebased code.
           // The isolated candidate is durably selected for checks-only provisioning;
           // successful checks require a new approval before its exact leased push.
@@ -284,7 +327,20 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             mergeBaseBranch,
             await deliveryCredential(approveProfile),
           );
-          if (rewriteId) return { kind: 'revalidate', rewriteId };
+          if (rewriteId) {
+            const disposition = await deliveryOperation(() =>
+              prManager.getPrStatus({ prUrl, worktreePath }),
+            );
+            if (disposition.merged) {
+              const entry = await observePublishedExternalMerge(disposition);
+              return { kind: 'predecessor_delivered', rewriteId, mergeIntentId: entry.id };
+            }
+            if (!disposition.open)
+              mergeReconciliation(
+                'The PR closed during rewrite preparation; retain the prepared candidate and original source.',
+              );
+            return { kind: 'revalidate', rewriteId };
+          }
 
           // Daemon-side approval gate: check the PR's review decision before attempting
           // to merge. If the platform reports that a review is still required or changes
@@ -295,7 +351,11 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             const prStatus = await deliveryOperation(async () =>
               prManager.getPrStatus({ prUrl, worktreePath }),
             );
-            if (prStatus.merged || !prStatus.open)
+            if (prStatus.merged) {
+              await observePublishedExternalMerge(prStatus);
+              return { kind: 'merged' };
+            }
+            if (!prStatus.open)
               return {
                 kind: 'merge_failed',
                 reason:
@@ -396,6 +456,52 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         });
 
       assertApprovalCurrent(mergingAnchor);
+      if (outcome.kind === 'predecessor_delivered') {
+        const journal = podRepo.mergeJournal ?? mergeReconciliation('Merge journal unavailable.');
+        const entry =
+          journal.find(mergingAnchor) ??
+          mergeReconciliation('Predecessor delivery evidence unavailable.');
+        if (entry.id !== outcome.mergeIntentId || entry.state !== 'merged')
+          mergeReconciliation('Predecessor delivery is not confirmed.');
+        journal.check(mergingAnchor, entry);
+        const completed = atomicPodChange(podRepo, () => {
+          assertApprovalCurrent(mergingAnchor);
+          podRepo.approvalRewrites?.recordPredecessorDelivery(
+            outcome.rewriteId,
+            mergingAnchor,
+            entry.id,
+          );
+          return transition(mergingAnchor, 'complete', {
+            completedAt: new Date().toISOString(),
+            failureReason: null,
+            mergeBlockReason: null,
+          });
+        });
+        assertApprovalCurrent({ ...mergingAnchor, status: 'complete' });
+        emitActivityStatus(
+          podId,
+          'Original PR delivery confirmed. Prepared candidate was not activated or checked; original reports and both source worktrees remain retained under the rewrite owner.',
+        );
+        captured.eventBus.emit({
+          type: 'pod.completed',
+          timestamp: new Date().toISOString(),
+          podId,
+          finalStatus: 'complete',
+          summary: {
+            id: podId,
+            profileName: pod.profileName,
+            task: pod.task,
+            status: 'complete',
+            model: pod.model,
+            runtime: pod.runtime,
+            duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
+            filesChanged: pod.filesChanged,
+            createdAt: pod.createdAt,
+          },
+        });
+        captured.maybeTriggerDependents(completed);
+        return { kind: 'halted' };
+      }
       if (outcome.kind === 'published') {
         emitActivityStatus(
           podId,
@@ -431,25 +537,46 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       const retryWorktreePath = pod.worktreePath;
       try {
         const retryProfile = executionForPod(pod);
-        const publishedSource = await deliveryOperation(async () =>
-          options.publishOnly
-            ? publishApprovalBranch(mergingAnchor, { pat: await deliveryCredential(retryProfile) })
-            : commitAndPublishApprovalBranch(mergingAnchor, {
-                worktreePath: retryWorktreePath,
-                // Push the feature branch up so the PR can be opened against the resolved base.
-                targetBranch: pod.branch,
-                // Pass the PAT explicitly — approval retry runs post-container, so the
-                // in-memory PAT cache may be cold after a daemon restart.
-                pat: await deliveryCredential(retryProfile),
-                // Post-container retry: sync-back already happened (or failed silently) upstream;
-                // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
-                maxDeletions: 0,
-                // Provide pod task as context for any auto-generated commit message.
-                podTask: pod.task,
-                profile: retryProfile,
-                podModel: pod.model,
-              }),
-        );
+        const recorded = podRepo.sourcePublications?.latestConfirmedForMerge?.(mergingAnchor);
+        if (recorded) {
+          const source = await deliveryOperation(
+            () =>
+              captured.worktreeManager.inspectSource?.(retryWorktreePath, pod.branch) ??
+              Promise.resolve(null),
+          );
+          if (
+            !source?.worktreeClean ||
+            source.branch !== recorded.branch ||
+            source.commitSha !== recorded.commitSha ||
+            source.treeSha !== recorded.treeSha
+          )
+            mergeReconciliation(
+              'Retained source changed after initial publication. PR creation cannot auto-commit or republish unchecked source.',
+            );
+        }
+        const publishedSource =
+          recorded ??
+          (await deliveryOperation(async () =>
+            options.publishOnly
+              ? publishApprovalBranch(mergingAnchor, {
+                  pat: await deliveryCredential(retryProfile),
+                })
+              : commitAndPublishApprovalBranch(mergingAnchor, {
+                  worktreePath: retryWorktreePath,
+                  // Push the feature branch up so the PR can be opened against the resolved base.
+                  targetBranch: pod.branch,
+                  // Pass the PAT explicitly — approval retry runs post-container, so the
+                  // in-memory PAT cache may be cold after a daemon restart.
+                  pat: await deliveryCredential(retryProfile),
+                  // Post-container retry: sync-back already happened (or failed silently) upstream;
+                  // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
+                  maxDeletions: 0,
+                  // Provide pod task as context for any auto-generated commit message.
+                  podTask: pod.task,
+                  profile: retryProfile,
+                  podModel: pod.model,
+                }),
+          ));
         const baseBranch = resolvePrBaseBranch(pod, retryProfile);
         await deliveryOperation(async () =>
           ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry'),

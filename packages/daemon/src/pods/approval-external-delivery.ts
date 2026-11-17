@@ -9,6 +9,8 @@ import {
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
 import type { ApprovalPreparationContext } from './delivery-contracts.js';
 import { withExternalDeliveryReadiness } from './external-delivery-readiness.js';
+import type { ExternalDeliverySourceProof } from './external-delivery-repository.js';
+import { publicSourceRepository } from './validation-source-evidence.js';
 
 /** Observe an already completed legacy PR. Never send a push/merge/resume/delete. */
 export async function reconcileExternalApproval(
@@ -32,11 +34,18 @@ export async function reconcileExternalApproval(
     !pod.prUrl ||
     pod.options.output !== 'pr' ||
     pod.options.agentMode !== 'auto' ||
-    pod.executionTarget !== 'sandbox' ||
     !pod.containerId ||
     podRepo.mergeJournal?.find(pod)
   )
     return false;
+  // Local publication-backed merges use the native merge journal owner. The
+  // receipt below is reserved for historical missing-publication delivery.
+  const publication = podRepo.sourcePublications?.latestConfirmedForMerge?.(pod);
+  if (podRepo.sourcePublications?.pending?.(pod))
+    mergeReconciliation(
+      'An earlier publication remains unconfirmed. Observe that durable operation through source-recovery; a historical delivery receipt cannot settle or replace it.',
+    );
+  if (pod.executionTarget === 'local' && publication) return false;
   const profile = executionForPod(pod);
   const provider = prManagerFactory?.(profile);
   if (!provider)
@@ -50,8 +59,16 @@ export async function reconcileExternalApproval(
     if (!status.open) mergeReconciliation('The existing PR is closed without a merge.');
     return false;
   }
+  if (podRepo.approvalRewrites?.latest(pod))
+    mergeReconciliation(
+      'The source rewrite owns delivery. Inspect source-recovery; ordinary external observation cannot clear its custody.',
+    );
   if (actor.type !== 'human' || !actor.userId.trim())
     mergeReconciliation('An authenticated human must reconcile this externally merged legacy PR.');
+  if (!publication && (context.options.reason?.trim().length ?? 0) < 10)
+    mergeReconciliation(
+      'Historical external delivery requires authenticated human approval with an explicit reason binding this task and retained source. Inspect its immutable validation-source proof first.',
+    );
   const receipts = podRepo.externalDeliveries;
   if (pod.worktreeCompromised || !pod.worktreePath || !worktreeManager.inspectSource || !receipts)
     mergeReconciliation('Retained local source cannot be verified for the external merge.');
@@ -63,15 +80,10 @@ export async function reconcileExternalApproval(
   if (!repository) mergeReconciliation('The task repository is unavailable.');
   // Old ADO URLs can carry a username. Strip auth from recorded/public identity,
   // never from a diagnostic string. Target comparison still validates host/path.
-  if (!repository.startsWith('git@github.com:')) {
-    try {
-      const url = new URL(repository);
-      url.username = '';
-      url.password = '';
-      repository = url.toString();
-    } catch {
-      mergeReconciliation('The task repository public identity is unavailable.');
-    }
+  try {
+    repository = publicSourceRepository(repository);
+  } catch {
+    mergeReconciliation('The task repository public identity is unavailable.');
   }
   const baseBranch = pod.baseBranch ?? profile.defaultBranch;
   if (!status.sourceTarget || !pod.branch || !baseBranch)
@@ -86,6 +98,19 @@ export async function reconcileExternalApproval(
     mergeReconciliation('The original sandbox recovery resource could not be confirmed present.');
   const source = await worktreeManager.inspectSource(pod.worktreePath, pod.branch);
   assertApprovalCurrent(pod);
+  const checked = publication
+    ? { head: publication.commitSha, tree: publication.treeSha, validationId: null }
+    : podRepo.validationSources?.checked(pod, profile);
+  if (!checked || checked.head !== source.commitSha || checked.tree !== source.treeSha)
+    mergeReconciliation(
+      'No immutable validation-source proof matches the retained commit/tree for this task, generation, target and resource. Inspect source-recovery and the owning validation evidence; a historical publication cannot be backfilled.',
+    );
+  if (publication)
+    assertMergeTarget(target, {
+      ...target,
+      repository: publication.repository,
+      branch: publication.branch,
+    });
   if (
     !source.worktreeClean ||
     source.branch !== pod.branch ||
@@ -152,7 +177,24 @@ export async function reconcileExternalApproval(
   const completed = atomicPodChange(podRepo, () => {
     assertApprovalCurrent(pod);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
-    receipts.record(receipt);
+    const sourceProof: ExternalDeliverySourceProof = publication
+      ? { publicationId: publication.publicationId, validationId: null }
+      : checked.validationId
+        ? { publicationId: null, validationId: checked.validationId }
+        : mergeReconciliation('Immutable external source evidence reference unavailable.');
+    receipts.record(receipt, sourceProof, () => {
+      assertApprovalCurrent(pod);
+      const proof = publication
+        ? podRepo.sourcePublications?.latestConfirmedForMerge?.(pod)
+        : podRepo.validationSources?.checked(pod, profile);
+      if (
+        !proof ||
+        ('commitSha' in proof
+          ? proof.commitSha !== source.commitSha || proof.treeSha !== source.treeSha
+          : proof.head !== source.commitSha || proof.tree !== source.treeSha)
+      )
+        mergeReconciliation('External delivery source proof changed before settlement.');
+    });
     const approved = transition(pod, 'approved');
     persistReadinessApproval(podId, readiness, actor, approvalReason);
     const currentReview = podRepo.getOrThrow(podId).readinessReview;

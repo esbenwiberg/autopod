@@ -572,8 +572,10 @@ describe('validation execution durable effects', () => {
         'binding',
         'binding',
         'start',
+        'binding',
         'preflight',
         'engine',
+        'binding',
         'finish',
       ]);
       expect(f.admitted).toHaveBeenCalledWith(
@@ -612,7 +614,11 @@ describe('validation execution durable effects', () => {
         target === 'sandbox' ? 'sandbox' : 'local',
       );
       expect(typeof f.config.captureEvidenceIdentity).toBe('function');
-      expect(f.cm.execInContainer).not.toHaveBeenCalled();
+      expect(f.cm.execInContainer).toHaveBeenCalled();
+      for (const [containerId, command] of vi.mocked(f.cm.execInContainer).mock.calls) {
+        expect(containerId).toBe(f.config.containerId);
+        expect(command[2]).toContain('autopod-validation-source-v1');
+      }
     } finally {
       f.close();
     }

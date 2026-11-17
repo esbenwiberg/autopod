@@ -620,9 +620,22 @@ export class LocalWorktreeManager implements WorktreeManager {
     worktreePath: string,
     repository: string,
     branch: string,
+    pat?: string,
   ): Promise<string> {
-    const remote = await this.getAuthenticatedRemote(worktreePath);
-    assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
+    // Publication receipts also support local file transports (including the
+    // real-Git fixture). This is source-ref observation, not provider merge authority.
+    if (repository.startsWith('file:')) {
+      const observed = path.isAbsolute(remote.url) ? `file://${remote.url}` : remote.url;
+      const canonical = (value: string) => {
+        const url = new URL(value);
+        if (url.protocol !== 'file:' || url.username || url.password || url.search || url.hash)
+          throw new Error('Invalid local source repository');
+        return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`;
+      };
+      if (canonical(repository) !== canonical(observed))
+        throw new Error('Local publication repository changed');
+    } else assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
     await git(['check-ref-format', `refs/heads/${branch}`], { cwd: worktreePath });
     try {
       const result = await git(['ls-remote', '--exit-code', remote.url, `refs/heads/${branch}`], {

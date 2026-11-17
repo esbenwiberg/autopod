@@ -28,6 +28,7 @@ import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
 import { requiresValidationSettlement } from './validation-recovery-policy.js';
 import { captureDockerValidationResourceScope } from './validation-resource-scope.js';
+import { observeValidationSource } from './validation-source-evidence.js';
 
 interface ValidationExecutionDependencies {
   /** Runs only after the existing durable dispatch/retry admission has started. */
@@ -50,6 +51,7 @@ interface ValidationExecutionDependencies {
     | 'approvalRewrites'
     | 'recoveryForks'
     | 'atomically'
+    | 'validationSources'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
   verifySelectedSource?(podId: string): Promise<unknown>;
@@ -344,12 +346,25 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         let result: ValidationResult;
         let engineStarted = false;
         let engineSettled = false;
+        let sourceAdmission: string | undefined;
         try {
           const assertPreparationCurrent = await deps.prepareValidationRepository?.(
             validationConfig,
             ownership.assertCurrent,
           );
           ownership.assertCurrent();
+          const sourcePod = ownership.assertCurrent();
+          const checkedSource = podRepo.validationSources
+            ? await observeValidationSource(cm, sourcePod)
+            : null;
+          ownership.assertCurrent();
+          if (checkedSource && admission)
+            sourceAdmission = podRepo.validationSources?.begin(
+              sourcePod,
+              resolveEffectiveBoundProfile(sourcePod),
+              checkedSource,
+              admission.id,
+            );
           engineStarted = true;
           result = await validationEngine.validate(
             withReviewerLaunchPreflight(validationConfig, ownership),
@@ -393,6 +408,28 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           };
         }
         if (dispatchId) result.executionDispatchId = dispatchId;
+        // Source certification is separate from the actual engine outcome. A
+        // superseded observer cannot turn completed checks into a synthetic
+        // failure or publish source proof into the replacement invocation.
+        if (sourceAdmission && result.overall === 'pass' && ownership.isCurrent()) {
+          try {
+            const afterPod = ownership.assertCurrent();
+            const afterSource = await observeValidationSource(cm, afterPod);
+            if (afterSource && ownership.isCurrent())
+              podRepo.validationSources?.finish(
+                sourceAdmission,
+                ownership.assertCurrent(),
+                resolveEffectiveBoundProfile(afterPod),
+                afterSource,
+                result,
+              );
+          } catch (error) {
+            logger.warn(
+              { err: error, podId },
+              'Validation source certification unavailable; original engine result retained without publication authority',
+            );
+          }
+        }
         if (recoverySource && result.overall === 'pass') {
           try {
             const after = await observeRecoveryCheckSource(

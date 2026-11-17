@@ -2,6 +2,7 @@ import { AutopodError, type Pod } from '@autopod/shared';
 import type {
   BranchPublicationOptions,
   BranchPublicationReceipt,
+  BranchPublicationSource,
   MergeBranchConfig,
   WorktreeManager,
 } from '../interfaces/worktree-manager.js';
@@ -49,10 +50,73 @@ export function publishSource(
   expectedRepository: string,
   manager: WorktreeManager,
   options?: Omit<BranchPublicationOptions, 'onPrepared'>,
+  assertPrepared?: (source: BranchPublicationSource) => void,
 ): Promise<ConfirmedSourcePublication> {
+  const pending = ledger.pending?.(pod);
+  if (pending)
+    return reconcilePublication(
+      ledger,
+      pod,
+      expectedRepository,
+      manager,
+      pending,
+      assertPrepared,
+      options?.pat,
+    );
   return performPublication(ledger, pod, expectedRepository, (admission) =>
-    manager.pushBranch(pod.worktreePath ?? '', pod.branch, { ...options, ...admission }),
+    manager.pushBranch(pod.worktreePath ?? '', pod.branch, {
+      ...options,
+      ...admission,
+      onPrepared(source) {
+        assertPrepared?.(source);
+        admission.onPrepared?.(source);
+      },
+    }),
   );
+}
+
+async function reconcilePublication(
+  ledger: SourcePublicationLedger,
+  pod: Pod,
+  repository: string,
+  manager: WorktreeManager,
+  pending: { id: string; source: BranchPublicationSource },
+  assertPrepared?: (source: BranchPublicationSource) => void,
+  pat?: string,
+): Promise<ConfirmedSourcePublication> {
+  const fail = (): never => {
+    throw new AutopodError(
+      'The original publication outcome remains unverified. Retain its source and resources; inspect source-recovery. No second push was admitted.',
+      'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      409,
+    );
+  };
+  if (
+    repositoryIdentity(repository) !== repositoryIdentity(pending.source.repository) ||
+    !manager.observeSourceBranch ||
+    !manager.inspectSource ||
+    !pod.worktreePath
+  )
+    return fail();
+  assertPrepared?.(pending.source);
+  const remote = await manager.observeSourceBranch(pod.worktreePath, repository, pod.branch, pat);
+  const local = await manager.inspectSource(pod.worktreePath, pod.branch);
+  if (
+    remote !== pending.source.commitSha ||
+    !local.worktreeClean ||
+    local.branch !== pod.branch ||
+    local.commitSha !== pending.source.commitSha ||
+    local.treeSha !== pending.source.treeSha
+  )
+    return fail();
+  assertPrepared?.(pending.source);
+  const receipt = {
+    ...pending.source,
+    observedRemoteCommitSha: remote,
+    observedAt: new Date().toISOString(),
+  };
+  ledger.confirm(pod, pending.id, receipt);
+  return { ...receipt, publicationId: pending.id };
 }
 
 export function publishCommittedSource(
@@ -67,6 +131,17 @@ export function publishCommittedSource(
       'Commit-and-push source identity changed; retain original resources.',
       'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
       409,
+    );
+  const pending = ledger.pending?.(pod);
+  if (pending)
+    return reconcilePublication(
+      ledger,
+      pod,
+      expectedRepository,
+      manager,
+      pending,
+      undefined,
+      config.pat,
     );
   return performPublication(ledger, pod, expectedRepository, (admission) =>
     manager.mergeBranch({ ...config, ...admission }),

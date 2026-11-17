@@ -199,6 +199,19 @@ export async function inspectRetainedMergeSource(
   if (!pod.worktreePath || !manager.inspectSource)
     return mergeReconciliation('Retained local source cannot be verified before delivery.');
   const snapshot = await manager.inspectSource(pod.worktreePath, pod.branch);
+  if (manager.inspectSourceAdoption) {
+    const strict = await manager.inspectSourceAdoption(pod.worktreePath, pod.branch);
+    journal.check(pod, entry);
+    if (
+      !strict.worktreeClean ||
+      strict.commitSha !== snapshot.commitSha ||
+      strict.treeSha !== snapshot.treeSha ||
+      strict.branch !== snapshot.branch
+    )
+      return mergeReconciliation(
+        'Retained source is not a complete clean identity before delivery.',
+      );
+  }
   journal.check(pod, entry);
   if (
     !snapshot.worktreeClean ||
