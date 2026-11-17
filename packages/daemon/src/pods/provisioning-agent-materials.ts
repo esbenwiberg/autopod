@@ -9,6 +9,7 @@ import { inspectExecutionPreflight } from './execution-preflight.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
 import { selectRelevantMemories } from './memory-selector.js';
 import { projectMemoryScope } from './project-memory-scope.js';
+import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type {
   PreparedExecution,
   ProvisioningCaptured,
@@ -93,6 +94,8 @@ export function createProvisioningAgentMaterials(
       reasoningEffort,
     } = input;
     const { emitStatus } = input.run;
+    const setupTimeout = (localTimeout: number) =>
+      provisioningExecTimeout(pod.executionTarget, localTimeout);
     // Merge daemon + profile injections
     const mergedMcpServers = mergeMcpServers(injectionsForPod(pod).mcpServers, profile.mcpServers);
     const mergedSections = mergeClaudeMdSections(
@@ -131,7 +134,7 @@ export function createProvisioningAgentMaterials(
         const binaryCheck = await containerManager.execInContainer(
           containerId,
           ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
-          { timeout: 5_000 },
+          { timeout: setupTimeout(5_000) },
         );
         if (binaryCheck.exitCode !== 0) {
           const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
@@ -155,7 +158,7 @@ export function createProvisioningAgentMaterials(
       binaryOkServers.map(async (server) => {
         const probeCmd = ['python3', MCP_PROBE_PATH, server.command, ...(server.args ?? [])];
         const mcpProbe = await containerManager.execInContainer(containerId, probeCmd, {
-          timeout: 100_000,
+          timeout: setupTimeout(100_000),
           cwd: '/workspace',
         });
 
@@ -188,7 +191,7 @@ export function createProvisioningAgentMaterials(
     );
 
     await containerManager.execInContainer(containerId, ['rm', '-f', MCP_PROBE_PATH], {
-      timeout: 3_000,
+      timeout: setupTimeout(3_000),
     });
 
     // Detect and auto-heal 0-byte .bin/ stubs before the agent starts. These are a
@@ -202,7 +205,7 @@ export function createProvisioningAgentMaterials(
           '-c',
           'find /workspace -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -10',
         ],
-        { timeout: 5_000 },
+        { timeout: setupTimeout(5_000) },
       )
       .catch(() => null);
     const brokenStubs = stubScan?.stdout?.trim();
@@ -218,7 +221,7 @@ export function createProvisioningAgentMaterials(
             '-c',
             "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done",
           ],
-          { timeout: 120_000 },
+          { timeout: setupTimeout(120_000) },
         )
         .catch((err: unknown) => ({
           stdout: '',
@@ -349,7 +352,7 @@ export function createProvisioningAgentMaterials(
             'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
           ].join(' && '),
         ],
-        { timeout: 5_000, user: 'root' },
+        { timeout: setupTimeout(5_000), user: 'root' },
       );
       if (pidFile.exitCode !== 0) {
         throw new Error(
@@ -358,13 +361,13 @@ export function createProvisioningAgentMaterials(
       }
     } else {
       await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
-        timeout: 5_000,
+        timeout: setupTimeout(5_000),
       });
     }
     for (const sf of providerResult.secretFiles) {
       await containerManager.writeFile(containerId, sf.path, sf.content);
       await containerManager.execInContainer(containerId, ['chmod', secretFileMode, sf.path], {
-        timeout: 5_000,
+        timeout: setupTimeout(5_000),
       });
       logger.info({ podId, path: sf.path, mode: secretFileMode }, 'Wrote secret file to container');
     }
@@ -373,11 +376,11 @@ export function createProvisioningAgentMaterials(
     // get the value via this shim so the raw secret is never in the exec's initial env.
     await containerManager.writeFile(containerId, AGENT_ENV_PATH, buildAgentEnvFile(secretEnv));
     await containerManager.execInContainer(containerId, ['chmod', secretFileMode, AGENT_ENV_PATH], {
-      timeout: 5_000,
+      timeout: setupTimeout(5_000),
     });
     await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
     await containerManager.execInContainer(containerId, ['chmod', shimMode, AGENT_SHIM_PATH], {
-      timeout: 5_000,
+      timeout: setupTimeout(5_000),
     });
 
     // Select approved memories before agent start. Reviewer ranking is best-effort:

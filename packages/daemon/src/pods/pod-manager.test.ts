@@ -12604,12 +12604,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', '0444', AGENT_ENV_PATH],
-        { timeout: 5_000 },
+        { timeout: 60_000 },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', '0555', AGENT_SHIM_PATH],
-        { timeout: 5_000 },
+        { timeout: 60_000 },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
@@ -12618,12 +12618,12 @@ describe('PodManager', () => {
           '-c',
           'install -d -o root -g root -m 0755 /run/autopod && install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
         ],
-        { timeout: 5_000, user: 'root' },
+        { timeout: 60_000, user: 'root' },
       );
       const repairCall = ctx.containerManager.execInContainer.mock.calls.find(
         ([, command, options]) => command[0] === 'sh' && options?.user === 'root',
       );
-      expect(repairCall?.[2]).toEqual({ timeout: 10_000, user: 'root' });
+      expect(repairCall?.[2]).toEqual({ timeout: 60_000, user: 'root' });
       expect(repairCall?.[1][2]).toContain(
         "chown -R autopod:autopod '/home/autopod/.claude' '/home/autopod/.autopod'",
       );

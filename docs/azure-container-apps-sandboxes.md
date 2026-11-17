@@ -52,6 +52,32 @@ Explicitly unsupported until Autopod wires up the remaining pieces:
   them yet.
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
+## Provisioning deadlines and buffered-exec failures
+
+Direct exec calls in workspace population, session-material and agent-material
+setup use a 60-second minimum request timeout on sandboxes, including Git probes,
+credential hooks, agent home ownership, secret/shim permissions, handoff/cache
+guards and legacy reference staging. Longer existing budgets (such as the
+120-second workspace copy) remain unchanged. This floor is specific to these
+provisioning steps: Docker, agent and validation command deadlines are not raised globally.
+The budget includes cloud transport latency, not just command execution time.
+
+A lost buffered-exec response remains `EXEC_EXIT_UNVERIFIED`; Autopod does not
+replay it or infer that the command failed, succeeded or stopped. Unknown-exit
+errors and structured warnings retain an operation ID, sandbox ID, dispatch-attempt
+flag, configured request timeout, elapsed time and fixed failure classification
+(`timeout`, `authentication`, `pre_dispatch`, `http`, `network`,
+`invalid_response` or `unknown`). Observed HTTP status and strictly validated
+UUID/trace correlation headers are included when available. Raw causes, commands,
+environment, URLs, credentials and response bodies are not attached to these
+unknown-exit diagnostics. Dispatch attempts and response headers are diagnostic
+context, not execution-settlement receipts.
+
+These changes improve future setup tolerance and diagnosis; they neither settle
+historical lost executions nor authorize retries or worker recovery. Regression
+tests simulate delayed transport and failure/redaction behavior; they do not
+establish live Azure latency or reliability.
+
 ## Exec Streaming Transport
 
 The preview Python SDK (`azure-containerapps-sandbox==0.1.0b3`) only exposes buffered
