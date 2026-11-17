@@ -17,6 +17,7 @@ import {
   createRetainedCheckpointRepository,
   rewriteRepairRetryBinding,
 } from './retained-checkpoint-repository.js';
+import { assertPublicationMutationAllowed } from './source-custody-guards.js';
 import { createValidationExecutionLedger } from './validation-execution-ledger.js';
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
@@ -238,6 +239,7 @@ export function createTaskRetryLedger(
     workerRunId?: string,
     readOnly = false,
   ) => {
+    assertPublicationMutationAllowed(db, podId);
     createDeletionOwnership(db).assertTaskAvailable(podId);
     createValidationExecutionLedger(db).assertTaskSettled(podId);
     const member = membership(podId);

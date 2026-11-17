@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 tests=(
   src/pods/pod-lifecycle-runway.test.ts
   src/pods/pod-lifecycle-routing-incidents.test.ts
+  src/pods/pod-lifecycle-delivery-incidents.test.ts
   src/pods/state-machine.test.ts
   src/pods/agent-process-workflow.test.ts
   src/pods/validation-execution.test.ts

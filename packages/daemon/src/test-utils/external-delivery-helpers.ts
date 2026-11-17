@@ -4,6 +4,7 @@ import { createApprovalDeliveryExecution } from '../pods/approval-delivery-execu
 import { createApprovalDeliveryPreparation } from '../pods/approval-delivery-preparation.js';
 import { createApprovalWorkflow } from '../pods/approval-workflow.js';
 import { createApprovalFixture } from './approval-helpers.js';
+import { seedCheckedValidationSource } from './validation-source-helpers.js';
 
 export function createExternalDeliveryFixture(disk = false) {
   const f = createApprovalFixture(disk);
@@ -11,6 +12,9 @@ export function createExternalDeliveryFixture(disk = false) {
   f.validated();
   f.podRepo.update('prepare', { prUrl: 'https://github.com/org/repo/pull/27' });
   const profile = f.mainCaptured.executionForPod(f.pod());
+  const result = f.pod().lastValidationResult;
+  if (!result) throw new Error('Missing validation result');
+  seedCheckedValidationSource(f.podRepo, f.pod(), profile, result);
   const target = {
     repository: profile.repoUrl,
     branch: f.pod().branch,

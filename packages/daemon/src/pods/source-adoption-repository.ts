@@ -4,6 +4,8 @@ import { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
 import { createSourceCommandJournal, type SourceCommandJournal } from './source-command-journal.js';
 import {
+  assertPublicationMutationAllowed,
+  assertPublicationResourceReleasable,
   assertSourceApprovalEntryAllowed,
   assertSourceAvailable,
   assertSourceDeliveryAllowed,
@@ -383,6 +385,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       ).map((row) => row.id);
     },
     assertDeletable(podId: string) {
+      assertPublicationMutationAllowed(db, podId);
       if (
         db
           .prepare(
@@ -396,6 +399,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
         );
     },
     assertReleasable(containerId: string) {
+      assertPublicationResourceReleasable(db, containerId);
       if (
         db
           .prepare("SELECT 1 FROM source_adoptions WHERE json_extract(binding,'$.containerId')=?")

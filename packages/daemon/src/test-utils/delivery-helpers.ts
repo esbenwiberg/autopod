@@ -26,6 +26,7 @@ import { createScanRepository } from '../security/scan-repository.js';
 import { publishSource } from '../worktrees/durable-source-publication.js';
 import { createApprovalFixture } from './approval-helpers.js';
 import { createPassingValidationResult } from './mock-helpers.js';
+import { seedCheckedValidationSource } from './validation-source-helpers.js';
 
 const cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -112,29 +113,39 @@ export function createDeliveryFixture(disk = false) {
     ),
   } satisfies ValidationPassCaptured & RevalidationPassCaptured;
   const calls = { approveSession: vi.fn(async () => {}) };
-  const passContext = (): ValidationPassContext => ({
-    podId: 'prepare',
-    pod: f.pod(),
-    s2: f.pod(),
-    profile: f.captured.resolveEffectiveBoundProfile(f.pod()),
-    result: createPassingValidationResult('prepare'),
-    validationSyncOk: true,
-    attempt: 1,
-    validationConfig: {
+  const passContext = (): ValidationPassContext => {
+    const result = createPassingValidationResult('prepare');
+    if (!f.podRepo.approvalRewrites?.latest(f.pod()))
+      seedCheckedValidationSource(
+        f.podRepo,
+        f.pod(),
+        f.captured.resolveEffectiveBoundProfile(f.pod()),
+        result,
+      );
+    return {
       podId: 'prepare',
-      containerId: 'container-123',
-      previewUrl: 'http://fixture',
-      buildCommand: '',
-      startCommand: '',
-      healthPath: '/',
-      healthTimeout: 1,
-      smokePages: [],
+      pod: f.pod(),
+      s2: f.pod(),
+      profile: f.captured.resolveEffectiveBoundProfile(f.pod()),
+      result,
+      validationSyncOk: true,
       attempt: 1,
-      task: 'Original task',
-      diff: '',
-    },
-    validationRecord: undefined,
-  });
+      validationConfig: {
+        podId: 'prepare',
+        containerId: 'container-123',
+        previewUrl: 'http://fixture',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Original task',
+        diff: '',
+      },
+      validationRecord: undefined,
+    };
+  };
   async function planMerge(options: { repository?: string; prUrl?: string } = {}) {
     f.podRepo.update('prepare', {
       status: 'merging',

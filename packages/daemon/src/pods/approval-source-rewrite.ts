@@ -172,8 +172,23 @@ export function activateApprovalRewrite(
   const repo = captured.podRepo.approvalRewrites ?? rewriteError('Rewrite ledger unavailable.');
   const record = repo.get(id) ?? rewriteError('Rewrite admission unavailable.');
   const prepared = record.prepared ?? rewriteError('Candidate unavailable.');
+  if (repo.predecessorDelivered(id))
+    rewriteError(
+      'The original predecessor is already delivered. Candidate activation is not authorized.',
+    );
   atomicPodChange(captured.podRepo, () => {
     captured.assertApprovalCurrent(pod);
+    const current = captured.podRepo.getOrThrow(pod.id);
+    if (
+      current.task !== pod.task ||
+      current.prUrl !== record.binding.prUrl ||
+      rewriteHash(current.lastValidationResult) !== record.binding.validationHash ||
+      rewriteConfiguration(current, captured.executionForPod(current)) !==
+        record.binding.configurationHash
+    )
+      rewriteError(
+        'Current task, validation or configuration changed before candidate activation. Inspect the prepared rewrite owner; current results remain retained.',
+      );
     if (
       record.activated ||
       record.generation !== pod.lifecycleGeneration ||

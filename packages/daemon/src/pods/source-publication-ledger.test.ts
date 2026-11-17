@@ -151,8 +151,16 @@ describe('durable source publication', () => {
     const f = fixture();
     try {
       const id = f.ledger.admit(f.pod, proof);
-      if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
-      if (change === 'worktree') f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' });
+      if (change === 'generation') {
+        expect(() => f.repo.incrementLifecycleGeneration(f.pod.id)).toThrow();
+        f.db
+          .prepare('UPDATE pods SET lifecycle_generation=lifecycle_generation+1 WHERE id=?')
+          .run(f.pod.id);
+      }
+      if (change === 'worktree') {
+        expect(() => f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' })).toThrow();
+        f.db.prepare('UPDATE pods SET worktree_path=? WHERE id=?').run('/tmp/replaced', f.pod.id);
+      }
       if (change === 'branch')
         f.db.prepare("UPDATE pods SET branch = 'replacement' WHERE id = ?").run(f.pod.id);
       if (change === 'decision') f.repo.update(f.pod.id, { status: 'awaiting_input' });

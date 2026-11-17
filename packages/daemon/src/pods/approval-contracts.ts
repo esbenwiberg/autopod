@@ -159,6 +159,7 @@ export type ApprovalDeliveryPreparationCaptured = Pick<
   | 'cleanupContainerAfterAdvisorySettles'
   | 'eventBus'
   | 'maybeTriggerDependents'
+  | 'resolveGitCredential'
 >;
 
 export type ApprovalDeliveryExecutionCaptured = Pick<
@@ -183,6 +184,8 @@ export type ApprovalDeliveryExecutionCaptured = Pick<
   | 'ensurePrBaseBranchOnOrigin'
   | 'getLatestPushFindings'
   | 'handleDeletionGuardError'
+  | 'eventBus'
+  | 'maybeTriggerDependents'
 >;
 
 export type ApprovalEntryCaptured = Pick<

@@ -164,6 +164,14 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
 
     // A factual, exact-source external merge is observed before any sandbox
     // wakeup. Its durable receipt pins unpreserved reports against all cleanup.
+    if (podRepo.sourcePublications?.pending?.(pod)) {
+      // The pending ledger forces publishSource down its read-only observation
+      // path. Failure retains the original admission; it never retries a push.
+      const pat = await captured.resolveGitCredential(executionForPod(pod));
+      assertApprovalCurrent(pod);
+      await publishApprovalBranch(pod, { pat });
+      assertApprovalCurrent(pod);
+    }
     if (
       !options.publishOnly &&
       (await reconcileExternalApproval(captured, {

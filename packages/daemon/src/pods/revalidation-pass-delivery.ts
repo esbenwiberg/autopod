@@ -5,6 +5,7 @@ import {
   preserveApprovalReportSnapshot,
 } from './approval-report-snapshot.js';
 import { isTerminalState } from './state-machine.js';
+import { publishValidatedSource } from './validated-source-publication.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
@@ -40,7 +41,6 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     this: Pick<ValidationWorkflowCalls, 'approveSession'>,
     {
       podId,
-      pod,
       profile,
       s2,
       result,
@@ -84,24 +84,34 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         // revalidateSession runs on a worktree just pushed by a human — nothing should
         // be uncommitted. If git add -A finds phantom deletions, it's a sync artifact,
         // not real work; block it.
-        await worktreeManager.mergeBranch({
-          worktreePath: s2.worktreePath,
-          // Push the feature branch up — the PR is opened against revalDefaultBranch
-          // separately by the PR manager.
-          targetBranch: s2.branch,
-          // Pass the PAT explicitly — revalidation often runs after a daemon restart,
-          // when the in-memory PAT cache for this bare repo is cold.
-          pat: pushPat,
-          maxDeletions: 0,
-          podTask: pod.task,
+        await publishValidatedSource({
+          pod: s2,
+          podRepo,
+          worktreeManager,
           profile,
-          podModel: pod.model,
+          assertCurrent,
+          pat: pushPat,
         });
       } catch (err) {
         logger.warn({ err, podId }, 'Failed to push branch for PR');
-        if (!handleDeletionGuardError(podId, err)) {
-          throw err;
+        if (podRepo.sourcePublications?.pending?.(s2)) {
+          const failureReason =
+            'Source publication outcome is unconfirmed. Validated source and original resources are retained. Use human approval to observe the original publication; no coding rerun or second push is authorized.';
+          transition(
+            s2,
+            podRepo.getOrThrow(podId).lastValidationResult?.overall === 'pass'
+              ? 'validated'
+              : 'review_required',
+            { failureReason },
+          );
+          emitActivityStatus(podId, failureReason);
+          refreshReadiness(podId, { advisoryQaInFlight: false });
+          return { newCommits, result: 'pass' };
         }
+        if (!handleDeletionGuardError(podId, err)) throw err;
+        const compromised = podRepo.getOrThrow(podId);
+        if (compromised.status === 'validating') transition(compromised, 'failed');
+        return { newCommits, result: 'fail' };
       }
 
       try {
