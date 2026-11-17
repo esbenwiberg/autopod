@@ -63,6 +63,10 @@ passing check result while an ambiguous prior merge still forbids publication.
 The owning approval path can record original-publication facts before rejecting
 changed retained-continuation checks. Observation does not waive those checks or
 retention, and never creates a replacement approval, push or validation attempt.
+Resume, PR retry and approval can settle the original publication while queued
+guidance remains unconsumed. A genuine infrastructure report remains a blocker.
+PR retry rechecks worker/validation termination before and after asynchronous
+observations: a historical pass cannot authorize new delivery over unknown execution.
 
 This selection is not proof of live containers, live external delivery,
 platform-specific behavior, or every recovery route. Extend the existing

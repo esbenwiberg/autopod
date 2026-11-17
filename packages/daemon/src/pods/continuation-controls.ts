@@ -229,8 +229,22 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           409,
         );
     }
-    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
+    const publicationPod = podRepo.getOrThrow(podId);
+    if (
+      ['pr', 'branch'].includes(publicationPod.options.output ?? 'pr') &&
+      ['failed', 'review_required'].includes(publicationPod.status) &&
+      podRepo.sourcePublications?.pending?.(publicationPod)
+    ) {
+      assertValidationExecutionSettled(
+        publicationPod,
+        podRepo.validationExecutions?.isSettled(publicationPod),
+      );
+      // Record only the original physical fact. Guidance, infrastructure holds,
+      // and current checks still independently gate ALL subsequent work.
+      await reconcilePendingPublication(publicationPod);
+    }
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertGuidanceCollected(podId);
     const pendingCollection = artifactResumeRuns.get(podId);
     if (pendingCollection) {
@@ -325,20 +339,6 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       return { action: 'retry-fix-delivery' };
     }
 
-    if (
-      pod.options.output === 'pr' &&
-      ['failed', 'review_required'].includes(pod.status) &&
-      podRepo.sourcePublications?.pending?.(pod)
-    ) {
-      assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
-      // Observe the existing publication before deciding whether current checks
-      // permit any continuation. This can never submit another push or worker.
-      await reconcilePendingPublication(pod);
-      if (validationResumeRuns.has(podId)) {
-        logger.info({ podId }, 'Coalesced validation Resume after publication observation');
-        return { action: 'revalidate' };
-      }
-    }
     const lastValidationResult = pod.lastValidationResult;
     const isInfrastructureReviewResume =
       pod.status === 'review_required' &&

@@ -5,8 +5,15 @@ import { reconcilePublication } from '../worktrees/durable-source-publication.js
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { DeliveryPrCaptured } from './delivery-contracts.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { publishValidatedSource } from './validated-source-publication.js';
 import { validationSourceError } from './validation-source-evidence.js';
+
+const deliveryHoldCodes = new Set([
+  'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+  'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+  'VALIDATION_EXECUTION_UNVERIFIED',
+]);
 
 export function createDeliveryPr(captured: DeliveryPrCaptured) {
   const {
@@ -65,7 +72,6 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
     const ledger = podRepo.sourcePublications;
     const pending = ledger?.pending?.(pod);
     if (!ledger || !pending) return;
-    assertGuidanceCollected(pod.id);
     const profile = executionForPod(pod);
     await reconcilePublication(
       ledger,
@@ -73,7 +79,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
       profile.repoUrl ?? '',
       worktreeManager,
       pending,
-      () => assertGuidanceCollected(pod.id),
+      undefined,
       await resolveGitCredential(profile),
     );
     emitActivityStatus(
@@ -90,6 +96,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         409,
       );
     }
+    await reconcilePendingPublication(pod);
     assertGuidanceCollected(pod.id);
     const podId = pod.id;
     if (!pod.worktreePath) {
@@ -111,6 +118,8 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
     const assertCurrent = () => {
+      assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      podRepo.validationExecutions?.assertTaskSettled(podId);
       assertGuidanceCollected(podId);
       if (!podRepo.validationSources)
         validationSourceError('Checked publication support is unavailable.');
@@ -127,7 +136,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
       // in awaiting_input instead of failing terminally on a fixable PAT issue.
       if (
         err instanceof GitCredentialError ||
-        (err instanceof AutopodError && err.code === 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED')
+        (err instanceof AutopodError && deliveryHoldCodes.has(err.code))
       ) {
         throw err;
       }
@@ -191,6 +200,7 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
       return result.url;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof AutopodError && deliveryHoldCodes.has(err.code)) throw err;
       logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: PR creation failed');
       emitActivityStatus(podId, `PR creation failed: ${message}`);
       throw new AutopodError(message, 'PR_CREATION_FAILED', 502);

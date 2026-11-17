@@ -88,7 +88,6 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     emitActivityStatus(podId, 'Preparing approval…');
     const publication = podRepo.sourcePublications;
     const pending = publication?.pending?.(pod);
-    let readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
     if (publication && pending) {
       // The owning approval path may observe its already-admitted physical
       // operation before evaluating NEW delivery permission. Do not reuse the
@@ -108,8 +107,8 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         podId,
         'Original publication observed; current checks and approval authority remain unchanged.',
       );
-      readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
     }
+    const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
     const recovery = podRepo.recoveryForks?.child(podId);
     assertApprovalCurrent(pod, { approvalEntry: !!recovery });
     const approvalReason = assertApprovalAllowed(podId, readiness, options);

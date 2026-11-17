@@ -555,6 +555,138 @@ describe('composed delivery incidents', () => {
     expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    'resume',
+    'retry-pr',
+    'approve',
+  ] as const)('observes original publication on %s without consuming pending guidance or authorizing delivery', async (action) => {
+    const f = fixture();
+    const physicalPush = vi.mocked(f.ctx.worktreeManager.pushBranch).getMockImplementation();
+    if (!physicalPush) throw new Error('Missing physical publication adapter');
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementationOnce(
+      async (worktree, branch, options) => {
+        await physicalPush(worktree, branch, options);
+        throw new Error('Lost publication response');
+      },
+    );
+    await f.process();
+    if (action === 'resume') f.ctx.podRepo.update(f.pod.id, { status: 'failed' });
+    f.ctx.nudgeRepo.queue(f.pod.id, 'Apply the new instruction before any further delivery');
+    const before = f.current();
+    await expect(
+      action === 'resume'
+        ? f.manager.resumePod(f.pod.id)
+        : action === 'retry-pr'
+          ? f.manager.retryCreatePr(f.pod.id)
+          : f.approve(),
+    ).rejects.toMatchObject({ code: 'UNCOLLECTED_HUMAN_GUIDANCE' });
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(count(f, 'source_publication_intents')).toBe(1);
+    expect(f.ctx.nudgeRepo.hasPending(f.pod.id)).toBe(true);
+    expect(f.current().lastValidationResult).toEqual(before.lastValidationResult);
+    expect(f.current().lifecycleGeneration).toBe(before.lifecycleGeneration);
+    expect(f.current().containerId).toBe(before.containerId);
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+  });
+
+  it('observes the original push without clearing a genuine infrastructure report or resuming work', async () => {
+    const f = fixture();
+    const physicalPush = vi.mocked(f.ctx.worktreeManager.pushBranch).getMockImplementation();
+    if (!physicalPush) throw new Error('Missing physical publication adapter');
+    vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementationOnce(
+      async (worktree, branch, options) => {
+        await physicalPush(worktree, branch, options);
+        throw new Error('Lost publication response');
+      },
+    );
+    await f.process();
+    f.ctx.podRepo.update(f.pod.id, { status: 'failed' });
+    f.ctx.escalationRepo.insert({
+      id: 'live-infrastructure-hold',
+      podId: f.pod.id,
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: f.current().lifecycleGeneration,
+        requiresResponse: false,
+        owner: 'validation',
+        phase: 'build',
+        description: 'Configured runner unavailable',
+        attempted: ['configured build'],
+        needs: 'Repair the qualified runner',
+      },
+    });
+    await expect(f.manager.resumePod(f.pod.id)).rejects.toMatchObject({
+      code: 'INFRASTRUCTURE_BLOCKED',
+    });
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(count(f, 'source_publication_intents')).toBe(1);
+    expect(f.ctx.podRepo.hasInfrastructureBlocker(f.pod.id)).toBe(true);
+    expect(f.current().status).toBe('failed');
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'before retry',
+    'during observation',
+  ] as const)('does not let prior checked source authorize PR retry when worker termination becomes unverified %s', async (timing) => {
+    const f = fixture();
+    f.provider.findPr.mockRejectedValueOnce(
+      new Error('Provider lookup unavailable before create dispatch'),
+    );
+    await f.process();
+    // Source was checked and published, but the failed read never authorized
+    // PR dispatch. Neither fact is authority over a later unknown worker.
+    expect(count(f, 'source_publication_receipts')).toBe(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.current().prUrl).toBeNull();
+    const pod = f.current();
+    const executions = f.ctx.podRepo.taskExecutions;
+    if (!executions) throw new Error('Missing execution ledger');
+    const discoverUnknownExecution = () => {
+      const run = executions.beginRun(
+        pod.id,
+        pod.lifecycleGeneration,
+        (pod.finalization?.cycle ?? 0) + 1,
+        {
+          runtime: pod.runtime,
+          model: pod.model,
+          providerAccountId: pod.providerAccountIdSnapshot ?? null,
+          resource: { containerId: pod.containerId, executionTarget: pod.executionTarget },
+        },
+      );
+      executions.retainUnverifiedRun(run);
+    };
+    if (timing === 'before retry') discoverUnknownExecution();
+    else {
+      const observer = f.ctx.worktreeManager.observeSourceBranch;
+      if (!observer) throw new Error('Missing source observer');
+      const observe = vi.mocked(observer).getMockImplementation();
+      if (!observe) throw new Error('Missing source observation adapter');
+      vi.mocked(observer).mockImplementationOnce(async (...args: Parameters<typeof observe>) => {
+        const head = await observe(...args);
+        discoverUnknownExecution();
+        return head;
+      });
+    }
+    await expect(f.manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+    });
+    expect(executions.hasUnverifiedTermination(pod.id)).toBe(true);
+    expect(f.current().prUrl).toBeNull();
+    expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+
   it('does not adopt a pending push from another generation', async () => {
     const f = fixture();
     vi.mocked(f.ctx.worktreeManager.pushBranch).mockImplementationOnce(
