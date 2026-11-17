@@ -7,6 +7,7 @@ import {
   collectPiiPatternNames,
   createPodRequestSchema,
   type FirewallDeniedEvent,
+  handledElsewhereArchiveRequestSchema,
   type OperatorActor,
   type PodStatus,
   podStatusSchema,
@@ -783,6 +784,19 @@ export function podRoutes(
       .parse(request.body);
     podRepo.fleetArchives.archive(podId, request.user.oid, body.reason);
     reply.status(200);
+    return { fleetArchivedAt: podRepo.fleetArchives.archivedAt(podId), retainedResources: true };
+  });
+
+  // Explicitly acknowledges visibility-only retirement; it never certifies delivery.
+  // Separate endpoint means old daemons cannot silently ignore the acknowledgement.
+  app.post('/pods/:podId/archive-handled-elsewhere', async (request) => {
+    if (!request.user?.oid?.trim())
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    if (!podRepo?.fleetArchives)
+      throw new AutopodError('Fleet archive is unavailable', 'FLEET_ARCHIVE_UNAVAILABLE', 503);
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    const input = handledElsewhereArchiveRequestSchema.parse(request.body);
+    podRepo.fleetArchives.archiveHandledElsewhere(podId, request.user.oid, input);
     return { fleetArchivedAt: podRepo.fleetArchives.archivedAt(podId), retainedResources: true };
   });
 

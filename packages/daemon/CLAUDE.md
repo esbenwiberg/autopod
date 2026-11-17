@@ -174,6 +174,15 @@ controls remain blocked while this source is owned. Never clear custody to retry
 or downgrade to an unaware binary after selection. See
 `docs/retained-pod-continuation.md` at the repository root.
 
+### Externally handled fleet cards
+
+`ap archive-handled-elsewhere` is a separate human visibility disposition for
+ordinary Validated/manually Paused work. It retains native status and all source,
+unknown accounting/execution, guidance and custody. Its reference is human-supplied,
+not a historical publication/merge receipt. Default Archive remains restrictive.
+Startup must not resume archived ordinary tasks or explicit manual pauses; Goal
+and interactive owners remain separate. See `docs/fleet-closeout.md`.
+
 ### Infrastructure-held running originals
 
 `ap recover-infrastructure` is a distinct human-bound control for settled failed

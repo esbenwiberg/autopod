@@ -7,6 +7,11 @@ import {
   hasInterruptedArtifactCollection,
 } from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
+import {
+  assertFleetRecoveryAllowed,
+  FleetRetentionFence,
+  retainFleetDisposition,
+} from './fleet-retention-policy.js';
 import type { PodRepository } from './pod-repository.js';
 import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -77,6 +82,12 @@ export async function reconcileLocalSessions(
     for (const pod of localSessions) {
       if (visited.has(pod.id)) continue;
       visited.add(pod.id);
+      // Visibility and an explicit human pause are not permission to resume work.
+      // Keep unknown worker/accounting claims intact; do not inspect or stop resources.
+      if (retainFleetDisposition(podRepo, pod)) {
+        result.skipped.push(pod.id);
+        continue;
+      }
       if (retainUnresolvedReconciliation(pod.id, podRepo, deps.trigger)) {
         result.skipped.push(pod.id);
         continue;
@@ -86,6 +97,14 @@ export async function reconcileLocalSessions(
         if (current.status !== status || current.executionTarget !== 'local') continue;
         await reconcileSession(current, deps, result);
       } catch (err) {
+        if (
+          err instanceof FleetRetentionFence ||
+          retainFleetDisposition(podRepo, podRepo.getOrThrow(pod.id))
+        ) {
+          logger.info({ err, podId: pod.id }, 'Fleet disposition retained during local recovery');
+          result.skipped.push(pod.id);
+          continue;
+        }
         logger.error({ err, podId: pod.id }, 'Failed to reconcile local pod');
         markSessionKilled(pod, deps);
         result.killed.push(pod.id);
@@ -103,6 +122,7 @@ async function reconcileSession(
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
 
+  assertFleetRecoveryAllowed(podRepo, pod.id);
   // A daemon restart is not an answer to a human decision. Retain its identity
   // and resources; a later explicit reply drives recovery rather than auto-dispatch.
   if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
@@ -186,6 +206,7 @@ async function reconcileSession(
   if (pod.outputMode === 'workspace' && pod.containerId) {
     try {
       const containerStatus = await containerManager.getStatus(pod.containerId);
+      assertFleetRecoveryAllowed(podRepo, pod.id);
       if (containerStatus === 'running') {
         const previousStatus = pod.status;
         podRepo.update(pod.id, { status: 'running' });
@@ -197,7 +218,8 @@ async function reconcileSession(
         );
         return;
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof FleetRetentionFence) throw err;
       // getStatus threw — container is gone; fall through to normal reconciliation
     }
   }
@@ -276,7 +298,9 @@ async function reconcileSession(
   }
 
   // 3. Sessions with a worktree that still exists → recover
-  if (pod.worktreePath && (await pathExists(pod.worktreePath))) {
+  const survivingWorktree = pod.worktreePath && (await pathExists(pod.worktreePath));
+  assertFleetRecoveryAllowed(podRepo, pod.id);
+  if (survivingWorktree) {
     await recoverSession(pod, deps, result);
     return;
   }
@@ -313,6 +337,7 @@ async function recoverSession(
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
   const trigger: ReconcileTrigger = deps.trigger ?? 'restart';
+  assertFleetRecoveryAllowed(podRepo, pod.id);
 
   // If the pod was mid-validation when the daemon crashed and validation had already
   // passed (result persisted in DB) + the PR was already created, recover directly to
@@ -328,6 +353,7 @@ async function recoverSession(
           // Container already gone — expected after a crash/restart
         }
       }
+      assertFleetRecoveryAllowed(podRepo, pod.id);
       podRepo.update(pod.id, { status: 'validated', containerId: null });
       emitStatusChanged(pod.id, 'validating', 'validated', eventBus);
       logger.info(
@@ -359,6 +385,7 @@ async function recoverSession(
         },
         'Pod exceeded recovery cap — marking failed instead of re-queueing',
       );
+      assertFleetRecoveryAllowed(podRepo, pod.id);
       if (pod.containerId) {
         try {
           await containerManager.kill(pod.containerId);
@@ -366,6 +393,7 @@ async function recoverSession(
           // Container already gone — expected after a crash/restart
         }
       }
+      assertFleetRecoveryAllowed(podRepo, pod.id);
       const previousStatus = pod.status;
       podRepo.update(pod.id, {
         status: 'failed',
@@ -380,6 +408,7 @@ async function recoverSession(
   }
 
   // Kill the old container (best-effort — it may already be gone after daemon restart)
+  assertFleetRecoveryAllowed(podRepo, pod.id);
   if (pod.containerId) {
     try {
       await containerManager.kill(pod.containerId);
@@ -388,13 +417,23 @@ async function recoverSession(
     }
   }
 
+  assertFleetRecoveryAllowed(podRepo, pod.id);
   // A non-terminal pod's sidecars are intentionally excluded from global orphan
   // reconciliation. Clean up this pod's recorded resources before enqueueing a
   // replacement, otherwise sidecar spawn can collide with the surviving name.
   if (deps.cleanupPodResources) {
     try {
       await deps.cleanupPodResources(pod.id);
+      assertFleetRecoveryAllowed(podRepo, pod.id);
     } catch (err) {
+      if (err instanceof FleetRetentionFence) throw err;
+      if (retainFleetDisposition(podRepo, podRepo.getOrThrow(pod.id))) {
+        logger.error(
+          { err, podId: pod.id },
+          'Cleanup ended after a fleet disposition; no further recovery effects admitted',
+        );
+        throw new FleetRetentionFence(pod.id);
+      }
       const previousStatus = pod.status;
       const failureReason = `Restart recovery could not clean up stale pod resources: ${
         err instanceof Error ? err.message : String(err)

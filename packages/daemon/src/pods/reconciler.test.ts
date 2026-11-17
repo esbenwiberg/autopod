@@ -257,7 +257,7 @@ describe('reconcileSandboxSessions', () => {
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'paused',
-        pauseReason: 'manual',
+        pauseReason: null,
         lastCorrectionMessage: expect.stringContaining('sandbox is suspended'),
         lastRecoveryTrigger: 'restart',
       }),
@@ -272,7 +272,7 @@ describe('reconcileSandboxSessions', () => {
 
     expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
     expect(deps.updates).toContainEqual(
-      expect.objectContaining({ status: 'paused', pauseReason: 'manual' }),
+      expect.objectContaining({ status: 'paused', pauseReason: null }),
     );
   });
 
@@ -294,7 +294,7 @@ describe('reconcileSandboxSessions', () => {
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'paused',
-        pauseReason: 'manual',
+        pauseReason: null,
         lastCorrectionMessage: expect.stringContaining('sandbox is suspended'),
         lastRecoveryTrigger: 'restart',
       }),
