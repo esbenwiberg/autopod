@@ -29,3 +29,53 @@ The existing error codes and 409 status remain unchanged. A task accounting
 refusal does not instruct the operator to reconcile a previous reviewer. Reviewer
 reconciliation only applies to an actual reviewer record, and never proves an
 unsettled coding/runtime invocation exited.
+
+## Explicit finite reviewer allowance increases
+
+For an ordinary settled native task, inspect its separate reviewer allowance:
+
+```sh
+ap reviewer-budget POD --json
+ap reviewer-budget POD --apply --limit 150000 \
+  --request-id OWNER_DECISION_ID --generation EXACT_GENERATION \
+  --expected-limit EXACT_CURRENT_LIMIT --evidence-hash EXACT_INSPECTION_HASH \
+  --reason 'Owner approved additional reviewer allowance; retain all usage' \
+  --ack-usage-retained --json
+```
+
+This is an explicit spending decision, not `ap budget` (the whole-task limit),
+reviewer usage reconciliation, retry authorization or a review pass. It changes
+only an append-only per-pod allowance record. Frozen configuration, presets, all
+measured tokens and prior failures remain untouched. For example, 106959 recorded
+under a 100000 original ceiling remains 106959 after an approved 150000 ceiling;
+the known headroom is 43041. The next admitted reviewer records the exact approval
+ID. Each immutable receipt retains the exact approved reviewer-ledger snapshot
+and its independently recomputable evidence hash, even if later native accounting
+changes a run. Inspection exposes that evidence before approval. Unknown usage is
+never zeroed or backfilled. Once a top-up is approved, database fences prevent
+reducing/clearing known token amounts or deleting/moving those runs; additional
+measured usage can still increase them. The actual reservation route must exactly
+match the approved frozen reviewer route to consume the increased allowance.
+Every reservation rechecks native measured usage: a new unknown/accepted-unknown
+or operator-reported run holds consumption of the increased ceiling even though
+the immutable grant remains. This never turns unavailable tokens into zero.
+
+`GET/POST /pods/:podId/reviewer-budget` is operator-only. Apply binds actor,
+request ID, exact generation, current finite ceiling and reviewer-ledger evidence.
+It refuses stale/decreased/nonfinite values, archived or nonordinary tasks,
+unknown review amounts, active/unclean reviewers and unsettled worker/validation
+accounting. Exact replay returns the original immutable receipt; changing its
+content or authority refuses. Unsupported old daemons fail closed with no fallback
+to task-budget changes, preset edits or resets. Approval stays within the same
+original launch/reviewer policy and never transfers to another pod or route.
+
+The ceiling retains existing admission semantics: recorded cumulative use at or
+above it prevents another review. It does not reserve provider spend, interrupt a
+review in flight or guarantee its final token count/bill. Hard whole-task limits
+and all execution/source/infrastructure/retry holds remain independently enforced.
+An explicit Resume or owning recovery selection is separate; a budget increase
+never starts a model or resolves an infrastructure report automatically. Existing
+unknown-usage acceptance remains available through reviewer-runs reconciliation,
+but this finite top-up path requires native measured reviewer counters. Known
+operator-reported amounts remain known (not zero or unknown), with their provenance
+retained, but do not authorize this native-measurement-only path.

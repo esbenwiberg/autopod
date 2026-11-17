@@ -5,6 +5,7 @@ import {
   type EffectiveLaunchConfig,
   type OperatorActor,
   type Pod,
+  reviewerBudgetRevisionRequestSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -24,6 +25,10 @@ import type { ConfigurationSecurityPolicyStore } from '../../configuration/secur
 import type { ReviewerRunRecord } from '../../validation/reviewer-run-repository.js';
 
 export interface ConfigurationRouteDependencies {
+  reviewerBudget?: Pick<
+    import('../../validation/reviewer-budget-revisions.js').ReviewerBudgetRevisions,
+    'inspect' | 'revise'
+  >;
   raiseBudget?: (
     podId: string,
     tokenBudget: number | null,
@@ -93,6 +98,24 @@ export function configurationRoutes(
         .strict()
         .parse(request.body);
       return raiseBudget(podId, body.tokenBudget, body.expectedBudget, request.user.oid);
+    });
+  }
+  if (deps.reviewerBudget) {
+    const budget = deps.reviewerBudget;
+    const human = (oid?: string) => {
+      if (!oid?.trim()) configurationError('Authenticated human required', 'UNAUTHORIZED', 401);
+      return { type: 'human' as const, userId: oid };
+    };
+    app.get('/pods/:podId/reviewer-budget', async (request) => {
+      human(request.user?.oid);
+      const { podId } = z.object({ podId: configurationIdSchema }).parse(request.params);
+      return budget.inspect(podId);
+    });
+    app.post('/pods/:podId/reviewer-budget', async (request) => {
+      const actor = human(request.user?.oid);
+      const { podId } = z.object({ podId: configurationIdSchema }).parse(request.params);
+      const input = reviewerBudgetRevisionRequestSchema.parse(request.body);
+      return budget.revise(podId, input, actor);
     });
   }
   if (deps.reviewerRuns) {
