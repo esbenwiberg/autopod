@@ -64,7 +64,8 @@ npx pnpm install
 npx pnpm lint              # Biome check
 npx pnpm lint:fix          # Biome auto-fix
 npx pnpm build             # Turborepo build (all packages)
-npx pnpm test              # Vitest (all packages)
+npx pnpm test              # Full test suite (all packages + root scripts)
+npx pnpm test:pr           # Bounded PR smoke lane (after build)
 
 # Single package
 npx pnpm --filter @autopod/daemon test
@@ -403,6 +404,13 @@ a profile field that the daemon validates but the desktop can't render.
 - Interfaces for all injectable infrastructure (ContainerManager, Runtime, WorktreeManager, ValidationEngine)
 
 ## PR Workflow
+
+Routine CI keeps full lint/build/typecheck plus a bounded test lane; full Linux
+and native macOS validation run nightly at 03:17 UTC and on manual dispatch.
+See [CI coverage and full-run instructions](docs/testing/ci.md), including native
+deferral, failure triage, and running full checks on a risky PR before merge.
+`pnpm test` remains the full test suite; `scripts/validate.sh` retains the full
+local pipeline.
 
 - Always use `gh pr create --head <branch>` — worktrees don't track remotes
 - Push before creating PRs: `git push -u origin <branch>`

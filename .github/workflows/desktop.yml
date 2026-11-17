@@ -1,35 +1,24 @@
 name: Desktop
 
+# Native validation is full/nightly coverage, not a routine PR gate.
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches: [main, codex/reliability]
-    paths:
-      - "packages/desktop/**"
-      - "packages/shared/**"
-      - "packages/daemon/**"
-      - ".github/workflows/desktop.yml"
-      - "scripts/update-village-renderer*"
-      - "scripts/test-desktop.sh"
-      - "pnpm-lock.yaml"
-  pull_request:
-    branches: [main, codex/reliability]
-    paths:
-      - "packages/desktop/**"
-      - "packages/shared/**"
-      - "packages/daemon/**"
-      - ".github/workflows/desktop.yml"
-      - "scripts/update-village-renderer*"
-      - "scripts/test-desktop.sh"
-      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
 
 concurrency:
   group: desktop-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test-and-build:
     runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +29,9 @@ jobs:
           xcodebuild -version
 
       - name: Test Swift package
-        run: ./scripts/test-desktop.sh
+        run: |
+          mkdir -p .ci-results
+          ./scripts/test-desktop.sh 2>&1 | tee .ci-results/swift-tests.log
 
       # Read packageManager from package.json; never let npx fetch a newer major.
       - uses: pnpm/action-setup@v4
@@ -64,3 +55,12 @@ jobs:
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGNING_REQUIRED=NO
+          2>&1 | tee .ci-results/xcodebuild.log
+
+      - name: Upload native validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-results/
+          retention-days: 14

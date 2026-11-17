@@ -1,0 +1,147 @@
+name: Full Validation
+
+on:
+  schedule:
+    # Off the top of the hour; GitHub schedules run on the default branch (UTC).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      # CI must fail, not auto-exclude DB tests, if native bindings break.
+      SKIP_DB_TESTS: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      # Keep full/PR caches separate: a nightly daemon run produces large test logs.
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-full-turbo-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-full-turbo-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare evidence
+        run: |
+          mkdir -p .ci-results
+          printf '%s\n' "Source: $GITHUB_SHA" "Event: $GITHUB_EVENT_NAME" > .ci-results/source.txt
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lint
+        run: pnpm lint 2>&1 | tee .ci-results/lint.log
+
+      - name: Build
+        run: pnpm build 2>&1 | tee .ci-results/build.log
+
+      - name: Typecheck
+        run: pnpm typecheck 2>&1 | tee .ci-results/typecheck.log
+
+      - name: Full test suite (no cached test results)
+        id: full-tests
+        # TURBO_FORCE also rebuilds dependencies: deliberate nightly freshness.
+        run: TURBO_FORCE=true pnpm test 2>&1 | tee .ci-results/tests.log
+
+      - name: Dependency audit
+        if: ${{ !cancelled() }}
+        # Advisory, matching previous CI policy; an audit-service outage is not
+        # proof of a dependency finding. Keep the raw exit/status in the artifact.
+        continue-on-error: true
+        run: |
+          set +e
+          pnpm audit --prod --audit-level high 2>&1 | tee .ci-results/audit.log
+          status=${PIPESTATUS[0]}
+          echo "Audit exit status: $status" | tee -a .ci-results/audit.log
+          exit "$status"
+
+      - name: Validation summary
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.full-tests.outcome }}
+        run: |
+          {
+            echo '## Full Linux validation'
+            echo "Source: $GITHUB_SHA"
+            echo "Full test step: $TEST_OUTCOME (forced fresh when executed)."
+            echo 'Build caches are not test evidence; a skipped test step is not a pass.'
+            echo 'See tests.log for passed/skipped counts. Opt-in live infrastructure fixtures are not enabled.'
+            echo 'The e2e workspace is a placeholder, not system-level coverage.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-results/
+          retention-days: 14
+
+  desktop:
+    uses: ./.github/workflows/desktop.yml
+
+  nightly-report:
+    # Manual branch runs report through Actions; only the scheduled default-branch
+    # run manages the shared failure issue. No PR code receives an issue-write token.
+    if: ${{ always() && github.event_name == 'schedule' && !cancelled() }}
+    needs: [linux, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or resolve the nightly failure issue
+        uses: actions/github-script@v7
+        env:
+          LINUX_RESULT: ${{ needs.linux.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+        with:
+          script: |
+            const title = '[CI] Nightly full validation failed';
+            const { owner, repo } = context.repo;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', creator: 'github-actions[bot]', per_page: 100,
+            });
+            const issue = issues.find((item) => !item.pull_request && item.title === title);
+            const passed = process.env.LINUX_RESULT === 'success' && process.env.DESKTOP_RESULT === 'success';
+            const run = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              `Full validation ${passed ? 'passed' : 'failed or did not complete'}.`,
+              `Source: ${context.sha}`,
+              `Linux: ${process.env.LINUX_RESULT}; Desktop: ${process.env.DESKTOP_RESULT}`,
+              `Run and evidence: ${run}`,
+              'Inspect the failed job and uploaded logs; restore green nightly coverage before treating main as fully validated.',
+            ].join('\n\n');
+            if (issue) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body });
+              if (passed) await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });
+            } else if (!passed) {
+              await github.rest.issues.create({ owner, repo, title, body, assignees: ['esbenwiberg'] });
+            }
