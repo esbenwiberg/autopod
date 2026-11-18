@@ -6,7 +6,11 @@ const MAX_BYTES = 256 * 1024;
 const DEADLINE_MS = 20_000;
 
 /** Own one IPC child. A watchdog kill is always a failure, never crash evidence. */
-export function startFixtureProcess(bundle: string, args: string[], root: string) {
+export function startFixtureProcess<M extends { type: 'ready' | 'recovered' } = FixtureMessage>(
+  bundle: string,
+  args: string[],
+  root: string,
+) {
   const child = fork(bundle, args, {
     execPath: process.execPath,
     execArgv: [],
@@ -26,14 +30,14 @@ export function startFixtureProcess(bundle: string, args: string[], root: string
   let outputBytes = 0;
   let messageCount = 0;
   let closed = false;
-  let resolveMessage: (message: FixtureMessage) => void;
+  let resolveMessage: (message: M) => void;
   let rejectMessage: (error: Error) => void;
   let rejectFailure: (error: Error) => void;
   const failed = new Promise<never>((_, reject) => {
     rejectFailure = reject;
   });
   void failed.catch(() => {});
-  const message = new Promise<FixtureMessage>((resolve, reject) => {
+  const message = new Promise<M>((resolve, reject) => {
     resolveMessage = resolve;
     rejectMessage = reject;
   });
@@ -63,7 +67,7 @@ export function startFixtureProcess(bundle: string, args: string[], root: string
       fail(new Error('Invalid or oversized fixture IPC message'));
       return;
     }
-    resolveMessage(payload as FixtureMessage);
+    resolveMessage(payload as M);
   });
   const capture = (chunk: Buffer) => {
     outputBytes += chunk.length;

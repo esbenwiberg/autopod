@@ -8,6 +8,7 @@ import { expect, it, onTestFinished } from 'vitest';
 import { digest } from '../managed/canonical.js';
 import { managedGit } from '../managed/source-git.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
+import { waveProcessRuntime } from '../test-utils/wave-process-runtime.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 
 async function setup(workerRequests = 2, maxActive = 1) {
@@ -305,17 +306,14 @@ function offlineController(reply: (payload: string) => string) {
   });
   return { provider: { client, model }, calls: () => calls };
 }
-it('commissions two workers from three verified reports while three other workers keep running', async () => {
-  const { f, request, cp, ledger, host } = await setup(17, 6);
+it('commissions two local processes from three verified reports while three original PIDs stay live', async () => {
+  const { f, root, request, cp, ledger, host } = await setup(17, 6);
+  const processes = waveProcessRuntime(root);
+  Object.assign(f.runtime, processes.port);
+  onTestFinished(async () => {
+    await processes.dispose();
+  });
   const l = ledger();
-  const reports = new Map<string, string>();
-  f.runtime.extractOutput = async (id, dest) => {
-    await mkdir(dest, { recursive: true });
-    const report = reports.get(id);
-    if (!report) throw new Error('missing report fixture');
-    await writeFile(path.join(dest, 'report.md'), report);
-    await writeFile(path.join(dest, 'private.txt'), 'sibling contents must not escape');
-  };
   for (let i = 0; i < 6; i++) {
     const r = structuredClone(request);
     r.dispatcherAttemptId = r.effectiveGrant.dispatcherAttemptId = r.startKey = `worker-${i}`;
@@ -326,18 +324,21 @@ it('commissions two workers from three verified reports while three other worker
   }
   expect(await l.recover()).toEqual({ blocked: [] });
   l.waves.park(cp.run, 'read-three', 0, 3);
-  for (const [i, report] of [
-    'Issue: CLI retries',
-    'Issue: cache expiry',
-    'Checks passed',
-  ].entries()) {
+  const firstWave = await processes.live();
+  expect(new Set(firstWave.values()).size).toBe(6);
+  const returned: string[] = [];
+  for (const i of [0, 1, 2]) {
     const id = f.service().lookup('native.example', `worker-${i}`)?.pod_id;
     if (!id) throw new Error('missing worker');
-    reports.set(id, `${report}\n${'é'.repeat(1300)}hidden-tail`);
-    await f.runtime.stop(id);
+    await processes.finish(id); // Worker writes its own report, then exits normally.
+    returned.push(id);
+    await f.service().enforceExpiry();
+    await f.service().artifactPipeline?.tick();
+    if (returned.length < 3)
+      await l.waves.dispatch(cp.run, async () => {
+        throw new Error('woke too soon');
+      });
   }
-  await f.service().enforceExpiry();
-  await f.service().artifactPipeline?.tick();
   expect(
     f.db.prepare("SELECT count(*) FROM artifact_exports WHERE status='committed'").pluck().get(),
   ).toBe(3);
@@ -366,7 +367,7 @@ it('commissions two workers from three verified reports while three other worker
       },
       provider,
     );
-  const [pod] = reports.keys();
+  const [pod] = returned;
   if (!pod) throw new Error('missing returned worker');
   const bundle = f.db
     .prepare('SELECT bundle_bytes FROM artifact_exports WHERE pod_id=?')
@@ -404,7 +405,12 @@ it('commissions two workers from three verified reports while three other worker
   f.restart();
   expect(await tick()).toEqual({ blocked: [] });
   expect(calls()).toBe(1);
-  expect(f.launches()).toBe(8);
+  expect(processes.count()).toBe(8);
+  const active = await processes.live();
+  expect(new Set(active.values()).size).toBe(5);
+  for (const [id, pid] of firstWave)
+    expect(active.get(id)).toBe(returned.includes(id) ? undefined : pid);
+  expect([...active.keys()].filter((id) => !firstWave.has(id))).toHaveLength(2);
   expect(ledger().waves.available(cp.run)).toBe(1);
   expect(
     f.db
@@ -420,6 +426,28 @@ it('commissions two workers from three verified reports while three other worker
   );
   expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
     cp.commit,
+  );
+  f.restart();
+  expect(await tick()).toEqual({ blocked: [] });
+  expect(await processes.live()).toEqual(active);
+  expect(processes.count()).toBe(8);
+  expect(calls()).toBe(1);
+
+  // Cancel fences new work immediately, but does not fabricate exit evidence.
+  ledger().cancel(cp.run);
+  expect(await processes.live()).toEqual(active);
+  const unseen = () =>
+    f.db.prepare('SELECT count(*) FROM managed_pods WHERE observed_exit=0').pluck().get();
+  await f.service().enforceExpiry();
+  expect((await processes.live()).size).toBe(0);
+  expect(unseen()).toBe(5);
+  await f.service().enforceExpiry();
+  expect(unseen()).toBe(0);
+  expect(f.db.prepare("SELECT count(*) FROM managed_pods WHERE state='killed'").pluck().get()).toBe(
+    5,
+  );
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    0,
   );
 }, 15000);
 
