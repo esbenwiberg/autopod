@@ -56,6 +56,16 @@ ap profile action-override remove <name> <action>
 
 ### Pods
 
+`ap draft-pr <full-pod-id>` inspects saved source for a separate review-only draft
+PR, including settled failed or compromised tasks. Use `--prepare --source <id>
+--request-id <stable-id> --binding <inspection-binding>`, then separately
+`--confirm --request-id <same-id> --binding <confirmation-binding>`. After network
+uncertainty use `--observe --request-id <same-id>`; never automatically resubmit.
+The original task remains unchanged. See [saved-work drafts](../saved-work-draft-pr.md).
+Before any external admission, `--cancel --request-id <same-id> --binding
+<confirmation-binding>` releases only the draft operation's temporary fence and
+retains every source/resource. Admitted or uncertain writes cannot be cancelled.
+
 Source selection in the updated CLI uses **published remote branch names**:
 `--start-branch feature/prep` selects the starting source, `--base-branch main`
 selects the base (and fallback starting source), and `--branch fix/result` names

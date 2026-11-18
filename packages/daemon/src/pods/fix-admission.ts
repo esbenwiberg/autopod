@@ -82,6 +82,16 @@ export function createFixAdmission(
           );
           return;
         }
+        if (
+          podRepo.hasInfrastructureBlocker?.(fix.id) ||
+          podRepo.retainedCheckpoints?.latest(fix.id)
+        ) {
+          const reason = `Fix pod ${fix.id} requires explicit infrastructure/source recovery; automatic coding retry stopped`;
+          transition(parent, 'failed', { failureReason: reason, mergeBlockReason: reason });
+          stopMergePolling(parentSessionId);
+          emitActivityStatus(parentSessionId, reason);
+          return;
+        }
         if (!isFixPodRecyclable(fix.status)) {
           logger.debug(
             { podId: parentSessionId, fixPodId: parent.fixPodId },

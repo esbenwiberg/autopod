@@ -92,6 +92,40 @@ describe('canonical fix admission and recycling', () => {
     expect(f.pod().prFixAttempts).toBe(0);
     expect(f.fix().status).toBe('awaiting_input');
   });
+  it.each([
+    1, 3,
+  ])('parks an infrastructure-blocked fix without spending another attempt (limit %s)', async (limit) => {
+    const f = createFixCycleFixture(true);
+    const fix = f.insertFix('failed');
+    f.podRepo.update('prepare', { prFixAttempts: 1, maxPrFixAttempts: limit });
+    f.deps.escalationRepo!.insert({
+      id: 'missing-ci-diagnostics',
+      podId: fix.id,
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: fix.lifecycleGeneration,
+        requiresResponse: false,
+        owner: 'parent',
+        phase: 'CI diagnosis',
+        description: 'The failing job errors were not supplied',
+        attempted: ['Inspected supplied checkout'],
+        needs: 'Provide the exact failing run and diagnostics',
+      },
+    });
+    const before = f.fix();
+    await f.admission().maybeSpawnFixSession('prepare', pendingStatus());
+    expect(f.pod()).toMatchObject({ status: 'failed', prFixAttempts: 1, fixPodId: fix.id });
+    expect(f.pod().mergeBlockReason).toContain('explicit infrastructure/source recovery');
+    expect(f.fix()).toEqual(before);
+    expect(f.admissionCaptured.enqueueSession).not.toHaveBeenCalled();
+    expect(f.admissionCaptured.cleanupContainer).not.toHaveBeenCalled();
+    expect(f.admissionCaptured.stopMergePolling).toHaveBeenCalledWith('prepare');
+    expect(f.reopen().pods.getOrThrow(fix.id)).toEqual(before);
+  });
+
   it('fails an exhausted parent and stops its existing poller before another worker admission', async () => {
     const f = createFixCycleFixture();
     f.podRepo.update('prepare', { prFixAttempts: 1, maxPrFixAttempts: 1 });

@@ -1,3 +1,4 @@
+import { resolvePolicy as resolveSecurityScanPolicy } from '../security/scan-policy.js';
 import { createArtifactChecksExecution } from './artifact-checks-execution.js';
 import { createArtifactChecksRecovery } from './artifact-checks-recovery.js';
 import { createProvisioningMaterials } from './provisioning-materials.js';
@@ -8,6 +9,7 @@ import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { createRetainedFinalization } from './retained-finalization.js';
+import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
@@ -1486,6 +1488,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.savedWorkDrafts?.assertAvailable(podId);
     podRepo.artifactChecks?.assertAvailable(podId);
     podRepo.recoveryForks?.assertOriginalAvailable(podId);
     podRepo.recoveryForks?.assertTaskExecutionAllowed(podId);
@@ -1791,6 +1794,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           assertGuidanceCollected,
         })
       : undefined;
+  const savedWorkDraft = podRepo.savedWorkDrafts
+    ? createSavedWorkDraftPr({
+        podRepo,
+        executionForPod,
+        worktreeManager,
+        prManagerFactory: rawPrManagerFactory,
+        root: path.join(
+          process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+          'saved-work-drafts',
+        ),
+        isGoal: (id) =>
+          deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+          Boolean(deps.launchConfiguration?.goals?.get(id)),
+        isIdle: (id) =>
+          !controlOperations.isActive(id) &&
+          !activeAgentRuns.has(id) &&
+          !validationAbortControllers.has(id) &&
+          !validationResumeRuns.has(id) &&
+          !artifactResumeRuns.has(id) &&
+          !artifactCompletionRuns.has(id) &&
+          !attemptExtensionRuns.has(id) &&
+          !stalledWorkerRecovery?.isActive(id) &&
+          !retainedFinalization?.isActive(id) &&
+          !checkpointRecovery?.isActive(id),
+        scanPublication: async (pod, worktree) => {
+          if (!repoScanner) return;
+          const settings = executionForPod(pod);
+          const policy = resolveSecurityScanPolicy(settings.securityScan);
+          // Independent bundles need not carry a usable base ref. Scan the exact
+          // whole saved tree rather than silently degrading a configured diff scan.
+          const scan = await repoScanner.scan('push', {
+            podId: pod.id,
+            workdir: worktree,
+            profile: { securityScan: { ...policy, push: { ...policy.push, scope: 'full' } } },
+          });
+          if (scan.decision === 'block' || scan.scanIncomplete)
+            throw new AutopodError(
+              'Saved-work publication security scan blocked or incomplete; nothing was pushed.',
+              'SECURITY_SCAN_BLOCKED',
+              409,
+            );
+        },
+      })
+    : undefined;
   const sandboxRecovery = createSandboxRecovery({
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
@@ -1894,6 +1941,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       stalledWorkerRecovery,
       sandboxRecovery,
       retainedFinalization,
+      savedWorkDraft,
       checkpointRecovery,
       artifactChecksRecovery,
       acceptFindings,
@@ -1946,3 +1994,5 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }),
   );
 }
+
+import { AutopodError } from '@autopod/shared';

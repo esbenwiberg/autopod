@@ -51,8 +51,18 @@ afterEach(async () => {
   }
   vi.unstubAllEnvs();
 });
-async function fixture(mode: 'checks' | 'rework' = 'checks') {
-  const f = await retainedCheckpointFixture('validation', true, false, true, 'local');
+async function fixture(mode: 'checks' | 'rework' = 'checks', linkedFix = false) {
+  const f = await retainedCheckpointFixture(
+    'validation',
+    true,
+    false,
+    true,
+    'local',
+    undefined,
+    undefined,
+    undefined,
+    linkedFix,
+  );
   fixtures.push(f);
   const launch = f.ctx.deps.launchConfiguration;
   if (!launch) throw new Error('Missing native launch');
@@ -112,6 +122,11 @@ async function fixture(mode: 'checks' | 'rework' = 'checks') {
       stopped = true;
     },
   };
+}
+function linkedParent(f: Awaited<ReturnType<typeof fixture>>) {
+  const id = f.pod().linkedPodId;
+  if (!id) throw new Error('Missing native fix parent');
+  return () => f.ctx.podRepo.getOrThrow(id);
 }
 function passingReview(f: Awaited<ReturnType<typeof fixture>>) {
   const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation();
@@ -800,6 +815,175 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === f.containerId)).toHaveLength(1);
     expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
     await publishAndComplete(f, provider);
+  });
+
+  it('repairs a canonical linked fix once with its failed parent held, fresh checks and no delivery', async () => {
+    const f = await fixture('rework', true);
+    const parent = linkedParent(f);
+    const originalParent = parent();
+    const original = f.pod();
+    const originalSource = await readFile(path.join(original.worktreePath!, 'source.ts'), 'utf8');
+    qualifiedExecution(f);
+    expect(f.recovery.inspect(f.podId).infrastructure.policies.rework?.state).toBe(
+      'no_recorded_blocker',
+    );
+    passingReview(f);
+    const provider = delivery(f);
+    vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* (options) {
+      expect(options.task).toContain(f.request.instructions!.content);
+      const cwd = f.pod().worktreePath!;
+      await writeFile(
+        path.join(cwd, 'source.ts'),
+        originalSource + '\nexport const repaired = true;\n',
+      );
+      await exec('git', ['add', 'source.ts'], { cwd });
+      await exec(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-m',
+          'fix: repair linked source',
+        ],
+        { cwd },
+      );
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Repair complete',
+      };
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    expect(f.pod().status).toBe('queued');
+    await f.manager.processPod(f.podId);
+    const record = f.recovery.list(f.podId)[0]!;
+    expect(record.blocked, f.pod().failureReason ?? JSON.stringify(record)).toBeNull();
+    expect(f.pod().status).toBe('validated');
+    expect(record.checked?.result.taskReview?.status).toBe('pass');
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(parent()).toEqual(originalParent);
+    expect(await readFile(path.join(original.worktreePath!, 'source.ts'), 'utf8')).toBe(
+      originalSource,
+    );
+    expect(record.infrastructure?.candidate?.head).not.toBe(record.prepared?.head);
+    expect(f.pod().linkedPodId).toBe(parent().id);
+    expect(f.pod().worktreePath).not.toBe(original.worktreePath);
+    expect(f.cm.kill).not.toHaveBeenCalledWith(original.containerId);
+    expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(provider.createPr).not.toHaveBeenCalled();
+    expect(provider.mergePr).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    false,
+    true,
+  ])('checks a linked fix without coding or delivery, typed prerequisite=%s', async (typed) => {
+    const f = await fixture('checks', true);
+    qualifiedExecution(f);
+    if (typed) {
+      const report = f.ctx.db
+        .prepare("SELECT id,payload FROM escalations WHERE pod_id=? AND type='report_blocker'")
+        .get(f.podId) as { id: string; payload: string };
+      f.ctx.db.prepare('UPDATE escalations SET payload=? WHERE id=?').run(
+        JSON.stringify({
+          ...JSON.parse(report.payload),
+          prerequisiteBlocker: {
+            version: 1,
+            kind: 'missing-execution-prerequisites',
+            requirementsHash: 'a'.repeat(64),
+            launchers: ['jq'],
+          },
+        }),
+        report.id,
+      );
+      const evidence = f.ctx.podRepo.retainedCheckpoints?.selectionEvidence(f.pod());
+      if (!evidence) throw new Error('Missing updated infrastructure report selection');
+      f.request.expectedResultHash = evidence.expectedResultHash;
+    }
+    await expect(f.recovery.previewExecution(f.podId, 'qualified-local')).resolves.toBeTruthy();
+    const parent = linkedParent(f);
+    const before = parent();
+    passingReview(f);
+    const provider = delivery(f);
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    await f.manager.processPod(f.podId);
+    const record = f.recovery.list(f.podId)[0]!;
+    expect(record.blocked, f.pod().failureReason ?? JSON.stringify(record)).toBeNull();
+    expect(record.checked?.result.overall).toBe('pass');
+    expect(f.pod().status).toBe('validated');
+    expect(parent()).toEqual(before);
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(provider.createPr).not.toHaveBeenCalled();
+    expect(provider.mergePr).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'parent-running',
+    'canonical-child',
+    'branch',
+    'pr',
+    'repository',
+    'parent-decision',
+  ] as const)('refuses linked fix recovery before effects when %s differs', async (fault) => {
+    const f = await fixture('rework', true);
+    const parent = linkedParent(f);
+    if (fault === 'parent-running') f.ctx.podRepo.update(parent().id, { status: 'running' });
+    if (fault === 'canonical-child') f.ctx.podRepo.update(parent().id, { fixPodId: null });
+    if (fault === 'branch') f.ctx.podRepo.update(parent().id, { baseBranch: 'foreign-base' });
+    if (fault === 'pr')
+      f.ctx.podRepo.update(parent().id, { prUrl: 'https://github.com/org/repo/pull/99' });
+    if (fault === 'parent-decision')
+      f.ctx.podRepo.update(parent().id, {
+        pendingEscalation: { id: 'pending', type: 'ask_human', question: 'Unresolved question' },
+      });
+    if (fault === 'repository') {
+      const settings = f.deps.executionForPod(f.pod());
+      f.deps.executionForPod = (pod) => ({
+        ...settings,
+        repoUrl: pod.id === parent().id ? 'https://github.com/foreign/repo' : settings.repoUrl,
+      });
+    }
+    await expect(f.recovery.recoverInfrastructure(f.podId, f.request, f.actor)).rejects.toThrow(
+      'same settled failed parent',
+    );
+    expect(f.recovery.list(f.podId)).toHaveLength(0);
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+
+  it('retains a linked recovery when parent identity changes during source preparation', async () => {
+    const f = await fixture('rework', true);
+    const parent = linkedParent(f);
+    const inspect = f.worktrees.inspectSourceAdoption!;
+    let claimed = false;
+    f.worktrees.inspectSourceAdoption = vi.fn(async (...args) => {
+      const result = await inspect.apply(f.worktrees, args);
+      if (f.recovery.list(f.podId).length && !claimed) {
+        claimed = true;
+        f.ctx.podRepo.incrementLifecycleGeneration(parent().id);
+      }
+      return result;
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    expect(f.recovery.list(f.podId)[0]?.blocked).toBeTruthy();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('failed');
+  });
+
+  it('still refuses ordinary continuation of a linked fix', async () => {
+    const f = await fixture('rework', true);
+    await expect(f.recovery.continueRetained(f.podId, f.input, f.actor)).rejects.toThrow();
+    expect(f.recovery.list(f.podId)).toHaveLength(0);
   });
 
   it('starts exactly one real manager-owned coding repair, freezes its descendant, then independently checks it', async () => {

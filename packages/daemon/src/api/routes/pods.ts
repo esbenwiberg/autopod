@@ -7,6 +7,7 @@ import {
   collectPiiPatternNames,
   createPodRequestSchema,
   type FirewallDeniedEvent,
+  handledElsewhereArchiveRequestSchema,
   type OperatorActor,
   type PodStatus,
   podStatusSchema,
@@ -61,6 +62,7 @@ import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedFinalizationRoutes } from './retained-finalization.js';
 import { reworkRoutes } from './rework.js';
 import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
+import { savedWorkDraftRoutes } from './saved-work-draft-pr.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
 import { stalledWorkerRecoveryRoutes } from './stalled-worker-recovery.js';
 import { validationRecoveryRoutes } from './validation-recovery.js';
@@ -786,6 +788,19 @@ export function podRoutes(
     return { fleetArchivedAt: podRepo.fleetArchives.archivedAt(podId), retainedResources: true };
   });
 
+  // Explicitly acknowledges visibility-only retirement; it never certifies delivery.
+  // Separate endpoint means old daemons cannot silently ignore the acknowledgement.
+  app.post('/pods/:podId/archive-handled-elsewhere', async (request) => {
+    if (!request.user?.oid?.trim())
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    if (!podRepo?.fleetArchives)
+      throw new AutopodError('Fleet archive is unavailable', 'FLEET_ARCHIVE_UNAVAILABLE', 503);
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    const input = handledElsewhereArchiveRequestSchema.parse(request.body);
+    podRepo.fleetArchives.archiveHandledElsewhere(podId, request.user.oid, input);
+    return { fleetArchivedAt: podRepo.fleetArchives.archivedAt(podId), retainedResources: true };
+  });
+
   app.delete('/pods/:podId/archive', async (request) => {
     if (!podRepo?.fleetArchives)
       throw new AutopodError('Fleet archive is unavailable', 'FLEET_ARCHIVE_UNAVAILABLE', 503);
@@ -846,6 +861,7 @@ export function podRoutes(
   artifactChecksRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
+  savedWorkDraftRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);
   sandboxRecoveryRoutes(app, podManager);

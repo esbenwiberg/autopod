@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { promisify, TextDecoder } from 'node:util';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorkspaceFingerprint } from '../pods/workspace-checkpoint-controller.js';
+import { inspectAdoptionGit, safeAdoptionGit } from './source-adoption-git.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,15 +14,41 @@ const CHECKPOINT_SUBJECT = 'autopod sandbox checkpoint';
 const CHECKPOINT_ACTOR = 'Autopod';
 const CHECKPOINT_EMAIL = 'autopod@localhost';
 
+function hostGit(cwd: string, timeout = 15_000) {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+  );
+  return safeAdoptionGit(async (args) => {
+    const result = await execFileAsync('git', args, {
+      cwd,
+      env: {
+        ...env,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+        GIT_NO_LAZY_FETCH: '1',
+        GIT_GRAFT_FILE: '/dev/null',
+      },
+      timeout,
+      maxBuffer: 4 * 1024 * 1024,
+      encoding: 'buffer',
+    });
+    // Git -z paths are raw bytes. Reject non-UTF-8 rather than probing a different
+    // filesystem path after Node silently substitutes replacement characters.
+    return {
+      stdout: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(result.stdout),
+      stderr: result.stderr.toString('utf8'),
+    };
+  });
+}
+
 async function peelDaemonNoopCheckpoints(bare: string, tip: string): Promise<string> {
+  const git = hostGit(bare);
   let current = tip;
   for (let depth = 0; depth < 64; depth++) {
     const metadata = (
-      await execFileAsync(
-        'git',
-        ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', current],
-        { cwd: bare },
-      )
+      await git(['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', current])
     ).stdout
       .trim()
       .split('\0');
@@ -36,16 +63,14 @@ async function peelDaemonNoopCheckpoints(bare: string, tip: string): Promise<str
       break;
     }
 
-    const lineage = (
-      await execFileAsync('git', ['rev-list', '--parents', '-n', '1', current], { cwd: bare })
-    ).stdout
+    const lineage = (await git(['rev-list', '--parents', '-n', '1', current])).stdout
       .trim()
       .split(/\s+/);
     if (lineage.length !== 2 || !lineage[1]) break;
     const parent = lineage[1];
     const [currentTree, parentTree] = await Promise.all([
-      execFileAsync('git', ['rev-parse', `${current}^{tree}`], { cwd: bare }),
-      execFileAsync('git', ['rev-parse', `${parent}^{tree}`], { cwd: bare }),
+      git(['rev-parse', `${current}^{tree}`]),
+      git(['rev-parse', `${parent}^{tree}`]),
     ]);
     if (currentTree.stdout.trim() !== parentTree.stdout.trim()) break;
     current = parent;
@@ -74,47 +99,37 @@ async function quarantinedCheckpointSourceHead(
   // checkpoint rather than a descendant. Supersede only an exact commit already
   // retained under this pod's host-owned quarantine namespace; lookalike commits
   // and checkpoints imported for another pod remain divergence barriers.
+  const git = hostGit(bare);
   const quarantineRef = (
-    await execFileAsync(
-      'git',
-      [
-        'for-each-ref',
-        '--format=%(refname)',
-        '--points-at',
-        checkpoint,
-        `refs/autopod-quarantine/${podToken}/`,
-      ],
-      { cwd: bare },
-    )
+    await git([
+      'for-each-ref',
+      '--format=%(refname)',
+      '--points-at',
+      checkpoint,
+      `refs/autopod-quarantine/${podToken}/`,
+    ])
   ).stdout.trim();
   if (!quarantineRef) return null;
 
-  const metadata = (
-    await execFileAsync(
-      'git',
-      ['show', '-s', '--format=%s%x00%an%x00%ae%x00%cn%x00%ce', checkpoint],
-      { cwd: bare },
-    )
-  ).stdout
-    .trim()
-    .split('\0');
+  // Raw headers, rather than revision-walker parents: replace refs/grafts must
+  // not turn another commit into owned single-parent checkpoint evidence.
+  const raw = (await git(['cat-file', 'commit', checkpoint])).stdout;
+  const separator = raw.indexOf('\n\n');
+  const headers = raw.slice(0, separator).split('\n');
+  const parents = headers.filter((line) => line.startsWith('parent '));
   if (
-    metadata.length !== 5 ||
-    metadata[0] !== CHECKPOINT_SUBJECT ||
-    metadata[1] !== CHECKPOINT_ACTOR ||
-    metadata[2] !== CHECKPOINT_EMAIL ||
-    metadata[3] !== CHECKPOINT_ACTOR ||
-    metadata[4] !== CHECKPOINT_EMAIL
-  ) {
+    separator < 0 ||
+    raw.slice(separator + 2).split('\n')[0] !== CHECKPOINT_SUBJECT ||
+    !headers.some((line) =>
+      /^author Autopod <autopod@localhost> [0-9]+ [+-][0-9]{4}$/.test(line),
+    ) ||
+    !headers.some((line) =>
+      /^committer Autopod <autopod@localhost> [0-9]+ [+-][0-9]{4}$/.test(line),
+    ) ||
+    parents.length !== 1
+  )
     return null;
-  }
-
-  const lineage = (
-    await execFileAsync('git', ['rev-list', '--parents', '-n', '1', checkpoint], { cwd: bare })
-  ).stdout
-    .trim()
-    .split(/\s+/);
-  return lineage.length === 2 && lineage[1] ? lineage[1] : null;
+  return parents[0]?.slice(7) ?? null;
 }
 
 /**
@@ -128,9 +143,7 @@ export async function resolveSandboxCheckpointSourceHead(
   checkpoint: string,
 ): Promise<string | null> {
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
-  const common = (
-    await execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath })
-  ).stdout.trim();
+  const common = (await hostGit(worktreePath)(['rev-parse', '--git-common-dir'])).stdout.trim();
   const bare = path.resolve(worktreePath, common);
   return quarantinedCheckpointSourceHead(bare, checkpoint, token);
 }
@@ -149,7 +162,83 @@ export interface WorkspaceCheckpointResult {
   promoted: boolean;
   materialized: boolean;
   quarantineRef: string;
+  /** Both old and new source remain retained in this pod's quarantine. */
+  rewrittenFrom?: { checkpoint: string; sourceHead: string; base: string };
   error?: { phase: string; code: string; retryable: boolean; message: string };
+}
+
+async function inspectUnpublishedRewrite(input: {
+  bare: string;
+  worktreePath: string;
+  branch: string;
+  expected: string;
+  sourceHead: string;
+  snapshotCommit: string;
+  podToken: string;
+  base: string;
+}): Promise<WorkspaceCheckpointResult['rewrittenFrom']> {
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.base)) return;
+  const git = hostGit(input.worktreePath);
+  try {
+    // Only an exact pod-owned checkpoint can be superseded. Never peel arbitrary
+    // host commits, even no-op commits that imitate checkpoint metadata.
+    const previousSource = await quarantinedCheckpointSourceHead(
+      input.bare,
+      input.expected,
+      input.podToken,
+    );
+    if (!previousSource) return;
+    const source = await inspectAdoptionGit(git, input.branch);
+    if (source.head !== input.expected) return;
+    await git(['merge-base', '--is-ancestor', input.base, previousSource]);
+    await git(['merge-base', '--is-ancestor', input.base, input.sourceHead]);
+    if (/^160000 /m.test((await git(['ls-tree', '-r', input.snapshotCommit])).stdout)) return;
+    // A clean worktree may still contain ignored reports. Do not overwrite an
+    // existing file/directory if the rewritten source starts tracking that path.
+    const added = (
+      await git([
+        'diff',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--no-renames',
+        '--name-only',
+        '--diff-filter=A',
+        '-z',
+        input.expected,
+        input.snapshotCommit,
+        '--',
+      ])
+    ).stdout
+      .split('\0')
+      .filter(Boolean);
+    for (const file of added) {
+      const parts = file.split('/');
+      if (parts.some((part) => !part || part === '.' || part === '..')) return;
+      let target = input.worktreePath;
+      for (const [index, part] of parts.entries()) {
+        target = path.join(target, part);
+        const entry = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (!entry) break;
+        // Never follow an ignored symlink ancestor (including a dangling one).
+        // Existing ordinary directories may contain unrelated retained reports.
+        if (!entry.isDirectory() || index === parts.length - 1) return;
+      }
+    }
+    const after = await inspectAdoptionGit(git, input.branch);
+    if (after.head !== source.head || after.tree !== source.tree) return;
+    if (
+      (await quarantinedCheckpointSourceHead(input.bare, input.expected, input.podToken)) !==
+      previousSource
+    )
+      return;
+    return { checkpoint: input.expected, sourceHead: previousSource, base: input.base };
+  } catch {
+    // Missing/uncertain proof is still a lineage conflict, never retry authority.
+    return;
+  }
 }
 
 function empty(sequence: number, message: string, phase = 'capture'): WorkspaceCheckpointResult {
@@ -214,6 +303,8 @@ export interface SandboxWorkspaceCheckpointArgs {
   worktreePath: string;
   sequence: number;
   assertCurrent: () => void;
+  /** Frozen admitted base, supplied only for first-generation unpublished work. */
+  unpublishedSourceBase?: string;
 }
 
 export async function checkpointSandboxWorkspace(
@@ -269,7 +360,15 @@ export async function checkpointSandboxWorkspace(
     )
       .trim()
       .split('\n');
-    if (!sourceHead || !sourceTree || !snapshotCommit || !snapshotTree)
+    if (
+      !sourceHead ||
+      !sourceTree ||
+      !snapshotCommit ||
+      !snapshotTree ||
+      ![sourceHead, sourceTree, snapshotCommit, snapshotTree].every((value) =>
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value),
+      )
+    )
       return empty(sequence, 'checkpoint metadata was incomplete');
     const bundle = await owned(() => cm.readFileBinary(containerId, remoteBundle));
     const hash = createHash('sha256').update(bundle).digest('hex');
@@ -279,27 +378,31 @@ export async function checkpointSandboxWorkspace(
     try {
       await writeFile(bundlePath, bundle, { mode: 0o600 });
       const common = (
-        await owned(() =>
-          execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath }),
-        )
+        await owned(() => hostGit(worktreePath)(['rev-parse', '--git-common-dir']))
       ).stdout.trim();
       const bare = path.resolve(worktreePath, common);
-      await owned(() => execFileAsync('git', ['bundle', 'verify', bundlePath], { cwd: bare }));
+      const git = hostGit(bare);
+      await owned(() => git(['bundle', 'verify', bundlePath]));
       const quarantineRef = `refs/autopod-quarantine/${token}/${sequence}`;
       await owned(() =>
-        execFileAsync('git', ['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`], {
-          cwd: bare,
-        }),
+        hostGit(bare, 120_000)(['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`]),
       );
+      const importedHead = (
+        await owned(() => git(['rev-parse', `${quarantineRef}^{commit}`]))
+      ).stdout.trim();
+      const actualSourceTree = (
+        await owned(() => git(['rev-parse', `${sourceHead}^{tree}`]))
+      ).stdout.trim();
       const importedTree = (
-        await owned(() =>
-          execFileAsync('git', ['rev-parse', `${quarantineRef}^{tree}`], { cwd: bare }),
-        )
+        await owned(() => git(['rev-parse', `${quarantineRef}^{tree}`]))
       ).stdout.trim();
-      const parent = (
-        await owned(() => execFileAsync('git', ['rev-parse', `${quarantineRef}^`], { cwd: bare }))
-      ).stdout.trim();
-      if (importedTree !== snapshotTree || parent !== sourceHead) {
+      const parent = (await owned(() => git(['rev-parse', `${quarantineRef}^`]))).stdout.trim();
+      if (
+        importedHead !== snapshotCommit ||
+        importedTree !== snapshotTree ||
+        parent !== sourceHead ||
+        actualSourceTree !== sourceTree
+      ) {
         return {
           ...empty(sequence, 'checkpoint lineage did not match metadata', 'lineage'),
           sourceHead,
@@ -313,14 +416,10 @@ export async function checkpointSandboxWorkspace(
         };
       }
       const branch = (
-        await owned(() =>
-          execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktreePath }),
-        )
+        await owned(() => hostGit(worktreePath)(['symbolic-ref', '--short', 'HEAD']))
       ).stdout.trim();
       const expected = (
-        await owned(() =>
-          execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare }),
-        )
+        await owned(() => git(['rev-parse', `refs/heads/${branch}`]))
       ).stdout.trim();
       // The isolated sandbox normally advances beyond the host branch while the
       // agent works. A prior capture can leave a daemon checkpoint as the host
@@ -329,14 +428,28 @@ export async function checkpointSandboxWorkspace(
       // arbitrary host commits remain divergence barriers.
       const expectedLineageBase = await owned(() => checkpointLineageBase(bare, expected, token));
       const fastForward = await owned(() =>
-        execFileAsync('git', ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead], {
-          cwd: bare,
-        }),
+        git(['merge-base', '--is-ancestor', expectedLineageBase, sourceHead]),
       ).then(
         () => true,
         () => false,
       );
-      if (!fastForward) {
+      const unpublishedSourceBase = args.unpublishedSourceBase;
+      const rewrittenFrom =
+        !fastForward && unpublishedSourceBase
+          ? await owned(() =>
+              inspectUnpublishedRewrite({
+                bare,
+                worktreePath,
+                branch,
+                expected,
+                sourceHead,
+                snapshotCommit,
+                podToken: token,
+                base: unpublishedSourceBase,
+              }),
+            )
+          : undefined;
+      if (!fastForward && !rewrittenFrom) {
         return {
           ...empty(sequence, 'feature branch diverged from checkpoint source', 'promotion'),
           sourceHead,
@@ -356,40 +469,23 @@ export async function checkpointSandboxWorkspace(
           },
         };
       }
-      await owned(() =>
-        execFileAsync('git', ['update-ref', `refs/heads/${branch}`, snapshotCommit, expected], {
-          cwd: bare,
-        }),
-      );
+      await owned(() => git(['update-ref', `refs/heads/${branch}`, snapshotCommit, expected]));
       try {
-        await owned(() =>
-          execFileAsync('git', ['reset', '--hard', snapshotCommit], { cwd: worktreePath }),
-        );
+        await owned(() => hostGit(worktreePath)(['reset', '--hard', snapshotCommit]));
         const finalHead = (
-          await owned(() => execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath }))
+          await owned(() => hostGit(worktreePath)(['rev-parse', 'HEAD']))
         ).stdout.trim();
         const finalTree = (
-          await owned(() =>
-            execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath }),
-          )
+          await owned(() => hostGit(worktreePath)(['rev-parse', 'HEAD^{tree}']))
         ).stdout.trim();
         const clean =
-          (
-            await owned(() =>
-              execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath }),
-            )
-          ).stdout.trim() === '';
+          (await owned(() => hostGit(worktreePath)(['status', '--porcelain']))).stdout.trim() ===
+          '';
         if (finalHead !== snapshotCommit || finalTree !== snapshotTree || !clean) {
           // Promotion is reversible until materialization proves the linked
           // worktree matches. Guard the rollback so concurrent host work wins.
-          await owned(() =>
-            execFileAsync('git', ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit], {
-              cwd: bare,
-            }),
-          );
-          await owned(() =>
-            execFileAsync('git', ['reset', '--hard', expected], { cwd: worktreePath }),
-          );
+          await owned(() => git(['update-ref', `refs/heads/${branch}`, expected, snapshotCommit]));
+          await owned(() => hostGit(worktreePath)(['reset', '--hard', expected]));
           return {
             ...empty(sequence, 'host materialization verification failed', 'materialize'),
             sourceHead,
@@ -417,13 +513,12 @@ export async function checkpointSandboxWorkspace(
           promoted: true,
           materialized: true,
           quarantineRef,
+          ...(rewrittenFrom ? { rewrittenFrom } : {}),
         };
       } catch (err) {
         // If reset itself fails, return the branch only if it is still ours.
         await owned(() =>
-          execFileAsync('git', ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit], {
-            cwd: bare,
-          }),
+          git(['update-ref', `refs/heads/${branch}`, expected, snapshotCommit]),
         ).catch(() => {});
         return {
           ...empty(sequence, err instanceof Error ? err.message : String(err), 'materialize'),

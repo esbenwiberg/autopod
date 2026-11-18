@@ -1434,6 +1434,48 @@ describe('LocalWorktreeManager', () => {
       expect(receipt.repository).toBe('https://github.com/org/repo');
     });
 
+    it('admits recovery publication only with an empty exact-ref lease', async () => {
+      const calls = publicationGit('autopod/saved-work/pod/operation', '');
+      const admission = vi.fn();
+      await manager.pushBranch('/tmp/independent', 'autopod/saved-work/pod/operation', {
+        createOnly: true,
+        expectedRepository: 'https://github.com/org/repo',
+        onPrepared: admission,
+      });
+      expect(admission).toHaveBeenCalledTimes(1);
+      expect(calls.find((args) => args.includes('push'))).toContain(
+        '--force-with-lease=refs/heads/autopod/saved-work/pod/operation:',
+      );
+      expect(calls.find((args) => args.includes('push'))).not.toContain('--force');
+    });
+
+    it('refuses a different recovery repository before remote observation or admission', async () => {
+      const calls = publicationGit('feature', '');
+      const admission = vi.fn();
+      await expect(
+        manager.pushBranch('/tmp/independent', 'feature', {
+          createOnly: true,
+          expectedRepository: 'https://github.com/other/repo',
+          onPrepared: admission,
+        }),
+      ).rejects.toThrow();
+      expect(admission).not.toHaveBeenCalled();
+      expect(calls.some((args) => args.includes('ls-remote') || args.includes('push'))).toBe(false);
+    });
+
+    it('refuses even a matching occupied recovery ref before durable push admission', async () => {
+      const calls = publicationGit('feature', `${'a'.repeat(40)}\trefs/heads/feature`);
+      const admission = vi.fn();
+      await expect(
+        manager.pushBranch('/tmp/independent', 'feature', {
+          createOnly: true,
+          onPrepared: admission,
+        }),
+      ).rejects.toMatchObject({ code: 'SAVED_WORK_BRANCH_COLLISION' });
+      expect(admission).not.toHaveBeenCalled();
+      expect(calls.some((args) => args.includes('push'))).toBe(false);
+    });
+
     it('pins a force push to an explicit predecessor, ignoring mutable tracking refs', async () => {
       const calls = publicationGit(
         'feat/security',

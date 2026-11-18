@@ -26,7 +26,11 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     runMigrations(db, old, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 245 });
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 251 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 252 });
+    expect(db.prepare('SELECT * FROM saved_work_draft_pr_operations').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM saved_work_draft_pr_preparation_cancellations').all()).toEqual(
+      [],
+    );
     expect(db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_network_releases').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_network_release_outcomes').all()).toEqual([]);

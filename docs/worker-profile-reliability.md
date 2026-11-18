@@ -185,6 +185,19 @@ Only the new generation uses that immutable selection. Preset edits alone still
 do nothing to an existing worker; image qualification, fresh checks/review and
 subsequent human approval remain separate.
 
+## Real jq in coding workers
+
+Every base and managed coding-worker template explicitly installs distro `jq`.
+During the build, the configured non-root worker runs `autopod-check-jq`, checking
+the package-owned binary with JSON selection/transformation, exact output, and
+`jq -e` success and false/null failure statuses. Local shims are not equivalent
+to validation with real jq; missing jq means functional qualification is not run.
+
+Template/source tests and daemon deployment do not repair published images or
+frozen workers. Build, qualify and publish new images, then deliberately select
+their immutable digests for future launches. Image rollout remains a separate
+operator action; existing pods keep their frozen image selection.
+
 ## Consistent coding-worker Git
 
 All base coding templates and both managed Codex templates install the same Git

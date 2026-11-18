@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -70,6 +79,236 @@ describe('checkpointSandboxWorkspace', () => {
       await rm(`${checkpointPath}.meta`, { force: true });
     }
     await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  async function rewrittenSource() {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'sandbox');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'base\n');
+    await writeFile(path.join(seed, '.gitignore'), 'ignored-report.txt\n');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'base']);
+    const base = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: seed })).stdout.trim();
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'implementation\n');
+    await git(sandbox, ['commit', '-am', 'draft implementation']);
+    const cm = createSandboxContainerManager(sandbox);
+    const args = {
+      assertCurrent: () => {},
+      containerManager: cm,
+      containerId: 'sandbox-1',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+    };
+    const first = await checkpointSandboxWorkspace({ ...args, sequence: 1 });
+    expect(first.materialized).toBe(true);
+    // Autosquash/amend keeps the task base but replaces the captured source commit.
+    await git(sandbox, ['commit', '--amend', '-m', 'final implementation']);
+    await writeFile(path.join(sandbox, 'new.txt'), 'final correction\n');
+    return { host, sandbox, base, first, args };
+  }
+
+  it('recovers an owned unpublished history rewrite while retaining both exact checkpoints', async () => {
+    const f = await rewrittenSource();
+    await writeFile(path.join(f.host, 'ignored-report.txt'), 'retained host report\n');
+    await mkdir(path.join(f.host, 'reports'));
+    await writeFile(path.join(f.host, 'reports/retained.log'), 'retained directory report\n');
+    await writeFile(path.join(f.host, '.git/info/exclude'), 'reports\n');
+    await mkdir(path.join(f.sandbox, 'reports'));
+    await writeFile(path.join(f.sandbox, 'reports/new.txt'), 'new tracked report\n');
+    await writeFile(path.join(f.sandbox, 'reports/ø.txt'), 'valid UTF-8 path\n');
+    const guestHead = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.sandbox }))
+      .stdout;
+    const guestStatus = (await execFileAsync('git', ['status', '--porcelain'], { cwd: f.sandbox }))
+      .stdout;
+    const result = await checkpointSandboxWorkspace({
+      ...f.args,
+      sequence: 2,
+      unpublishedSourceBase: f.base,
+    });
+    expect(result).toMatchObject({
+      promoted: true,
+      materialized: true,
+      rewrittenFrom: {
+        checkpoint: f.first.snapshotCommit,
+        sourceHead: f.first.sourceHead,
+        base: f.base,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(
+      (
+        await execFileAsync('git', ['rev-parse', f.first.quarantineRef], { cwd: f.host })
+      ).stdout.trim(),
+    ).toBe(f.first.snapshotCommit);
+    expect(
+      (
+        await execFileAsync('git', ['rev-parse', result.quarantineRef], { cwd: f.host })
+      ).stdout.trim(),
+    ).toBe(result.snapshotCommit);
+    expect(await readFile(path.join(f.host, 'new.txt'), 'utf8')).toBe('final correction\n');
+    expect(await readFile(path.join(f.host, 'ignored-report.txt'), 'utf8')).toBe(
+      'retained host report\n',
+    );
+    expect(await readFile(path.join(f.host, 'reports/retained.log'), 'utf8')).toBe(
+      'retained directory report\n',
+    );
+    expect(await readFile(path.join(f.host, 'reports/new.txt'), 'utf8')).toBe(
+      'new tracked report\n',
+    );
+    expect((await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.sandbox })).stdout).toBe(
+      guestHead,
+    );
+    expect((await execFileAsync('git', ['status', '--porcelain'], { cwd: f.sandbox })).stdout).toBe(
+      guestStatus,
+    );
+    await expect(
+      resolveSandboxCheckpointSourceHead(f.host, f.args.podId, result.snapshotCommit),
+    ).resolves.toBe(result.sourceHead);
+  });
+
+  it.each([
+    'no-base',
+    'missing-base',
+    'wrong-base',
+    'foreign-checkpoint',
+    'host-commit',
+    'dirty-host',
+    'untracked-host',
+    'ignored-collision',
+    'ignored-rename-collision',
+    'ignored-symlink-ancestor',
+    'ignored-dangling-ancestor',
+    'ignored-nonutf8-collision',
+    'ignored-bom-collision',
+    'replace-ancestry',
+    'grafted-ancestry',
+  ])('refuses rewrite recovery for %s without changing either source', async (scenario) => {
+    const f = await rewrittenSource();
+    let base: string | undefined = f.base;
+    if (scenario === 'no-base') base = undefined;
+    if (scenario === 'missing-base') base = 'a'.repeat(40);
+    if (
+      scenario === 'wrong-base' ||
+      scenario === 'replace-ancestry' ||
+      scenario === 'grafted-ancestry'
+    )
+      base = f.first.sourceHead;
+    if (scenario === 'replace-ancestry' || scenario === 'grafted-ancestry') {
+      const imported = await checkpointSandboxWorkspace({ ...f.args, sequence: 2 });
+      expect(imported).toMatchObject({ hostImported: true, promoted: false });
+    }
+    if (scenario === 'replace-ancestry') {
+      const rewritten = (
+        await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.sandbox })
+      ).stdout.trim();
+      await git(f.host, ['replace', f.first.sourceHead, rewritten]);
+    }
+    if (scenario === 'grafted-ancestry') {
+      const rewritten = (
+        await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.sandbox })
+      ).stdout.trim();
+      await writeFile(
+        path.join(f.host, '.git/info/grafts'),
+        `${rewritten} ${f.first.sourceHead}\n`,
+      );
+    }
+    if (scenario === 'foreign-checkpoint') {
+      await git(f.host, [
+        'update-ref',
+        'refs/autopod-quarantine/another-pod/1',
+        f.first.snapshotCommit,
+      ]);
+      await git(f.host, ['update-ref', '-d', f.first.quarantineRef]);
+    }
+    if (scenario === 'host-commit')
+      await git(f.host, ['commit', '--allow-empty', '-m', 'operator work']);
+    if (scenario === 'dirty-host')
+      await writeFile(path.join(f.host, 'tracked.txt'), 'operator work\n');
+    if (scenario === 'untracked-host')
+      await writeFile(path.join(f.host, 'operator.txt'), 'operator notes\n');
+    if (scenario === 'ignored-collision') {
+      await writeFile(path.join(f.host, '.git/info/exclude'), 'new.txt\n');
+      await writeFile(path.join(f.host, 'new.txt'), 'retained ignored report\n');
+    }
+    if (scenario === 'ignored-bom-collision') {
+      await rm(path.join(f.sandbox, 'new.txt'));
+      await writeFile(path.join(f.host, '.git/info/exclude'), '*\n');
+      await writeFile(path.join(f.host, '\uFEFFnew.txt'), 'retained BOM-path report\n');
+      await writeFile(path.join(f.sandbox, '\uFEFFnew.txt'), 'new tracked BOM-path content\n');
+    }
+    if (scenario === 'ignored-nonutf8-collision') {
+      await mkdir(path.join(f.host, 'reports'));
+      await mkdir(path.join(f.sandbox, 'reports'));
+      await writeFile(path.join(f.host, '.git/info/exclude'), 'reports\n');
+      for (const [root, contents] of [
+        [f.host, 'retained byte-path report\n'],
+        [f.sandbox, 'new tracked byte-path content\n'],
+      ] as const) {
+        const file = Buffer.concat([
+          Buffer.from(`${root}/reports/`),
+          Buffer.from([0xff]),
+          Buffer.from('.txt'),
+        ]);
+        await writeFile(file, contents);
+      }
+    }
+    if (scenario === 'ignored-symlink-ancestor' || scenario === 'ignored-dangling-ancestor') {
+      const outside = path.join(tmpRoot, 'outside');
+      if (scenario === 'ignored-symlink-ancestor') await mkdir(outside);
+      await symlink(outside, path.join(f.host, 'reports'), 'dir');
+      await writeFile(path.join(f.host, '.git/info/exclude'), 'reports\n');
+      await mkdir(path.join(f.sandbox, 'reports'));
+      await writeFile(path.join(f.sandbox, 'reports/new.txt'), 'new tracked content\n');
+    }
+    if (scenario === 'ignored-rename-collision') {
+      await git(f.sandbox, ['mv', 'tracked.txt', 'renamed.txt']);
+      await writeFile(path.join(f.host, '.git/info/exclude'), 'renamed.txt\n');
+      await writeFile(path.join(f.host, 'renamed.txt'), 'retained rename report\n');
+    }
+    const before = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.host })).stdout;
+    const status = (await execFileAsync('git', ['status', '--porcelain'], { cwd: f.host })).stdout;
+    const result = await checkpointSandboxWorkspace({
+      ...f.args,
+      sequence: scenario === 'replace-ancestry' || scenario === 'grafted-ancestry' ? 3 : 2,
+      unpublishedSourceBase: base,
+    });
+    expect(result).toMatchObject({ promoted: false, materialized: false });
+    expect((await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.host })).stdout).toBe(
+      before,
+    );
+    expect((await execFileAsync('git', ['status', '--porcelain'], { cwd: f.host })).stdout).toBe(
+      status,
+    );
+    if (scenario === 'dirty-host')
+      expect(await readFile(path.join(f.host, 'tracked.txt'), 'utf8')).toBe('operator work\n');
+    if (scenario === 'ignored-collision')
+      expect(await readFile(path.join(f.host, 'new.txt'), 'utf8')).toBe(
+        'retained ignored report\n',
+      );
+    if (scenario === 'ignored-rename-collision')
+      expect(await readFile(path.join(f.host, 'renamed.txt'), 'utf8')).toBe(
+        'retained rename report\n',
+      );
+    if (scenario === 'ignored-bom-collision')
+      expect(await readFile(path.join(f.host, '\uFEFFnew.txt'), 'utf8')).toBe(
+        'retained BOM-path report\n',
+      );
+    if (scenario === 'ignored-nonutf8-collision') {
+      const file = Buffer.concat([
+        Buffer.from(`${f.host}/reports/`),
+        Buffer.from([0xff]),
+        Buffer.from('.txt'),
+      ]);
+      expect(await readFile(file, 'utf8')).toBe('retained byte-path report\n');
+    }
+    if (scenario === 'ignored-symlink-ancestor' || scenario === 'ignored-dangling-ancestor') {
+      expect((await lstat(path.join(f.host, 'reports'))).isSymbolicLink()).toBe(true);
+      expect(await readlink(path.join(f.host, 'reports'))).toBe(path.join(tmpRoot, 'outside'));
+    }
   });
 
   it('retains physical host source and ignored reports if authority is lost after guest export before promotion', async () => {

@@ -63,6 +63,25 @@ export class InputBundleStore {
     return this.response(this.row(id, owner));
   }
 
+  /** Human/operator viewing only. Admission and mutations must use owner-bound helpers. */
+  getForViewing(id: string, viewer: string): InputBundleResponse {
+    const row = this.db
+      .prepare("SELECT * FROM input_bundles WHERE id=? AND (owner_id=? OR status='sealed')")
+      .get(id, viewer) as Row | undefined;
+    if (!row) fail('Input bundle not found', 'INPUT_BUNDLE_NOT_FOUND', 404);
+    return this.response(row);
+  }
+
+  assertForViewing(ref: InputBundleRef, viewer: string): void {
+    this.assertManifest(ref, this.getForViewing(ref.id, viewer));
+  }
+
+  readForViewing(id: string, viewer: string, index: number): Buffer {
+    const bundle = this.getForViewing(id, viewer);
+    if (bundle.status !== 'sealed') fail('Input upload is incomplete', 'INPUT_UPLOAD_INCOMPLETE');
+    return this.readVerified(bundle, index);
+  }
+
   create(raw: unknown, owner: string): InputBundleResponse {
     const { requestKey, files } = createInputBundleSchema.parse(raw);
     const manifest = {
@@ -161,11 +180,14 @@ export class InputBundleStore {
   }
   read(id: string, owner: string, index: number): Buffer {
     const bundle = this.get(id, owner);
+    return this.readVerified(bundle, index);
+  }
+  private readVerified(bundle: InputBundleResponse, index: number): Buffer {
     const file = bundle.files[index];
     if (!file) fail('Input file not found', 'INPUT_FILE_NOT_FOUND', 404);
     const row = this.db
       .prepare('SELECT bytes FROM input_bundle_files WHERE bundle_id=? AND file_index=?')
-      .get(id, index) as { bytes: Buffer } | undefined;
+      .get(bundle.id, index) as { bytes: Buffer } | undefined;
     if (!row) fail('Input upload is incomplete', 'INPUT_UPLOAD_INCOMPLETE');
     this.verify(file, row.bytes);
     return row.bytes;
@@ -181,7 +203,10 @@ export class InputBundleStore {
     })();
   }
   assert(ref: InputBundleRef, owner: string): void {
-    const { status, ...actual } = this.get(ref.id, owner);
+    this.assertManifest(ref, this.get(ref.id, owner));
+  }
+  private assertManifest(ref: InputBundleRef, bundle: InputBundleResponse): void {
+    const { status, ...actual } = bundle;
     if (status !== 'sealed')
       fail('Seal reference attachments before previewing or launching', 'INPUT_UPLOAD_INCOMPLETE');
     if (configurationDigest(inputBundleRefSchema.parse(ref)) !== configurationDigest(actual))

@@ -433,6 +433,7 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  readonly supportsCreateOnlyPublication = true as const;
   async assertSourceDescendsFrom(worktreePath: string, head: string): Promise<void> {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head))
       throw new AutopodError('Exact source ancestor required', 'CHECKPOINT_SOURCE_UNVERIFIED', 409);
@@ -1844,6 +1845,17 @@ export class LocalWorktreeManager implements WorktreeManager {
     );
     const repository = `${repositoryUrl.protocol}//${repositoryUrl.host}${repositoryUrl.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`;
     const remoteRef = `refs/heads/${expectedBranch}`;
+    // Saved-work drafts require provider repository identity before create-only admission.
+    // Ordinary delivery retains its publication ledger's repository identity semantics.
+    if (options?.createOnly && options.expectedRepository)
+      assertMergeRepository(
+        {
+          repository: options.expectedRepository,
+          branch: expectedBranch,
+          baseBranch: expectedBranch,
+        },
+        repository,
+      );
     const observeRemote = async (): Promise<string | null> => {
       const result = await git(['ls-remote', '--heads', remote.url, remoteRef], {
         cwd: worktreePath,
@@ -1894,6 +1906,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     };
     // An immutable source ref prevents a concurrent checkout/commit from silently
     // changing which source the external push publishes.
+    if (options?.createOnly && (await observeRemote()) !== null)
+      throw new AutopodError(
+        'Recovery destination is occupied; no overwrite admitted.',
+        'SAVED_WORK_BRANCH_COLLISION',
+        409,
+      );
+    await options?.beforePrepared?.();
     options?.onPrepared?.({
       branch: expectedBranch,
       repository,
@@ -1904,6 +1923,8 @@ export class LocalWorktreeManager implements WorktreeManager {
     });
     const refspec = `${source.head}:${remoteRef}`;
     let pushArgs = ['push', '--no-verify', remote.url, refspec];
+    if (options?.createOnly)
+      pushArgs = ['push', '--no-verify', `--force-with-lease=${remoteRef}:`, remote.url, refspec];
     if (force) {
       const observedRemoteOid = await observeRemote();
       if (observedRemoteOid === source.head) {

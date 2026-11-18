@@ -5,13 +5,15 @@ ARG REPOSITORY_URL
 ARG BASE_REVISION
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git python3 ripgrep \
+    && apt-get install -y --no-install-recommends jq ca-certificates curl git python3 ripgrep \
       build-essential libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep Git integration capabilities independent of the distribution package version.
 COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
 RUN sh /tmp/install-worker-git.sh && rm /tmp/install-worker-git.sh
+COPY templates/base/check-worker-jq.sh /usr/local/bin/autopod-check-jq
+RUN chmod 0755 /usr/local/bin/autopod-check-jq
 COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
 # Bounded workers must not acquire untracked background Git writers.
 RUN chmod 0755 /usr/local/bin/autopod-check-git \
@@ -45,4 +47,5 @@ ENV DISABLE_AUTOUPDATER=1
 WORKDIR /output
 USER autopod
 RUN autopod-check-git
+RUN autopod-check-jq
 CMD ["sleep", "infinity"]

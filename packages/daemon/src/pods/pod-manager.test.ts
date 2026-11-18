@@ -9215,7 +9215,8 @@ describe('PodManager', () => {
         reviewComments: [],
       });
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-        code: 'APPROVAL_DELIVERY_FAILED',
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
       });
       expect(manager.getSession(pod.id)).toMatchObject({
         status: 'validated',

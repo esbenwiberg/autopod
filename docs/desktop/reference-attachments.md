@@ -1,7 +1,8 @@
 # Viewing reference attachments
 
 Open a pod, then **Work → Task**. Its **Reference attachments** card appears
-below the task text when its frozen launch includes uploaded inputs.
+below the task text. A successfully confirmed empty load shows **0 attachments**
+without Retry; loading and failed lookups remain distinct.
 
 - Image rows show a thumbnail, filename and file size. Select a row for a larger
   native preview; use **Zoom in** to inspect it in a scrollable view, **Fit image**
@@ -17,11 +18,14 @@ below the task text when its frozen launch includes uploaded inputs.
 These are **provided inputs, not added to source**. **Evidence → Screenshots**
 continues to show generated validation/review screenshots, not uploaded inputs.
 
-Metadata and bytes use the existing owner-scoped configuration/input APIs. The
+Metadata and bytes use authenticated configuration/input APIs that share sealed
+references across human/operator accounts on this single-user daemon. Uploads,
+sealing, renderer POST requests and launch/fork/reuse admission remain owner-bound;
+other accounts cannot inspect incomplete uploads, and pod tokens cannot read these APIs. The
 client verifies downloaded length and SHA-256 against the frozen manifest. A
 missing, inaccessible or corrupt reference displays an error and retry action;
-it is not represented as an empty set. Pods without inputs have no attachments
-card. Changing pods or daemon connections discards the previous view's state.
+it is not represented as an empty set. Changing pods or daemon connections
+discards the previous view's state.
 
 This desktop change does not require a daemon schema change or worker wake-up.
 An older daemon without the configuration/input endpoints cannot provide these

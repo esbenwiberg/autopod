@@ -160,6 +160,19 @@ stopped; it never stops, wakes or deletes it. Historical Docker failures without
 maintained dispatch evidence remain blocked. See `docs/approval-rewrite-repair.md`
 for independent checkout selection, targeted retry permission and fresh approval.
 
+### Saved-work review-only draft publication
+
+`saved-work-draft-pr.ts` owns a distinct human inspect/prepare/confirm workflow.
+Its durable ledger binds actor/task/generation/repository/base, saved commit/tree
+and a new branch. A promotion-only divergent sandbox checkpoint requires complete
+imported proof reverified against local objects and its pod-owned quarantine ref.
+Never substitute `latestVerified` for the latest imported snapshot or claim host
+HEAD contains dirty sandbox work. Older source requires explicit selection.
+Independent preparation preserves originals; push uses an empty exact-ref lease.
+Uncertain effects reconcile positive exact evidence without replay. Keep the
+receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
+`docs/saved-work-draft-pr.md`; preserve the dedicated suites and Mac verification.
+
 ### Retention-safe task continuation
 
 `ap retained-continuation` explicitly selects independent source for ordinary
@@ -174,6 +187,15 @@ controls remain blocked while this source is owned. Never clear custody to retry
 or downgrade to an unaware binary after selection. See
 `docs/retained-pod-continuation.md` at the repository root.
 
+### Externally handled fleet cards
+
+`ap archive-handled-elsewhere` is a separate human visibility disposition for
+ordinary Validated/manually Paused work. It retains native status and all source,
+unknown accounting/execution, guidance and custody. Its reference is human-supplied,
+not a historical publication/merge receipt. Default Archive remains restrictive.
+Startup must not resume archived ordinary tasks or explicit manual pauses; Goal
+and interactive owners remain separate. See `docs/fleet-closeout.md`.
+
 ### Infrastructure-held running originals
 
 `ap recover-infrastructure` is a distinct human-bound control for settled failed
@@ -182,8 +204,12 @@ It acquires custody before one non-destructive stop, reconciles uncertain stop
 outcomes without replay, and independently provisions either checks-only source
 or one owned coding repair. Repair candidates must be clean descendants and still
 pass fresh checks/review/report capture. There is no budget reset, original wake,
-automatic second repair worker or delivery authority. See
-`docs/infrastructure-recovery.md` at the repository root for input qualification,
+automatic second repair worker or delivery authority. A canonical linked PR-fix
+can use this explicit protocol only while its same-task/PR/branch root parent is
+settled failed; that parent binding is rechecked through recovery. Automatic fix
+recycling parks the parent rather than spending another attempt after an
+infrastructure report or retained-checkpoint hold. Ordinary continuation/rewrite
+still excludes linked fixes. See `docs/infrastructure-recovery.md` at the repository root for input qualification,
 exact-request reconciliation, limitations and honest test evidence scope.
 
 ## Database

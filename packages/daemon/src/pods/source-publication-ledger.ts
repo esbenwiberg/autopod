@@ -28,6 +28,10 @@ export interface FixSourceRecovery {
 export interface SourcePublicationLedger {
   /** Exact earlier publication for legacy explicitly requested update-from-base; never a tracking ref. */
   latestConfirmed?(pod: Pod): BranchPublicationReceipt | null;
+  /** Read-only adoption of an actual publication, including one made before PR creation. */
+  latestConfirmedForMerge?(
+    pod: Pod,
+  ): (BranchPublicationReceipt & { publicationId: string; publicationPrUrl: string | null }) | null;
   admit(pod: Pod, source: PublicationSource): string;
   admitFix(
     parent: Pod,
@@ -155,6 +159,25 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       const receipt = JSON.parse(row.receipt) as BranchPublicationReceipt;
       requireEvidence(row.identity === identity(pod, receipt));
       return receipt;
+    },
+    latestConfirmedForMerge(pod) {
+      assertCurrent(pod);
+      const row = db
+        .prepare(`SELECT i.id,i.identity,r.receipt FROM source_publication_intents i
+        JOIN source_publication_receipts r ON r.intent_id=i.id
+        WHERE i.pod_id=? AND i.generation=? ORDER BY r.rowid DESC LIMIT 1`)
+        .get(pod.id, pod.lifecycleGeneration) as
+        | { id: string; identity: string; receipt: string }
+        | undefined;
+      if (!row) return null;
+      requireEvidence(row.receipt.length <= 16384);
+      const receipt = JSON.parse(row.receipt) as BranchPublicationReceipt;
+      // PR creation follows publication. Only that null→current PR identity
+      // change is supported; never borrow another lifecycle/resource's receipt.
+      const publicationPrUrl = row.identity === identity(pod, receipt) ? pod.prUrl : null;
+      requireEvidence(row.identity === identity({ ...pod, prUrl: publicationPrUrl }, receipt));
+      ledger.confirmedForMerge({ ...pod, prUrl: publicationPrUrl }, pod, row.id);
+      return { ...receipt, publicationId: row.id, publicationPrUrl };
     },
     admitFix(parent, fix, source, priorMergeIntentId, recovery) {
       requireEvidence(!db.inTransaction);

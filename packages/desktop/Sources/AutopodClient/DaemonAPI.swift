@@ -78,6 +78,30 @@ public actor DaemonAPI {
 
   // MARK: - Health
 
+  public func inspectSavedWorkDraft(_ id: String) async throws -> SavedWorkDraftPreview {
+    try await request("GET", try savedWorkDraftPath(id))
+  }
+  public func cancelSavedWorkDraftPreparation(_ id: String, body: SavedWorkDraftPrepare) async throws -> SavedWorkDraftPreparationCancellation {
+    try await request("POST", try savedWorkDraftPath(id) + "/cancel-preparation", body: encode(body))
+  }
+  public func cancelSavedWorkDraft(_ id: String, body: SavedWorkDraftCancel) async throws -> SavedWorkDraftOperation {
+    try await request("POST", try savedWorkDraftPath(id) + "/cancel", body: encode(body))
+  }
+  public func prepareSavedWorkDraft(_ id: String, body: SavedWorkDraftPrepare) async throws -> SavedWorkDraftOperation {
+    try await request("POST", try savedWorkDraftPath(id) + "/prepare", body: encode(body), timeout: 180)
+  }
+  public func confirmSavedWorkDraft(_ id: String, body: SavedWorkDraftConfirm) async throws -> SavedWorkDraftOperation {
+    try await request("POST", try savedWorkDraftPath(id) + "/confirm", body: encode(body), timeout: 180)
+  }
+  public func observeSavedWorkDraft(_ id: String, requestId: String) async throws -> SavedWorkDraftOperation {
+    guard requestId.range(of: #"^[a-zA-Z0-9-]{1,64}$"#, options: .regularExpression) != nil else { throw URLError(.badURL) }
+    return try await request("GET", try savedWorkDraftPath(id) + "/" + requestId)
+  }
+  private func savedWorkDraftPath(_ id: String) throws -> String {
+    guard id.range(of: #"^[a-zA-Z0-9_-]{1,128}$"#, options: .regularExpression) != nil else { throw URLError(.badURL) }
+    return "/pods/\(id)/saved-work-draft"
+  }
+
   public func healthCheck() async throws -> Bool {
     let _: HealthResponse = try await request("GET", "/health")
     return true

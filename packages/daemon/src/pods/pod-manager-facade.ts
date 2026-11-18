@@ -82,6 +82,61 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    async cancelSavedWorkDraftPreparation(
+      podId: string,
+      request: import('@autopod/shared').SavedWorkDraftPrepare,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')
+      ).cancelPreparation(podId, request, actor);
+    },
+    async cancelSavedWorkDraft(
+      podId: string,
+      request: import('@autopod/shared').SavedWorkDraftCancel,
+      actor: OperatorActor,
+    ) {
+      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).cancel(
+        podId,
+        request,
+        actor,
+      );
+    },
+    inspectSavedWorkDraft(podId: string, actor: OperatorActor) {
+      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).inspect(
+        podId,
+        actor,
+      );
+    },
+    observeSavedWorkDraft(podId: string, requestId: string, actor: OperatorActor) {
+      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).observe(
+        podId,
+        requestId,
+        actor,
+      );
+    },
+    prepareSavedWorkDraft(
+      podId: string,
+      request: import('@autopod/shared').SavedWorkDraftPrepare,
+      actor: OperatorActor,
+    ) {
+      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).prepare(
+        podId,
+        request,
+        actor,
+      );
+    },
+    confirmSavedWorkDraft(
+      podId: string,
+      request: import('@autopod/shared').SavedWorkDraftConfirm,
+      actor: OperatorActor,
+    ) {
+      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).confirm(
+        podId,
+        request,
+        actor,
+      );
+    },
     inspectArtifactChecksRecovery(podId: string) {
       return (
         captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')

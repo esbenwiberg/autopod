@@ -320,10 +320,17 @@ import {
   type ExternalDeliveryRepository,
 } from './external-delivery-repository.js';
 import { createMergeJournal, type MergeJournal } from './merge-journal.js';
+import {
+  createSavedWorkDraftRepository,
+  type SavedWorkDraftRepository,
+} from './saved-work-draft-repository.js';
 import { createTaskExecutionLedger, type TaskExecutionLedger } from './task-execution-ledger.js';
 import { createTaskHistoryArchive } from './task-history-archive.js';
+import { createWorkspaceCheckpointRepository } from './workspace-checkpoint-repository.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
+  savedWorkDrafts?: SavedWorkDraftRepository;
+  savedWorkspaceCheckpoints?: ReturnType<typeof createWorkspaceCheckpointRepository>;
   artifactChecks?: import('./artifact-checks-recovery-repository.js').ArtifactChecksRecoveryRepository;
   recoveryForks?: RecoveryForkRepository;
   inputBundles?: InputBundleStore;
@@ -886,6 +893,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
     artifactChecks: createArtifactChecksRecoveryRepository(db),
     taskRetries: createTaskRetryLedger(db),
     validationExecutions: createValidationExecutionLedger(db),
+    savedWorkDrafts: createSavedWorkDraftRepository(db),
+    savedWorkspaceCheckpoints: createWorkspaceCheckpointRepository(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
     stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
@@ -1721,6 +1730,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      createSavedWorkDraftRepository(db).assertAvailable(id);
       createRecoveryForkRepository(db).assertOriginalAvailable(id);
       assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);

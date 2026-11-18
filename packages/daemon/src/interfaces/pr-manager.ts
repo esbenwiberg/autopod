@@ -200,6 +200,8 @@ export interface FoundPr {
 }
 
 export interface PrManager {
+  /** Narrow review-only API: no generated narrative, updates, ready or merge operation. */
+  savedDraft?: SavedDraftProvider;
   /** Bounded, exact repository/head/base lookup across all dispositions. Errors are not absence. */
   findPr?(
     config: Pick<CreatePrConfig, 'worktreePath' | 'repoUrl' | 'branch' | 'baseBranch'>,
@@ -214,4 +216,28 @@ export interface PrManager {
     worktreePath?: string;
     responses: ReviewFeedbackReply[];
   }): Promise<ReviewFeedbackReplyResult>;
+}
+
+export interface SavedDraftTarget {
+  repository: string;
+  branch: string;
+  baseBranch: string;
+  head: string;
+  operationId: string;
+  worktreePath: string;
+}
+export interface SavedDraftObservation {
+  url: string;
+  repository: string;
+  branch: string;
+  baseBranch: string;
+  head: string;
+  draft: boolean;
+  open: boolean;
+  merged: boolean;
+  body: string;
+}
+export interface SavedDraftProvider {
+  find(target: SavedDraftTarget): Promise<SavedDraftObservation | null>;
+  create(target: SavedDraftTarget, body: string, onPrepared: () => Promise<void>): Promise<void>;
 }

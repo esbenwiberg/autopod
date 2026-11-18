@@ -174,9 +174,13 @@ references for a new launch. Series requests may select `inputBundle` at the ser
 request's top level; current normal pod CLI/desktop attachment pickers do not add
 series-picker or phone-uploader support.
 
-Only the authenticated bundle owner can list/download/reuse it. Pod tokens do not
+Authenticated human/operator accounts on this single-user daemon can read sealed
+bundle manifests, original downloads and attachment-bearing source configuration,
+regardless of uploader account. Only the uploader can inspect incomplete upload
+metadata. Mutations, renderer POST requests and launch/fork/reuse admission remain
+owner-bound; shared viewing grants no admission authority. Pod tokens do not
 authorize these endpoints. Ordinary pod list/detail DTOs withhold attachment
-manifests; the source-configuration endpoint checks attachment ownership. Local absolute paths and original bytes are not inserted into upload/launch
+manifests. Local absolute paths and original bytes are not inserted into upload/launch
 receipts. Normalized native-image activity summaries withhold image blocks and
 known reference-file read contents. Treat provider-owned sessions/raw debugging
 transcripts as sensitive task data; model descriptions and arbitrary unstructured
@@ -218,8 +222,9 @@ Human/operator bearer authentication is required throughout:
    absolute 30-second body deadline releases stalled requests.
 3. `POST /input-bundles/:id/seal`; missing or mismatched bytes fail closed.
 4. Include the sealed reference (without `status`) in `LaunchRequest.work.inputBundle`.
-5. `GET /input-bundles/:id` returns owner-scoped metadata;
-   `GET /input-bundles/:id/files/:index` downloads sealed raw bytes.
+5. `GET /input-bundles/:id` returns sealed metadata to any authenticated operator
+   (incomplete metadata only to its owner); `GET /input-bundles/:id/files/:index`
+   downloads verified sealed raw bytes to any authenticated operator.
 6. Optional `POST /input-bundles/:id/render` with `{ "path": "folder/design.html" }`
    returns `{ receipt, base64 }` for a source-bound JPEG, at most 2 MiB decoded.
    Owner authentication and `private, no-store` apply; no arbitrary URLs, browser

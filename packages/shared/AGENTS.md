@@ -8,6 +8,10 @@ Types live under `src/types/`, one file per concern. Public exports flow through
 `src/index.ts`. When changing shared types, check every downstream package that
 consumes the contract.
 
+Saved-work draft contracts intentionally use a separate operation/receipt from
+Pod status and `prUrl`. Their review-only human authority must never be mapped
+into ordinary approval, readiness or merge/fix polling.
+
 Useful checks:
 
 ```bash

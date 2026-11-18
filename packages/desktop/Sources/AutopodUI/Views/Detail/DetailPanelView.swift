@@ -174,6 +174,7 @@ public struct DetailPanelView: View {
 
     @State private var requestedEvidenceSection: EvidenceSection?
     @State private var findingsError: String?
+    @State private var showSavedWorkDraft = false
     @State private var findingsPending = false
     @State private var isInfrastructureResumePending = false
     @State private var didCopyName: Bool = false
@@ -463,6 +464,10 @@ public struct DetailPanelView: View {
             .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text("This will permanently remove the pod record.")
+        }
+        .sheet(isPresented: $showSavedWorkDraft) {
+            SavedWorkDraftView(podId: pod.id, actions: actions.savedWorkDraft)
+                .id(pod.id + actions.savedWorkDraft.scope)
         }
         .sheet(isPresented: $showSpawnFixSheet) {
             if redesign {
@@ -805,6 +810,11 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.orange)
                 .help("Repopulate the host worktree from the live container or, if the container is gone, restore deleted files from the agent's last commit on the bare repo. Clears the compromised flag on success.")
+            }
+            if pod.pod.output == .pr && [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
+                Button("Create draft PR from saved work…") { showSavedWorkDraft = true }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .accessibilityIdentifier("saved-work-draft-action")
             }
             switch pod.status {
             case .queued:

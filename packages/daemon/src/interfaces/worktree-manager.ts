@@ -21,6 +21,10 @@ export type BranchPublicationSource = Omit<
   'observedAt' | 'observedRemoteCommitSha'
 >;
 export interface BranchPublicationOptions {
+  /** New exact ref only. Empty predecessor lease; occupied refs are never reused. */
+  createOnly?: boolean;
+  /** Fresh custody and exact-source recheck after authentication/remote observation. */
+  beforePrepared?: () => Promise<void>;
   expectedRepository?: string;
   force?: boolean;
   /** Exact durable predecessor; never inferred from a mutable tracking ref. */
@@ -236,6 +240,7 @@ export interface PrepareSourceAdoption {
 }
 
 export interface WorktreeManager {
+  readonly supportsCreateOnlyPublication?: true;
   prepareApprovalRebase?(config: ApprovalRebaseConfig): Promise<ApprovalRebaseResult>;
   /** Only a newly-created independent continuation checkout; never the retained original. */
   selectRetainedContinuationSource?(config: {

@@ -164,6 +164,10 @@ describe('retained source location protection', () => {
     if (!holdBeforeMove) f.hold([source.worktreePath]);
     if (autoGc) {
       await git(source.bareRepoPath, 'repack', '-ad');
+      // The actual fetch honors system policy; opt this disposable repository
+      // into synchronous maintenance even in workers that disable it globally.
+      await git(source.bareRepoPath, 'config', 'gc.auto', '6700');
+      await git(source.bareRepoPath, 'config', 'maintenance.auto', 'true');
       await git(source.bareRepoPath, 'config', 'gc.autoPackLimit', '1');
       await git(source.bareRepoPath, 'config', 'gc.autoDetach', 'false');
       await git(source.bareRepoPath, 'config', 'fetch.unpackLimit', '1');
