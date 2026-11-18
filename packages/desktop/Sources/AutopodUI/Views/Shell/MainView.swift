@@ -1587,6 +1587,9 @@ public struct MainView: View {
                         qualityScore: qualityScores[pod.id]
                     )
                     .onTapGesture { selectFleetPod(pod.id) }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Open \(pod.desktopTitle)")
+                    .accessibilityAction { selectFleetPod(pod.id) }
                 }
             }
             .padding(16)
@@ -1601,11 +1604,8 @@ public struct MainView: View {
             if let id { selectFleetPod(id) }
         })) {
             ForEach(sessions) { pod in
-                SessionListRow(pod: pod)
+                FleetPodListButton(pod: pod, onSelect: selectFleetPod)
                     .tag(pod.id)
-                    .simultaneousGesture(TapGesture().onEnded { selectFleetPod(pod.id) })
-                    .accessibilityIdentifier("fleet-list-\(pod.id)")
-                    .accessibilityAction { selectFleetPod(pod.id) }
             }
             browseArchiveFooter(visibleCount: sessions.count, scopedTotal: fleet.scopedTotal)
         }
@@ -1719,6 +1719,22 @@ enum SortOrder: String, CaseIterable {
 }
 
 // MARK: - Pod list row (compact list view)
+
+struct FleetPodListButton: View {
+    let pod: Pod
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Button { onSelect(pod.id) } label: {
+            SessionListRow(pod: pod)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(pod.desktopTitle)")
+        .accessibilityIdentifier("fleet-list-\(pod.id)")
+    }
+}
 
 struct SessionListRow: View {
     let pod: Pod

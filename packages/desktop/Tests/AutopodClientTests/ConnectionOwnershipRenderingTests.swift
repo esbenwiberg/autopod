@@ -73,7 +73,8 @@ import AutopodUI
     try await connectionWait {
       let text = self.rows.joined(separator: "\n")
       if let decision { return text.contains("Question \(decision)?") && text.contains("\(decision) first") }
-      return !text.contains("Question A?") && !text.contains("A first") && text.contains("Select a pod")
+      return text.contains("No pods") && !text.contains("Select a pod")
+        && !text.contains("Question A?") && !text.contains("A first")
     }
     let text = rows.joined(separator: "\n")
     if decision != "A" { #expect(!text.contains("Question A?") && !text.contains("A first")) }

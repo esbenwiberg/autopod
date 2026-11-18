@@ -56,6 +56,34 @@ import Testing
         let editor = try #require(field.currentEditor() as? NSTextView)
         editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
     }
+    func fleetSegment(_ label: String) -> (NSSegmentedControl, Int)? {
+        func findSegment(_ view: NSView) -> (NSSegmentedControl, Int)? {
+            if let control = view as? NSSegmentedControl, !control.isHiddenOrHasHiddenAncestor {
+                for index in 0..<control.segmentCount {
+                    if control.label(forSegment: index) == label
+                        || control.image(forSegment: index)?.accessibilityDescription == label {
+                        return (control, index)
+                    }
+                }
+            }
+            return view.subviews.lazy.compactMap(findSegment).first
+        }
+        return findSegment(hosting)
+    }
+    func selectFleetSegment(_ label: String) throws {
+        layout()
+        let (control, index) = try #require(fleetSegment(label))
+        control.selectedSegment = index
+        try #require(control.sendAction(control.action, to: control.target))
+    }
+    func fleetTable(rowCount: Int) -> NSTableView? {
+        func findTable(_ view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView, !table.isHiddenOrHasHiddenAncestor,
+               table.numberOfRows == rowCount { return table }
+            return view.subviews.lazy.compactMap(findTable).first
+        }
+        return findTable(hosting)
+    }
     func key(_ code: UInt16, characters: String, modifiers: NSEvent.ModifierFlags = []) throws {
         window.makeKeyAndOrderFront(nil)
         let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
@@ -120,7 +148,10 @@ import Testing
         let current = nodes
         guard let node = find(id: "detail-tab-\(tab)", in: current),
               value(node, "accessibilitySelected") as? Bool == true,
-              let id = inputs.selectedID, current.contains(where: { label($0) == id }) else { return false }
+              let id = inputs.selectedID else { return false }
+        // Work renders a unique summary for the current pod; the legacy
+        // heading groups the pod ID under its copy gesture in AppKit.
+        if tab != "work", !current.contains(where: { label($0) == id }) { return false }
         let marker: String
         switch tab {
         case "overview": marker = "Recent Activity"

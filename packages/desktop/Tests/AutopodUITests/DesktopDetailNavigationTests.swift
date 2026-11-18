@@ -63,18 +63,46 @@ import Testing
         try await host.wait { host.inputs.selectedID == "perf-0010" && host.destination("work") }
     }
 
-    @Test func listReopensSameAndAnotherPodWithoutChangingViewOrTab() async throws {
-        let host = try DesktopSelectionPerformanceHost(redesign: false)
+    @Test func closingDetailsLeavesLegacyListAndSelectionIntact() async throws {
+        let host = try DesktopSelectionPerformanceHost(redesign: false) { view in
+            view.pods = Array(view.pods.prefix(2))
+            for index in view.pods.indices { view.pods[index].status = .failed }
+        }
         defer { host.close() }
         try await host.selectTab("work")
-        #expect(host.press(try #require(host.find(label: "List"))))
-        try await host.wait { host.find(id: "fleet-list-perf-0000") != nil }
-        for id in ["perf-0000", "perf-0001"] {
-            #expect(host.press(try #require(host.find(id: "detail-close"))))
-            try await host.wait { host.find(id: "detail-close") == nil }
-            #expect(host.press(try #require(host.find(id: "fleet-list-\(id)"))))
-            try await host.wait { host.inputs.selectedID == id && host.destination("work") }
-            #expect(host.find(id: "fleet-list-\(id)") != nil)
+        try host.selectFleetSegment("List")
+        try await host.wait { host.fleetTable(rowCount: 2) != nil }
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        #expect(host.inputs.selectedID == "perf-0000")
+        #expect(host.fleetTable(rowCount: 2) != nil)
+    }
+
+    @Test func listRowActivationReopensSameAndAnotherPodWithTabRetained() async throws {
+        let inputs = DetailNavigationInputs()
+        inputs.navigation.request(.work)
+        let pods = Array(DesktopPerformanceFixtures.pods.prefix(2))
+        let host = LaunchComposerHost(VStack {
+            ForEach(pods) { pod in
+                // Use the production row button, mounted without the native
+                // outline's virtualized AX cells.
+                FleetPodListButton(pod: pod) { id in
+                    if let next = pods.first(where: { $0.id == id }) {
+                        inputs.navigation.reveal()
+                        inputs.pod = next
+                    }
+                }
+            }
+            DetailNavigationFixtureView(inputs: inputs)
+        }, width: 1_200)
+        defer { host.close() }
+        for pod in pods {
+            inputs.navigation.close()
+            try await host.wait { !host.has("detail-close") }
+            try host.press("fleet-list-\(pod.id)")
+            try await host.wait { host.containsText("Fixture summary for \(pod.id)") }
+            #expect(inputs.pod.id == pod.id)
+            #expect(inputs.navigation.selectedTab == .work)
         }
     }
 
@@ -99,22 +127,24 @@ import Testing
     }
 
     @Test func sortAndDensitySurviveCloseReopen() async throws {
-        let host = try DesktopSelectionPerformanceHost(width: 2_600, redesign: false)
+        let host = try DesktopSelectionPerformanceHost(width: 2_000, redesign: false) { view in
+            view.pods = Array(view.pods.prefix(2))
+            for index in view.pods.indices { view.pods[index].status = .failed }
+        }
         defer { host.close() }
         try await host.selectTab("work")
-        #expect(host.press(try #require(host.find(label: "Last Active"))))
-        #expect(host.press(try #require(host.find(label: "Compact"))))
+        try host.selectFleetSegment("Last Active")
+        try host.selectFleetSegment("Compact")
         func selected(_ label: String) -> Bool {
-            guard let node = host.find(label: label) else { return false }
-            return host.value(node, "accessibilitySelected") as? Bool == true
-                || host.value(node, "accessibilityValue") as? Int == 1
+            guard let (control, index) = host.fleetSegment(label) else { return false }
+            return control.selectedSegment == index
         }
         try await host.wait { selected("Last Active") && selected("Compact") }
         #expect(host.press(try #require(host.find(id: "detail-close"))))
         try await host.wait { host.find(id: "detail-close") == nil }
         #expect(selected("Last Active"))
         #expect(selected("Compact"))
-        #expect(host.press(try #require(host.find(label: "Fixture pod perf-0000"))))
+        #expect(host.press(try #require(host.find(label: "Open Fixture pod perf-0000"))))
         try await host.wait { host.destination("work") }
         #expect(selected("Last Active"))
         #expect(selected("Compact"))
@@ -147,8 +177,9 @@ import Testing
         #expect(host.press(try #require(host.find(id: "desktop-series-close-reopen-series"))))
         #expect(host.find(id: "detail-close") == nil, "Series owns a separate detail column")
         #expect(host.press(try #require(host.find(label: "Summary"))))
-        try await host.wait { host.find(label: "perf-0000") != nil }
-        #expect(host.press(try #require(host.find(label: "perf-0000"))))
+        let rowLabel = "Open Fixture pod perf-0000"
+        try await host.wait { host.find(label: rowLabel) != nil }
+        #expect(host.press(try #require(host.find(label: rowLabel))))
         try await host.wait { host.inputs.selectedID == "perf-0000" && host.destination("overview") }
     }
 

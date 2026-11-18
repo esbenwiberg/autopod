@@ -2006,6 +2006,9 @@ public struct DetailPanelView: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .accessibilityLabel(tab.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("detail-tab-\(tab.label.lowercased())")
         .help(isDisabled ? disabledHelp : tab.label)
     }
 
