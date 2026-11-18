@@ -13,6 +13,20 @@ cd packages/daemon
 
 Both cases use private Git, on-disk SQLite, an offline SDK transport, and owned Node child processes. One controller turn proposes six briefs and waits for three results. On the third report a second turn proposes two follow-ups, then hands control back. The assertions check **eight children, five live PIDs (including the same three unfinished originals), two controller calls, and no remaining request allowance**. Duplicate notifications do not change those counts. The startup case disconnects the listener before the third return and reopens SQLite before reattaching it.
 
+## Docker restart canary (opt-in)
+
+From `packages/daemon`, use a **local** Docker socket and a pre-existing Alpine image. No image pull, external provider, credentials, published ports or network access in the workers is needed.
+
+```sh
+AUTOPOD_MANAGED_DOCKER_SOCKET=/absolute/path/to/docker.sock \
+AUTOPOD_WAVE_DOCKER_IMAGE="$(docker image inspect alpine:3 --format '{{.Id}}')" \
+./node_modules/.bin/vitest run src/orchestration/waves.docker.test.ts
+```
+
+The first scheduler launches six workers against read-only synthetic source. Three write reports and exit on an explicit FIFO barrier. After the follow-up decision and reservations commit, the test sends the scheduler itself SIGKILL before wake acknowledgement. A different scheduler process restores from SQLite and uses Docker's persisted container IDs. The canary checks eight distinct containers, five running (including the three original survivors), two offline controller requests total, 16 worker request reservations and no refund. It cancels, verifies Docker and the ledger both report exit, and removes only containers carrying the test's random ownership label.
+
+This uses a fixed Docker workload through a test runtime port. It is not the packaged Codex worker, a real model, the full HTTP daemon or hosted startup. See [managed local Docker](managed-local-docker.md) for the separate production-runtime tests.
+
 ## Host lifecycle
 
 1. Construct `LocalCheckpointHost` with a private scratch directory and a host-owned managed-service factory. Open a run and retain a verified starting commit. Set the whole-run request allowance and concurrent worker limit separately. For the example, eight worker reservations of two requests plus two controller requests cost 18; six slots suffice.
