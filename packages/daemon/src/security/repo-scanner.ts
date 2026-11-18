@@ -33,6 +33,8 @@ export interface ScanContext {
   baseRef?: string;
   profile: Pick<PodExecutionSettings, 'securityScan'>;
   isWorkspacePod?: boolean;
+  /** Optional longer bounded scan for a daemon-owned publication path. */
+  budgetMs?: number;
 }
 
 export interface RepoScanner {
@@ -63,6 +65,7 @@ export function createRepoScanner(deps: RepoScannerDeps): RepoScanner {
         policy,
         checkpoint,
         isWorkspacePod: ctx.isWorkspacePod,
+        budgetMs: ctx.budgetMs,
       });
 
       if (deps.scanRepo) {

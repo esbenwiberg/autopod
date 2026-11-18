@@ -355,6 +355,10 @@ export function createSavedWorkDraftPr(deps: {
           },
           onPrepared(source) {
             policy(pods.getOrThrow(podId));
+            // The scan and provider preflight may outlive the initial check.
+            // Recheck the confirmation deadline before admitting any remote write.
+            if (now() > Date.parse(op.expiresAt))
+              draftError('Confirmation expired during publication checks; nothing was pushed.');
             if (
               source.commitSha !== op.source.commit ||
               source.treeSha !== op.source.tree ||
