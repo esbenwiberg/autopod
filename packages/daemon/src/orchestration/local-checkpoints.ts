@@ -10,6 +10,8 @@ import { type ContinuationCheckpoint, OrchestrationContinuations } from './conti
 import { type ControllerConfig, tickController } from './controller-turns.js';
 import type { ResultWake } from './run-waves.js';
 
+import { UnknownOutcomes } from './unknown-outcomes.js';
+
 type Subject = Omit<ContinuationCheckpoint, 'evidenceDigest'>;
 const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const hash = /^sha256:[a-f0-9]{64}$/;
@@ -39,6 +41,7 @@ function requirePass(subject: Subject, v: Verification) {
  * that makes independent worker copies before returning; never mount the scratch mirror. */
 export class LocalCheckpointHost {
   readonly ledger: OrchestrationContinuations;
+  readonly interventions: UnknownOutcomes;
   constructor(
     private readonly db: Database.Database,
     private readonly scratch: string,
@@ -69,6 +72,7 @@ export class LocalCheckpointHost {
       requirePass(subject, manifest.verification);
       return this.withMirror(subject, row.bundle, (mirror) => use(compose(cp, mirror)));
     });
+    this.interventions = new UnknownOutcomes(db, this.ledger);
   }
   /** One host scheduler turn, after managed result collection or restart. No waiting worker. */
   async tick(run: string, controller: (wake: ResultWake) => Promise<void>) {

@@ -209,7 +209,7 @@ export class OrchestrationContinuations {
         `SELECT c.* FROM orchestration_continuations c JOIN orchestration_runs r ON r.id=c.run_id WHERE r.canceled=0 AND c.pod_id IS NULL AND (? IS NULL OR r.id=?) ORDER BY c.rowid`,
       )
       .all(run ?? null, run ?? null) as (Intent & { run_id: string })[];
-    type Stage = 'claim' | 'binding' | 'source' | 'launch' | 'capacity';
+    type Stage = 'claim' | 'binding' | 'source' | 'launch' | 'capacity' | 'allocation-unknown';
     const blocked: { run: string; key: string; stage: Stage }[] = [];
     for (const intent of pending) {
       let stage: Stage = 'claim';
@@ -253,6 +253,10 @@ export class OrchestrationContinuations {
           const row = s.lookup(installation, req.startKey);
           if (row && row.execution_spec_digest !== req.executionSpecDigest)
             throw new Error('managed-start-conflict');
+          if (row?.allocation_attempted && !row.runtime_ref && !row.observed_exit) {
+            stage = 'allocation-unknown';
+            throw new Error('continuation-allocation-unknown');
+          }
           // Inspecting a previously allocated/terminal attempt never starts another worker.
           const pod =
             row && (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))

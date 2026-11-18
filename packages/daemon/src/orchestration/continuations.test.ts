@@ -43,6 +43,12 @@ async function setup(workerRequests = 2, maxActive = 1) {
       'utf8',
     ),
   );
+  f.db.exec(
+    await readFile(
+      new URL('../db/migrations/260_orchestration_unknown_outcomes.sql', import.meta.url),
+      'utf8',
+    ),
+  );
   const source = path.join(root, 'retained');
   const commit = async (message: string) =>
     managedGit(source, [
@@ -281,7 +287,7 @@ async function controllerFixture(limit: number, reply: (payload: string) => stri
       },
       provider,
     );
-  return { f, request, cp, tick, calls };
+  return { f, request, cp, host, tick, calls };
 }
 it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
   'recovers a SIGKILLed scheduler while three original worker PIDs stay live: %s',
@@ -775,8 +781,8 @@ it('another local recovery process defers while the first launch is unconfirmed'
   expect(f.db.prepare('SELECT count(*) FROM managed_pods').pluck().get()).toBe(1);
 });
 
-it('cancel after allocation authorization retains uncertainty until a late ref and observed exit', async () => {
-  const { f, cp, request, ledger } = await setup();
+it('operator fence after allocation authorization retains uncertainty until a late ref and observed exit', async () => {
+  const { f, cp, request, ledger, host } = await setup();
   await ledger().acceptAndContinue(cp, request);
   const entered = Promise.withResolvers<void>();
   const resume = Promise.withResolvers<void>();
@@ -803,7 +809,9 @@ it('cancel after allocation authorization retains uncertainty until a late ref a
         throw new Error('allocation never started');
       }),
     ]);
-    ledger().cancel(cp.run);
+    const [unknown] = host().interventions.inspect(cp.run).unknown;
+    if (!unknown) throw new Error('missing allocation');
+    host().interventions.fence(unknown, 'operator-one', 'case-42');
     await f.service().enforceExpiry();
     expect(row()).toMatchObject({
       revoked: 1,
@@ -832,6 +840,12 @@ it('cancel after allocation authorization retains uncertainty until a late ref a
   stopped = true;
   await f.service().enforceExpiry();
   expect(row()).toMatchObject({ state: 'killed', observed_exit: 1 });
+  const history = host().interventions.inspect(cp.run);
+  expect(history.unknown).toEqual([]);
+  expect(history.fences).toHaveLength(1);
+  const [receipt] = history.fences;
+  if (!receipt) throw new Error('missing historical fence');
+  expect(host().interventions.fence(receipt, 'operator-one', 'case-42')).toEqual(receipt);
   expect(await ledger().recover()).toEqual({ blocked: [] });
   expect(f.launches()).toBe(1);
   expect(
@@ -840,6 +854,105 @@ it('cancel after allocation authorization retains uncertainty until a late ref a
       .raw()
       .get(),
   ).toEqual([1, 2]);
+});
+
+it('never retries a lost allocation without identity, before or after operator intervention', async () => {
+  const { f, cp, request, ledger, host } = await setup();
+  await ledger().acceptAndContinue(cp, request);
+  let attempts = 0;
+  const ensure = f.runtime.ensure.bind(f.runtime);
+  f.runtime.ensure = async (id, spec) => {
+    attempts++;
+    await ensure(id, spec, () => {});
+    throw new Error('lost allocation identity');
+  };
+  expect((await ledger().recover()).blocked[0]?.stage).toBe('launch');
+  f.restart();
+  expect((await ledger().recover()).blocked[0]?.stage).toBe('allocation-unknown');
+  const [target] = host().interventions.inspect(cp.run).unknown;
+  if (!target) throw new Error('missing allocation');
+  expect(target).toMatchObject({ kind: 'allocation', key: request.startKey, reserved_requests: 2 });
+  expect(host().interventions.inspect('another-run').unknown).toEqual([]);
+  expect(() =>
+    host().interventions.fence({ ...target, binding: digest('stale') }, 'operator-one', 'case-42'),
+  ).toThrow('outcome-not-unknown');
+  expect(f.db.prepare('SELECT canceled FROM orchestration_runs').pluck().get()).toBe(0);
+  host().interventions.fence(target, 'operator-one', 'case-42');
+  f.restart();
+  await f.service().enforceExpiry();
+  expect(await ledger().recover()).toEqual({ blocked: [] });
+  expect(attempts).toBe(1);
+  expect(f.service().lookup('native.example', request.startKey)).toMatchObject({
+    runtime_ref: null,
+    observed_exit: 0,
+    stop_requested: 1,
+  });
+  expect(host().interventions.inspect(cp.run).unknown).toEqual([target]);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    0,
+  );
+});
+
+it('atomically records and replays an operator fence for a lost controller reply', async () => {
+  const { f, cp, host, tick, calls } = await controllerFixture(6, () => {
+    throw new Error('no provider reply');
+  });
+  await expect(tick()).rejects.toThrow();
+  const [target] = host().interventions.inspect(cp.run).unknown;
+  if (!target) throw new Error('missing turn');
+  expect(target).toMatchObject({
+    kind: 'controller',
+    key: 'plan-next',
+    reserved_requests: 1,
+    pod_id: null,
+  });
+  const fence = () => host().interventions.fence(target, 'operator-two', 'case-17');
+  f.db.exec(
+    "CREATE TEMP TRIGGER fail_fence BEFORE UPDATE OF canceled ON orchestration_runs BEGIN SELECT RAISE(ABORT,'injected-fence'); END",
+  );
+  expect(fence).toThrow('injected-fence');
+  expect(host().interventions.inspect(cp.run)).toEqual({ unknown: [target], fences: [] });
+  expect(f.db.prepare('SELECT canceled FROM orchestration_runs').pluck().get()).toBe(0);
+  f.restart();
+  const receipt = fence();
+  f.restart();
+  expect(fence()).toEqual(receipt);
+  expect(() => host().interventions.fence(target, 'operator-two', 'other-case')).toThrow(
+    'unknown-fence-conflict',
+  );
+  expect(host().interventions.inspect(cp.run)).toEqual({ unknown: [target], fences: [receipt] });
+  await expect(tick()).rejects.toThrow('controller-policy-inactive');
+  expect(calls()).toBe(1);
+  expect(f.launches()).toBe(1);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    3,
+  );
+});
+
+it('retains a late controller reply as evidence but does not dispatch its proposed child after a fence', async () => {
+  const { f, host, cp, tick, calls } = await controllerFixture(6, () => {
+    const [pending] = host().interventions.inspect(cp.run).unknown;
+    if (!pending) throw new Error('missing turn');
+    host().interventions.fence(pending, 'operator', 'case-late');
+    return JSON.stringify({
+      children: [{ recipe: 'inspect', brief: 'late follow-up' }],
+      waitFor: null,
+    });
+  });
+  await expect(tick()).rejects.toThrow('controller-policy-inactive');
+  f.restart();
+  expect(host().interventions.inspect(cp.run).unknown).toEqual([]);
+  expect(host().interventions.inspect(cp.run).fences).toHaveLength(1);
+  expect(f.db.prepare('SELECT status FROM orchestration_controller_turns').pluck().get()).toBe(
+    'decided',
+  );
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_continuations').pluck().get()).toBe(1);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    3,
+  );
+  await expect(tick()).rejects.toThrow('controller-policy-inactive');
+  expect(calls()).toBe(1);
+  expect(f.launches()).toBe(1);
 });
 
 it('records killed rather than validating when cancellation commits during exit observation', async () => {
