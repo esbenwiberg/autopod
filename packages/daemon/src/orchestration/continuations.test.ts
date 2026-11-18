@@ -1,13 +1,14 @@
-import { spawnSync } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import Anthropic from '@anthropic-ai/sdk';
 import { build } from 'esbuild';
 import { expect, it, onTestFinished } from 'vitest';
 import { digest } from '../managed/canonical.js';
 import { managedGit } from '../managed/source-git.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
+import { offlineController } from '../test-utils/offline-controller.js';
 import { waveProcessRuntime } from '../test-utils/wave-process-runtime.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 
@@ -282,174 +283,223 @@ async function controllerFixture(limit: number, reply: (payload: string) => stri
     );
   return { f, request, cp, tick, calls };
 }
-function offlineController(reply: (payload: string) => string) {
-  let calls = 0;
-  const model = 'fixture-controller';
-  const client = new Anthropic({
-    apiKey: 'fixture-key-not-real',
-    fetch: async (_url, init) => {
-      calls++;
-      return new Response(
-        JSON.stringify({
-          id: 'message',
-          type: 'message',
-          role: 'assistant',
-          model,
-          content: [{ type: 'text', text: reply(String(init?.body)) }],
-          stop_reason: 'end_turn',
-          stop_sequence: null,
-          usage: { input_tokens: 37, output_tokens: 19 },
-        }),
-        { headers: { 'content-type': 'application/json' } },
+it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
+  'recovers a SIGKILLed scheduler while three original worker PIDs stay live: %s',
+  async (boundary) => {
+    const { f, root, request, cp, ledger, host } = await setup(17, 6);
+    const processes = waveProcessRuntime(root);
+    Object.assign(f.runtime, processes.port);
+    onTestFinished(async () => {
+      await processes.dispose();
+    });
+    const l = ledger();
+    for (let i = 0; i < 6; i++) {
+      const r = structuredClone(request);
+      r.dispatcherAttemptId = r.effectiveGrant.dispatcherAttemptId = r.startKey = `worker-${i}`;
+      r.outputs.artifacts.mode = 'required';
+      r.outputs.artifacts.requiredPaths = ['report.md'];
+      if (i === 0) await l.acceptAndContinue(cp, resign(r));
+      else await l.spawnFromAccepted(cp, resign(r));
+    }
+    expect(await l.recover()).toEqual({ blocked: [] });
+    l.waves.park(cp.run, 'read-three', 0, 3);
+    const firstWave = await processes.live();
+    expect(new Set(firstWave.values()).size).toBe(6);
+    const returned: string[] = [];
+    for (const i of [0, 1, 2]) {
+      const id = f.service().lookup('native.example', `worker-${i}`)?.pod_id;
+      if (!id) throw new Error('missing worker');
+      await processes.finish(id); // Worker writes its own report, then exits normally.
+      returned.push(id);
+      await f.service().enforceExpiry();
+      await f.service().artifactPipeline?.tick();
+      if (returned.length < 3)
+        await l.waves.dispatch(cp.run, async () => {
+          throw new Error('woke too soon');
+        });
+    }
+    expect(
+      f.db.prepare("SELECT count(*) FROM artifact_exports WHERE status='committed'").pluck().get(),
+    ).toBe(3);
+    const { provider, calls } = offlineController(() => {
+      throw new Error('owner must not plan');
+    });
+    const tick = () =>
+      host().tickController(
+        cp.run,
+        {
+          findings: 'report.md',
+          mission: 'Investigate reported issues',
+          routeId: 'offline',
+          recipes: { inspect: 'worker-0' },
+        },
+        provider,
       );
-    },
-  });
-  return { provider: { client, model }, calls: () => calls };
-}
-it('commissions two local processes from three verified reports while three original PIDs stay live', async () => {
-  const { f, root, request, cp, ledger, host } = await setup(17, 6);
-  const processes = waveProcessRuntime(root);
-  Object.assign(f.runtime, processes.port);
-  onTestFinished(async () => {
-    await processes.dispose();
-  });
-  const l = ledger();
-  for (let i = 0; i < 6; i++) {
-    const r = structuredClone(request);
-    r.dispatcherAttemptId = r.effectiveGrant.dispatcherAttemptId = r.startKey = `worker-${i}`;
-    r.outputs.artifacts.mode = 'required';
-    r.outputs.artifacts.requiredPaths = ['report.md'];
-    if (i === 0) await l.acceptAndContinue(cp, resign(r));
-    else await l.spawnFromAccepted(cp, resign(r));
-  }
-  expect(await l.recover()).toEqual({ blocked: [] });
-  l.waves.park(cp.run, 'read-three', 0, 3);
-  const firstWave = await processes.live();
-  expect(new Set(firstWave.values()).size).toBe(6);
-  const returned: string[] = [];
-  for (const i of [0, 1, 2]) {
-    const id = f.service().lookup('native.example', `worker-${i}`)?.pod_id;
-    if (!id) throw new Error('missing worker');
-    await processes.finish(id); // Worker writes its own report, then exits normally.
-    returned.push(id);
-    await f.service().enforceExpiry();
-    await f.service().artifactPipeline?.tick();
-    if (returned.length < 3)
-      await l.waves.dispatch(cp.run, async () => {
-        throw new Error('woke too soon');
-      });
-  }
-  expect(
-    f.db.prepare("SELECT count(*) FROM artifact_exports WHERE status='committed'").pluck().get(),
-  ).toBe(3);
-  const { provider, calls } = offlineController((payload) => {
-    const ctx = JSON.parse(JSON.parse(payload).messages[0].content);
+    const [pod] = returned;
+    if (!pod) throw new Error('missing returned worker');
+    const bundle = f.db
+      .prepare('SELECT bundle_bytes FROM artifact_exports WHERE pod_id=?')
+      .pluck()
+      .get(pod) as Buffer;
+    const replace = (bytes: Buffer) =>
+      f.db.prepare('UPDATE artifact_exports SET bundle_bytes=? WHERE pod_id=?').run(bytes, pod);
+    replace(Buffer.from('damaged'));
+    await expect(tick()).rejects.toThrow('artifact-integrity-failure');
+    expect(calls()).toBe(0);
+    expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+      5,
+    );
+    replace(bundle);
+    // The result cursor is not an artifact capability: swapping in a sibling's real
+    // export must not disclose that sibling's bytes, even in the same installation.
+    const [original, sibling] = f.db
+      .prepare('SELECT artifact_id FROM orchestration_child_outcomes ORDER BY sequence')
+      .pluck()
+      .all() as string[];
+    if (!original || !sibling) throw new Error('missing artifact fixture');
+    const swap = (id: string) =>
+      f.db
+        .prepare('UPDATE orchestration_child_outcomes SET artifact_id=? WHERE pod_id=?')
+        .run(id, pod);
+    swap(sibling);
+    await expect(tick()).rejects.toThrow('controller-artifact-binding');
+    expect(calls()).toBe(0);
+    swap(original);
+    const scheduler = await buildStartupHarness('wave-scheduler-fixture');
+    await writeFile(path.join(root, 'profile.json'), JSON.stringify(request.profileSnapshot));
+    const env = { HOME: root, TMPDIR: root, LANG: 'C' };
+    const writer = spawnSync(process.execPath, [scheduler, f.db.name, root, boundary], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 8000,
+    });
+    expect(writer.error).toBeUndefined();
+    expect(writer.signal, writer.stderr).toBe('SIGKILL');
+    f.restart();
+    const waits = () =>
+      f.db
+        .prepare('SELECT acknowledged FROM orchestration_result_waits ORDER BY rowid')
+        .pluck()
+        .all();
+    const waveCommitted = boundary === 'before-ack';
+    expect(waits()).toEqual(waveCommitted ? [0, 0] : [0]);
+    expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+      waveCommitted ? 0 : 4,
+    );
+    expect(f.db.prepare('SELECT status FROM orchestration_controller_turns').pluck().all()).toEqual(
+      ['decided'],
+    );
+    expect(
+      f.db
+        .prepare('SELECT count(*) FROM orchestration_continuations WHERE pod_id IS NULL')
+        .pluck()
+        .get(),
+    ).toBe(waveCommitted ? 2 : 0);
+    expect(await processes.live()).toEqual(
+      new Map([...firstWave].filter(([id]) => !returned.includes(id))),
+    );
+    replace(Buffer.from('damaged after decision'));
+
+    // Only the worker owner survives. A new scheduler reads its decisions and launch
+    // specs from SQLite. Its IPC channel can ask the owner to start only an admitted ID.
+    const reader = fork(scheduler, [f.db.name, root, 'recover'], {
+      cwd: root,
+      env,
+      execArgv: [],
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      timeout: 8000,
+      killSignal: 'SIGKILL',
+    });
+    const closed = once(reader, 'close');
+    let diagnostic = '';
+    reader.stderr?.on('data', (chunk) => {
+      diagnostic = (diagnostic + chunk).slice(-4096);
+    });
+    try {
+      expect(reader.pid).not.toBe(writer.pid);
+      for (let i = 0; i < 2; i++) {
+        const [id] = await Promise.race([
+          once(reader, 'message'),
+          closed.then(() => {
+            throw new Error('scheduler closed before launch: ' + diagnostic);
+          }),
+        ]);
+        if (typeof id !== 'string') throw new Error('invalid fixture allocation');
+        const row = f.service().row('native.example', id);
+        const spec = JSON.parse(row.request_json);
+        expect(spec.startKey).toMatch(/^turn-/);
+        await processes.port.ensure(id, spec, () => {});
+        reader.send(id);
+      }
+      expect(await closed, diagnostic).toEqual([0, null]);
+    } finally {
+      if (reader.exitCode === null && reader.signalCode === null) reader.kill('SIGKILL');
+      await closed;
+    }
+    expect(waits()).toEqual([1, 0]);
+    const requests = (await readFile(path.join(root, 'provider-calls.jsonl'), 'utf8'))
+      .trim()
+      .split('\n');
+    expect(requests).toHaveLength(1);
+    const call = JSON.parse(requests[0] ?? '');
+    expect(call.pid).toBe(writer.pid);
+    expect(call.payload).not.toMatch(/sibling contents|hidden-tail|�/);
+    const ctx = JSON.parse(JSON.parse(call.payload).messages[0].content);
     expect(ctx.inFlightCount).toBe(3);
-    expect(payload).not.toMatch(/sibling contents|hidden-tail|�/);
-    const children = [];
+    expect(ctx.results).toHaveLength(3);
     for (const r of ctx.results) {
       expect(r.finding.status).toBe('excerpt');
       expect(r.finding.truncated).toBe(true);
       expect(Buffer.byteLength(r.finding.text)).toBeLessThanOrEqual(2048);
-      const issue = /^Issue: (.+)$/m.exec(r.finding.text)?.[1];
-      if (issue) children.push({ recipe: 'inspect', brief: `Investigate ${issue}` });
     }
-    return JSON.stringify({ children, waitFor: 1 });
-  });
-  const tick = () =>
-    host().tickController(
-      cp.run,
-      {
-        findings: 'report.md',
-        mission: 'Investigate reported issues',
-        routeId: 'offline',
-        recipes: { inspect: 'worker-0' },
-      },
-      provider,
+    expect(processes.count()).toBe(8);
+    const active = await processes.live();
+    expect(new Set(active.values()).size).toBe(5);
+    for (const [id, pid] of firstWave)
+      expect(active.get(id)).toBe(returned.includes(id) ? undefined : pid);
+    expect([...active.keys()].filter((id) => !firstWave.has(id))).toHaveLength(2);
+    expect(ledger().waves.available(cp.run)).toBe(1);
+    expect(
+      f.db
+        .prepare(
+          "SELECT json_extract(request_json,'$.task.objective') FROM orchestration_continuations WHERE start_key LIKE 'turn-%' ORDER BY rowid",
+        )
+        .pluck()
+        .all(),
+    ).toEqual(
+      ['CLI retries', 'cache expiry'].map(
+        (issue) => `${request.task.objective}\n\nFollow-up task:\nInvestigate ${issue}`,
+      ),
     );
-  const [pod] = returned;
-  if (!pod) throw new Error('missing returned worker');
-  const bundle = f.db
-    .prepare('SELECT bundle_bytes FROM artifact_exports WHERE pod_id=?')
-    .pluck()
-    .get(pod) as Buffer;
-  const replace = (bytes: Buffer) =>
-    f.db.prepare('UPDATE artifact_exports SET bundle_bytes=? WHERE pod_id=?').run(bytes, pod);
-  replace(Buffer.from('damaged'));
-  await expect(tick()).rejects.toThrow('artifact-integrity-failure');
-  expect(calls()).toBe(0);
-  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
-    5,
-  );
-  replace(bundle);
-  // The result cursor is not an artifact capability: swapping in a sibling's real
-  // export must not disclose that sibling's bytes, even in the same installation.
-  const [original, sibling] = f.db
-    .prepare('SELECT artifact_id FROM orchestration_child_outcomes ORDER BY sequence')
-    .pluck()
-    .all() as string[];
-  if (!original || !sibling) throw new Error('missing artifact fixture');
-  const swap = (id: string) =>
-    f.db
-      .prepare('UPDATE orchestration_child_outcomes SET artifact_id=? WHERE pod_id=?')
-      .run(id, pod);
-  swap(sibling);
-  await expect(tick()).rejects.toThrow('controller-artifact-binding');
-  expect(calls()).toBe(0);
-  swap(original);
-  f.db.exec(
-    "CREATE TEMP TRIGGER lose_ack BEFORE UPDATE OF acknowledged ON orchestration_result_waits BEGIN SELECT RAISE(ABORT,'lost-ack'); END",
-  );
-  await expect(tick()).rejects.toThrow('lost-ack');
-  replace(Buffer.from('damaged after decision'));
-  f.restart();
-  expect(await tick()).toEqual({ blocked: [] });
-  expect(calls()).toBe(1);
-  expect(processes.count()).toBe(8);
-  const active = await processes.live();
-  expect(new Set(active.values()).size).toBe(5);
-  for (const [id, pid] of firstWave)
-    expect(active.get(id)).toBe(returned.includes(id) ? undefined : pid);
-  expect([...active.keys()].filter((id) => !firstWave.has(id))).toHaveLength(2);
-  expect(ledger().waves.available(cp.run)).toBe(1);
-  expect(
-    f.db
-      .prepare(
-        "SELECT json_extract(request_json,'$.task.objective') FROM orchestration_continuations WHERE start_key LIKE 'turn-%' ORDER BY rowid",
-      )
-      .pluck()
-      .all(),
-  ).toEqual(
-    ['CLI retries', 'cache expiry'].map(
-      (issue) => `${request.task.objective}\n\nFollow-up task:\nInvestigate ${issue}`,
-    ),
-  );
-  expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
-    cp.commit,
-  );
-  f.restart();
-  expect(await tick()).toEqual({ blocked: [] });
-  expect(await processes.live()).toEqual(active);
-  expect(processes.count()).toBe(8);
-  expect(calls()).toBe(1);
+    expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
+      cp.commit,
+    );
+    f.restart();
+    expect(await tick()).toEqual({ blocked: [] });
+    expect(await processes.live()).toEqual(active);
+    expect(processes.count()).toBe(8);
+    expect(calls()).toBe(0);
 
-  // Cancel fences new work immediately, but does not fabricate exit evidence.
-  ledger().cancel(cp.run);
-  expect(await processes.live()).toEqual(active);
-  const unseen = () =>
-    f.db.prepare('SELECT count(*) FROM managed_pods WHERE observed_exit=0').pluck().get();
-  await f.service().enforceExpiry();
-  expect((await processes.live()).size).toBe(0);
-  expect(unseen()).toBe(5);
-  await f.service().enforceExpiry();
-  expect(unseen()).toBe(0);
-  expect(f.db.prepare("SELECT count(*) FROM managed_pods WHERE state='killed'").pluck().get()).toBe(
-    5,
-  );
-  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
-    0,
-  );
-}, 15000);
+    // Cancel fences new work immediately, but does not fabricate exit evidence.
+    ledger().cancel(cp.run);
+    expect(await processes.live()).toEqual(active);
+    const unseen = () =>
+      f.db.prepare('SELECT count(*) FROM managed_pods WHERE observed_exit=0').pluck().get();
+    await f.service().enforceExpiry();
+    expect((await processes.live()).size).toBe(0);
+    expect(unseen()).toBe(5);
+    await f.service().enforceExpiry();
+    expect(unseen()).toBe(0);
+    expect(
+      f.db.prepare("SELECT count(*) FROM managed_pods WHERE state='killed'").pluck().get(),
+    ).toBe(5);
+    expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+      0,
+    );
+  },
+  15000,
+);
 
 it('replays a recorded controller decision without a second SDK request or duplicate workers', async () => {
   const { f, tick, calls, request } = await controllerFixture(7, (payload) => {
@@ -545,14 +595,14 @@ it.each([
   );
 });
 
-async function buildStartupHarness() {
+async function buildStartupHarness(entry = 'continuation-crash-fixture') {
   const daemon = path.resolve(import.meta.dirname, '../..');
   await mkdir(path.join(daemon, '.turbo'), { recursive: true });
   const dir = await mkdtemp(path.join(daemon, '.turbo', 'continuation-crash-'));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const bundle = path.join(dir, 'writer.mjs');
   await build({
-    entryPoints: [path.join(daemon, 'src/test-utils/continuation-crash-fixture.ts')],
+    entryPoints: [path.join(daemon, `src/test-utils/${entry}.ts`)],
     outfile: bundle,
     bundle: true,
     platform: 'node',
