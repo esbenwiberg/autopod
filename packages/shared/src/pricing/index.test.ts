@@ -11,6 +11,25 @@ import {
 } from './index.js';
 
 describe('MODEL_PRICING', () => {
+  it.each([
+    ['gpt-6.2-astra', 8, 0.4, 40],
+    ['gpt-6.2-sol', 2, 0.1, 10],
+    ['gpt-6.1-terra', 1, 0.05, 5],
+    ['claude-fable-5-2', 8, 0.2, 40],
+    // Base/from estimate only: prompts above 100k have higher rates.
+    ['claude-haiku-5-5', 0.1, 0.01, 0.5],
+  ] as const)('prices current %s including cached input', (model, input, cached, output) => {
+    expect(canonicalModelKey(model)).toBe(model);
+    expect(MODEL_PRICING[model]).toEqual({
+      inputPer1M: input,
+      cachedInputPer1M: cached,
+      outputPer1M: output,
+    });
+    expect(computeCostWithCache(model, 100_000, 50_000, 25_000)).toBeCloseTo(
+      0.075 * input + 0.025 * cached + 0.05 * output,
+    );
+  });
+
   it('has Claude 5 standard pricing, defaults, and stable historical aliases', () => {
     expect(MODEL_PRICING['claude-fable-5']).toEqual({
       inputPer1M: 10,
