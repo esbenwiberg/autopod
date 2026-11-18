@@ -56,7 +56,7 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
   // (especially unknown allocations) or run part of the new chain on mixed state.
   if (namesByVersion.get(262) === '262_orchestration_continuations.sql' && currentVersion >= 255) {
     const retired = db
-      .prepare('SELECT 1 FROM schema_version WHERE version BETWEEN 256 AND 261 LIMIT 1')
+      .prepare('SELECT 1 FROM schema_version WHERE version BETWEEN 257 AND 261 LIMIT 1')
       .get();
     const table = (name: string) =>
       db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -70,6 +70,9 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
       .get();
     if (
       retired ||
+      Boolean(table('fresh_handoff_preparations')) !== currentVersion >= 256 ||
+      Boolean(db.prepare('SELECT 1 FROM schema_version WHERE version=256').get()) !==
+        currentVersion >= 256 ||
       !table('validation_phase_timings') ||
       !db.prepare('SELECT 1 FROM schema_version WHERE version=255').get() ||
       recordedCount !== expectedCount ||

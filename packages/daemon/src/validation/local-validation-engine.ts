@@ -78,6 +78,7 @@ import {
 } from './reviewer-input-bounds.js';
 import { runValidationCommand } from './run-validation-command.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
+import { prepareTestMemory, requireMemoryImprovement } from './test-process-memory.js';
 import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
 
 const execFileAsync = promisify(execFile);
@@ -292,6 +293,7 @@ interface InfrastructureAwareResult {
 }
 
 interface TestRunResult extends InfrastructureAwareResult {
+  memoryEvidence?: import('@autopod/shared').TestProcessMemoryEvidence;
   status: 'pass' | 'fail' | 'skip';
   duration: number;
   stdout?: string;
@@ -1864,15 +1866,32 @@ async function runTests(
   log?.info({ testCommand: config.testCommand }, 'running tests');
 
   const testCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
+  await config.assertTestMemoryCurrent?.();
+  let memory: Awaited<ReturnType<typeof prepareTestMemory>>;
+  try {
+    memory = await prepareTestMemory(containerManager, config, config.assertTestMemoryOwnership);
+  } catch (error) {
+    if (config.requiredTestMemory) throw error;
+    log?.warn('Optional test-process memory evidence unavailable; running the frozen test command');
+  }
+  if (config.requiredTestMemory)
+    requireMemoryImprovement(config.requiredTestMemory, memory?.evidence);
+  await config.assertTestMemoryCurrent?.();
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
     result = await runValidationCommand(
       containerManager,
       config.executionTarget,
       config.containerId,
-      wrapValidationExecCommand(config.testCommand, config.extraExecEnv, config.nonSecretExecEnv),
+      wrapValidationExecCommand(
+        memory?.command ?? config.testCommand,
+        config.extraExecEnv,
+        config.nonSecretExecEnv,
+      ),
       {
         cwd: testCwd,
+        assertCurrent: config.assertTestMemoryOwnership,
+        ...(config.requiredTestMemory ? { requireObservedExit: true } : {}),
         timeout: config.outerTestTimeout ?? config.testTimeout ?? 600_000,
         ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
       },
@@ -1929,6 +1948,10 @@ async function runTests(
       stdout: boundOutput(`${infrastructureFailure.message}\n\n--- test output ---\n${rawOutput}`),
       stderr: '',
       infrastructureFailure,
+      ...(infrastructureFailure.code === 'PROCESS_MEMORY_EXHAUSTED' &&
+      memory?.actual(rawOutput, true)
+        ? { memoryEvidence: memory.actual(rawOutput, true) }
+        : {}),
     };
   }
   const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
@@ -1944,6 +1967,9 @@ async function runTests(
     duration,
     stdout: boundOutput(result.stdout),
     stderr: boundOutput(result.stderr),
+    ...(memory?.actual(rawOutput, false)
+      ? { memoryEvidence: memory.actual(rawOutput, false) }
+      : {}),
   };
 }
 

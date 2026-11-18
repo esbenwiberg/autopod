@@ -5,6 +5,19 @@ import type { DeviationsAssessment } from './task-summary.js';
 
 export type ScreenshotSource = 'smoke' | 'fact' | 'review' | 'advisory';
 
+/** Prospective evidence for the direct Node test process, never inferred from GB settings. */
+export interface TestProcessMemoryEvidence {
+  version: 1;
+  kind: 'node-heap';
+  commandHash: string;
+  containerId: string;
+  resourceKey: string;
+  imageDigest: string;
+  heapLimitBytes: number;
+  containerLimitBytes: number;
+  processId: number;
+}
+
 export interface ScreenshotRef {
   podId: string;
   source: ScreenshotSource;
@@ -58,6 +71,7 @@ export interface ValidationResult {
     duration: number;
     stdout?: string;
     stderr?: string;
+    memoryEvidence?: TestProcessMemoryEvidence;
     reusedEvidence?: import('./validation-evidence.js').ReusedValidationEvidence;
   };
   lint?: LintResult;

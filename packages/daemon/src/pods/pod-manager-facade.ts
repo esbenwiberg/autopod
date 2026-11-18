@@ -155,6 +155,18 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     inspectRecoveryFork(podId: string) {
       return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).inspect(podId);
     },
+    prepareRecoveryHandoff(podId: string, input: unknown, actor: OperatorActor) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).prepareHandoff(
+        podId,
+        input,
+        actor,
+      );
+    },
+    getPreparedRecoveryHandoff(podId: string) {
+      return (
+        captured.recoveryFork ?? checkpointError('Recovery fork unavailable')
+      ).getPreparedHandoff(podId);
+    },
     previewRecoveryFork(podId: string, input: import('@autopod/shared').RecoveryForkInput) {
       return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).preview(
         podId,

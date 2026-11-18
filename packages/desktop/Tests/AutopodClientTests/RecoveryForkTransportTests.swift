@@ -1,10 +1,42 @@
 import AutopodClient
+import CryptoKit
 import AutopodUI
 import Foundation
 import Testing
 @testable import AutopodDesktop
 
 @MainActor @Suite struct RecoveryForkTransportTests {
+  @Test func prepareAndObserveUseOnlyNonExecutingRoutesAndVerifyPacketBytes() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
+      let packet = "Brief only. Worker not started."
+      let hash = SHA256.hash(data: Data(packet.utf8)).map { String(format: "%02x", $0) }.joined()
+      let receipt: [String: Any] = ["version": 1, "podId": "pod", "generation": 3, "actorId": "human",
+        "createdAt": "2026-11-18T10:00:00Z", "coverage": "brief-only", "source": NSNull(),
+        "packet": packet, "packetHash": hash, "workerStarted": false]
+      let response = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
+      let work = f.startResult { do {
+        _ = try await handler.actions.recoveryFork.prepare("pod", RecoveryHandoffPreparationRequest(expectedGeneration: 3, instructions: "")); return "prepared"
+      } catch { return error.localizedDescription } }
+      let post = try await f.a.next()
+      #expect(post.request.httpMethod == "POST" && post.request.url?.path == "/pods/pod/recovery-fork/prepare-handoff")
+      let body = try #require(JSONSerialization.jsonObject(with: forkBody(post.request)) as? [String: Any])
+      #expect(body["instructions"] as? String == "" && body["actorId"] == nil && body["tokenBudget"] == nil)
+      post.respond(body: response); #expect(await work.value == "prepared")
+      let observation = f.startResult { do {
+        _ = try await handler.actions.recoveryFork.prepared("pod"); return "observed"
+      } catch { return error.localizedDescription } }
+      let get = try await f.a.next()
+      #expect(get.request.httpMethod == "GET" && get.request.url?.path == "/pods/pod/recovery-fork/prepared-handoff")
+      let state: [String: Any] = ["version": 1, "podId": "pod", "generation": 3, "available": true,
+        "blockers": [], "context": ["summary": "Original task", "failure": "Worker unreachable", "messages": [], "truncated": false, "omissions": []], "receipt": receipt]
+      get.respond(body: String(decoding: try JSONSerialization.data(withJSONObject: state), as: UTF8.self)); #expect(await observation.value == "observed")
+      #expect(f.a.requests.count == 2 && f.b.requests.isEmpty)
+      var changed = try JSONDecoder().decode(RecoveryHandoffPreparation.self, from: Data(response.utf8))
+      changed.packet += "tampered"
+      #expect(throws: (any Error).self) { try changed.validate(podId: "pod") }
+    }
+  }
   @Test func fourBoundRoutesCarryExactDecisionAndOpeningChildDoesNotForkAgain() async throws {
     try await withPodStoreLifetimeFixture { f in
       let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())

@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import AutopodClient
 import Foundation
 import SwiftUI
@@ -6,6 +7,138 @@ import Testing
 @testable import AutopodUI
 
 @MainActor @Suite(.serialized) struct RecoveryForkTests {
+  @Test func emptyOptionalNoteUsesTheDaemonHandoffWithoutOperatorProse() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    let model = RecoveryForkModel(podId: "original", actions: f.actions)
+    await model.refresh(f.actions)
+    model.acknowledged = true
+    #expect(model.instructions.isEmpty && model.canPreview)
+    await model.review(f.actions); await model.create(f.actions)
+    #expect(f.created.count == 1 && f.created[0].instructions.isEmpty)
+    #expect(model.operation?.state == .queued && model.operation?.childStatus == "queued")
+  }
+  @Test func boundWorkerPacketIsAvailableBeforeStartAndMissingPacketKeepsFallbackDisabled() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    let model = RecoveryForkModel(podId: "original", actions: f.actions)
+    await model.refresh(f.actions); model.acknowledged = true
+    await model.review(f.actions)
+    #expect(model.canCreate && model.preview?.workerBrief == f.packet(try #require(model.input)) && f.created.isEmpty)
+    let reviewed = model.preview?.workerBrief
+    await model.create(f.actions)
+    #expect(model.operation?.workerBrief == reviewed && f.created.count == 1)
+    let missing = RecoveryForkFixture(); defer { missing.clean() }; missing.omitProposedPacket = true
+    let fallback = RecoveryForkModel(podId: "original", actions: missing.actions)
+    await fallback.refresh(missing.actions); fallback.acknowledged = true
+    await fallback.review(missing.actions); await fallback.create(missing.actions)
+    #expect(fallback.preview?.available == true && !fallback.canCreate && missing.created.isEmpty)
+  }
+  @Test func unreachableWorkerPreparationAndLostReplyReopenWithoutLaunchingOrProbingAgain() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    f.sourceAvailable = false
+    var actions = f.actions
+    actions.preparationAvailable = true
+    var saved: RecoveryHandoffPreparation?
+    var preparations = 0
+    actions.prepared = { _ in try f.preparationState(saved) }
+    actions.prepare = { _, request in
+      preparations += 1
+      let packet = "Brief only. Later edits are unknown. No worker was started."
+      saved = try f.decode(["version": 1, "podId": "original", "generation": request.expectedGeneration,
+        "actorId": "human", "createdAt": "2026-11-18T10:00:00Z", "coverage": "brief-only", "source": NSNull(),
+        "packet": packet, "packetHash": SHA256.hash(data: Data(packet.utf8)).map { String(format: "%02x", $0) }.joined(), "workerStarted": false])
+      throw URLError(.networkConnectionLost)
+    }
+    let model = RecoveryForkModel(podId: "original", actions: actions)
+    await model.refresh(actions)
+    #expect(!model.canPreview && !model.canCreate && f.inspections == 0)
+    await model.prepareHandoff(actions)
+    #expect(model.preparationUncertain && preparations == 1 && f.created.isEmpty)
+    await model.prepareHandoff(actions)
+    #expect(preparations == 1)
+    await model.refresh(actions)
+    #expect(model.preparedHandoff == saved && !model.preparationUncertain && f.inspections == 0)
+    let reopened = RecoveryForkModel(podId: "original", actions: actions)
+    await reopened.refresh(actions)
+    #expect(reopened.preparedHandoff?.coverage == "brief-only" && f.inspections == 0 && f.created.isEmpty)
+    #expect(!reopened.canCreate && reopened.pending == nil)
+    await reopened.refresh(actions, forStart: true)
+    #expect(f.inspections == 1 && !reopened.canCreate && f.created.isEmpty)
+  }
+  @Test func purePreparationObservationFindsAnAlreadyQueuedSuccessorWithoutSourceInspection() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    let input = RecoveryForkInput(expectedGeneration: 3, sourceHead: f.head, executionProfileId: "@original", instructions: "", files: [], acknowledgePartialSource: true)
+    let operation = try f.operation(RecoveryForkRequest(expectedBinding: String(repeating: "e", count: 64), input: input))
+    var actions = f.actions; actions.preparationAvailable = true
+    actions.prepared = { _ in var state = try f.preparationState(nil); state.operation = operation; return state }
+    let model = RecoveryForkModel(podId: "original", actions: actions)
+    await model.refresh(actions)
+    #expect(model.operation == operation && model.pending == operation.request && f.inspections == 0 && f.created.isEmpty)
+    await model.create(actions)
+    #expect(f.created.isEmpty && !model.canCreate)
+  }
+  @Test func confirmedMissingPreparationReceiptAllowsAnExplicitPreparationRetryOnly() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    var actions = f.actions; actions.preparationAvailable = true
+    var attempts = 0
+    actions.prepared = { _ in try f.preparationState(nil) }
+    actions.prepare = { _, request in
+      attempts += 1
+      if attempts == 1 { throw URLError(.cannotConnectToHost) }
+      let packet = "Brief only. No worker was started."
+      return try f.decode(["version": 1, "podId": "original", "generation": request.expectedGeneration,
+        "actorId": "human", "createdAt": "2026-11-18T10:00:00Z", "coverage": "brief-only", "source": NSNull(),
+        "packet": packet, "packetHash": SHA256.hash(data: Data(packet.utf8)).map { String(format: "%02x", $0) }.joined(), "workerStarted": false])
+    }
+    let model = RecoveryForkModel(podId: "original", actions: actions)
+    await model.refresh(actions); await model.prepareHandoff(actions)
+    #expect(model.preparationUncertain && attempts == 1)
+    await model.prepareHandoff(actions)
+    #expect(attempts == 1)
+    await model.refresh(actions)
+    #expect(!model.preparationUncertain && model.preparedHandoff == nil)
+    await model.prepareHandoff(actions)
+    #expect(attempts == 2 && model.preparedHandoff?.workerStarted == false)
+    #expect(f.created.isEmpty && f.inspections == 0 && model.pending == nil)
+  }
+  @Test(arguments: ["prepared", "replacement-failed", "queued", "unavailable"])
+  func nativeFreshHandoffStatesRemainInspectableWithoutDispatch(state: String) async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    var actions = f.actions
+    if state == "queued" {
+      let input = RecoveryForkInput(expectedGeneration: 3, sourceHead: f.head, executionProfileId: "@original", instructions: "", files: [], acknowledgePartialSource: true)
+      f.observed = try f.operation(RecoveryForkRequest(expectedBinding: String(repeating: "e", count: 64), input: input))
+      actions = f.actions
+    } else if state == "unavailable" { f.sourceAvailable = false }
+    else if state == "replacement-failed" { f.chained = true }
+    else {
+      let packet = "Brief only. Handoff ready. Worker not started."
+      let saved: RecoveryHandoffPreparation = try f.decode(["version": 1, "podId": "original", "generation": 3,
+        "actorId": "human", "createdAt": "2026-11-18T10:00:00Z", "coverage": "brief-only", "source": NSNull(),
+        "packet": packet, "packetHash": SHA256.hash(data: Data(packet.utf8)).map { String(format: "%02x", $0) }.joined(), "workerStarted": false])
+      actions.preparationAvailable = true; actions.prepared = { _ in try f.preparationState(saved) }
+    }
+    let model = RecoveryForkModel(podId: "original", actions: actions)
+    await model.refresh(actions)
+    if state == "prepared" { #expect(model.preparedHandoff?.workerStarted == false && f.inspections == 0) }
+    if state == "replacement-failed" { #expect(model.context?.attempts?.first?.podId == "prior-attempt" && model.inspection?.source?.head == f.head) }
+    if state == "queued" { #expect(model.operation?.state == .queued && model.operation?.childStatus == "queued") }
+    if state == "unavailable" { #expect(!model.canCreate && model.inspection?.blockers.isEmpty == false) }
+    NSApplication.shared.finishLaunching()
+    let view = NSHostingView(rootView: RecoveryForkView(actions: actions, model: model).padding(24)
+      .background(DesktopTheme.canvas).frame(width: 820))
+    let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 820, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = view; window.orderBack(nil)
+    defer { window.close() }
+    try await Task.sleep(for: .milliseconds(150)); view.layoutSubtreeIfNeeded()
+    #expect(view.fittingSize.width == 820 && f.created.isEmpty)
+    if let folder = ProcessInfo.processInfo.environment["AUTOPOD_FORK_SCREENSHOT_DIR"] {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let data = try #require(bitmap.representation(using: .png, properties: [:]))
+      try data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("handoff-\(state).png"))
+    }
+  }
   @Test func ordinaryRunningHubDoesNotInspectSourcesUntilExplicitRecoveryIsOpened() async throws {
     let f = RecoveryForkFixture(); defer { f.clean() }
     var actions = PodActions.preview; actions.recoveryFork = f.actions
@@ -211,24 +344,38 @@ import Testing
   var created: [RecoveryForkRequest] = []; var previews: [RecoveryForkInput] = []; var opened: [String] = []
   var fileRows: [[String: Any]] = [["path": "notes.md", "size": 12, "version": String(repeating: "c", count: 64)]]
   var genericCode: Int?
+  var sourceAvailable = true
+  var chained = false
+  var omitProposedPacket = false
   var current = true; var loseResponse = false; var failObservation = false; var reject = false; var corruptReceipt = false
   var observed: RecoveryForkOperation?
   var head = String(repeating: "a", count: 40)
-  var context: [String: Any] { ["summary": "Continue the existing task.", "failure": "Node compatibility check failed.", "messages": [["role": "human", "text": "Keep the working changes; fix the environment failure.", "timestamp": "2026-11-10T10:00:00Z", "eventId": 7]], "truncated": false, "omissions": ["Tool payloads and provider sessions excluded."]] }
+  var context: [String: Any] {
+    var value: [String: Any] = ["summary": chained ? "Inherited parser and saved regression test. No passing report." : "Continue the existing task.", "failure": chained ? "Replacement runner could not start the test launcher." : "Node compatibility check failed.", "messages": [["role": "human", "text": "Keep the working changes; fix the environment failure.", "timestamp": "2026-11-10T10:00:00Z", "eventId": 7]], "truncated": false, "omissions": ["Tool payloads and provider sessions excluded."]]
+    if chained { value["attempts"] = [["podId": "prior-attempt", "capturedAt": "2026-11-10T09:00:00Z", "sourceHead": String(repeating: "d", count: 40), "packetHash": String(repeating: "e", count: 64), "summary": "Parser saved.", "failure": "First attempt failed in tests.", "messages": [], "omissions": ["Later edits were not captured."]]] }
+    return value
+  }
   var source: [String: Any] { ["head": head, "tree": String(repeating: "b", count: 40), "baseCommitSha": String(repeating: "d", count: 40), "branch": "autopod/original", "repository": "https://example.com/repo.git", "files": fileRows, "truncated": false, "skippedEntries": 2, "caveats": ["Host checkpoint only. Unsaved sandbox files are unverified."]] }
   var budget: [String: Any] { ["taskId": "same-logical-task", "status": "below_recorded_limit", "tokenBudget": 10000, "recordedTokens": 2000, "retryAuthorizationRequired": false] }
   func decode<T: Decodable>(_ value: [String: Any]) throws -> T { try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: value)) }
   func wire(_ value: some Encodable) throws -> Any { try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) }
-  func operation(_ request: RecoveryForkRequest) throws -> RecoveryForkOperation {
-    try decode(["version": 1, "id": request.id, "parentPodId": "original", "generation": 3, "actorId": "human", "request": wire(request), "state": "queued", "childPodId": "new-child", "childStatus": "queued", "sourceHead": corruptReceipt ? String(repeating: "f", count: 40) : request.sourceHead, "copiedFiles": request.files.map(\.path), "context": context, "error": NSNull(), "createdAt": "2026-11-10T10:01:00Z"])
+  func preparationState(_ receipt: RecoveryHandoffPreparation?) throws -> RecoveryHandoffPreparationState {
+    try decode(["version": 1, "podId": "original", "generation": 3, "available": true,
+      "blockers": [], "context": context, "receipt": receipt.map { try! wire($0) } ?? NSNull()])
   }
+  func operation(_ request: RecoveryForkRequest) throws -> RecoveryForkOperation {
+    try decode(["version": 1, "id": request.id, "parentPodId": "original", "generation": 3, "actorId": "human", "request": wire(request), "state": "queued", "childPodId": "new-child", "childStatus": "queued", "sourceHead": corruptReceipt ? String(repeating: "f", count: 40) : request.sourceHead, "copiedFiles": request.files.map(\.path), "context": context, "error": NSNull(), "createdAt": "2026-11-10T10:01:00Z", "workerBrief": packet(request.input), "workerBriefHash": SHA256.hash(data: Data(packet(request.input).utf8)).map { String(format: "%02x", $0) }.joined()])
+  }
+  func packet(_ input: RecoveryForkInput) -> String { "Verified fixture worker brief · \(input.sourceHead)\nOptional operator note: \(input.instructions)" }
   var actions: RecoveryForkActions {
     RecoveryForkActions(scope: "fixture", journalDirectory: directory, isCurrent: { self.current }, inspect: { _ in
       self.inspections += 1
-      return try self.decode(["version": 1, "podId": "original", "generation": 3, "available": self.observed == nil, "blockers": [], "source": self.source, "context": self.context, "budget": self.budget, "profiles": [["id": "@original", "label": "Original frozen environment"], ["id": "recovery-node", "label": "Recovery Node"]], "operation": self.observed.map { try! self.wire($0) } ?? NSNull(), "lineage": NSNull()])
+      return try self.decode(["version": 1, "podId": "original", "generation": 3, "available": self.observed == nil && self.sourceAvailable, "blockers": self.sourceAvailable ? [] : ["Worker ownership is unresolved. Starting is blocked."], "source": self.source, "context": self.context, "budget": self.budget, "profiles": [["id": "@original", "label": "Original frozen environment"], ["id": "recovery-node", "label": "Recovery Node"]], "operation": self.observed.map { try! self.wire($0) } ?? NSNull(), "lineage": NSNull()])
     }, preview: { _, input in
       self.previews.append(input)
-      return try self.decode(["version": 1, "podId": "original", "generation": 3, "available": true, "blockers": [], "expectedBinding": String(repeating: "e", count: 64), "source": self.source, "context": self.context, "budget": self.budget, "execution": ["profileId": input.executionProfileId, "target": "local", "template": "node-22", "platform": "linux/amd64", "memoryGb": 4, "cpus": 2, "originalTemplate": "node-20", "sameEnvironment": false], "input": self.wire(input)])
+      var object: [String: Any] = ["version": 1, "podId": "original", "generation": 3, "available": true, "blockers": [], "expectedBinding": String(repeating: "e", count: 64), "source": self.source, "context": self.context, "budget": self.budget, "execution": ["profileId": input.executionProfileId, "target": "local", "template": "node-22", "platform": "linux/amd64", "memoryGb": 4, "cpus": 2, "originalTemplate": "node-20", "sameEnvironment": false], "input": try self.wire(input)]
+      if !self.omitProposedPacket { let bytes = self.packet(input); object["workerBrief"] = bytes; object["workerBriefHash"] = SHA256.hash(data: Data(bytes.utf8)).map { String(format: "%02x", $0) }.joined() }
+      return try self.decode(object)
     }, create: { _, request in
       self.created.append(request)
       if self.reject { throw RecoveryForkRejection(podId: "original", request: request, message: "Selection changed before admission.") }

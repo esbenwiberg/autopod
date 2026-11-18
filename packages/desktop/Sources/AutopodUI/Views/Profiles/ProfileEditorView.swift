@@ -104,7 +104,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .buildRun:
             ["build command", "start command", "test command", "health path", "timeout", "npm", "dotnet", "python", "compile"]
         case .agent:
-            ["model", "claude-opus-4-8", "claude-sonnet-4-6", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
+            ["model", "claude-opus-5-5", "claude-sonnet-5-5", "auto", "gpt-6.2-sol", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
             ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "openrouter", "open router", "deepseek", "minimax", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:

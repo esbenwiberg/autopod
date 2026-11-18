@@ -19,10 +19,12 @@ import type {
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
 import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
+import { prepareTestMemory, requireMemoryImprovement } from '../validation/test-process-memory.js';
 import { createValidationIdentityCollector } from '../validation/validation-identity-collector.js';
 import type { PodRepository } from './pod-repository.js';
 import { observeRecoveryCheckSource } from './recovery-fork-checks.js';
 import { RepositoryPreparationError } from './repository-preparation.js';
+import { checkpointResourceIdentity } from './retained-checkpoint-repository.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
@@ -234,9 +236,66 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           )
           .digest('hex');
         const repair = podRepo.retainedCheckpoints?.latest(podId);
+        const memoryRecovery =
+          pod.executionTarget === 'local' &&
+          repair?.binding.continuation?.infrastructure?.mode === 'checks' &&
+          repair?.binding.continuation?.infrastructure?.predecessorChecksId &&
+          repair.originalEvidence.result?.infrastructureFailure?.phase === 'test' &&
+          repair.originalEvidence.result?.infrastructureFailure?.code ===
+            'PROCESS_MEMORY_EXHAUSTED';
+        if (memoryRecovery) {
+          validationConfig.assertTestMemoryOwnership = () => {
+            ownership.assertCurrent();
+          };
+          validationConfig.requiredTestMemory =
+            repair.originalEvidence.result?.test?.memoryEvidence;
+          if (!validationConfig.requiredTestMemory)
+            throw new TaskRetryBlockedError('Prior command memory evidence is unavailable');
+          const memory = await prepareTestMemory(cm, validationConfig, ownership.assertCurrent);
+          const allocation = await cm.getExecutionMetadata?.(validationConfig.containerId);
+          ownership.assertCurrent();
+          const selectedResources = repair.binding.continuation?.execution?.resolvedExecution.main;
+          if (
+            !selectedResources ||
+            selectedResources.memoryGb === null ||
+            allocation?.memoryLimitBytes !== selectedResources.memoryGb * 1024 ** 3 ||
+            (selectedResources.cpus !== null && allocation.cpuLimit !== selectedResources.cpus)
+          )
+            throw new TaskRetryBlockedError(
+              'Actual allocation differs from the explicitly selected memory candidate',
+            );
+          if (
+            allocation?.resourceIdentity !==
+            checkpointResourceIdentity(podId, repair.id, pod.lifecycleGeneration)
+          )
+            throw new TaskRetryBlockedError(
+              'Actual memory candidate does not belong to the exact retained request',
+            );
+          requireMemoryImprovement(validationConfig.requiredTestMemory, memory?.evidence);
+          validationConfig.assertTestMemoryCurrent = async () => {
+            ownership.assertCurrent();
+            if (!deps.verifySelectedSource)
+              throw new TaskRetryBlockedError('Memory recovery source verifier unavailable');
+            await deps.verifySelectedSource(podId);
+            const currentAllocation = await cm.getExecutionMetadata?.(validationConfig.containerId);
+            const currentKey = await cm.getResourceKey?.(validationConfig.containerId);
+            ownership.assertCurrent();
+            if (
+              currentAllocation?.memoryLimitBytes !== allocation.memoryLimitBytes ||
+              currentAllocation.cpuLimit !== allocation.cpuLimit ||
+              currentAllocation.resourceIdentity !== allocation.resourceIdentity ||
+              currentAllocation.imageDigest !== allocation.imageDigest ||
+              currentKey !== memory?.evidence.resourceKey
+            )
+              throw new TaskRetryBlockedError(
+                'Selected memory allocation changed before checks or certification',
+              );
+          };
+        }
         const verifyRepair = async () => {
           if (
-            (repair?.binding.approvalRewrite ||
+            (memoryRecovery ||
+              repair?.binding.approvalRewrite ||
               repair?.binding.continuation?.infrastructure?.mode === 'rework' ||
               podRepo.retainedCoding?.finalSource(podId, pod.lifecycleGeneration)) &&
             repair?.activated?.generation === pod.lifecycleGeneration
@@ -455,6 +514,25 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           };
         }
         if (dispatchId) result.executionDispatchId = dispatchId;
+        if (memoryRecovery && result.overall === 'pass') {
+          await validationConfig.assertTestMemoryCurrent?.();
+          const actual = result.test?.memoryEvidence;
+          requireMemoryImprovement(validationConfig.requiredTestMemory, actual);
+          const metadata = await cm.getExecutionMetadata?.(validationConfig.containerId);
+          const resourceKey = await cm.getResourceKey?.(validationConfig.containerId);
+          ownership.assertCurrent();
+          if (
+            !actual ||
+            actual.containerId !== validationConfig.containerId ||
+            actual.resourceKey !== resourceKey ||
+            actual.imageDigest !== metadata?.imageDigest ||
+            !metadata?.memoryLimitBytes ||
+            actual.containerLimitBytes > metadata.memoryLimitBytes
+          )
+            throw new TaskRetryBlockedError(
+              'Actual test allocation changed before source certification',
+            );
+        }
         // Source certification is separate from the actual engine outcome. A
         // superseded observer cannot turn completed checks into a synthetic
         // failure or publish source proof into the replacement invocation.

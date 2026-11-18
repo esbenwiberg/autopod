@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   AutopodError,
@@ -15,12 +16,15 @@ import {
   type RecoveryForkOperation,
   type RecoveryForkPreview,
   type RecoveryForkRequest,
+  type RecoveryHandoffPreparation,
   recoveryForkInputSchema,
   recoveryForkRequestSchema,
+  recoveryHandoffPreparationSchema,
 } from '@autopod/shared';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { launchPodOptions } from '../configuration/launch-pod-options.js';
 import {
+  RECOVERY_CONTINUATION_INSTRUCTION,
   RECOVERY_FORK_HANDOFF_PATH,
   recoveryForkLaunch,
 } from '../configuration/recovery-fork-launch.js';
@@ -33,6 +37,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import { RECOVERY_FILE_LIMITS } from '../interfaces/recovery-files.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import {
+  captureRecoveryForkSelection,
   inspectRecoveryForkFiles,
   prepareRecoveryForkSource,
   recoveryBytesHash,
@@ -51,7 +56,7 @@ import type { PodManagerDependencies } from './pod-manager-contracts.js';
 import type { PodRepository } from './pod-repository.js';
 import { assertRepairableExecutionRequirements } from './prerequisite-blocker.js';
 import type { PreparedExecution } from './provisioning-ports.js';
-import { recoveryForkContext } from './recovery-fork-context.js';
+import { recoveryForkContext, recoveryText } from './recovery-fork-context.js';
 import {
   RecoveryForkRejectedBeforeClaim,
   RecoveryForkSelectionError,
@@ -97,6 +102,246 @@ export function createRecoveryFork(deps: {
   const store = pods.recoveryForks ?? fail('Recovery storage unavailable');
   const launch = () => deps.launch ?? fail('Frozen launch configuration unavailable');
   const events = () => deps.events ?? fail('Visible event history unavailable');
+  async function bundleHash(file: string) {
+    const stat = await lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1_073_741_824)
+      fail('Saved checkpoint bundle is not a bounded regular file');
+    const hash = createHash('sha256');
+    let bytes = 0;
+    for await (const chunk of createReadStream(file)) {
+      bytes += chunk.length;
+      if (bytes > 1_073_741_824) fail('Saved checkpoint exceeds preparation bounds');
+      hash.update(chunk);
+    }
+    return hash.digest('hex');
+  }
+  async function preparedReceipt(podId: string) {
+    const generation = pods.getOrThrow(podId).lifecycleGeneration;
+    const saved = store.preparation(podId, generation);
+    if (saved?.source) {
+      const file =
+        store.preparationArchive(podId, generation) ??
+        fail('Prepared checkpoint archive is unavailable');
+      if ((await bundleHash(file)) !== saved.source.bundleHash)
+        fail('Prepared checkpoint bytes changed');
+    }
+    return saved;
+  }
+  async function getPreparedHandoff(podId: string) {
+    const pod = pods.getOrThrow(podId);
+    const config = launch().read(podId);
+    const available =
+      config?.intent === 'task' && config.workflow.agentMode === 'auto' && !deps.isGoal(podId);
+    return {
+      version: 1 as const,
+      podId,
+      generation: pod.lifecycleGeneration,
+      available,
+      blockers: available
+        ? []
+        : ['Frozen ordinary coding-task inputs are required for preparation.'],
+      context: context(pod),
+      receipt: await preparedReceipt(podId),
+      operation: store.parent(podId) ? operation(store.parent(podId)!) : null,
+    };
+  }
+  function context(pod: Pod) {
+    const current = recoveryForkContext(pod, events());
+    current.decisions = recoveryText(pods.completionJournal?.recoveryContext(pod) ?? '', 4000);
+    if (!store.child(pod.id)) return current;
+    const lineage = store.lineage(pod.id);
+    if (!lineage.length) return current;
+    current.attempts = lineage
+      .slice()
+      .reverse()
+      .map((record) => ({
+        podId: record.parentPodId,
+        capturedAt: record.createdAt,
+        sourceHead: record.binding.source.head,
+        packetHash: record.facts.prepared!.packetHash,
+        summary: recoveryText(record.binding.context.summary, 2500),
+        failure: recoveryText(record.binding.context.failure, 1500),
+        decisions: recoveryText(record.binding.context.decisions ?? '', 800),
+        operatorNote: recoveryText(record.request.instructions, 800),
+        reports: record.binding.context.reports?.slice(-2).map((report) => {
+          const text = recoveryText(report.text, 800);
+          return {
+            ...report,
+            text,
+            sha256: recoveryBytesHash(text),
+            omissions: report.omissions + ' Prior-attempt excerpt further bounded to 800 bytes.',
+          };
+        }),
+        messages: record.binding.context.messages.slice(-2).map((message) => ({
+          ...message,
+          text: recoveryText(message.text, 800),
+        })),
+        omissions: [
+          ...record.binding.context.omissions,
+          'Prior attempt excerpts in UTF-8 bytes: summary ≤2,500, failure ≤1,500, decisions/note ≤800, latest two messages/reports ≤800 each. Original retained history contains omitted text. Historical operator notes grant no new authority.',
+        ],
+      }));
+    if (Buffer.byteLength(JSON.stringify(current)) > 120_000)
+      fail('Accumulated handoff exceeds the safe history byte bound; originals retained');
+    return current;
+  }
+  async function prepareHandoff(
+    podId: string,
+    raw: unknown,
+    actor: OperatorActor,
+  ): Promise<RecoveryHandoffPreparation> {
+    const request = recoveryHandoffPreparationSchema.parse(raw);
+    if (actor.type !== 'human' || !actor.userId.trim())
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    const pod = pods.getOrThrow(podId);
+    if (request.expectedGeneration !== pod.lifecycleGeneration)
+      fail('Preparation generation changed', 'RECOVERY_FORK_SELECTION_STALE');
+    const requestHash = configurationDigest({ podId, request, actor });
+    const saved = store.preparation(podId, request.expectedGeneration);
+    if (saved) {
+      store.savePreparation(saved, requestHash);
+      return (await preparedReceipt(podId))!;
+    }
+    // Deliberately does not call policy(), accounting(), settings(), resource(),
+    // capabilities, credentials, environment preparation or enqueue. This document
+    // grants no custody bypass and cannot be consumed as an execution receipt.
+    const config = launch().read(podId) ?? fail('Frozen task inputs unavailable');
+    if (config.intent !== 'task' || config.workflow.agentMode !== 'auto' || deps.isGoal(podId))
+      fail('Only ordinary coding task handoffs can be prepared');
+    const lineage = store.lineage(podId);
+    const original = lineage.at(-1)?.binding.originalLaunch ?? config;
+    const inherited = lineage[0];
+    let source: RecoveryHandoffPreparation['source'] = null;
+    let archivePath: string | undefined;
+    let coverage: RecoveryHandoffPreparation['coverage'] = 'brief-only';
+    const checkpoint = await pods.savedWorkspaceCheckpoints?.latest(podId);
+    const result = checkpoint?.result;
+    if (
+      checkpoint &&
+      result?.objectStore &&
+      result.transferVerified &&
+      result.bundleVerified &&
+      result.hostImported &&
+      result.lineageVerified
+    ) {
+      const expectedRef = `refs/autopod-quarantine/${podId.replace(/[^A-Za-z0-9_-]/g, '_')}/${checkpoint.sequence}`;
+      if (![expectedRef, `${expectedRef}-committed`].includes(result.quarantineRef))
+        fail('Saved checkpoint belongs to another pod');
+      const git = recoveryGit(result.objectStore);
+      if (
+        (await git(['rev-parse', '--is-bare-repository'])).stdout.trim() !== 'true' ||
+        (await git(['rev-parse', `${result.quarantineRef}^{commit}`])).stdout.trim() !==
+          result.snapshotCommit ||
+        (await git(['rev-parse', `${result.snapshotCommit}^{tree}`])).stdout.trim() !==
+          result.snapshotTree
+      )
+        fail('Saved checkpoint object identity changed');
+      if (!pod.startCommitSha) fail('Saved checkpoint task base unavailable');
+      await git(['merge-base', '--is-ancestor', pod.startCommitSha, result.snapshotCommit]);
+      await mkdir(deps.root, { recursive: true, mode: 0o700 });
+      const archive = path.join(deps.root, `prepared-${randomUUID()}`);
+      await mkdir(archive, { mode: 0o700 });
+      archivePath = path.join(archive, 'source.bundle');
+      await git(['bundle', 'create', archivePath, result.quarantineRef]);
+      await git(['bundle', 'verify', archivePath]);
+      const advertised = (await git(['bundle', 'list-heads', archivePath])).stdout
+        .trim()
+        .split('\n');
+      if (
+        advertised.length !== 1 ||
+        advertised[0] !== `${result.snapshotCommit} ${result.quarantineRef}` ||
+        (await git(['rev-parse', `${result.quarantineRef}^{commit}`])).stdout.trim() !==
+          result.snapshotCommit
+      )
+        fail(
+          'Saved checkpoint changed while preserving its independent bundle',
+          'RECOVERY_FORK_SELECTION_STALE',
+        );
+      const hash = await bundleHash(archivePath);
+      if (
+        configurationDigest(checkpoint) !==
+        configurationDigest(await pods.savedWorkspaceCheckpoints!.latest(podId))
+      )
+        fail('Saved checkpoint selection changed', 'RECOVERY_FORK_SELECTION_STALE');
+      source = {
+        podId,
+        head: result.snapshotCommit,
+        tree: result.snapshotTree,
+        bundleHash: hash,
+        savedAt: checkpoint.capturedAt ?? checkpoint.verifiedAt ?? 'not recorded',
+      };
+      coverage = 'saved-checkpoint';
+    } else if (inherited) {
+      // Only the prior daemon's independently saved immutable bundle. Never
+      // inspect the unresolved worker's checkout, container or current HEAD.
+      const prepared = inherited.facts.prepared!;
+      if ((await bundleHash(prepared.bundle)) !== prepared.bundleHash)
+        fail('Saved immutable checkpoint changed');
+      archivePath = prepared.bundle;
+      source = {
+        podId: inherited.parentPodId,
+        head: prepared.head,
+        tree: prepared.tree,
+        bundleHash: prepared.bundleHash,
+        savedAt: inherited.createdAt,
+      };
+      coverage = 'inherited-checkpoint';
+    }
+    const createdAt = new Date().toISOString();
+    const packet = JSON.stringify({
+      version: 1,
+      podId,
+      capturedAt: createdAt,
+      continuationInstruction: RECOVERY_CONTINUATION_INSTRUCTION,
+      task: original.task,
+      contract: original.work.contract ?? null,
+      originalFrozenHandoffInstructions: original.work.handoffInstructions ?? null,
+      originalInputs: original.work.inputBundle ?? null,
+      source,
+      coverage:
+        coverage === 'saved-checkpoint'
+          ? 'Independently saved checkpoint; later edits may be missing.'
+          : source
+            ? 'Inherited checkpoint only; this is not the unresolved replacement’s latest saved work.'
+            : 'Brief only; no independently archived code bytes are selected.',
+      quotedHistoricalContext: context(pod),
+      optionalOperatorNote: request.instructions,
+      omissions: [
+        'No old worker or live checkout was accessed. Later, unsynced and inaccessible edits, supplemental files outside the immutable Git bundle and final reports are not captured.',
+        ...(checkpoint && coverage !== 'saved-checkpoint'
+          ? [
+              'The latest checkpoint record lacks a supported independently verifiable object-store binding; its bytes are not claimed as recovered.',
+            ]
+          : []),
+      ],
+      nextSteps:
+        'Inspect this document. Resolve prior worker ownership, then separately inspect and select the latest verified checkpoint and a freshly qualified execution environment. Preparation never starts automatically.',
+      constraints:
+        'No execution grant, new credentials, model call, allocation, approval, validation result or delivery. Original task authority and spending/retry history remain in force.',
+    });
+    if (
+      pod.lifecycleGeneration !== pods.getOrThrow(podId).lifecycleGeneration ||
+      config.digest !== launch().read(podId)?.digest
+    )
+      fail('Task inputs changed during preparation', 'RECOVERY_FORK_SELECTION_STALE');
+    if (Buffer.byteLength(packet) > 512_000) fail('Prepared handoff exceeds the packet byte bound');
+    return store.savePreparation(
+      {
+        version: 1,
+        podId,
+        generation: request.expectedGeneration,
+        actorId: actor.userId,
+        createdAt,
+        coverage,
+        source,
+        packet,
+        packetHash: recoveryBytesHash(packet),
+        workerStarted: false,
+      },
+      requestHash,
+      archivePath,
+    );
+  }
   function accounting(pod: Pod) {
     const task = pods.taskExecutions?.snapshot(pod.id) ?? fail('Task accounting unavailable');
     if (!['unlimited', 'below_recorded_limit'].includes(task.budgetCheck?.status ?? ''))
@@ -146,11 +391,14 @@ export function createRecoveryFork(deps: {
       launch().assertRecoveryAdmissionReady ??
       fail('Recovery admission readiness evidence unavailable')
     )();
-    if (store.child(podId) || configHasRecoveryPointer(launch().read(podId)))
+    const lineage = store.lineage(podId);
+    if (configHasRecoveryPointer(launch().read(podId)) && !lineage.length)
       fail(
-        'Chained recovery handoffs are unsupported; retain the server-owned prior packet',
+        'Pointer-only recovery history is unsupported; daemon-owned admission is required',
         'RECOVERY_FORK_CHAIN_UNSUPPORTED',
       );
+    if (lineage.length >= 7)
+      fail('Recovery history is limited to eight attempts; originals retained');
     if (!pods.hasUnansweredDecision) fail('Durable human-decision evidence unavailable');
     if (!owned) store.assertOriginalAvailable(podId);
     const config = launch().read(podId) ?? fail('Original frozen task launch required');
@@ -211,9 +459,23 @@ export function createRecoveryFork(deps: {
     if (config.work.contract?.executionRequirements !== undefined)
       assertRepairableExecutionRequirements(config.work.contract.executionRequirements);
     assertCheckpointRepository(config.repository.config.remote);
+    const previousAdmission = store.child(podId);
+    if (previousAdmission && !store.workerSettled(podId))
+      fail(
+        'Exact prior recovery worker qualification and settlement are required; uncertain attempts remain held',
+      );
+    // A recovery child's normal validation failure can precede the generic
+    // finalization preservation mark. Its exact settled local worker plus the
+    // independently verified clean host Git checkpoint (checked below before
+    // claim and again by the importer) is a separate source proof. This never
+    // admits unknown exits or reads unsynced worker bytes.
+    const settledLocalChild =
+      pod.executionTarget === 'local' &&
+      previousAdmission?.facts.qualified?.evidence.outcome === 'qualified' &&
+      store.workerSettled(podId);
     if (
       !pod.finalization?.agentSettledAt ||
-      !pod.finalization.sourcePreservedAt ||
+      (!pod.finalization.sourcePreservedAt && !settledLocalChild) ||
       !pods.taskExecutions?.hasSettledRun?.(pod, pod.finalization.cycle)
     )
       fail('Positive exact original worker settlement and preserved host source required');
@@ -336,13 +598,15 @@ export function createRecoveryFork(deps: {
           ? 'Recovery attempt interrupted; original custody retained. No step was replayed.'
           : null),
       createdAt: record.createdAt,
+      workerBrief: f.prepared ? store.packet(record) : undefined,
+      workerBriefHash: f.prepared?.packetHash,
     };
   }
   async function inspect(podId: string, strict = false): Promise<RecoveryForkInspection> {
     const pod = (pods.getForHistory ?? pods.getOrThrow)(podId);
     const prior = store.parent(podId);
     const lineage = store.child(podId);
-    const context = recoveryForkContext(pod, events());
+    const handoffContext = context(pod);
     let source: RecoveryForkInspection['source'] = null;
     let currentBudget: RecoveryForkBudget | null = null;
     const blockers: string[] = [];
@@ -359,7 +623,30 @@ export function createRecoveryFork(deps: {
         allowSupplementalFiles: true,
       });
       if (!observed.worktreeClean) fail('Clean exact host checkpoint required');
-      const listing = await inspectRecoveryForkFiles(pod.worktreePath!);
+      const savedCheckpoint = store.latestSavedCheckpoint(podId);
+      if (savedCheckpoint) {
+        const saved = savedCheckpoint.result;
+        if (!saved.transferVerified || !saved.bundleVerified || !saved.lineageVerified)
+          fail(
+            'The latest independently saved checkpoint lacks complete source proof; it cannot be replaced by older host work',
+          );
+        try {
+          await recoveryGit(pod.worktreePath!)([
+            'merge-base',
+            '--is-ancestor',
+            saved.snapshotCommit,
+            observed.commitSha,
+          ]);
+        } catch {
+          fail(
+            'The host checkout does not contain the latest independently saved checkpoint. Reconcile that saved source before starting; older work will not be substituted.',
+          );
+        }
+      }
+      const listing = await inspectRecoveryForkFiles(
+        pod.worktreePath!,
+        store.child(podId)?.facts.prepared?.files,
+      );
       try {
         await recoveryGit(pod.worktreePath!)([
           'merge-base',
@@ -367,6 +654,14 @@ export function createRecoveryFork(deps: {
           pod.startCommitSha!,
           observed.commitSha,
         ]);
+        const prior = store.child(podId);
+        if (prior)
+          await recoveryGit(pod.worktreePath!)([
+            'merge-base',
+            '--is-ancestor',
+            prior.facts.prepared!.head,
+            observed.commitSha,
+          ]);
       } catch (error) {
         // Git exit 1 establishes non-ancestry. Missing objects, timeouts and
         // transport/inspection failures are not known policy rejections.
@@ -378,8 +673,7 @@ export function createRecoveryFork(deps: {
       if (
         !key ||
         configurationDigest(before) !== configurationDigest(after) ||
-        configurationDigest(context) !==
-          configurationDigest(recoveryForkContext(after.pod, events()))
+        configurationDigest(handoffContext) !== configurationDigest(context(after.pod))
       )
         fail('Original source/context/accounting changed during inspection');
       source = {
@@ -389,6 +683,7 @@ export function createRecoveryFork(deps: {
         branch: pod.branch,
         repository: before.config.repository!.config.remote,
         ...listing,
+        savedCheckpointHash: configurationDigest(savedCheckpoint),
         caveats: [
           'HOST checkpoint only; final sandbox source and reports are not certified.',
           'Only selected safe nonignored supplemental files are copied. Ignored, unavailable, dependency, credential and unselected files remain in original custody.',
@@ -411,7 +706,7 @@ export function createRecoveryFork(deps: {
       available: blockers.length === 0,
       blockers,
       source,
-      context,
+      context: handoffContext,
       budget: currentBudget,
       profiles: [
         { id: '@original', label: 'Original frozen environment' },
@@ -422,6 +717,56 @@ export function createRecoveryFork(deps: {
         ? { parentPodId: lineage.parentPodId, operationId: lineage.requestId }
         : null,
     };
+  }
+  function workerPacket(binding: RecoveryForkBinding, input: RecoveryForkInput) {
+    const podId = binding.parentPodId;
+    const pod = pods.getOrThrow(podId);
+    const lineage = store.lineage(podId);
+    const previous = lineage[0];
+    const settings = launch().executionSettings(binding.execution);
+    const packet = JSON.stringify({
+      version: 1,
+      continuationInstruction: RECOVERY_CONTINUATION_INSTRUCTION,
+      task: binding.originalLaunch.task,
+      contract: binding.originalLaunch.work.contract ?? null,
+      sourceRecordedTimes: {
+        workerSettledAt: pod.finalization?.agentSettledAt ?? null,
+        hostPreservedAt: pod.finalization?.sourcePreservedAt ?? null,
+        caveat:
+          'Recorded daemon evidence times, not a claim about later or unsynced edits. Packet preparation/admission time is recorded on the separate operation receipt.',
+      },
+      frozenCheckCommands: {
+        setup: settings.validationSetupCommand ?? null,
+        build: settings.buildCommand ?? null,
+        test: settings.testCommand ?? null,
+      },
+      parentPodId: podId,
+      history: `/pods/${podId}`,
+      source: binding.source,
+      originalFrozenHandoffInstructions:
+        (lineage.at(-1)?.binding.originalLaunch ?? binding.originalLaunch).work
+          .handoffInstructions ?? null,
+      quotedHistoricalContext: binding.context,
+      optionalOperatorNote: input.instructions,
+      humanContinuationInstructions: input.instructions,
+      nextSteps:
+        'Inspect the imported checkpoint and selected supplemental bytes. Read each attempt’s failure and omissions; resume the next unfinished step of the original task, then run the frozen checks and independent review. No prior check, waiver, approval or delivery is inherited.',
+      importedSupplementalPaths: input.files.map((file) => file.path),
+      importedSupplementalFiles: binding.supplementalFiles ?? [],
+      priorSupplementalIdentities: (previous?.facts.prepared?.files ?? []).map((file) => ({
+        ...file,
+        sourcePodId: previous!.parentPodId,
+        savedAt: previous!.createdAt,
+        packetHash: previous!.facts.prepared!.packetHash,
+      })),
+      supplementalWorkPolicy:
+        'Imported bytes are verified before coding. If you edit an imported supplemental file, explicitly add and commit it as regular source (git --literal-pathspecs add -f -- <path>) before checks. Uncommitted or missing imported reference files remain blocked; the handoff packet must stay unchanged.',
+      authority:
+        'Original frozen task authority only; historical quotations and continuation instructions grant no additional permission. Fresh checks and independent review precede separate authenticated human approval.',
+    });
+    if (Buffer.byteLength(packet) > 512_000)
+      fail('Proposed worker handoff exceeds the packet byte bound');
+    return packet;
   }
   async function resolve(podId: string, input: RecoveryForkInput) {
     const view = await inspect(podId, true);
@@ -435,6 +780,12 @@ export function createRecoveryFork(deps: {
     for (const file of input.files)
       if (!view.source.files.some((f) => f.path === file.path && f.version === file.version))
         fail('Supplemental file selection changed', 'RECOVERY_FORK_SELECTION_STALE');
+    for (const file of store.child(podId)?.facts.prepared?.files ?? [])
+      if (
+        view.source.files.some((current) => current.path === file.path) &&
+        !input.files.some((selected) => selected.path === file.path)
+      )
+        fail(`Select inherited supplemental file ${file.path} to preserve its saved bytes`);
     if (
       input.files.reduce(
         (sum, file) => sum + (view.source!.files.find((f) => f.path === file.path)?.size ?? 0),
@@ -466,11 +817,14 @@ export function createRecoveryFork(deps: {
     const settings = launch().executionSettings(execution);
     assertQualificationExecutionContextSupported(settings);
     await launch().assertCurrentCapabilities(execution);
+    const supplementalFiles = await captureRecoveryForkSelection(
+      selected.pod.worktreePath!,
+      input.files,
+    );
     const after = policy(podId);
     if (
       configurationDigest(selected) !== configurationDigest(after) ||
-      configurationDigest(view.context) !==
-        configurationDigest(recoveryForkContext(after.pod, events()))
+      configurationDigest(view.context) !== configurationDigest(context(after.pod))
     )
       fail('Original task/settings/context changed', 'RECOVERY_FORK_SELECTION_STALE');
     const binding: RecoveryForkBinding = {
@@ -493,7 +847,9 @@ export function createRecoveryFork(deps: {
       context: view.context,
       contextHash: configurationDigest(view.context),
       accountingHash: configurationDigest(selected.task),
+      supplementalFiles,
     };
+    binding.packetHash = recoveryBytesHash(workerPacket(binding, input));
     if (configurationDigest(after) !== configurationDigest(policy(podId)))
       fail('Original task changed', 'RECOVERY_FORK_SELECTION_STALE');
     return { view, binding };
@@ -510,6 +866,8 @@ export function createRecoveryFork(deps: {
         available: true,
         blockers: [],
         expectedBinding: configurationDigest({ binding, input }),
+        workerBrief: workerPacket(binding, input),
+        workerBriefHash: binding.packetHash,
         source: view.source,
         context: view.context,
         budget: view.budget,
@@ -554,8 +912,10 @@ export function createRecoveryFork(deps: {
       (deps.container(current.pod.executionTarget).executionResourceScope ?? null) !==
         record.binding.resourceScope ||
       current.config.digest !== record.binding.originalLaunch.digest ||
-      configurationDigest(recoveryForkContext(current.pod, events())) !==
-        record.binding.contextHash ||
+      (record.binding.source.savedCheckpointHash !== undefined &&
+        record.binding.source.savedCheckpointHash !==
+          configurationDigest(store.latestSavedCheckpoint(record.parentPodId))) ||
+      configurationDigest(context(current.pod)) !== record.binding.contextHash ||
       (beforeAdmission && configurationDigest(current.task) !== record.binding.accountingHash) ||
       configurationDigest(launch().executionSettings(record.binding.execution)) !==
         record.binding.settingsHash
@@ -594,7 +954,10 @@ export function createRecoveryFork(deps: {
       ({ binding } = await resolve(podId, input));
       // Resolve awaits policy/resource/profile reads. Recheck raw source and
       // forbidden metadata after those waits, before the first claim attempt.
-      const finalFiles = await inspectRecoveryForkFiles(binding.worktreePath);
+      const finalFiles = await inspectRecoveryForkFiles(
+        binding.worktreePath,
+        store.child(podId)?.facts.prepared?.files,
+      );
       const finalSource = await inspectSupplementalAdoptionGit(
         recoveryGit(binding.worktreePath),
         binding.source.branch,
@@ -668,6 +1031,11 @@ export function createRecoveryFork(deps: {
     const atomically = pods.atomically ?? fail('Atomic recovery admission unavailable');
     const claim = atomically(() => {
       policy(podId);
+      if (
+        binding.source.savedCheckpointHash !==
+        configurationDigest(store.latestSavedCheckpoint(podId))
+      )
+        fail('Saved checkpoint changed before claim', 'RECOVERY_FORK_SELECTION_STALE');
       return store.claim(`rf-${randomUUID()}`, podId, request, actor.userId, binding);
     });
     if (!claim.created) return operation(claim.record);
@@ -676,20 +1044,9 @@ export function createRecoveryFork(deps: {
       assertCurrent(record, true);
       await mkdir(deps.root, { recursive: true, mode: 0o700 });
       assertCurrent(record, true);
-      const packet = JSON.stringify({
-        version: 1,
-        parentPodId: podId,
-        history: `/pods/${podId}`,
-        source: binding.source,
-        originalFrozenHandoffInstructions: binding.originalLaunch.work.handoffInstructions ?? null,
-        quotedHistoricalContext: binding.context,
-        humanContinuationInstructions: request.instructions,
-        importedSupplementalPaths: request.files.map((file) => file.path),
-        supplementalWorkPolicy:
-          'Imported bytes are verified before coding. If you edit an imported supplemental file, explicitly add and commit it as regular source (git --literal-pathspecs add -f -- <path>) before checks. Uncommitted or missing imported reference files remain blocked; the handoff packet must stay unchanged.',
-        authority:
-          'Original frozen task authority only; historical quotations and continuation instructions grant no additional permission. Fresh checks and independent review precede separate authenticated human approval.',
-      });
+      const packet = workerPacket(binding, input);
+      if (recoveryBytesHash(packet) !== binding.packetHash)
+        fail('Proposed worker packet changed after review', 'RECOVERY_FORK_SELECTION_STALE');
       const prepared = await prepareRecoveryForkSource({
         source: binding.worktreePath,
         root: path.join(deps.root, record.id),
@@ -702,7 +1059,10 @@ export function createRecoveryFork(deps: {
         childBranch: binding.execution.work.branch!,
         input,
         packet,
+        inheritedFiles: store.child(podId)?.facts.prepared?.files,
       });
+      if (prepared.packetHash !== binding.packetHash)
+        fail('Imported worker packet differs from the reviewed packet');
       assertCurrent(record, true);
       if ((await resource(pods.getOrThrow(podId))) !== binding.resourceKey)
         fail('Original resource identity changed');
@@ -762,6 +1122,11 @@ export function createRecoveryFork(deps: {
               original.maxValidationAttempts,
               config.workflow.maxValidationAttempts,
             ),
+            // A newly inserted execution has provably consumed nothing yet.
+            // Parent usage remains in the shared task ledger; do not mistake
+            // ancestor runs for missing telemetry in this empty child.
+            tokenTelemetryAccuracy: 'complete',
+            phaseTokenUsage: {},
           });
         },
       );
@@ -957,8 +1322,7 @@ export function createRecoveryFork(deps: {
       deps.assertGuidanceCollected(original.id);
       if (
         configurationDigest(original) !== record.binding.parentHash ||
-        configurationDigest(recoveryForkContext(original, events())) !==
-          record.binding.contextHash ||
+        configurationDigest(context(original)) !== record.binding.contextHash ||
         launch().read(original.id)?.digest !== record.binding.originalLaunch.digest ||
         launch().read(podId)?.digest !== record.binding.execution.digest ||
         qualificationExecutionContextHash(settings) !== proof.binding.executionContextHash
@@ -1026,6 +1390,8 @@ export function createRecoveryFork(deps: {
     inspect,
     preview,
     create,
+    prepareHandoff,
+    getPreparedHandoff,
     process,
     async qualifyChild(input: PreparedExecution) {
       const record = store.child(input.pod.id);

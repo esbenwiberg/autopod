@@ -56,6 +56,11 @@ public enum ClaudeModelCanonicalizer {
 
 public enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
+        "gpt-6.2-astra": RuntimeModelPrice(inputPer1M: 8, cachedInputPer1M: 0.4, outputPer1M: 40),
+        "gpt-6.2-sol": RuntimeModelPrice(inputPer1M: 2, cachedInputPer1M: 0.1, outputPer1M: 10),
+        "gpt-6.1-terra": RuntimeModelPrice(inputPer1M: 1, cachedInputPer1M: 0.05, outputPer1M: 5),
+        "claude-fable-5-2": RuntimeModelPrice(inputPer1M: 8, cachedInputPer1M: 0.2, outputPer1M: 40),
+        "claude-haiku-5-5": RuntimeModelPrice(inputPer1M: 0.1, cachedInputPer1M: 0.01, outputPer1M: 0.5),
         "claude-fable-5-1": RuntimeModelPrice(
             inputPer1M: 10,
             cachedInputPer1M: 0.25,
@@ -204,6 +209,14 @@ public enum RuntimeModelOptions {
     ]
 
     private static let modelLabels: [String: String] = [
+        "anthropic/claude-sonnet-4": "Anthropic · Claude Sonnet 4",
+        "openai-codex/gpt-5.3-codex": "OpenAI Codex · GPT-5.3-Codex",
+        "github-copilot/gpt-5.2-codex": "GitHub Copilot · GPT-5.2-Codex",
+        "gpt-6.2-astra": "GPT-6.2 Astra",
+        "gpt-6.2-sol": "GPT-6.2 Sol",
+        "gpt-6.1-terra": "GPT-6.1 Terra",
+        "claude-fable-5-2": "Fable 5.2",
+        "claude-haiku-5-5": "Haiku 5.5",
         "claude-fable-5-1": "Fable 5.1",
         "claude-opus-5-5": "Opus 5.5",
         "claude-sonnet-5-5": "Sonnet 5.5",
@@ -223,6 +236,10 @@ public enum RuntimeModelOptions {
         "gpt-5.6-sol": "GPT-5.6 Sol",
         "gpt-5.6-terra": "GPT-5.6 Terra",
         "gpt-5.6-luna": "GPT-5.6 Luna",
+        "gpt-5.3-codex": "GPT-5.3-Codex",
+        "gpt-5.5": "GPT-5.5",
+        "gpt-5": "GPT-5",
+        "gpt-5-mini": "GPT-5 Mini",
     ]
 
     public static func defaultOptions(
@@ -322,6 +339,9 @@ public enum RuntimeModelOptions {
         }
 
         let canonicalModel = canonicalValue(for: model)
+        if canonicalModel == "claude-haiku-5-5", let price = modelPricing[canonicalModel] {
+            return "From \(price.summary) (prompts ≤100k tokens; above 100k: $0.50 in / $0.05 cached / $2.50 out)"
+        }
         return modelPricing[canonicalModel]?.summary ?? "Pricing not in local table"
     }
 
@@ -351,60 +371,33 @@ public enum RuntimeModelOptions {
                 return [
                     RuntimeModelOption(value: "claude-opus-5-5", label: "Opus 5.5"),
                     RuntimeModelOption(value: "claude-sonnet-5-5", label: "Sonnet 5.5"),
-                    RuntimeModelOption(value: "claude-fable-5-1", label: "Fable 5.1"),
-                    RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
-                    RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
-                    RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
-                    RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
-                    RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
-                    RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
+                    RuntimeModelOption(value: "claude-fable-5-2", label: "Fable 5.2"),
+                    RuntimeModelOption(value: "claude-haiku-5-5", label: "Haiku 5.5"),
                 ]
             case .reviewerModel:
                 return [
                     RuntimeModelOption(value: "claude-sonnet-5-5", label: "Sonnet 5.5"),
                     RuntimeModelOption(value: "claude-opus-5-5", label: "Opus 5.5"),
-                    RuntimeModelOption(value: "claude-fable-5-1", label: "Fable 5.1"),
-                    RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
-                    RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
-                    RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
-                    RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
-                    RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
-                    RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
+                    RuntimeModelOption(value: "claude-fable-5-2", label: "Fable 5.2"),
+                    RuntimeModelOption(value: "claude-haiku-5-5", label: "Haiku 5.5"),
                 ]
             }
         case .codex:
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
-                RuntimeModelOption(value: "gpt-6.1-sol", label: "GPT-6.1 Sol"),
-                RuntimeModelOption(value: "gpt-6-astra", label: "GPT-6 Astra"),
+                RuntimeModelOption(value: "gpt-6.2-sol", label: "GPT-6.2 Sol"),
+                RuntimeModelOption(value: "gpt-6.2-astra", label: "GPT-6.2 Astra"),
+                RuntimeModelOption(value: "gpt-6.1-terra", label: "GPT-6.1 Terra"),
                 RuntimeModelOption(value: "gpt-6-luna", label: "GPT-6 Luna"),
-                RuntimeModelOption(value: "gpt-5.6-sol", label: "GPT-5.6 Sol"),
-                RuntimeModelOption(value: "gpt-5.6-terra", label: "GPT-5.6 Terra"),
-                RuntimeModelOption(value: "gpt-5.6-luna", label: "GPT-5.6 Luna"),
-                RuntimeModelOption(value: "gpt-5.3-codex", label: "GPT-5.3-Codex"),
-                RuntimeModelOption(value: "gpt-5.5", label: "GPT-5.5"),
-                RuntimeModelOption(value: "gpt-5", label: "GPT-5"),
-                RuntimeModelOption(value: "gpt-5-mini", label: "GPT-5 Mini"),
             ]
         case .copilot:
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
             ]
         case .pi:
+            // Explicit choices come from the authorized catalog, not stale provider examples.
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
-                RuntimeModelOption(
-                    value: "anthropic/claude-sonnet-4",
-                    label: "Anthropic · Claude Sonnet 4"
-                ),
-                RuntimeModelOption(
-                    value: "openai-codex/gpt-5.3-codex",
-                    label: "OpenAI Codex · GPT-5.3-Codex"
-                ),
-                RuntimeModelOption(
-                    value: "github-copilot/gpt-5.2-codex",
-                    label: "GitHub Copilot · GPT-5.2-Codex"
-                ),
             ]
         }
     }
@@ -426,7 +419,8 @@ public enum RuntimeModelOptions {
         let label = modelLabels[model] ?? model
         guard runtime == .pi, let providerId,
               catalog?.provider(id: providerId)?.implementation.kind == "generic-pi-api" else {
-            return label
+            let isKnown = modelLabels[model] != nil || modelPricing[model] != nil
+            return isKnown ? "\(label) (Legacy)" : label
         }
         return "\(label) (unavailable)"
     }

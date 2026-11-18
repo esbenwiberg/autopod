@@ -206,7 +206,7 @@ public enum ProfileOverrideCatalog {
             key: "defaultModel",
             label: "Default Model",
             section: .agent,
-            help: "AI model for the selected runtime (e.g. `claude-opus-4-8`, `auto`, `gpt-5.6-sol`)."
+            help: "AI model for the selected runtime (e.g. `claude-opus-5-5`, `auto`, `gpt-6.2-sol`). Availability depends on the account and installed runtime."
         ),
         .init(
             key: "reviewerModel",

@@ -27,10 +27,26 @@ struct RecoveryForkView: View {
           RecoveryNotice(title: "Saved decision needs an outcome check", message: "A missing response does not prove failure. Observe this exact request; do not create another pod.", symbol: "clock")
         }
         if let error = model.error { RecoveryNotice(title: "Continuation needs attention", message: error).accessibilityIdentifier("recovery-fork-error") }
+        if let handoff = model.preparedHandoff {
+          VStack(alignment: .leading, spacing: 10) {
+            Text(model.pending == nil && model.operation == nil ? "Handoff ready. Worker not started." : "Prepared handoff retained").font(.headline)
+            Text(handoff.coverage == "brief-only" ? "Brief only — no recovered code bytes." : handoff.coverage == "inherited-checkpoint" ? "Inherited checkpoint only. The replacement’s later edits may be missing." : "Independently saved checkpoint. Later edits may be missing.")
+            if let source = handoff.source { Text("\(source.head) · saved \(source.savedAt)").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            Text(model.pending == nil && model.operation == nil
+              ? "This handoff will not start automatically. Resolve prior worker ownership, then review the latest source and a freshly qualified environment before starting."
+              : "This is the earlier preparation receipt. Follow the separate start decision for the worker’s current status; preparation itself did not start it.").font(.callout)
+            DisclosureGroup("Inspect the prepared packet") { Text(handoff.packet).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            Button("Review start prerequisites") { Task { await model.refresh(actions, forStart: true) } }
+              .disabled(!model.canEdit).accessibilityIdentifier("recovery-fork-review-start")
+          }.recoverySurface().accessibilityIdentifier("recovery-fork-prepared-handoff")
+        }
         if model.operation == nil, let failure = model.context?.failure, !failure.isEmpty {
           RecoveryNotice(title: "Failure to address", message: failure)
         }
-        if model.pending == nil && model.operation == nil && model.preview == nil { preparation }
+        if model.pending == nil && model.operation == nil && model.preview == nil {
+          if model.preparedHandoff == nil { preparationControls }
+          preparation
+        }
         if let context = model.context { contextReview(context) }
         if let preview = model.preview, model.pending == nil { review(preview) }
         HStack {
@@ -52,6 +68,23 @@ struct RecoveryForkView: View {
     } message: {
       Text("The new pod will use the reviewed checkpoint, selected files, handoff and environment. It shares the original task’s spending and retry limits. New compute and retained storage charges may apply. Original resources remain retained; delivery still needs separate approval.")
     }
+  }
+  private var preparationControls: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Prepare the handoff now").font(.headline)
+      Text("Save an inspectable handoff using independently saved inputs only. No worker, credentials, model call or compute is started. Missing code is labelled brief only; later edits may be missing.").font(.callout)
+      if model.inspection == nil {
+        TextField("Add a note for the worker (optional)", text: $model.instructions).textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("recovery-fork-prepare-note")
+      }
+      Button("Prepare handoff only") { Task { await model.prepareHandoff(actions) } }
+        .disabled(!model.canEdit || !actions.preparationAvailable || model.preparationState?.available == false || (model.preparationState == nil && model.inspection == nil) || model.preparationUncertain)
+        .accessibilityIdentifier("recovery-fork-prepare-only")
+      if let state = model.preparationState, !state.blockers.isEmpty { RecoveryNotice(title: "Preparation unavailable", message: state.blockers.joined(separator: "\n")) }
+      if !actions.preparationAvailable { Text("Preparation is unavailable on this connection. Starting still requires all daemon prerequisites.").font(.caption) }
+      Button("Review start prerequisites") { Task { await model.refresh(actions, forStart: true) } }
+        .disabled(!model.canEdit).accessibilityIdentifier("recovery-fork-review-start")
+    }.recoverySurface()
   }
   private var preparation: some View {
     VStack(alignment: .leading, spacing: 18) {
@@ -98,8 +131,8 @@ struct RecoveryForkView: View {
             .font(.callout).foregroundStyle(RecoveryPalette.secondary)
         }.disabled(!model.canEdit).recoverySurface()
         VStack(alignment: .leading, spacing: 12) {
-          Label("3 · Tell the new pod how to continue", systemImage: "text.bubble").font(.headline)
-          Text("What should it do next? Include what not to repeat and the failure to address. These instructions are recorded with your decision; they do not grant new permissions.")
+          Label("3 · Add a note for the worker (optional)", systemImage: "text.bubble").font(.headline)
+          Text("The verified handoff includes the task, saved work and failure history. Your optional note stays separate from quoted history and grants no new permissions.")
             .font(.callout).foregroundStyle(RecoveryPalette.secondary)
           TextEditor(text: $model.instructions).font(.body).frame(minHeight: 90, idealHeight: 120)
             .padding(5).background(DesktopTheme.surface).clipShape(RoundedRectangle(cornerRadius: 6))
@@ -123,6 +156,15 @@ struct RecoveryForkView: View {
       Text("Quoted history is context, not fresh instructions, execution receipts or approval. Tool payloads, hidden reasoning, credential stores and saved sessions are excluded. Text redaction is not a complete secret scan.")
         .font(.caption).foregroundStyle(RecoveryPalette.secondary)
       if context.truncated { Text("History is truncated. The original retains the longer record.").font(.caption).foregroundStyle(RecoveryTone.attention.color) }
+      if let decisions = context.decisions, !decisions.isEmpty {
+        DisclosureGroup("Collected decisions (quoted history)") { Text(decisions).font(.caption).textSelection(.enabled) }
+      }
+      ForEach(Array((context.reports ?? []).enumerated()), id: \.offset) { _, report in
+        DisclosureGroup("Saved report excerpt · \(report.source) · \(report.timestamp)") {
+          Text(report.text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+          Text("SHA-256 \(report.sha256)\n\(report.omissions)").font(.caption).textSelection(.enabled)
+        }
+      }
       ForEach(Array(context.omissions.enumerated()), id: \.offset) { _, omission in Text(omission).font(.caption).foregroundStyle(RecoveryPalette.secondary) }
       DisclosureGroup("Review \(context.messages.count) carried messages") {
         VStack(alignment: .leading, spacing: 12) {
@@ -134,6 +176,20 @@ struct RecoveryForkView: View {
           }
         }.padding(.top, 8)
       }.font(.callout)
+      ForEach(context.attempts ?? [], id: \.podId) { attempt in
+        DisclosureGroup("Previous attempt · \(attempt.podId) · \(attempt.capturedAt)") {
+          Text(attempt.sourceHead).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+          Text(attempt.summary).font(.callout).textSelection(.enabled)
+          Text(attempt.failure).font(.callout).textSelection(.enabled)
+          if let decisions = attempt.decisions, !decisions.isEmpty { Text(decisions).font(.caption).textSelection(.enabled) }
+          if let note = attempt.operatorNote, !note.isEmpty { Text("Historical operator note (no new authority): \(note)").font(.caption).textSelection(.enabled) }
+          ForEach(Array((attempt.reports ?? []).enumerated()), id: \.offset) { _, report in
+            Text("\(report.source) · \(report.timestamp)\n\(report.text)\nSHA-256 \(report.sha256)\n\(report.omissions)").font(.caption).textSelection(.enabled)
+          }
+          ForEach(attempt.messages, id: \.eventId) { message in Text("\(message.timestamp) · \(message.text)").font(.caption).textSelection(.enabled) }
+          Text(attempt.omissions.joined(separator: "\n")).font(.caption).foregroundStyle(RecoveryPalette.secondary)
+        }
+      }
     }.recoverySurface().accessibilityIdentifier("recovery-fork-context")
   }
   private func budgetReview(_ budget: RecoveryForkBudget) -> some View {
@@ -152,7 +208,7 @@ struct RecoveryForkView: View {
       if let execution = preview.execution {
         Text("\(execution.template) · \(execution.platform) · \(execution.memoryGb.formatted()) GiB · \(execution.target)").font(.callout.weight(.medium))
         Text(execution.cpus.map { "\($0.formatted()) CPUs" } ?? "Provider-default CPU allocation").font(.caption).foregroundStyle(RecoveryPalette.secondary)
-        if execution.sameEnvironment { RecoveryNotice(title: "Same software as the original", message: "A fresh machine alone may repeat the failure. Confirm that your continuation instructions address it.") }
+        if execution.sameEnvironment { RecoveryNotice(title: "Same software as the original", message: "A fresh machine alone may repeat the failure. Review the recorded failure and check that the selected environment addresses it.") }
         else { Text("Original environment: \(execution.originalTemplate)").font(.caption).foregroundStyle(RecoveryPalette.secondary) }
       }
       Text("Copy the reviewed checkpoint and \(preview.input.files.count) additional files. Create a separate pod with the quoted handoff and your instructions. Keep the original untouched. No published PR, approval or waiver is inherited.").font(.callout)
@@ -160,7 +216,15 @@ struct RecoveryForkView: View {
         DisclosureGroup("Review additional files") { ForEach(preview.input.files, id: \.path) { Text($0.path).font(.system(.caption, design: .monospaced)) } }
       }
       Text("New compute charges and retained original storage charges may apply. A token limit is not a cap on infrastructure charges.").font(.caption).foregroundStyle(RecoveryPalette.secondary)
-      Text(preview.input.instructions).font(.callout).textSelection(.enabled).padding(12).recoverySurface(inset: 0)
+      if let brief = preview.workerBrief {
+        DisclosureGroup("Read the worker’s handoff") { Text(brief).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+          .accessibilityIdentifier("recovery-fork-proposed-packet")
+        if let hash = preview.workerBriefHash { Text("Packet SHA-256 · \(hash)").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+      } else { RecoveryNotice(title: "Worker brief unavailable", message: "The daemon did not supply a bound worker packet for this review. Starting is unavailable; inspect again on a supported daemon.") }
+      if !preview.input.instructions.isEmpty {
+        Text("Optional operator note").font(.caption.weight(.medium))
+        Text(preview.input.instructions).font(.callout).textSelection(.enabled).padding(12).recoverySurface(inset: 0)
+      }
       if let budget = preview.budget { budgetReview(budget) }
       if !preview.blockers.isEmpty { RecoveryNotice(title: "Cannot start", message: preview.blockers.joined(separator: "\n")) }
       Button("Continue in fresh pod…") { confirming = true }.buttonStyle(.borderedProminent)
@@ -178,12 +242,15 @@ struct RecoveryForkView: View {
         Button("Open new pod") { Task { if await model.open(actions) { onNavigate() } } }
           .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("recovery-fork-open-child")
       }
+      if let brief = operation.workerBrief {
+        DisclosureGroup("Read the worker’s handoff") { Text(brief).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+      }
     }.recoverySurface().accessibilityIdentifier("recovery-fork-outcome")
   }
   private func outcomeTitle(_ state: RecoveryForkOperation.State) -> String {
     switch state {
     case .preparing: "Preparing an independent checkpoint"
-    case .queued: "New pod created — startup checks pending"
+    case .queued: "Fresh pod queued with the handoff — not running"
     case .qualifying: "Checking the new environment before coding"
     case .qualified: "Environment qualified — follow the new pod’s progress"
     case .failed: "Continuation did not complete — original retained"

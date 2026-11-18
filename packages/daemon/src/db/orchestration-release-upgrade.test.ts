@@ -17,21 +17,27 @@ import {
 import { snapshotBeforeCutover } from './cutover-backup.js';
 import { runMigrationsWithBackups } from './migrate.js';
 
-it('rehearses the released 255 upgrade on a restored online backup, never on the source or snapshot', async () => {
+it.each([
+  255, 256,
+])('rehearses the released %i upgrade on a restored online backup, never on the source or snapshot', async (release) => {
   const root = mkdtempSync(path.join(tmpdir(), 'orch-release-'));
   mkdirSync(path.join(root, 'backups'));
   const source = createHistoricalDiskDatabase(path.join(root, 'release.db'), [
-    { dir: MIGRATIONS_DIR, through: 255 },
+    { dir: MIGRATIONS_DIR, through: release },
   ]);
   try {
     source.exec(`INSERT INTO validation_phase_timings VALUES('timing','[123,456]');
  INSERT INTO managed_pods(pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,request_json,handle_json,created_at) VALUES('unresolved','installation','a','k','spec','profile','grant',1,'digest','{}','{}',1)`);
+    if (release === 256)
+      source
+        .prepare("INSERT INTO fresh_handoff_preparations VALUES('p',1,'digest','{}',NULL)")
+        .run();
     const prior = source.prepare('SELECT * FROM schema_version ORDER BY version').all();
     const backup = await snapshotBeforeCutover(
       source,
       source.name,
       logger,
-      'synthetic-release-255',
+      `synthetic-release-${release}`,
     );
     if (!backup) throw new Error('missing backup');
     const verified = await verifyBackupRestore(backup.path, {
@@ -46,13 +52,19 @@ it('rehearses the released 255 upgrade on a restored online backup, never on the
       await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
       expect(
         db
-          .prepare('SELECT version FROM schema_version WHERE version>255 ORDER BY version')
+          .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
           .pluck()
           .all(),
       ).toEqual([262, 263, 264, 265, 266, 267, 268, 269]);
       expect(
-        db.prepare('SELECT * FROM schema_version WHERE version<=255 ORDER BY version').all(),
+        db.prepare('SELECT * FROM schema_version WHERE version<=? ORDER BY version').all(release),
       ).toEqual(prior);
+      if (release === 256) {
+        expect(
+          db.prepare('SELECT request_hash FROM fresh_handoff_preparations').pluck().get(),
+        ).toBe('digest');
+        expect(() => db.exec('DELETE FROM fresh_handoff_preparations')).toThrow('retained');
+      }
       expect(db.prepare('SELECT durations_ms FROM validation_phase_timings').pluck().get()).toBe(
         '[123,456]',
       );
@@ -112,6 +124,8 @@ it('resumes a valid partially applied orchestration prefix', async () => {
 it.each([
   'DELETE FROM schema_version WHERE version=262; DROP TABLE orchestration_runs',
   'DELETE FROM schema_version WHERE version=263',
+  'DROP TABLE fresh_handoff_preparations',
+  'DELETE FROM schema_version WHERE version=256',
   'DROP TABLE orchestration_runs',
 ])('rejects a high version that masks missing orchestration history or its root table: %s', async (damage) => {
   const root = mkdtempSync(path.join(tmpdir(), 'orch-incomplete-'));

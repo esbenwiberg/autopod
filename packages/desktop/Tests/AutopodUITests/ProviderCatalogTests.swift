@@ -23,7 +23,7 @@ final class ProviderCatalogTests: XCTestCase {
           "credentialOptions": [
             { "kind": "api-key", "label": "Fixture key", "acquisition": "Create a fixture key." }
           ],
-          "modelIds": ["fixture/model-a"],
+          "modelIds": ["fixture/model-a", "fixture/retired-model"],
           "requiredHosts": ["api.fixture.invalid"],
           "policy": {
             "lifecycle": "active",
@@ -100,6 +100,12 @@ final class ProviderCatalogTests: XCTestCase {
           "providerId": "fixture-cloud",
           "displayName": "Fixture Unreviewed Model",
           "lifecycle": "active"
+        },
+        {
+          "id": "fixture/retired-model",
+          "providerId": "fixture-cloud",
+          "displayName": "Fixture Retired Model",
+          "lifecycle": "retired"
         }
       ]
     }
@@ -133,6 +139,7 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertTrue(RuntimeModelOptions.options(
       for: .pi,
       role: .defaultModel,
+      currentValue: "blocked/saved-model",
       catalog: catalog,
       providerId: blocked.id
     ).isEmpty)
@@ -146,10 +153,26 @@ final class ProviderCatalogTests: XCTestCase {
       catalog: catalog,
       providerId: "fixture-cloud"
     )
-    XCTAssertTrue(options.contains {
-      $0.value == "fixture/model-a" && $0.label == "Fixture Model A"
-    })
+    XCTAssertEqual(options.map(\.value), ["fixture/model-a"])
+    XCTAssertEqual(options.first?.label, "Fixture Model A")
     XCTAssertFalse(options.contains { $0.value == "fixture/unreviewed-model" })
+    let saved = RuntimeModelOptions.options(
+      for: .pi,
+      role: .reviewerModel,
+      currentValue: "fixture/retired-model",
+      catalog: catalog,
+      providerId: "fixture-cloud"
+    )
+    XCTAssertEqual(saved.map(\.value), ["fixture/model-a", "fixture/retired-model"])
+    XCTAssertEqual(saved.last?.label, "fixture/retired-model (unavailable)")
+    let current = RuntimeModelOptions.options(
+      for: .pi,
+      role: .defaultModel,
+      currentValue: "fixture/model-a",
+      catalog: catalog,
+      providerId: "fixture-cloud"
+    )
+    XCTAssertEqual(current.map(\.value), ["fixture/model-a"])
   }
 
   func testProviderModelAllowlistBlocksUnreviewedCatalogModel() throws {

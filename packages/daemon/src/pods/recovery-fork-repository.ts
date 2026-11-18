@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
   EffectiveLaunchConfig,
@@ -7,6 +8,7 @@ import type {
   RecoveryForkContext,
   RecoveryForkRequest,
   RecoveryForkSource,
+  RecoveryHandoffPreparation,
   ValidationResult,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -17,9 +19,11 @@ import { recoveryForkError } from './recovery-fork-rejection.js';
 
 export { recoveryForkError } from './recovery-fork-rejection.js';
 
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 
 export const recoveryForkProcessEpoch = randomUUID();
+const packetBytesHash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 export interface RecoveryForkBinding {
   version: 1;
   parentPodId: string;
@@ -40,6 +44,8 @@ export interface RecoveryForkBinding {
   context: RecoveryForkContext;
   contextHash: string;
   accountingHash: string;
+  supplementalFiles?: Array<{ path: string; sha256: string; size: number }>;
+  packetHash?: string;
 }
 export interface RecoveryForkFacts {
   prepared: {
@@ -113,6 +119,93 @@ export function createRecoveryForkRepository(db: Database.Database) {
       )
       .get(podId) as { id: string } | undefined;
     return row ? get(row.id) : null;
+  }
+  function packet(record: RecoveryForkRecord) {
+    const prepared = record.facts.prepared ?? recoveryForkError('Prepared handoff unavailable');
+    const stat = lstatSync(prepared.packet);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 512_000)
+      recoveryForkError('Recovery packet exceeds safe bounds or is not a regular file');
+    const bytes = readFileSync(prepared.packet, 'utf8');
+    if (packetBytesHash(bytes) !== prepared.packetHash)
+      recoveryForkError('Recovery lineage packet bytes are unavailable or tampered');
+    return bytes;
+  }
+  /** Pointers are not custody. Every edge must be a daemon admission of the same task. */
+  function lineage(podId: string): RecoveryForkRecord[] {
+    const result: RecoveryForkRecord[] = [];
+    const seen = new Set<string>();
+    let current = podId;
+    while (true) {
+      if (seen.has(current) || result.length >= 8)
+        recoveryForkError('Recovery lineage is cyclic or exceeds eight attempts');
+      seen.add(current);
+      const record = child(current);
+      const row = db
+        .prepare(`SELECT e.parent_pod_id AS parent,p.launch_config_digest AS digest,
+        e.task_id AS task,s.payload FROM retained_pods p
+        JOIN retained_task_executions e ON e.pod_id=p.id
+        LEFT JOIN retained_pod_launch_snapshots s ON s.pod_id=p.id WHERE p.id=?`)
+        .get(current) as
+        | { parent: string | null; digest: string; task: string; payload: string | null }
+        | undefined;
+      if (!row) recoveryForkError('Recovery lineage task/snapshot is unavailable');
+      const config = row!.payload ? (JSON.parse(row!.payload) as EffectiveLaunchConfig) : null;
+      const descendant = result.at(-1);
+      if (descendant && (!config || config.digest !== descendant.binding.originalLaunch.digest))
+        recoveryForkError('Recovery predecessor launch changed');
+      if (result.some((r) => r.binding.taskId !== row!.task))
+        recoveryForkError('Recovery lineage crosses logical tasks');
+      if (!record) {
+        if (
+          config?.derivation?.kind === 'recovery-fork' ||
+          config?.work.handoffInstructions?.includes('/autopod/recovery/handoff.json')
+        )
+          recoveryForkError(
+            'Pointer-only recovery history is not verified lineage',
+            'RECOVERY_FORK_CHAIN_UNSUPPORTED',
+          );
+        break;
+      }
+      const p = record.facts.prepared;
+      const { id: _requestId, expectedBinding, ...input } = record.request;
+      if (expectedBinding !== configurationDigest({ binding: record.binding, input }))
+        recoveryForkError('Recovery selection binding changed');
+      const { digest: configDigest, ...configBody } = config ?? {};
+      if (
+        !p ||
+        !config ||
+        record.binding.version !== 1 ||
+        record.request.version !== 1 ||
+        record.binding.generation !== record.request.expectedGeneration ||
+        config.derivation?.kind !== 'recovery-fork' ||
+        row!.parent !== record.parentPodId ||
+        record.parentPodId === current ||
+        record.binding.parentPodId !== record.parentPodId ||
+        row!.task !== record.binding.taskId ||
+        config.derivation?.podId !== record.parentPodId ||
+        config.derivation.digest !== record.binding.originalLaunch.digest ||
+        record.requestHash !==
+          configurationDigest({
+            parentPodId: record.parentPodId,
+            request: record.request,
+            actorId: record.actorId,
+          }) ||
+        record.facts.admitted?.digest !== row!.digest ||
+        row!.digest !== record.binding.execution.digest ||
+        configDigest !== configurationDigest(configBody) ||
+        configurationDigest(config) !== configurationDigest(record.binding.execution) ||
+        record.binding.contextHash !== configurationDigest(record.binding.context) ||
+        p.head !== record.binding.source.head ||
+        p.tree !== record.binding.source.tree ||
+        (record.binding.packetHash !== undefined && p.packetHash !== record.binding.packetHash) ||
+        result.some((r) => r.binding.taskId !== row!.task)
+      )
+        recoveryForkError('Recovery admission/source/task lineage does not match');
+      packet(record);
+      result.push(record);
+      current = record.parentPodId;
+    }
+    return result;
   }
   function append<K extends keyof RecoveryForkFacts>(
     id: string,
@@ -267,6 +360,63 @@ export function createRecoveryForkRepository(db: Database.Database) {
     get,
     parent,
     child,
+    lineage,
+    packet,
+    latestSavedCheckpoint(podId: string) {
+      const row = db
+        .prepare(`SELECT sequence,result,verified_at AS verifiedAt,created_at AS capturedAt
+        FROM workspace_checkpoints WHERE pod_id=? AND json_extract(result,'$.hostImported')=1
+        ORDER BY sequence DESC LIMIT 1`)
+        .get(podId) as
+        | { sequence: number; result: string; verifiedAt: string | null; capturedAt: string }
+        | undefined;
+      return row ? { ...row, result: JSON.parse(row.result) as WorkspaceCheckpointResult } : null;
+    },
+    preparationArchive(podId: string, generation: number) {
+      const row = db
+        .prepare(
+          'SELECT archive_path AS path FROM fresh_handoff_preparations WHERE pod_id=? AND generation=?',
+        )
+        .get(podId, generation) as { path: string | null } | undefined;
+      return row?.path ?? null;
+    },
+    preparation(podId: string, generation: number): RecoveryHandoffPreparation | null {
+      const row = db
+        .prepare('SELECT receipt FROM fresh_handoff_preparations WHERE pod_id=? AND generation=?')
+        .get(podId, generation) as { receipt: string } | undefined;
+      if (!row) return null;
+      const receipt = JSON.parse(row.receipt) as RecoveryHandoffPreparation;
+      if (packetBytesHash(receipt.packet) !== receipt.packetHash)
+        recoveryForkError('Prepared packet identity changed');
+      return receipt;
+    },
+    savePreparation(
+      receipt: RecoveryHandoffPreparation,
+      requestHash: string,
+      archivePath?: string,
+    ) {
+      const prior = db
+        .prepare(
+          'SELECT request_hash AS hash,receipt FROM fresh_handoff_preparations WHERE pod_id=? AND generation=?',
+        )
+        .get(receipt.podId, receipt.generation) as { hash: string; receipt: string } | undefined;
+      if (prior) {
+        if (prior.hash !== requestHash)
+          recoveryForkError(
+            'A different handoff preparation is already saved',
+            'RECOVERY_FORK_REQUEST_CONFLICT',
+          );
+        return JSON.parse(prior.receipt) as RecoveryHandoffPreparation;
+      }
+      db.prepare('INSERT INTO fresh_handoff_preparations VALUES(?,?,?,?,?)').run(
+        receipt.podId,
+        receipt.generation,
+        requestHash,
+        JSON.stringify(receipt),
+        archivePath ?? null,
+      );
+      return receipt;
+    },
     append,
     checked,
     recordChecks(
@@ -360,7 +510,9 @@ export function createRecoveryForkRepository(db: Database.Database) {
         .prepare(`SELECT r.id FROM recovery_forks r JOIN retained_task_executions e
         ON e.task_id=json_extract(r.binding,'$.taskId') WHERE e.pod_id=?`)
         .all(podId) as { id: string }[];
-      if (rows.some((row) => get(row.id)?.facts.admitted?.childPodId !== podId))
+      if (!rows.length) return;
+      const ancestors = new Set(lineage(podId).map((record) => record.id));
+      if (rows.some((row) => !ancestors.has(row.id)))
         recoveryForkError(
           'Recovery fork owns this logical task; only its admitted independent child may execute or publish',
           'RECOVERY_FORK_TASK_HELD',
@@ -380,14 +532,25 @@ export function createRecoveryForkRepository(db: Database.Database) {
         );
     },
     workerSettled(podId: string) {
-      const worker = child(podId)?.facts.worker;
+      const record = child(podId);
+      const worker = record?.facts.worker;
       return (
+        !!record &&
         !!worker &&
+        !record.facts.failed &&
+        !record.facts.unknown &&
+        record.facts.qualified?.evidence.outcome === 'qualified' &&
+        evidenceBound(record, podId) &&
         !!db
           .prepare(
-            "SELECT 1 FROM retained_task_agent_runs WHERE id=? AND ended_at IS NOT NULL AND failure_category IS NOT 'execution_termination_unverified'",
+            `SELECT 1 FROM retained_task_agent_runs r JOIN retained_pods p ON p.id=r.pod_id
+            WHERE r.id=? AND r.pod_id=? AND r.generation=? AND r.cycle=?
+            AND p.lifecycle_generation=r.generation AND p.container_id=?
+            AND json_extract(r.binding,'$.resource.containerId')=p.container_id
+            AND json_extract(r.binding,'$.resource.executionTarget')=p.execution_target
+            AND r.ended_at IS NOT NULL AND r.failure_category IS NOT 'execution_termination_unverified'`,
           )
-          .get(worker.runId)
+          .get(worker.runId, podId, worker.generation, worker.cycle, worker.containerId)
       );
     },
     assertBoundWorker(podId: string) {
@@ -485,6 +648,7 @@ export function assertRecoveryForkResourceAvailable(
 export function assertRecoveryForkPathAvailable(db: Database.Database, location: string): void {
   const rows = db
     .prepare(`SELECT json_extract(binding,'$.worktreePath') AS location FROM recovery_forks
+    UNION ALL SELECT archive_path AS location FROM fresh_handoff_preparations WHERE archive_path IS NOT NULL
     UNION ALL SELECT value AS location FROM recovery_forks,json_each(binding,'$.sourceLocations')
     UNION ALL SELECT json_extract(binding,'$.archiveRoot') || '/' || id || '/host' AS location FROM recovery_forks WHERE json_extract(binding,'$.archiveRoot') IS NOT NULL
     UNION ALL SELECT json_extract(binding,'$.archiveRoot') || '/' || id || '/source.bundle' AS location FROM recovery_forks WHERE json_extract(binding,'$.archiveRoot') IS NOT NULL

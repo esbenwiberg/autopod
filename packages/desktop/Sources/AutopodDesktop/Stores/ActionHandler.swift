@@ -263,6 +263,15 @@ public final class ActionHandler {
         let response = try await self.perform { try await self.api.getPod(id) }
         self.podStore.upsertSession(PodMapper.map(response)); self.podStore.selectedSessionId = id
       })
+    result.recoveryFork.preparationAvailable = true
+    result.recoveryFork.prepare = { [weak self] id, request in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.prepareRecoveryHandoff(id, body: request) }
+    }
+    result.recoveryFork.prepared = { [weak self] id in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.getPreparedRecoveryHandoff(id) }
+    }
     result.fileRecovery = FileRecoveryActions(scope: replyContextID.uuidString,
       isCurrent: { [weak self] in
         guard let self else { return false }; return self.podStore.isCurrent(self.ownership)
@@ -383,6 +392,20 @@ public final class ActionHandler {
         return details
       }
     }
+    result.memoryChecks = MemoryChecksActions(scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("memory-checks", isDirectory: true),
+      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      load: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectMemoryChecks(id) }
+      }, preview: { [weak self] id, profile in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.previewMemoryChecks(id, profileId: profile) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.submitMemoryChecks(id, input: input) }
+      })
     result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getTaskExecution(id) }

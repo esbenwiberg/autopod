@@ -1,5 +1,10 @@
 {
-  "$comment": "USD per 1M tokens keyed by canonical model ID. Historical short aliases are resolved through MODEL_CANONICAL before lookup; new profile and pod writes must use canonical model IDs. cachedInputPer1M is optional because not every provider reports cached input.",
+  "$comment": "USD per 1M tokens keyed by canonical model ID. Historical short aliases are resolved through MODEL_CANONICAL before lookup; new profile and pod writes must use canonical model IDs. cachedInputPer1M is optional because not every provider reports cached input. Haiku 5.5 uses base/from estimates for prompts <=100,000 tokens; above 100k its input/cached/output rates are 0.50/0.05/2.50. Flat aggregate estimates cannot apply per-request tiers. Sources and availability caveats: docs/model-choices.md.",
+  "gpt-6.2-astra": { "inputPer1M": 8.0, "cachedInputPer1M": 0.4, "outputPer1M": 40.0 },
+  "gpt-6.2-sol": { "inputPer1M": 2.0, "cachedInputPer1M": 0.1, "outputPer1M": 10.0 },
+  "gpt-6.1-terra": { "inputPer1M": 1.0, "cachedInputPer1M": 0.05, "outputPer1M": 5.0 },
+  "claude-fable-5-2": { "inputPer1M": 8.0, "cachedInputPer1M": 0.2, "outputPer1M": 40.0 },
+  "claude-haiku-5-5": { "inputPer1M": 0.1, "cachedInputPer1M": 0.01, "outputPer1M": 0.5 },
   "claude-fable-5-1": { "inputPer1M": 10.0, "cachedInputPer1M": 0.25, "outputPer1M": 50.0 },
   "claude-opus-5-5": { "inputPer1M": 4.0, "cachedInputPer1M": 0.2, "outputPer1M": 20.0 },
   "claude-sonnet-5-5": { "inputPer1M": 2.0, "cachedInputPer1M": 0.2, "outputPer1M": 10.0 },

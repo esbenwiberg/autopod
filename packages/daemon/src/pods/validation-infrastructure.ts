@@ -110,7 +110,9 @@ export function createValidationInfrastructure(deps: ValidationInfrastructureDep
       pod.id,
       requiresValidationSettlement({ ...pod, lastValidationResult: result })
         ? `${label} — termination proof required; inspect ap reconcile-validation ${pod.id} --json before retry or repair`
-        : `${label} — parked for explicit Resume`,
+        : result.infrastructureFailure?.code === 'PROCESS_MEMORY_EXHAUSTED'
+          ? `${label} — inspect retained checks recovery; effective command memory improvement and retry permission are required`
+          : `${label} — parked for explicit Resume`,
     );
     if (pod.failureReason) transition(pod, 'review_required');
     else
