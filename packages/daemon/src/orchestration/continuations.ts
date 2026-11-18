@@ -18,9 +18,10 @@ export interface ContinuationCheckpoint {
 /** Must resolve retained evidence and source from host custody, verify the complete binding
  * (including ancestry, policy and review), and return a managed service pinned to that source.
  * A controller-supplied receipt or location is never sufficient. No default permissive adapter. */
-export type ResolveVerifiedExecutor = (
+export type WithVerifiedExecutor = <T>(
   checkpoint: Readonly<ContinuationCheckpoint>,
-) => Promise<ManagedPodService>;
+  use: (service: ManagedPodService) => Promise<T>,
+) => Promise<T>;
 interface Intent {
   start_key: string;
   request_json: string;
@@ -38,7 +39,7 @@ const principal = (run: string) => `native.${run}`;
 export class OrchestrationContinuations {
   constructor(
     private readonly db: Database.Database,
-    private readonly resolve: ResolveVerifiedExecutor,
+    private readonly resolve: WithVerifiedExecutor,
   ) {}
 
   open(
@@ -68,10 +69,14 @@ export class OrchestrationContinuations {
       .prepare('SELECT * FROM orchestration_continuations WHERE run_id=? AND start_key=?')
       .get(run, key) as Intent | undefined;
   }
-  private async executor(cp: ContinuationCheckpoint) {
-    const service = await this.resolve(Object.freeze({ ...cp }));
-    if (service.db !== this.db) throw new Error('executor-outside-run-database');
-    return service;
+  private withExecutor<T>(
+    cp: ContinuationCheckpoint,
+    use: (service: ManagedPodService) => Promise<T>,
+  ) {
+    return this.resolve(Object.freeze({ ...cp }), async (service) => {
+      if (service.db !== this.db) throw new Error('executor-outside-run-database');
+      return use(service);
+    });
   }
   async acceptAndContinue(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     const cp = { ...input };
@@ -104,8 +109,7 @@ export class OrchestrationContinuations {
       return !!prior;
     };
     if (replay()) return;
-    const service = await this.executor(cp);
-    await service.preflight(req, principal(cp.run));
+    await this.withExecutor(cp, (service) => service.preflight(req, principal(cp.run)));
     this.db
       .transaction(() => {
         if (replay()) return;
@@ -178,31 +182,32 @@ export class OrchestrationContinuations {
         )
           throw new Error('continuation-ledger-mismatch');
         stage = 'source';
-        const s = await this.executor(cp);
-        stage = 'launch';
-        const installation = principal(cp.run);
-        const assertActive = () => {
-          if (
-            !this.db
-              .prepare('SELECT 1 FROM orchestration_runs WHERE id=? AND canceled=0')
-              .get(cp.run)
-          )
-            throw new Error('run-canceled');
-        };
-        assertActive();
-        const row = s.lookup(installation, req.startKey);
-        if (row && row.execution_spec_digest !== req.executionSpecDigest)
-          throw new Error('managed-start-conflict');
-        // Inspecting a previously allocated/terminal attempt never starts another worker.
-        const pod =
-          row && (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))
-            ? row.pod_id
-            : (await s.start(installation, req, undefined, assertActive)).podId;
-        this.db
-          .prepare(
-            'UPDATE orchestration_continuations SET pod_id=? WHERE run_id=? AND start_key=? AND pod_id IS NULL',
-          )
-          .run(pod, cp.run, req.startKey);
+        await this.withExecutor(cp, async (s) => {
+          stage = 'launch';
+          const installation = principal(cp.run);
+          const assertActive = () => {
+            if (
+              !this.db
+                .prepare('SELECT 1 FROM orchestration_runs WHERE id=? AND canceled=0')
+                .get(cp.run)
+            )
+              throw new Error('run-canceled');
+          };
+          assertActive();
+          const row = s.lookup(installation, req.startKey);
+          if (row && row.execution_spec_digest !== req.executionSpecDigest)
+            throw new Error('managed-start-conflict');
+          // Inspecting a previously allocated/terminal attempt never starts another worker.
+          const pod =
+            row && (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))
+              ? row.pod_id
+              : (await s.start(installation, req, undefined, assertActive)).podId;
+          this.db
+            .prepare(
+              'UPDATE orchestration_continuations SET pod_id=? WHERE run_id=? AND start_key=? AND pod_id IS NULL',
+            )
+            .run(pod, cp.run, req.startKey);
+        });
       } catch {
         blocked.push({ run: intent.run_id, key: intent.start_key, stage });
       }
