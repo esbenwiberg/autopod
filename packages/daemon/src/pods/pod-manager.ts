@@ -1113,6 +1113,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const agentEventConsumption = createAgentEventConsumption(deps, {
+    preservePodWorkspace,
     runtimeRegistry,
     reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     containerManagerFactory,

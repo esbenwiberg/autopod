@@ -46,6 +46,23 @@ The Codex usage-stop path requires a tracked native exec and verified process-gr
 termination; missing handles or uncertain stops retain an unresolved execution
 claim. Stopping the worker does not delete its container or source.
 
+A prospectively verified ordinary hard-budget stop closes its exact resource-bound
+run with the `token_budget` reason, records stopped-worker settlement (not successful
+completion), and preserves source before recording preservation. A failed capture or
+unverified stop never supplies those receipts. Resume/revalidation cannot substitute
+checks for interrupted coding. After adjusting budget and separately authorizing any
+required retry, the desktop **Continue coding** handoff uses the existing durable
+Rework request to continue the retained native session. It retains resource/source and
+cumulative accounting, and permits one coding segment followed by checks/review without
+automatic coding retry. Preparation failure retains the interrupted-coding guard and the original generation's
+stop proof, so another explicit request can retry preparation without backfilling receipts.
+Startup/queue machinery never automatically replays a pending retained continuation.
+If a cap is first reported on a completed worker's final usage, there is no interrupted
+coding turn: the task parks with a distinct completed-worker reason and may retry checks
+after budget adjustment, rather than requiring a nonexistent live-stop receipt.
+Historical missing receipts are not backfilled; see
+[desktop task budgets](desktop/task-budgets.md).
+
 Previously incomplete usage is not made complete by a later successful invocation.
 Likewise, a new incomplete invocation can make a previously repaired pod partial;
 the older repair records and provider history remain preserved.
@@ -76,3 +93,22 @@ The Node 22/24 base Dockerfiles install real `procps` and assert `ps` availabili
 Deployment alone does not rebuild a frozen worker image. Build and qualify the
 replacement image, then explicitly select it through supported recovery controls.
 Do not remove Stryker checks or patch the preserved source container in place.
+
+## Docker validation process resources
+
+New Docker worker containers enable the engine's init/reaper so orphaned tool/test
+children are collected instead of accumulating zombies behind `sleep` as PID 1.
+Existing containers are unchanged; deployment does not retrofit their process tree.
+The daemon test script defaults its Node old-space heap to 4096 MiB, preserving an
+explicit `NODE_OPTIONS` override. Container RAM and per-process V8 heap limits are
+separate; qualify aggregate runner capacity before increasing worker concurrency.
+Real process-tree termination tests use the production termination ceiling and retain
+their descendant-termination assertions.
+
+Precise fatal allocation/JavaScript-heap signatures from a nonzero local Docker
+validation command are recorded as `PROCESS_MEMORY_EXHAUSTED` infrastructure failures,
+including a worker crash wrapped in exit 1. Sandboxes keep their existing
+`SANDBOX_MEMORY_EXHAUSTED` code. Neither error claims a kernel OOM kill; ambiguous
+memory wording remains an ordinary failure. Infrastructure failures park validation
+rather than automatically asking a coding agent to repair repository code. Retained
+failed tasks still need qualified supported recovery; this does not replay them.

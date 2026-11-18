@@ -1,4 +1,5 @@
 import { AutopodError } from '@autopod/shared';
+import { BUDGET_CONTINUATION_CHECKS_ONLY } from './budget-stop.js';
 import { createCompletionDecision } from './completion-decision.js';
 import { createCompletionHumanGate } from './completion-human-gate.js';
 import type {
@@ -167,7 +168,11 @@ export function createCompletionWorkflow(
       await this.triggerValidation(podId, { validationOnly: true });
       return;
     }
-    await applyCompletionDecision(pod, preparedSource, (id) => this.triggerValidation(id));
+    await applyCompletionDecision(pod, preparedSource, (id) =>
+      pod.reworkReason === BUDGET_CONTINUATION_CHECKS_ONLY
+        ? this.triggerValidation(id, { validationOnly: true })
+        : this.triggerValidation(id),
+    );
   }
   const infrastructureCompletions = new Map<string, Promise<void>>();
   /** Restart can finish an already-settled block, never manufacture termination or dispatch. */

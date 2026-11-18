@@ -45,6 +45,18 @@ it('keeps a held ready artifact out of ordinary Resume and checks retry', async 
   expect(f.captured.enqueueSession).not.toHaveBeenCalled();
   expect(f.cm.spawn).not.toHaveBeenCalled();
 });
+it('does not route a hard budget stop into validation-only Resume, including legacy stops', async () => {
+  const f = fixture();
+  f.pods.update('control', {
+    failureReason: 'Token budget exceeded (1503606/1500000 tokens used).',
+  });
+  await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toMatchObject({
+    code: 'BUDGET_CODING_CONTINUATION_REQUIRED',
+  });
+  expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+  expect(f.calls.handleCompletion).not.toHaveBeenCalled();
+  expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) close();

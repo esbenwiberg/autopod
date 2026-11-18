@@ -23,6 +23,18 @@ afterEach(() => {
 });
 
 describe('complete agent process owner', () => {
+  it('does not replay a pending retained budget continuation through the startup queue', async () => {
+    const f = fixture();
+    f.podRepo.update('prepare', {
+      status: 'queued',
+      reworkReason: '[budget-continuation:pending]',
+    });
+    await f.process().processPod.call(f.calls, 'prepare');
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.calls.consumeAgentEvents).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
   it('does not pull a coding iterator after an accepted report during recovery preparation', async () => {
     const f = fixture();
     f.podRepo.update('prepare', { recoveryWorktreePath: f.directory });
