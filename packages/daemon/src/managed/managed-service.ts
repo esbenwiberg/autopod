@@ -266,7 +266,16 @@ export class ManagedPodService {
       // seeing no runtime_ref after this point cannot infer that no resource exists.
       this.db
         .transaction(() => {
-          this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
+          const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+          this.requireActive(latest);
+          // Native sandbox allocations may already be billable or only partially uploaded.
+          // Refuse any second ensure, even when the backend returned an identity.
+          if (
+            latest.dispatcher_installation_id.startsWith('native.') &&
+            request.route.executionTarget === 'sandbox' &&
+            latest.allocation_attempted
+          )
+            throw new Error('managed-sandbox-create-uncertain');
           this.db
             .prepare('UPDATE managed_pods SET allocation_attempted=1 WHERE pod_id=?')
             .run(row.pod_id);
@@ -358,6 +367,12 @@ export class ManagedPodService {
     // Recovering their identity must not re-admit or restart the expired grant.
     if (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))
       return JSON.parse(row.handle_json) as ManagedPodHandle;
+    if (
+      installation.startsWith('native.') &&
+      request.route.executionTarget === 'sandbox' &&
+      row.allocation_attempted
+    )
+      throw new Error('managed-sandbox-create-uncertain');
     return this.start(installation, request);
   }
   expired(row: ManagedPodRow): boolean {

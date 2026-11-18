@@ -264,6 +264,13 @@ it('starts one checkpoint-backed sandbox with only approved bytes, then reattach
   x.channel.attach.mockClear();
   await reopened.resume();
   expect(x.channel.attach).not.toHaveBeenCalled();
+  await expect(reopened.service.reconcileStart('native.fixture', x.request)).rejects.toThrow(
+    'managed-sandbox-create-uncertain',
+  );
+  await expect(reopened.service.start('native.fixture', x.request)).rejects.toThrow(
+    'managed-sandbox-create-uncertain',
+  );
+  expect(order).toEqual(['allocated', 'verified']);
   f.db.prepare("UPDATE managed_pods SET state='running' WHERE pod_id=?").run(h.podId);
   await reopened.resume();
   expect(x.channel.attach).toHaveBeenCalledTimes(1);
