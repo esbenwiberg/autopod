@@ -37,6 +37,15 @@ export function publicSourceRepository(raw: string): string {
     .replace(/\/+$/, '')
     .replace(/\.git$/, '');
 }
+const SOURCE_PROBE_MAX_BYTES = 4 * 1024 * 1024;
+// The sandbox buffered adapter does not implement maxOutputBytes. This fixed
+// Git probe bounds its own stdout and uses a per-call trailer to detect
+// provider truncation. pipefail preserves Git's exit status.
+const BOUNDED_SANDBOX_GIT =
+  'trailer=$1; shift; "$@" 2>/dev/null | /usr/bin/head -c ' +
+  (SOURCE_PROBE_MAX_BYTES + 1) +
+  ' && printf %s "$trailer"';
+
 /** An unavailable observation grants no publication or historical delivery authority. */
 export async function observeValidationSource(
   cm: ContainerManager,
@@ -46,10 +55,10 @@ export async function observeValidationSource(
   const containerId = pod.containerId;
   try {
     return await inspectAdoptionGit(async (args) => {
+      const sandbox = pod.executionTarget === 'sandbox';
+      const trailer = sandbox ? randomUUID() : '';
       const result = await cm.execInContainer(
         containerId,
-        // Git is already a worker prerequisite. Avoid requiring an additional
-        // language runtime and discard inherited Git/auth/executable settings.
         [
           '/usr/bin/env',
           '-i',
@@ -62,15 +71,26 @@ export async function observeValidationSource(
           'GIT_NO_REPLACE_OBJECTS=1',
           'GIT_NO_LAZY_FETCH=1',
           'GIT_TERMINAL_PROMPT=0',
+          ...(sandbox
+            ? ['/bin/bash', '-o', 'pipefail', '-c', BOUNDED_SANDBOX_GIT, '--', trailer]
+            : []),
           '/usr/bin/git',
           '-C',
           '/workspace',
           ...args,
         ],
-        { cwd: '/workspace', timeout: 15_000, maxOutputBytes: 4 * 1024 * 1024 },
+        {
+          cwd: '/workspace',
+          timeout: 15_000,
+          ...(sandbox ? {} : { maxOutputBytes: SOURCE_PROBE_MAX_BYTES }),
+        },
       );
-      if (result.exitCode !== 0) throw new Error('Validation source observation unavailable');
-      return result;
+      if (result.exitCode !== 0 || (sandbox && !result.stdout.endsWith(trailer)))
+        throw new Error('Validation source observation unavailable');
+      const stdout = sandbox ? result.stdout.slice(0, -trailer.length) : result.stdout;
+      if (Buffer.byteLength(stdout) > SOURCE_PROBE_MAX_BYTES)
+        throw new Error('Validation source observation exceeded its output limit');
+      return { stdout, stderr: result.stderr };
     }, pod.branch);
   } catch {
     return null;

@@ -13,6 +13,14 @@ required Mac Facts remaining pending rather than waived. Real Git verifies empty
 incremental versus inherited changes. Missing live/host review source is not an
 empty packet; display previews retain their separate best-effort fallback.
 
+Clean sandbox checkpoints retain the worker's original commit, so the host
+review packet and live validation workspace agree on both HEAD and tree. Dirty
+snapshots retain a separate custody commit and do not qualify as the same live
+source. A legacy checkpoint tip is not rewound without unpublished source
+custody. The sandbox source probe rejects missing, truncated or oversized
+output; an unavailable observation and an observed mismatch both block checks,
+but are reported separately. A no-op base update is not source reconciliation.
+
 Network incidents interleave allocation and pressure cleanup across separate
 managers sharing migrated SQLite. A provisioning bridge is not orphaned merely
 because its first container has not attached. GC rechecks durable pod/reviewer

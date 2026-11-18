@@ -7,6 +7,7 @@ import {
 } from '../test-utils/retained-checkpoint-helpers.js';
 import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
+import { resolveSandboxCheckpointSourceHead } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 
@@ -42,7 +43,10 @@ async function assertTransportedCheckpoint(
       promoted: true,
       materialized: true,
     });
-    expect(receipt.snapshotCommit).not.toBe(receipt.sourceHead);
+    expect(receipt.snapshotCommit).toBe(receipt.sourceHead);
+    await expect(
+      resolveSandboxCheckpointSourceHead(args.worktreePath, args.podId, receipt.snapshotCommit),
+    ).resolves.toBe(receipt.sourceHead);
     const source = await inspectCheckpointSource({
       podId: args.podId,
       worktreePath: args.worktreePath,
@@ -52,7 +56,7 @@ async function assertTransportedCheckpoint(
       worktreeManager: f.worktrees,
       assertCurrent: () => {},
     });
-    expect(source.checkpoints).toContain(receipt.snapshotCommit);
+    expect(source).toMatchObject({ head: receipt.sourceHead, checkpoints: [] });
   }
 }
 
@@ -150,7 +154,7 @@ describe('retained checkpoint through the real manager workflow (provider and ch
       current.worktreePath!,
       current.branch,
     );
-    expect(capturedSource.commitSha).not.toBe(operation.prepared?.head);
+    expect(capturedSource.commitSha).toBe(operation.prepared?.head);
     expect(capturedSource.treeSha).toBe(operation.prepared?.tree);
     expect(operation.originalEvidence.result).toEqual(original);
     expect(current.lifecycleGeneration).toBe(2);

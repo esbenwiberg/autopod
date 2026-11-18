@@ -57,6 +57,17 @@ export async function verifySavedSource(
     draftError('Saved reference no longer matches recorded proof.');
   if ((await git(['rev-parse', `${source.commit}^{tree}`])).stdout.trim() !== source.tree)
     draftError('Saved tree differs from recorded proof.');
+  // An original sandbox HEAD has no synthetic parent receipt. Require the
+  // daemon's verified committed quarantine ref, not just any ref to that OID.
+  const committedSequence = /^refs\/autopod-quarantine\/[\w-]+\/(\d+)-committed$/.exec(
+    source.ref,
+  )?.[1];
+  const committedCheckpoint =
+    source.kind === 'sandbox-checkpoint' &&
+    source.parent === null &&
+    source.parentTree === null &&
+    committedSequence !== undefined &&
+    source.id === `checkpoint-${committedSequence}`;
   // Read the actual commit header; revision traversal can honor legacy grafts.
   const raw = (await git(['cat-file', 'commit', source.commit])).stdout;
   const separator = raw.indexOf('\n\n');
@@ -65,6 +76,7 @@ export async function verifySavedSource(
   const parents = lines.filter((line) => line.startsWith('parent '));
   if (
     source.kind === 'sandbox-checkpoint' &&
+    !committedCheckpoint &&
     (separator < 0 ||
       !source.parent ||
       !source.parentTree ||
@@ -105,6 +117,8 @@ export async function checkpointSavedSource(
 ): Promise<SavedWorkSource> {
   const r = record.result;
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
+  const committed = r.snapshotCommit === r.sourceHead;
+  const expectedRef = `refs/autopod-quarantine/${token}/${record.sequence}${committed ? '-committed' : ''}`;
   if (
     record.podId !== podId ||
     record.sequence !== r.sequence ||
@@ -112,7 +126,8 @@ export async function checkpointSavedSource(
     !r.bundleVerified ||
     !r.hostImported ||
     !r.lineageVerified ||
-    r.quarantineRef !== `refs/autopod-quarantine/${token}/${record.sequence}` ||
+    r.quarantineRef !== expectedRef ||
+    (committed && r.sourceTree !== r.snapshotTree) ||
     (r.error && !(r.error.phase === 'promotion' && r.error.code === 'LINEAGE_CONFLICT'))
   )
     draftError('Checkpoint lacks complete imported lineage proof or failed beyond promotion.');
@@ -121,8 +136,8 @@ export async function checkpointSavedSource(
     kind: 'sandbox-checkpoint',
     commit: r.snapshotCommit,
     tree: r.snapshotTree,
-    parent: r.sourceHead,
-    parentTree: r.sourceTree,
+    parent: committed ? null : r.sourceHead,
+    parentTree: committed ? null : r.sourceTree,
     ref: r.quarantineRef,
     capturedAt: record.capturedAt ?? record.verifiedAt,
     freshness: record.sequence === latestSequence ? 'latest-saved' : 'older-saved',
@@ -130,12 +145,6 @@ export async function checkpointSavedSource(
       'Only the recorded saved snapshot is included. Later sandbox edits and unsaved host/index work are excluded; the live sandbox was not read.',
   };
   await verifySavedSource(worktree, repository, source);
-  if (
-    !oid.test(r.sourceTree) ||
-    (await savedGit(worktree)(['rev-parse', `${r.sourceHead}^{tree}`])).stdout.trim() !==
-      r.sourceTree
-  )
-    draftError('Checkpoint parent tree differs from recorded proof.');
   return source;
 }
 

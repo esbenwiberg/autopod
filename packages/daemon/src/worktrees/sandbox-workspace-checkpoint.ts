@@ -100,16 +100,20 @@ async function quarantinedCheckpointSourceHead(
   // retained under this pod's host-owned quarantine namespace; lookalike commits
   // and checkpoints imported for another pod remain divergence barriers.
   const git = hostGit(bare);
-  const quarantineRef = (
-    await git([
-      'for-each-ref',
-      '--format=%(refname)',
-      '--points-at',
-      checkpoint,
-      `refs/autopod-quarantine/${podToken}/`,
-    ])
-  ).stdout.trim();
-  if (!quarantineRef) return null;
+  const namespace = `refs/autopod-quarantine/${podToken}/`;
+  const refs = (
+    await git(['for-each-ref', '--format=%(refname)', '--points-at', checkpoint, namespace])
+  ).stdout
+    .trim()
+    .split('\n');
+  // Only a verified original commit gets a -committed custody ref.
+  if (
+    refs.some(
+      (ref) => ref.startsWith(namespace) && /^\d+-committed$/.test(ref.slice(namespace.length)),
+    )
+  )
+    return checkpoint;
+  if (!refs.some((ref) => ref.startsWith(namespace))) return null;
 
   // Raw headers, rather than revision-walker parents: replace refs/grafts must
   // not turn another commit into owned single-parent checkpoint evidence.
@@ -343,7 +347,10 @@ export async function checkpointSandboxWorkspace(
             // identical source/tree snapshots: a timestamp-only sibling would rewind
             // a branch that was already published and make its next push non-fast-forward.
             `snapshot=$(git rev-parse --verify ${checkpointRef}^{commit} 2>/dev/null || true)`,
-            'if [ -z "$snapshot" ] || [ "$(git rev-list --parents -n 1 "$snapshot" 2>/dev/null || true)" != "$snapshot $head" ] || [ "$(git rev-parse "$snapshot^{tree}" 2>/dev/null || true)" != "$snapshot_tree" ]; then ' +
+            // Clean work needs a custody ref, not a new commit. Keep the
+            // sandbox, review packet and host worktree on the exact same HEAD.
+            'if [ "$snapshot_tree" = "$tree" ]; then snapshot=$head; ' +
+              'elif [ -z "$snapshot" ] || [ "$(git rev-list --parents -n 1 "$snapshot" 2>/dev/null || true)" != "$snapshot $head" ] || [ "$(git rev-parse "$snapshot^{tree}" 2>/dev/null || true)" != "$snapshot_tree" ]; then ' +
               "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head); fi",
             `git update-ref ${checkpointRef} "$snapshot"`,
             // Bundles must advertise a named ref; a raw commit ID produces an empty bundle.
@@ -383,24 +390,29 @@ export async function checkpointSandboxWorkspace(
       const bare = path.resolve(worktreePath, common);
       const git = hostGit(bare);
       await owned(() => git(['bundle', 'verify', bundlePath]));
-      const quarantineRef = `refs/autopod-quarantine/${token}/${sequence}`;
+      const importedRef = `refs/autopod-quarantine/${token}/${sequence}`;
       await owned(() =>
-        hostGit(bare, 120_000)(['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`]),
+        hostGit(bare, 120_000)(['fetch', bundlePath, `${checkpointRef}:${importedRef}`]),
       );
       const importedHead = (
-        await owned(() => git(['rev-parse', `${quarantineRef}^{commit}`]))
+        await owned(() => git(['rev-parse', `${importedRef}^{commit}`]))
       ).stdout.trim();
       const actualSourceTree = (
         await owned(() => git(['rev-parse', `${sourceHead}^{tree}`]))
       ).stdout.trim();
       const importedTree = (
-        await owned(() => git(['rev-parse', `${quarantineRef}^{tree}`]))
+        await owned(() => git(['rev-parse', `${importedRef}^{tree}`]))
       ).stdout.trim();
-      const parent = (await owned(() => git(['rev-parse', `${quarantineRef}^`]))).stdout.trim();
+      const committed = snapshotCommit === sourceHead;
+      const lineageMatches = committed
+        ? snapshotTree === sourceTree
+        : (
+            await owned(() => git(['rev-list', '--parents', '-n', '1', importedHead]))
+          ).stdout.trim() === `${importedHead} ${sourceHead}`;
       if (
         importedHead !== snapshotCommit ||
         importedTree !== snapshotTree ||
-        parent !== sourceHead ||
+        !lineageMatches ||
         actualSourceTree !== sourceTree
       ) {
         return {
@@ -412,9 +424,14 @@ export async function checkpointSandboxWorkspace(
           transferVerified: true,
           bundleVerified: true,
           hostImported: true,
-          quarantineRef,
+          quarantineRef: importedRef,
         };
       }
+      const quarantineRef = committed ? `${importedRef}-committed` : importedRef;
+      if (committed)
+        await owned(() =>
+          git(['update-ref', quarantineRef, importedHead, '0'.repeat(importedHead.length)]),
+        );
       const branch = (
         await owned(() => hostGit(worktreePath)(['symbolic-ref', '--short', 'HEAD']))
       ).stdout.trim();
@@ -434,6 +451,23 @@ export async function checkpointSandboxWorkspace(
         () => false,
       );
       const unpublishedSourceBase = args.unpublishedSourceBase;
+      // Older releases may already have published a synthetic child of this
+      // exact HEAD. Do not rewind that tip just to normalize its checkpoint.
+      const legacyRewind =
+        committed && expected !== sourceHead && expectedLineageBase === sourceHead;
+      let allowLegacyRewind = !legacyRewind;
+      if (legacyRewind && unpublishedSourceBase) {
+        const ownedCheckpoint =
+          (await owned(() => quarantinedCheckpointSourceHead(bare, expected, token))) ===
+          sourceHead;
+        if (ownedCheckpoint)
+          allowLegacyRewind = await owned(() =>
+            git(['merge-base', '--is-ancestor', unpublishedSourceBase, sourceHead]),
+          ).then(
+            () => true,
+            () => false,
+          );
+      }
       const rewrittenFrom =
         !fastForward && unpublishedSourceBase
           ? await owned(() =>
@@ -449,7 +483,7 @@ export async function checkpointSandboxWorkspace(
               }),
             )
           : undefined;
-      if (!fastForward && !rewrittenFrom) {
+      if ((!fastForward && !rewrittenFrom) || !allowLegacyRewind) {
         return {
           ...empty(sequence, 'feature branch diverged from checkpoint source', 'promotion'),
           sourceHead,
@@ -465,7 +499,9 @@ export async function checkpointSandboxWorkspace(
             phase: 'promotion',
             code: 'LINEAGE_CONFLICT',
             retryable: false,
-            message: 'feature branch diverged from checkpoint source',
+            message: !allowLegacyRewind
+              ? 'Existing checkpoint tip cannot be rewound without unpublished source custody'
+              : 'feature branch diverged from checkpoint source',
           },
         };
       }

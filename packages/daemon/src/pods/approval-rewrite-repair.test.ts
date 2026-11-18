@@ -159,7 +159,7 @@ it.each([
     expect(method).not.toHaveBeenCalled();
 }, 15_000);
 
-it('admits a normal promoted no-op sandbox checkpoint without rewriting frozen source facts', async () => {
+it('admits a clean sandbox checkpoint without rewriting frozen source facts', async () => {
   const f = await fixture();
   const before = f.pod();
   const rewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId);
@@ -181,7 +181,7 @@ it('admits a normal promoted no-op sandbox checkpoint without rewriting frozen s
     materialized: true,
     lineageVerified: true,
   });
-  expect(checkpoint.snapshotCommit).not.toBe(rewrite!.prepared!.head);
+  expect(checkpoint.snapshotCommit).toBe(rewrite!.prepared!.head);
   const request = { ...f.request, checkpointHead: checkpoint.snapshotCommit };
   await f.recovery.prepareRewriteRepair(f.podId, request, f.actor);
   await f.recovery.wait(request.id);

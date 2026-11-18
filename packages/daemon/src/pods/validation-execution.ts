@@ -28,7 +28,21 @@ import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
 import { requiresValidationSettlement } from './validation-recovery-policy.js';
 import { captureDockerValidationResourceScope } from './validation-resource-scope.js';
-import { observeValidationSource } from './validation-source-evidence.js';
+import { type CheckedSource, observeValidationSource } from './validation-source-evidence.js';
+
+function requireReviewSource(
+  actual: CheckedSource | null,
+  expected: CheckedSource,
+  mismatch: string,
+): void {
+  if (!actual || actual.head !== expected.head || actual.tree !== expected.tree)
+    throw new TaskRetryBlockedError(
+      actual
+        ? mismatch
+        : 'Autopod could not verify the workspace source. Inspect workspace and checkpoint status before retrying; no checks ran.',
+      'REVIEW_SOURCE_UNAVAILABLE',
+    );
+}
 
 interface ValidationExecutionDependencies {
   /** Runs only after the existing durable dispatch/retry admission has started. */
@@ -150,15 +164,11 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         if (validationConfig.reviewSource) {
           const source = await observeValidationSource(cm, pod);
           ownership.assertCurrent();
-          if (
-            !source ||
-            source.head !== validationConfig.reviewSource.head ||
-            source.tree !== validationConfig.reviewSource.tree
-          )
-            throw new TaskRetryBlockedError(
-              'Review input no longer matches the owned source. Refresh source inputs before validation; no checks ran.',
-              'REVIEW_SOURCE_UNAVAILABLE',
-            );
+          requireReviewSource(
+            source,
+            validationConfig.reviewSource,
+            'Workspace HEAD or tree differs from the captured review input. Reconcile the workspace and review source before retrying; no checks ran.',
+          );
         }
         const retainedBudget = podRepo.retainedCheckpoints?.testBudget(pod, originalTestTimeout);
         retainedBudgetWasSelected = Boolean(retainedBudget);
@@ -371,15 +381,11 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             ? await observeValidationSource(cm, sourcePod)
             : null;
           ownership.assertCurrent();
-          if (
-            validationConfig.reviewSource &&
-            (!checkedSource ||
-              checkedSource.head !== validationConfig.reviewSource.head ||
-              checkedSource.tree !== validationConfig.reviewSource.tree)
-          )
-            throw new TaskRetryBlockedError(
+          if (validationConfig.reviewSource)
+            requireReviewSource(
+              checkedSource,
+              validationConfig.reviewSource,
               'Repository preparation changed source after review input capture; no checks ran.',
-              'REVIEW_SOURCE_UNAVAILABLE',
             );
           if (checkedSource && admission && validationConfig.reviewSource)
             sourceAdmission = podRepo.validationSources?.begin(
@@ -416,7 +422,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           if (sourceUnavailable) {
             result.smoke.build = {
               status: 'skip',
-              output: 'Not run: review source changed',
+              output: 'Not run: review source changed or could not be verified',
               duration: 0,
             };
             result.smoke.health = { status: 'skip', url: '', responseCode: null, duration: 0 };
