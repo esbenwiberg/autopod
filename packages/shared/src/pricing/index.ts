@@ -1,5 +1,8 @@
 import pricingData from './model-pricing.json' with { type: 'json' };
 
+/** Flat estimate rates; Haiku 5.5 is a base/from estimate, not tier-aware billing.
+ * See docs/model-choices.md for prompt thresholds and official sources.
+ */
 export interface ModelPrice {
   inputPer1M: number;
   cachedInputPer1M?: number;

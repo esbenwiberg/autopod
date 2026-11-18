@@ -86,7 +86,7 @@ private func failoverAccount(
     )
     #expect(
         codexOptions.contains {
-            $0.value == "gpt-5.6-sol" && $0.label == "GPT-5.6 Sol"
+            $0.value == "gpt-5.6-sol" && $0.label == "GPT-5.6 Sol (Legacy)"
         }
     )
 
@@ -106,7 +106,7 @@ private func failoverAccount(
     )
     #expect(
         legacyClaude.contains {
-            $0.value == "opus" && $0.label == "Opus 4.8"
+            $0.value == "opus" && $0.label == "Opus 4.8 (Legacy)"
         }
     )
     #expect(!legacyClaude.contains { $0.value == "claude-opus-4-8" })
