@@ -1,5 +1,21 @@
 import Foundation
 
+public struct ValidationPhaseEstimateResponse: Codable, Sendable {
+  public let durationMs: Int
+  public let sampleCount: Int
+}
+
+public struct ValidationPhaseProgressResponse: Codable, Sendable {
+  public struct Active: Codable, Sendable {
+    public let phase: String
+    public let startedAt: String
+    public let estimate: ValidationPhaseEstimateResponse?
+  }
+
+  public let eventId: Int
+  public let active: Active?
+}
+
 // MARK: - Validation override (mirrors ValidationOverride in validation.ts)
 
 public struct ValidationOverrideResponse: Codable, Sendable {

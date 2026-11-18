@@ -470,7 +470,7 @@ export function createValidationTriggerWorkflow(
         result = await validateWithInfrastructureRetries(
           validationConfig,
           validationController,
-          buildPhaseEventCallbacks(podId),
+          buildPhaseEventCallbacks(podId, { config: validationConfig, profile }),
           'Validation engine threw unexpectedly',
           ownership,
         );

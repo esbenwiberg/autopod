@@ -234,6 +234,7 @@ public struct SessionResponse: Codable, Sendable {
   public let plan: PlanResponse?
   public let progress: ProgressResponse?
   public let reviewProgress: ReviewProgressResponse?
+  public let validationPhaseProgress: ValidationPhaseProgressResponse?
   public let contract: SpecContractResponse?
   public let claudeSessionId: String?
   public let outputMode: String
@@ -322,7 +323,7 @@ public struct SessionResponse: Codable, Sendable {
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
-    case mergeBlockReason, plan, progress, reviewProgress, contract, claudeSessionId
+    case mergeBlockReason, plan, progress, reviewProgress, validationPhaseProgress, contract, claudeSessionId
     case outputMode
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt

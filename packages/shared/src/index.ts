@@ -318,6 +318,7 @@ export type {
   ValidationOverrideQueuedEvent,
   ValidationPhase,
   ValidationPhaseCompletedEvent,
+  ValidationPhaseEstimate,
   ValidationPhaseStartedEvent,
   ValidationStartedEvent,
 } from './types/events.js';

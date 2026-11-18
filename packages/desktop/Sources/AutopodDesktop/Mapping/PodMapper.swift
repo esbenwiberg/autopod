@@ -564,6 +564,14 @@ public enum PodMapper {
         createdAt: Date(timeIntervalSince1970: Double(msg.createdAt) / 1000)
       )
     }
+    if let snapshot = response.validationPhaseProgress {
+      var progress = ValidationProgress.initial(attempt: response.validationAttempts)
+      progress.advancePhaseEvent(snapshot.eventId)
+      if let active = snapshot.active, let phase = ValidationPhase(rawValue: active.phase) {
+        progress.markStarted(phase, timing: mapPhaseTiming(active.startedAt, estimate: active.estimate))
+      }
+      result.validationProgress = progress
+    }
     if let reviewProgress = mapReviewProgress(response.reviewProgress) {
       var validationProgress = result.validationProgress
         ?? ValidationProgress.initial(attempt: reviewProgress.attempt)
@@ -574,6 +582,13 @@ public enum PodMapper {
     result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
     return result
+  }
+
+  static func mapPhaseTiming(_ startedAt: String, estimate: ValidationPhaseEstimateResponse?) -> ValidationPhaseTiming? {
+    guard let date = isoFormatter.date(from: startedAt) ?? isoFormatterNoFraction.date(from: startedAt) else {
+      return nil
+    }
+    return ValidationPhaseTiming(startedAt: date, estimate: estimate)
   }
 
   static func mapReviewProgress(_ response: ReviewProgressResponse?) -> LiveReviewProgress? {

@@ -263,6 +263,13 @@ Yes. Add `privateRegistries` to your profile with your Azure DevOps feed URLs an
 <summary><b>Is there a desktop app?</b></summary>
 
 Yes — `packages/desktop` is a native macOS app built with SwiftUI and AppKit. It gives you a three-column pod browser (sidebar → pod list → detail panel), Readiness/Evidence/Summary/Validation/Diff tabs, memory and scheduled-job management, analytics drill-downs, and a live terminal view (SwiftTerm). Build with Xcode. It connects to the same daemon as the CLI.
+
+The Validation tab's running phase card shows estimated time left when the daemon
+has comparable timing samples, or elapsed time otherwise. The bar estimates
+waiting time, not checks completed. It becomes indeterminate if the phase runs
+past the estimate. Completed cards keep their result and recorded duration.
+The daemon learns from successful, actually executed checks after the upgrade;
+older results aren't backfilled.
 </details>
 
 <details>
