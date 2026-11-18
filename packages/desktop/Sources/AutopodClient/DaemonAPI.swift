@@ -512,6 +512,20 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/checkpoint-recovery")
   }
 
+  public func inspectMemoryChecks(_ id: String) async throws -> MemoryChecksInspection {
+    try await request("GET", "/pods/\(id)/checkpoint-recovery")
+  }
+  public func previewMemoryChecks(_ id: String, profileId: String) async throws -> MemoryChecksPreview {
+    try await request("GET", "/pods/\(id)/retained-continuation/execution", query: ["profileId": profileId])
+  }
+  public func submitMemoryChecks(_ id: String, input: MemoryChecksRequest) async throws -> MemoryChecksOperation {
+    try input.validate()
+    struct Response: Decodable { let operation: MemoryChecksOperation }
+    let response: Response = try await request("POST", "/pods/\(id)/infrastructure-recovery", body: encode(input))
+    try response.operation.validate(podId: id, request: input)
+    return response.operation
+  }
+
   public func inspectStalledWorkerRecovery(_ id: String) async throws -> StalledWorkerRecoveryView {
     try await request("GET", "/pods/\(id)/stalled-worker-recovery")
   }

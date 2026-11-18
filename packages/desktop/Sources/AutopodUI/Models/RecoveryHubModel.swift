@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 enum RecoveryRoute: String, CaseIterable {
-  case overview, continueWork, recoverFiles, freeStorage, repair, stalled, finalization, checks, freshPod
+  case overview, continueWork, recoverFiles, freeStorage, repair, stalled, finalization, checks, freshPod, memoryChecks
 }
 
 func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
@@ -31,6 +31,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   let sandbox: SandboxRecoveryModel
   let files: FileRecoveryModel
   let fork: RecoveryForkModel
+  let memoryChecks: MemoryChecksRecoveryModel
   private(set) var refreshing = false
   private(set) var inspected = false
   private(set) var checkedAt: Date?
@@ -47,16 +48,17 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     sandbox = SandboxRecoveryModel(podId: podId, actions: actions.sandboxRecovery)
     files = FileRecoveryModel(podId: podId, actions: actions.fileRecovery)
     fork = RecoveryForkModel(podId: podId, actions: actions.recoveryFork)
+    memoryChecks = MemoryChecksRecoveryModel(podId: podId, actions: actions.memoryChecks)
   }
 
   static func scope(_ actions: PodActions) -> String {
-    [actions.sandboxRecovery.scope, actions.repairContinuation.scope,
+    [actions.memoryChecks.scope, actions.sandboxRecovery.scope, actions.repairContinuation.scope,
      actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope, actions.recoveryFork.scope]
       .map { "\($0.utf8.count):\($0)" }.joined()
   }
 
   static func available(_ actions: PodActions, workspace: Bool) -> Bool {
-    actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.recoveryFork.available || actions.repairContinuation.available
+    actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.memoryChecks.available || actions.recoveryFork.available || actions.repairContinuation.available
       || actions.retainedFinalization.available || actions.stalledWorkerRecovery.available))
   }
 
@@ -64,9 +66,10 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
   }
 
-  var busy: Bool { refreshing || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy }
+  var busy: Bool { refreshing || memoryChecks.busy || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy }
 
   var pendingRoute: RecoveryRoute? {
+    if memoryChecks.needsObservation { return .memoryChecks }
     if fork.needsObservation || fork.invalidJournal { return .freshPod }
     if repair.pending != nil && ![.validated, .failed].contains(repair.operation?.state) { return .repair }
     if stalled.pending != nil && stalled.receipt?.state != .settled { return .stalled }
@@ -128,7 +131,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     return generation == repair.snapshot?.generation && !observationsDisagree
   }
 
-  func invalidateObservation() { inspected = false; checkedAt = nil }
+  func invalidateObservation() { inspected = false; checkedAt = nil; memoryChecks.invalidate() }
 
   func failureSummary(for pod: Pod) -> String? {
     if let failure = pod.validationChecks?.infrastructureFailure { return failure.executionSummary }
@@ -186,6 +189,9 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     inspectingRepair = !pod.isWorkspace && actions.repairContinuation.available
       && [.failed, .reviewRequired, .validated].contains(pod.status)
     defer { refreshing = false }
+    if !pod.isWorkspace && actions.memoryChecks.available {
+      await memoryChecks.refresh(actions.memoryChecks)
+    }
     if inspectingFork { await fork.refresh(actions.recoveryFork) }
     guard !Task.isCancelled else { return }
     if inspectingSandbox {

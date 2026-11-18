@@ -383,6 +383,20 @@ public final class ActionHandler {
         return details
       }
     }
+    result.memoryChecks = MemoryChecksActions(scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("memory-checks", isDirectory: true),
+      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      load: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectMemoryChecks(id) }
+      }, preview: { [weak self] id, profile in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.previewMemoryChecks(id, profileId: profile) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.submitMemoryChecks(id, input: input) }
+      })
     result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getTaskExecution(id) }

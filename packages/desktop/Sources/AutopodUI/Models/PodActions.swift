@@ -44,6 +44,7 @@ public struct PodActions: Sendable {
   public var stalledWorkerRecovery: StalledWorkerRecoveryActions = .unavailable
   public var retainedFinalization: RetainedFinalizationActions = .unavailable
   public var repairContinuation: RepairContinuationActions = .unavailable
+  public var memoryChecks: MemoryChecksActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable
   public var fileRecovery: FileRecoveryActions = .unavailable
   public var recoveryFork: RecoveryForkActions = .unavailable
