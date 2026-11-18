@@ -181,7 +181,19 @@ public final class PodStore {
     }
     if shouldPreserveValidationProgress(current.validationProgress, for: merged) {
       var preserved = current.validationProgress
+      if let live = incoming.validationProgress, let eventId = live.phaseEventId,
+         var currentProgress = preserved, currentProgress.advancePhaseEvent(eventId) {
+        if live.attempt != currentProgress.attempt {
+          currentProgress = live
+        } else if let phase = live.activePhase {
+          currentProgress.markStarted(phase, timing: live.activePhaseTiming)
+        } else {
+          currentProgress.clearRunningPhase()
+        }
+        preserved = currentProgress
+      }
       if let incomingReview = incoming.validationProgress?.reviewProgress,
+         preserved?.phaseEventId == nil || preserved?.activePhase == .review,
          (preserved?.reviewProgress?.updatedAt ?? .distantPast) < incomingReview.updatedAt {
         preserved?.reviewProgress = incomingReview
         preserved?.markStarted(.review)
@@ -542,34 +554,57 @@ public final class PodStore {
     pods[index].validationChecks = checks
   }
 
-  public func initValidationProgress(_ podId: String, attempt: Int) {
-    guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
-    pods[index].validationProgress = ValidationProgress.initial(attempt: attempt)
+  public func initValidationProgress(_ podId: String, attempt: Int, eventId: Int? = nil) {
+    guard let index = pods.firstIndex(where: { $0.id == podId }),
+          eventId == nil || pods[index].validationProgress?.advancePhaseEvent(eventId) != false else { return }
+    var progress = ValidationProgress.initial(attempt: attempt)
+    progress.advancePhaseEvent(eventId)
+    pods[index].validationProgress = progress
   }
 
-  public func markValidationPhaseStarted(_ podId: String, phase: ValidationPhase) {
+  public func endRunningValidationPhase(_ podId: String, eventId: Int?, keepAdvisory: Bool = false) {
+    guard let index = pods.firstIndex(where: { $0.id == podId }),
+          !keepAdvisory || pods[index].validationProgress?.activePhase != .advisory,
+          pods[index].validationProgress?.advancePhaseEvent(eventId) == true else { return }
+    pods[index].validationProgress?.clearRunningPhase()
+  }
+
+  public func markValidationPhaseStarted(
+    _ podId: String, phase: ValidationPhase, timing: ValidationPhaseTiming? = nil, eventId: Int? = nil
+  ) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     if pods[index].validationProgress == nil {
       let attempt = pods[index].attempts?.current ?? 1
       pods[index].validationProgress = ValidationProgress.initial(attempt: attempt)
     }
-    pods[index].validationProgress?.markStarted(phase)
+    guard pods[index].validationProgress?.advancePhaseEvent(eventId) == true else { return }
+    pods[index].validationProgress?.markStarted(phase, timing: timing)
   }
 
-  public func markValidationPhaseCompleted(_ podId: String, phase: ValidationPhase, result: ValidationPhaseResult) {
+  public func markValidationPhaseCompleted(
+    _ podId: String, phase: ValidationPhase, result: ValidationPhaseResult, eventId: Int? = nil
+  ) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     if pods[index].validationProgress == nil {
       let attempt = pods[index].attempts?.current ?? 1
       pods[index].validationProgress = ValidationProgress.initial(attempt: attempt)
     }
+    // REST can observe a completion before its socket payload arrives. It stops
+    // the timer but does not have the result details; accept that exact payload.
+    let matchesSettledSnapshot = eventId != nil
+      && pods[index].validationProgress?.phaseEventId == eventId
+      && pods[index].validationProgress?.activePhase == nil
+    guard matchesSettledSnapshot || pods[index].validationProgress?.advancePhaseEvent(eventId) == true else { return }
     let baseURL = api?.baseURL
     pods[index].validationProgress?.markCompleted(phase, result: result) { dto in
       PodMapper.mapScreenshotRef(dto, baseURL: baseURL)
     }
   }
 
-  public func applyReviewProgress(_ podId: String, progress: LiveReviewProgress) {
+  public func applyReviewProgress(_ podId: String, progress: LiveReviewProgress, eventId: Int? = nil) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if let eventId, let latestPhaseEvent = pods[index].validationProgress?.phaseEventId,
+       eventId <= latestPhaseEvent { return }
     if pods[index].validationProgress == nil {
       pods[index].validationProgress = ValidationProgress.initial(attempt: progress.attempt)
     }

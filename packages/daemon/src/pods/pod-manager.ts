@@ -788,6 +788,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const { buildPhaseEventCallbacks, ownedValidationCallbacks } = createValidationProgress({
     eventBus,
+    timing: validationRepo?.phaseTimings,
+    logger,
   });
 
   const { recordValidationProvenance, withReviewerLaunchPreflight, prepareValidationRepository } =

@@ -61,6 +61,45 @@ struct PodStoreLifetimeTests {
     }
   }
 
+  @Test func hydratesValidationTimerAndDoesNotReopenItAfterCompletion() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      f.seed("pod")
+      f.store.updateStatus("pod", to: .validating)
+      f.store.initValidationProgress("pod", attempt: 1)
+      let body = lifetimePod(id: "pod").replacingOccurrences(
+        of: #""status":"complete""#,
+        with: #""status":"validating","validationPhaseProgress":{"eventId":20,"active":{"phase":"test","startedAt":"2026-07-01T00:05:00Z","estimate":{"durationMs":300000,"sampleCount":1}}}"#
+      )
+      let first = f.start { await f.store.refreshSession("pod") }
+      try await f.next(f.a, "/pods/pod").respond(body: body)
+      _ = await first.value
+      let start = try #require(ISO8601DateFormatter().date(from: "2026-07-01T00:05:00Z"))
+      #expect(f.store.pods.first?.validationProgress?.activePhase == .test)
+      #expect(f.store.pods.first?.validationProgress?.activePhaseTiming?.startedAt == start)
+      #expect(f.store.pods.first?.validationProgress?.activePhaseTiming?.estimate?.durationMs == 300_000)
+
+      let second = f.start { await f.store.refreshSession("pod") }
+      let stale = try await f.next(f.a, "/pods/pod")
+      f.store.endRunningValidationPhase("pod", eventId: 21)
+      stale.respond(body: body)
+      _ = await second.value
+      #expect(f.store.pods.first?.validationProgress?.activePhase == nil)
+      #expect(f.store.pods.first?.validationProgress?.phaseEventId == 21)
+
+      let completion = try JSONDecoder().decode(RawSystemEvent.self, from: Data("""
+        {"type":"pod.validation_phase_completed","timestamp":"2026-07-01T00:10:10Z","podId":"pod",
+        "phase":"test","phaseStatus":"pass","testResult":{"status":"pass","duration":310000}}
+        """.utf8))
+      guard case .validationPhaseCompleted(let podId, let phase, let result) = SystemEvent.parse(completion) else {
+        Issue.record("Expected a typed phase completion")
+        return
+      }
+      f.store.markValidationPhaseCompleted(podId, phase: phase, result: result, eventId: 21)
+      #expect(f.store.pods.first?.validationProgress?.test.status == .passed)
+      #expect(f.store.pods.first?.validationProgress?.test.duration == 310_000)
+    }
+  }
+
   @Test(arguments: ["scores", "series", "diff", "empty-diff"])
   func supersededCachesCannotReplaceCurrent(kind: String) async throws {
     try await withPodStoreLifetimeFixture { f in

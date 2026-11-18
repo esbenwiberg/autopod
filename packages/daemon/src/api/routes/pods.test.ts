@@ -948,6 +948,44 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
   });
 
+  it('hydrates live validation phase timing on pod detail only and retires it at completion', async () => {
+    const podId = 'live-test-pod';
+    insertPod(db, { id: podId, status: 'validating', completedAt: undefined });
+    const url = `/pods/${podId}`;
+    const timestamp = '2026-08-11T16:46:52.000Z';
+    const estimate = { durationMs: 300_000, sampleCount: 3 };
+    const eventId = eventRepo.insert({
+      type: 'pod.validation_phase_started',
+      timestamp,
+      podId,
+      phase: 'test',
+      estimate,
+    });
+
+    const detail = await app.inject({ method: 'GET', url });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().validationPhaseProgress).toEqual({
+      eventId,
+      active: { phase: 'test', startedAt: timestamp, estimate },
+    });
+    const compact = await app.inject({ method: 'GET', url: '/pods?compact=true' });
+    expect(compact.json()[0]).not.toHaveProperty('validationPhaseProgress');
+
+    const completedId = eventRepo.insert({
+      type: 'pod.validation_phase_completed',
+      timestamp: '2026-08-11T16:52:01.000Z',
+      podId,
+      phase: 'test',
+      phaseStatus: 'pass',
+      testResult: { status: 'pass', duration: 309_000 },
+    });
+    const completed = await app.inject({ method: 'GET', url });
+    expect(completed.json().validationPhaseProgress).toEqual({
+      eventId: completedId,
+      active: null,
+    });
+  });
+
   it('hydrates the latest active review snapshot and compact summary', async () => {
     insertPod(db, { id: 'live-review-pod', status: 'validating', completedAt: undefined });
     db.prepare('UPDATE pods SET validation_attempts = 1 WHERE id = ?').run('live-review-pod');

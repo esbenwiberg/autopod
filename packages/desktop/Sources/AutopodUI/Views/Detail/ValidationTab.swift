@@ -160,11 +160,9 @@ public func validationShouldDisplayLiveProgress(
   progress: ValidationProgress,
   hasPersistedReviewCouncil: Bool
 ) -> Bool {
+  if podStatus == .validating || progress.hasRunningPhase { return true }
   guard !hasPersistedReviewCouncil else { return false }
-  return podStatus == .validating
-    || progress.hasRunningPhase
-    || progress.advisoryDetail != nil
-    || progress.reviewDetail?.council != nil
+  return progress.advisoryDetail != nil || progress.reviewDetail?.council != nil
 }
 
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
@@ -1022,7 +1020,9 @@ public struct ValidationTab: View {
           ForEach(displayedPhases, id: \.self) { phase in
             DesktopValidationPhaseCard(
               phase: phase, state: phaseState(phase), isSelected: displayPhase == phase,
-              subLabel: chipSubLabel(phase)
+              subLabel: phaseState(phase).status != .running || phase == .review && progress?.reviewProgress != nil
+                ? chipSubLabel(phase) : nil,
+              timing: phaseTiming(phase)
             ) { selectedPhase = phase }
             .id(phase)
           }.padding(.vertical, 2)
@@ -1032,6 +1032,11 @@ public struct ValidationTab: View {
         }
       }
     }
+  }
+
+  private func phaseTiming(_ phase: ValidationPhase) -> ValidationPhaseTiming? {
+    guard let progress, progress.activePhase == phase else { return nil }
+    return progress.activePhaseTiming
   }
 
   // MARK: - Detail panel
@@ -1193,6 +1198,12 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var phaseDetailPanel: some View {
     if let phase = displayPhase {
+      if phaseState(phase).status == .running, let timing = phaseTiming(phase) {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          Text(ValidationPhaseClock(timing: timing, now: context.date).detail)
+            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+        }
+      }
       switch phase {
       case .setup:   setupDetail
       case .build:   buildDetail

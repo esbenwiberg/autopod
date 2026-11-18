@@ -213,6 +213,10 @@ public final class EventStream {
     var podIds = Set(historicalRequestedScope.keys)
     if let selectedPodId = podStore.selectedSessionId {
       podIds.insert(selectedPodId)
+      if let selected = podStore.pods.first(where: { $0.id == selectedPodId }),
+         selected.status == .validating || selected.validationProgress?.hasRunningPhase == true {
+        await podStore.refreshSession(selectedPodId)
+      }
     }
     for podId in podIds.sorted() {
       let scope = historicalRequestedScope[podId] ?? .latest(Self.defaultHistoricalEventLimit)
@@ -269,6 +273,9 @@ public final class EventStream {
     case .statusChanged(let podId, _, let newStatus):
       if let status = PodStatus(rawValue: newStatus) {
         podStore.updateStatus(podId, to: status)
+        if status != .validating {
+          podStore.endRunningValidationPhase(podId, eventId: raw._eventId, keepAdvisory: status == .validated)
+        }
         if status == .validating,
            let pod = podStore.pods.first(where: { $0.id == podId }),
            pod.validationProgress == nil {
@@ -291,17 +298,18 @@ public final class EventStream {
 
     case .validationStarted(let podId, let attempt):
       podStore.updateStatus(podId, to: .validating)
-      podStore.initValidationProgress(podId, attempt: attempt)
+      podStore.initValidationProgress(podId, attempt: attempt, eventId: raw._eventId)
 
-    case .validationPhaseStarted(let podId, let phase):
-      podStore.markValidationPhaseStarted(podId, phase: phase)
+    case .validationPhaseStarted(let podId, let phase, let startedAt, let estimate):
+      let timing = PodMapper.mapPhaseTiming(startedAt, estimate: estimate)
+      podStore.markValidationPhaseStarted(podId, phase: phase, timing: timing, eventId: raw._eventId)
 
     case .validationPhaseCompleted(let podId, let phase, let result):
-      podStore.markValidationPhaseCompleted(podId, phase: phase, result: result)
+      podStore.markValidationPhaseCompleted(podId, phase: phase, result: result, eventId: raw._eventId)
 
     case .reviewProgress(let podId, let response):
       guard let progress = PodMapper.mapReviewProgress(response) else { return }
-      podStore.applyReviewProgress(podId, progress: progress)
+      podStore.applyReviewProgress(podId, progress: progress, eventId: raw._eventId)
       let activity = AgentEvent(
         id: raw._eventId ?? nextLocalEventId(),
         timestamp: progress.updatedAt,
@@ -315,6 +323,7 @@ public final class EventStream {
       scheduleFlush()
 
     case .validationCompleted(let podId, let result):
+      podStore.endRunningValidationPhase(podId, eventId: raw._eventId, keepAdvisory: true)
       let passed = result.overall == "pass"
       let checks = ValidationChecks(
         smoke: result.smoke.status == "pass",

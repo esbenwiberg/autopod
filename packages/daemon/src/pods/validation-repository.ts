@@ -6,6 +6,8 @@ import {
   readRetainedHistory,
 } from '../history/retained-history-read.js';
 
+import { createValidationPhaseTimings } from './validation-phase-timings.js';
+
 export interface StoredValidation {
   id: string;
   podId: string;
@@ -19,6 +21,7 @@ export interface StoredValidation {
 }
 
 export interface ValidationRepository {
+  phaseTimings?: ReturnType<typeof createValidationPhaseTimings>;
   insert(podId: string, attempt: number, result: ValidationResult): StoredValidation;
   updateResult(validationId: string, result: ValidationResult): boolean;
   /** Attach advisory evidence without replacing deterministic, review or waiver evidence. */
@@ -51,6 +54,7 @@ function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
 
 export function createValidationRepository(db: Database.Database): ValidationRepository {
   return {
+    phaseTimings: createValidationPhaseTimings(db),
     insert(podId: string, attempt: number, result: ValidationResult): StoredValidation {
       return db.transaction(() => {
         const latest = db

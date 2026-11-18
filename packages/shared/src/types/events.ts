@@ -196,11 +196,18 @@ export interface ValidationCompletedEvent {
   result: ValidationResult;
 }
 
+/** A wall-clock estimate, not a measurement of work completed. */
+export interface ValidationPhaseEstimate {
+  durationMs: number;
+  sampleCount: number;
+}
+
 export interface ValidationPhaseStartedEvent {
   type: 'pod.validation_phase_started';
   timestamp: string;
   podId: string;
   phase: ValidationPhase;
+  estimate?: ValidationPhaseEstimate;
 }
 
 export interface ValidationPhaseCompletedEvent {
