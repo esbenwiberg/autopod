@@ -63,9 +63,9 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     // MAX(version) alone cannot prove that every preceding step was applied.
     // schema_version.version is a primary key; the range count therefore proves
     // the complete prefix up to this branch's last migration (or the current tip).
-    const expectedCount = Math.max(0, Math.min(currentVersion, 268) - 261);
+    const expectedCount = Math.max(0, Math.min(currentVersion, 269) - 261);
     const recordedCount = db
-      .prepare('SELECT count(*) FROM schema_version WHERE version BETWEEN 262 AND 268')
+      .prepare('SELECT count(*) FROM schema_version WHERE version BETWEEN 262 AND 269')
       .pluck()
       .get();
     if (

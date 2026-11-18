@@ -49,7 +49,7 @@ it('rehearses the released 255 upgrade on a restored online backup, never on the
           .prepare('SELECT version FROM schema_version WHERE version>255 ORDER BY version')
           .pluck()
           .all(),
-      ).toEqual([262, 263, 264, 265, 266, 267, 268]);
+      ).toEqual([262, 263, 264, 265, 266, 267, 268, 269]);
       expect(
         db.prepare('SELECT * FROM schema_version WHERE version<=255 ORDER BY version').all(),
       ).toEqual(prior);
@@ -101,7 +101,7 @@ it('resumes a valid partially applied orchestration prefix', async () => {
         .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
         .pluck()
         .all(),
-    ).toEqual([262, 263, 264, 265, 266, 267, 268]);
+    ).toEqual([262, 263, 264, 265, 266, 267, 268, 269]);
     assertBackupIntegrity(db);
   } finally {
     db.close();

@@ -170,6 +170,10 @@ export class LocalCheckpointHost {
             operatorSeed.active,
           );
         if (!current()) throw new Error('checkpoint-run-mismatch');
+        if (operatorSeed)
+          this.db
+            .prepare('UPDATE orchestration_runs SET operator_owned=1 WHERE id=?')
+            .run(subject.run);
         this.db
           .prepare(
             `INSERT INTO orchestration_checkpoint_custody(run_id,evidence_digest,manifest,bundle) VALUES(?,?,?,?) ON CONFLICT(run_id,evidence_digest) DO NOTHING`,

@@ -77,6 +77,7 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
       'INSERT INTO orchestration_kickoffs(run_id,seed_digest,checkpoint_json,recipes_json) VALUES(?,?,?,?)',
     )
     .run(run, digest(0), JSON.stringify(cp), '{}');
+  f.db.prepare('DELETE FROM orchestration_checkpoint_custody WHERE run_id=?').run(run);
   expect(() => assertOperatorRecovery(f.db, null)).toThrow('enrollment-required');
   expect(() => assertOperatorRecovery(f.db, run)).not.toThrow();
   seeded.host.ledger.cancel(run);

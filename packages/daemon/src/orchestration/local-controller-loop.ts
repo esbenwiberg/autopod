@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { subscribeLocalRun } from '../managed/local-run-signals.js';
 import type { OrchestrationContinuations } from './continuations.js';
+import { ControllerPassFailure } from './controller-turns.js';
 
 type Pass = ReturnType<OrchestrationContinuations['recover']>;
 /** Single local owner. Subscribe BEFORE catch-up. Edges during a pass request one more pass;
@@ -22,6 +23,7 @@ export function attachLocalController(db: Database.Database, run: string, pass: 
             outcome = await pass();
             failure = undefined;
           } catch (error) {
+            if (error instanceof ControllerPassFailure) outcome = error.recovery;
             failure = { error };
           }
         }

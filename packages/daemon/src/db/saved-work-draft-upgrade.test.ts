@@ -48,7 +48,7 @@ it('upgrades applied v253 without skipping draft tables or changing reviewer/pub
       db.prepare("SELECT 1 FROM sqlite_master WHERE name='saved_work_draft_pr_operations'").get(),
     ).toBeUndefined();
     runMigrations(db, MIGRATIONS_DIR, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 268 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 269 });
     expect(
       db.prepare('SELECT * FROM schema_version WHERE version<=253 ORDER BY version').all(),
     ).toEqual(previousVersions);

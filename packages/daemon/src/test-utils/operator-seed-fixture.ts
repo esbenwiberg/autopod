@@ -18,7 +18,7 @@ import { setupOrchestrationRun } from './orchestration-run-fixture.js';
 export async function operatorSeedFixture(image: string) {
   const { root, subject: s, request, bytes } = await setupOrchestrationRun();
   const db = createHistoricalDiskDatabase(path.join(root, 'daemon.db'), [
-    { dir: MIGRATIONS_DIR, through: 268 },
+    { dir: MIGRATIONS_DIR, through: 269 },
   ]);
   onTestFinished(() => db.close());
   const f = { db };

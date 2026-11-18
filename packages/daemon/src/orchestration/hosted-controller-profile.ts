@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import type { ConfigurationStore } from '../configuration/configuration-store.js';
@@ -47,6 +48,7 @@ export function bindHostedControllerProfile(
   };
   if (ordered) validate(); // One-shot preflight; ordinary controls must survive a revoked route.
   let sent = 0;
+  const beforeSend = new AsyncLocalStorage<() => void>();
   // A placeholder SDK emits the normal controller request. Resolve auth on its one permitted
   // wire path, after ledger reservation. No SDK env endpoint, failover, redirects or tools.
   const client = new Anthropic({
@@ -72,7 +74,6 @@ export function bindHostedControllerProfile(
         (ordered && ctx.phase !== (sent === 0 ? 'kickoff' : 'results'))
       )
         throw new Error('controller-request-shape');
-      sent++;
       const a = accounts.get(accountId);
       const c = a.credentials;
       if (a.provider !== 'max' || c?.provider !== 'max')
@@ -83,6 +84,15 @@ export function bindHostedControllerProfile(
           : (await refreshAndPersistProviderAccountMaxCredentials(accounts, accountId, c, logger))
               .credentials.accessToken;
       if (!token) throw new Error('controller-account-unavailable');
+      const outbound = JSON.stringify({ ...payload, max_tokens: 512 });
+      if (Buffer.byteLength(outbound) > 8192 || sent >= 2)
+        throw new Error('controller-request-limit');
+      validate();
+      init?.signal?.throwIfAborted();
+      const reserve = beforeSend.getStore();
+      if (!reserve && !ordered) throw new Error('controller-send-outside-turn');
+      reserve?.();
+      sent++;
       return fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         redirect: 'error',
@@ -93,13 +103,15 @@ export function bindHostedControllerProfile(
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ ...payload, max_tokens: 512 }),
+        body: outbound,
       });
     },
   });
   return {
     client,
     model,
+    atControllerSend: <T>(reserve: () => void, send: () => Promise<T>) =>
+      beforeSend.run(reserve, send),
     preflightControllerRequest: (body: unknown) => {
       validate();
       if (Buffer.byteLength(JSON.stringify(body)) > 8192)

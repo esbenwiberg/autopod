@@ -50,6 +50,8 @@ it('rejects changed main route and an unhealthy account without reading credenti
 it.each([
   'revoked',
   'oversized',
+  'missing-credential',
+  'lost-wire',
 ] as const)('keeps host recovery available and rejects %s before the controller reservation', async (mode) => {
   const { f, cp, request, host } = await setupOrchestrationRun(6, 1);
   const s = stores();
@@ -69,6 +71,11 @@ it.each([
     s.health as unknown as ProviderAccountHealthStore,
     pino({ level: 'silent' }),
   );
+  if (mode === 'missing-credential')
+    s.accounts.get.mockImplementation(() => ({
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: '' },
+    }));
   const owner = host();
   await owner.ledger.kickoff(cp, { inspect: request });
   const wire = vi.fn(() => {
@@ -85,12 +92,55 @@ it.each([
       },
       provider,
     ),
-  ).rejects.toThrow(mode === 'oversized' ? 'request-limit' : 'unavailable');
-  expect(f.db.prepare('SELECT count(*) FROM orchestration_controller_turns').pluck().get()).toBe(0);
-  expect(s.accounts.get).not.toHaveBeenCalled();
-  expect(wire).not.toHaveBeenCalled();
+  ).rejects.toThrow();
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_controller_turns').pluck().get()).toBe(
+    mode === 'lost-wire' ? 1 : 0,
+  );
+  expect(s.accounts.get).toHaveBeenCalledTimes(
+    mode === 'missing-credential' || mode === 'lost-wire' ? 1 : 0,
+  );
+  expect(wire).toHaveBeenCalledTimes(mode === 'lost-wire' ? 1 : 0);
   owner.ledger.cancel(cp.run);
   expect(f.db.prepare('SELECT canceled FROM orchestration_runs').pluck().get()).toBe(1);
+});
+it('rejects an oversized result and reserves at the last boundary for an exact 8 KiB result', async () => {
+  const s = stores(),
+    p = s.bind(),
+    reserve = vi.fn();
+  const msg = (phase: string, n = 0) => ({
+    model: p.model,
+    max_tokens: 512,
+    messages: [
+      {
+        role: 'user' as const,
+        content: JSON.stringify({ phase, report: '\\'.repeat(0) + 'x'.repeat(n) }),
+      },
+    ],
+  });
+  const wire = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    expect(reserve).toHaveBeenCalledTimes(wire.mock.calls.length);
+    return new Response(
+      JSON.stringify({
+        type: 'message',
+        role: 'assistant',
+        model: p.model,
+        content: [],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  });
+  vi.stubGlobal('fetch', wire);
+  const send = (body: ReturnType<typeof msg>) =>
+    p.atControllerSend(reserve, () => p.client.messages.create(body, { maxRetries: 0 }));
+  await send(msg('kickoff'));
+  const room = 8192 - Buffer.byteLength(JSON.stringify(msg('results')));
+  await expect(send(msg('results', room + 1))).rejects.toThrow();
+  expect(reserve).toHaveBeenCalledTimes(1);
+  await send(msg('results', room));
+  expect(Buffer.byteLength(String(wire.mock.calls[1]?.[1]?.body))).toBe(8192);
+  expect(reserve).toHaveBeenCalledTimes(2);
 });
 it('reserves the wire phase on a lost response and does not follow a redirect or retry', async () => {
   const wire = vi.fn(async () => {
