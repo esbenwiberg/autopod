@@ -11,10 +11,10 @@ import Testing
       "generation":3,"failureId":null,"code":\(held ? "\"INFRASTRUCTURE_BLOCKED\"" : "null")}
       """.utf8))
   }
-  private func context(generation: Int = 3) throws -> RepairRetainedContext {
+  private func context(generation: Int = 3, needTruncated: Bool = false, reportsTruncated: Bool = false) throws -> RepairRetainedContext {
     try JSONDecoder().decode(RepairRetainedContext.self, from: Data("""
-      {"inspection":{"generation":\(generation),"infrastructure":{"state":"reported","truncated":false,\
-      "needs":[{"id":"report-1","owner":"validation","phase":"test","needs":"Diagnose runner heap and reaping","truncated":false}]},\
+      {"inspection":{"generation":\(generation),"infrastructure":{"state":"reported","truncated":\(reportsTruncated),\
+      "needs":[{"id":"report-1","owner":"validation","phase":"test","needs":"Diagnose runner heap and reaping","truncated":\(needTruncated)}]},\
       "prerequisites":{"sourcePreservationRecorded":true,"workerSettlementRecorded":true,"pendingDecision":false}}}
       """.utf8))
   }
@@ -74,6 +74,17 @@ import Testing
     actions.inspectInfrastructure = { _ in Issue.record("No infrastructure report read for non-held lifecycle"); return current }
     await model.refreshEligibility(id: "fixture", actions: actions)
     #expect(model.infrastructureContext == nil && model.infrastructureInspectionError == nil && !model.infrastructureBlocked)
+  }
+
+  @Test(arguments: [true, false], [true, false])
+  func individualAndCollectionTruncationAreDisclosedSeparately(needTruncated: Bool, reportsTruncated: Bool) async throws {
+    let host = LaunchComposerHost(InfrastructureRecoveryHandoff(podId: "fixture",
+      context: try context(needTruncated: needTruncated, reportsTruncated: reportsTruncated),
+      inspectionError: nil), width: 800)
+    defer { host.close() }
+    try await host.wait { host.has("repair-infrastructure-handoff") }
+    #expect(host.has("repair-infrastructure-report-truncated-report-1") == needTruncated)
+    #expect(host.has("repair-infrastructure-reports-truncated") == reportsTruncated)
   }
 
   @Test func replacementLinkOnlyHandsOffToSeparateInspection() async throws {

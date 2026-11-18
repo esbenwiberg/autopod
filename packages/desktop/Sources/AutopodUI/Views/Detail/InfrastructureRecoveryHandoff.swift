@@ -29,9 +29,17 @@ struct InfrastructureRecoveryHandoff: View {
               .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Text(need.needs ?? "Inspect the original report for the recorded need.").textSelection(.enabled)
             Text("Report \(need.id)").font(.caption).foregroundStyle(.secondary)
+            if need.truncated {
+              Text("This report is shortened. Inspect the original report before selecting recovery.")
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("repair-infrastructure-report-truncated-\(need.id)")
+            }
           }
         }
-        if inspection.infrastructure.truncated { Text("Some report details were omitted. Inspect the full recorded reports before selecting recovery.").font(.caption) }
+        if inspection.infrastructure.truncated {
+          Text("Some reports were omitted. Inspect the full recorded reports before selecting recovery.")
+            .font(.caption).accessibilityIdentifier("repair-infrastructure-reports-truncated")
+        }
         Text(inspection.prerequisites.sourcePreservationRecorded && inspection.prerequisites.workerSettlementRecorded
           ? "Source preservation and worker settlement are recorded. Exact source, resource state and the replacement environment still require inspection."
           : "Source preservation or worker settlement is not confirmed here. Keep the original resources; the owning recovery must verify them.")
