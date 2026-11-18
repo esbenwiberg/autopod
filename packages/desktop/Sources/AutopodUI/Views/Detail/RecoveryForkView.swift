@@ -27,6 +27,17 @@ struct RecoveryForkView: View {
           RecoveryNotice(title: "Saved decision needs an outcome check", message: "A missing response does not prove failure. Observe this exact request; do not create another pod.", symbol: "clock")
         }
         if let error = model.error { RecoveryNotice(title: "Continuation needs attention", message: error).accessibilityIdentifier("recovery-fork-error") }
+        if let handoff = model.preparedHandoff {
+          VStack(alignment: .leading, spacing: 10) {
+            Text("Handoff ready. Worker not started.").font(.headline)
+            Text(handoff.coverage == "brief-only" ? "Brief only — no recovered code bytes." : handoff.coverage == "inherited-checkpoint" ? "Inherited checkpoint only. The replacement’s later edits may be missing." : "Independently saved checkpoint. Later edits may be missing.")
+            if let source = handoff.source { Text("\(source.head) · saved \(source.savedAt)").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            Text("This handoff will not start automatically. Resolve prior worker ownership, then review the latest source and a freshly qualified environment before starting.").font(.callout)
+            DisclosureGroup("Inspect the prepared packet") { Text(handoff.packet).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            Button("Review start prerequisites") { Task { await model.refresh(actions, forStart: true) } }
+              .disabled(model.busy).accessibilityIdentifier("recovery-fork-review-start")
+          }.recoverySurface().accessibilityIdentifier("recovery-fork-prepared-handoff")
+        }
         if model.operation == nil, let failure = model.context?.failure, !failure.isEmpty {
           RecoveryNotice(title: "Failure to address", message: failure)
         }
@@ -59,6 +70,14 @@ struct RecoveryForkView: View {
         if !inspection.blockers.isEmpty {
           RecoveryNotice(title: "Not ready to continue", message: inspection.blockers.joined(separator: "\n"))
         }
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Prepare the handoff now").font(.headline)
+          Text("Save an inspectable handoff using independently saved inputs only. No worker, credentials, model call or compute is started. Missing code is labelled brief only; later edits may be missing.").font(.callout)
+          Button("Prepare handoff only") { Task { await model.prepareHandoff(actions) } }
+            .disabled(!model.canEdit || !actions.preparationAvailable || model.preparedHandoff != nil || model.preparationUncertain)
+            .accessibilityIdentifier("recovery-fork-prepare-only")
+          if !actions.preparationAvailable { Text("Preparation is unavailable on this connection. Starting still requires all daemon prerequisites.").font(.caption) }
+        }.recoverySurface()
         if let source = inspection.source {
           VStack(alignment: .leading, spacing: 10) {
             Label("1 · Review recovered work", systemImage: "doc.text.magnifyingglass").font(.headline)
@@ -98,8 +117,8 @@ struct RecoveryForkView: View {
             .font(.callout).foregroundStyle(RecoveryPalette.secondary)
         }.disabled(!model.canEdit).recoverySurface()
         VStack(alignment: .leading, spacing: 12) {
-          Label("3 · Tell the new pod how to continue", systemImage: "text.bubble").font(.headline)
-          Text("What should it do next? Include what not to repeat and the failure to address. These instructions are recorded with your decision; they do not grant new permissions.")
+          Label("3 · Add a note for the worker (optional)", systemImage: "text.bubble").font(.headline)
+          Text("The verified handoff includes the task, saved work and failure history. Your optional note stays separate from quoted history and grants no new permissions.")
             .font(.callout).foregroundStyle(RecoveryPalette.secondary)
           TextEditor(text: $model.instructions).font(.body).frame(minHeight: 90, idealHeight: 120)
             .padding(5).background(DesktopTheme.surface).clipShape(RoundedRectangle(cornerRadius: 6))
@@ -134,6 +153,15 @@ struct RecoveryForkView: View {
           }
         }.padding(.top, 8)
       }.font(.callout)
+      ForEach(context.attempts ?? [], id: \.podId) { attempt in
+        DisclosureGroup("Previous attempt · \(attempt.podId) · \(attempt.capturedAt)") {
+          Text(attempt.sourceHead).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+          Text(attempt.summary).font(.callout).textSelection(.enabled)
+          Text(attempt.failure).font(.callout).textSelection(.enabled)
+          ForEach(attempt.messages, id: \.eventId) { message in Text("\(message.timestamp) · \(message.text)").font(.caption).textSelection(.enabled) }
+          Text(attempt.omissions.joined(separator: "\n")).font(.caption).foregroundStyle(RecoveryPalette.secondary)
+        }
+      }
     }.recoverySurface().accessibilityIdentifier("recovery-fork-context")
   }
   private func budgetReview(_ budget: RecoveryForkBudget) -> some View {
@@ -178,12 +206,15 @@ struct RecoveryForkView: View {
         Button("Open new pod") { Task { if await model.open(actions) { onNavigate() } } }
           .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("recovery-fork-open-child")
       }
+      if let brief = operation.workerBrief {
+        DisclosureGroup("Read the worker’s handoff") { Text(brief).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+      }
     }.recoverySurface().accessibilityIdentifier("recovery-fork-outcome")
   }
   private func outcomeTitle(_ state: RecoveryForkOperation.State) -> String {
     switch state {
     case .preparing: "Preparing an independent checkpoint"
-    case .queued: "New pod created — startup checks pending"
+    case .queued: "Fresh pod queued with the handoff — not running"
     case .qualifying: "Checking the new environment before coding"
     case .qualified: "Environment qualified — follow the new pod’s progress"
     case .failed: "Continuation did not complete — original retained"

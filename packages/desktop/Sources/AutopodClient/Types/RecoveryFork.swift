@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct RecoveryForkFile: Codable, Equatable, Sendable, Identifiable {
   public var id: String { path }
@@ -28,7 +29,7 @@ public struct RecoveryForkInput: Codable, Equatable, Sendable {
   public var isValid: Bool {
     version == 1 && expectedGeneration >= 1 && RecoveryForkValidation.isSHA(sourceHead)
       && !executionProfileId.isEmpty && executionProfileId.utf16.count <= 128
-      && (10...8000).contains(instructions.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count)
+      && instructions.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count <= 8000
       && acknowledgePartialSource && files.count <= 100 && Set(files.map(\.path)).count == files.count
       && files.allSatisfy { RecoveryFilesSnapshot.safePath($0.path) && RecoveryFilesSnapshot.isHash($0.version) }
       && ((try? JSONEncoder().encode(self).count) ?? Int.max) <= 120_000
@@ -92,6 +93,16 @@ public struct RecoveryForkSource: Codable, Equatable, Sendable {
   public var caveats: [String]
 }
 public struct RecoveryForkContext: Codable, Equatable, Sendable {
+  public struct Attempt: Codable, Equatable, Sendable {
+    public var podId: String
+    public var capturedAt: String
+    public var sourceHead: String
+    public var packetHash: String
+    public var summary: String
+    public var failure: String
+    public var messages: [Message]
+    public var omissions: [String]
+  }
   public struct Message: Codable, Equatable, Sendable {
     public var role: String
     public var text: String
@@ -103,6 +114,7 @@ public struct RecoveryForkContext: Codable, Equatable, Sendable {
   public var messages: [Message]
   public var truncated: Bool
   public var omissions: [String]
+  public var attempts: [Attempt]? = nil
 }
 public struct RecoveryForkBudget: Codable, Equatable, Sendable {
   public var taskId: String
@@ -186,6 +198,7 @@ public struct RecoveryForkOperation: Codable, Equatable, Sendable {
   public var context: RecoveryForkContext
   public var error: String?
   public var createdAt: String
+  public var workerBrief: String? = nil
   public func validate(podId: String, request expected: RecoveryForkRequest? = nil) throws {
     guard version == 1, parentPodId == podId, !actorId.isEmpty, request.isValid,
       id == request.id, generation == request.expectedGeneration, sourceHead == request.sourceHead,
@@ -196,6 +209,39 @@ public struct RecoveryForkOperation: Codable, Equatable, Sendable {
       copiedFiles.allSatisfy({ request.files.map(\.path).contains($0) }),
       ![.queued, .qualifying, .qualified].contains(state) || (childPodId?.isEmpty == false && Set(copiedFiles) == Set(request.files.map(\.path))) else { throw URLError(.badServerResponse) }
     try RecoveryForkValidation.validate(source: nil, context: context)
+  }
+}
+public struct RecoveryHandoffPreparationRequest: Codable, Equatable, Sendable {
+  public let expectedGeneration: Int
+  public let instructions: String
+  public init(expectedGeneration: Int, instructions: String) {
+    self.expectedGeneration = expectedGeneration; self.instructions = instructions
+  }
+}
+public struct RecoveryHandoffPreparation: Codable, Equatable, Sendable {
+  public struct Source: Codable, Equatable, Sendable {
+    public var podId: String
+    public var head: String
+    public var tree: String
+    public var bundleHash: String
+    public var savedAt: String
+  }
+  public var version: Int
+  public var podId: String
+  public var generation: Int
+  public var actorId: String
+  public var createdAt: String
+  public var coverage: String
+  public var source: Source?
+  public var packet: String
+  public var packetHash: String
+  public var workerStarted: Bool
+  public func validate(podId: String) throws {
+    guard version == 1, self.podId == podId, generation >= 1, !workerStarted,
+      ["brief-only", "inherited-checkpoint", "saved-checkpoint"].contains(coverage),
+      (coverage == "brief-only") == (source == nil), !actorId.isEmpty,
+      RecoveryFilesSnapshot.isHash(packetHash), packet.utf8.count <= 512_000 else { throw URLError(.badServerResponse) }
+    guard SHA256.hash(data: Data(packet.utf8)).map({ String(format: "%02x", $0) }).joined() == packetHash else { throw URLError(.badServerResponse) }
   }
 }
 private enum RecoveryForkValidation {

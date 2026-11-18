@@ -82,7 +82,10 @@ export function recoveryFileExclusions(files: ReadonlyArray<{ path: string }>) {
     '\n'
   );
 }
-export async function inspectRecoveryForkFiles(source: string) {
+export async function inspectRecoveryForkFiles(
+  source: string,
+  inherited: ReadonlyArray<{ path: string; sha256: string; size: number }> = [],
+) {
   const git = recoveryGit(source);
   if ((await git(['for-each-ref', '--format=%(refname)', 'refs/replace/'])).stdout.trim())
     recoveryForkError(
@@ -127,6 +130,13 @@ export async function inspectRecoveryForkFiles(source: string) {
       .split('\0')
       .filter(Boolean),
   );
+  // A prior daemon-selected supplement is excluded in the child's private Git
+  // metadata, but may continue only while its exact independently recorded bytes survive.
+  for (const file of inherited) {
+    if (tracked.has(file.path)) continue;
+    await verifyRecoveryForkFiles(source, [file]);
+    allowed.add(file.path);
+  }
   const possible = listing.files.filter((f) => !tracked.has(f.path) && safeForkFile(f.path));
   const files = possible.filter((f) => allowed.has(f.path));
   return {
@@ -167,9 +177,10 @@ export async function prepareRecoveryForkSource(
     childBranch: string;
     input: RecoveryForkInput;
     packet: string;
+    inheritedFiles?: ReadonlyArray<{ path: string; sha256: string; size: number }>;
   },
 ) {
-  const catalog = await inspectRecoveryForkFiles(options.source);
+  const catalog = await inspectRecoveryForkFiles(options.source, options.inheritedFiles);
   options.assertCurrent();
   const chosen = options.input.files.map((f) => {
     const current = catalog.files.find((c) => c.path === f.path && c.version === f.version);

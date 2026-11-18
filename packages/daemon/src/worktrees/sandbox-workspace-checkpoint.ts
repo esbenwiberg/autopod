@@ -166,6 +166,8 @@ export interface WorkspaceCheckpointResult {
   promoted: boolean;
   materialized: boolean;
   quarantineRef: string;
+  /** Daemon-owned independent Git object store; never a live worker checkout. */
+  objectStore?: string;
   /** Both old and new source remain retained in this pod's quarantine. */
   rewrittenFrom?: { checkpoint: string; sourceHead: string; base: string };
   error?: { phase: string; code: string; retryable: boolean; message: string };
@@ -549,6 +551,7 @@ export async function checkpointSandboxWorkspace(
           promoted: true,
           materialized: true,
           quarantineRef,
+          objectStore: bare,
           ...(rewrittenFrom ? { rewrittenFrom } : {}),
         };
       } catch (err) {

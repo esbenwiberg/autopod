@@ -1,0 +1,338 @@
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { RECOVERY_CONTINUATION_INSTRUCTION } from '../configuration/recovery-fork-launch.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
+import { codingTransport, fixture, git } from '../test-utils/fresh-handoff-helpers.js';
+import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
+import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
+import { createRecoveryForkRepository } from './recovery-fork-repository.js';
+
+// Two production admissions and real independent Git imports per chain.
+vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
+
+describe('fresh-pod handoff continuity with real Git and SQLite', () => {
+  it('imports B’s latest checkpoint, A’s inherited source and B’s saved edit before C codes without an operator note', async () => {
+    const f = await fixture(
+      false,
+      'Preserve parser compatibility. Do not publish without approval.',
+    );
+    const events = f.ctx.deps.eventRepo!;
+    const log = (podId: string, message: string) =>
+      events.insert({
+        type: 'pod.agent_activity',
+        podId,
+        timestamp: new Date().toISOString(),
+        event: { type: 'status', message, timestamp: new Date().toISOString() },
+      });
+    log(f.podId, 'Attempt A: parser saved; original checks failed.');
+    const a = f.pod();
+    codingTransport(f);
+    f.ctx.validationEngine.validate = vi.fn(async (config) => ({
+      ...createFailingValidationResult(config.podId, config.attempt),
+      infrastructureFailure: {
+        phase: 'setup' as const,
+        code: 'COMMAND_NOT_FOUND',
+        statusCode: 409,
+        message: 'Synthetic test launcher unavailable',
+        retryable: false,
+      },
+    }));
+    let bHead = '';
+    f.ctx.runtime.spawn = vi.fn(async function* () {
+      const prepared = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.prepared!;
+      expect(await readFile(path.join(prepared.worktree, 'source.ts'), 'utf8')).toContain(
+        'preserved',
+      );
+      await writeFile(
+        path.join(prepared.worktree, 'regression.test.ts'),
+        'export const blankRowsCovered = true;\n',
+      );
+      await git(prepared.worktree, 'add', 'regression.test.ts');
+      await git(
+        prepared.worktree,
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-m',
+        'Save B regression test',
+      );
+      bHead = await git(prepared.worktree, 'rev-parse', 'HEAD');
+      const b = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.admitted!.childPodId;
+      log(b, 'Attempt B: regression saved; test launcher unavailable.');
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Regression saved; run the original checks next.',
+        totalInputTokens: 20,
+        totalOutputTokens: 10,
+        costUsd: 0.001,
+      };
+    });
+    const firstRequest = await f.request();
+    const first = await f.manager.createRecoveryFork(f.podId, firstRequest, f.actor);
+    await f.manager.processPod(first.childPodId!);
+    const b = f.ctx.podRepo.getOrThrow(first.childPodId!);
+    expect(['failed', 'review_required']).toContain(b.status);
+    // Positive daemon completion/run evidence is required; no unknown-exit bypass.
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(b.id).taskId).toBe(
+      f.ctx.podRepo.taskExecutions!.snapshot(a.id).taskId,
+    );
+    await writeFile(
+      path.join(b.worktreePath!, 'saved-note.txt'),
+      'Safely captured B supplemental edit\n',
+    );
+    f.cm.getStatus = vi.fn(async (id) => (id === '3'.repeat(64) ? 'running' : 'stopped'));
+    const view = await f.manager.inspectRecoveryFork(b.id);
+    expect(view.budget?.status, JSON.stringify(f.ctx.podRepo.taskExecutions!.snapshot(b.id))).toBe(
+      'below_recorded_limit',
+    );
+    expect(
+      view.blockers,
+      JSON.stringify({
+        reason: b.failureReason,
+        finalization: b.finalization,
+        runs: f.ctx.db.prepare('SELECT * FROM task_agent_runs WHERE pod_id=?').all(b.id),
+      }),
+    ).toEqual([]);
+    expect(view.source?.head).toBe(bHead);
+    const priorPacket = f.ctx.podRepo.recoveryForks!.parent(a.id)!.facts.prepared!.packet;
+    const priorBytes = await readFile(priorPacket, 'utf8');
+    await chmod(priorPacket, 0o644);
+    await writeFile(priorPacket, priorBytes + 'tampered');
+    await expect(f.manager.inspectRecoveryFork(b.id)).rejects.toThrow('tampered');
+    await writeFile(priorPacket, priorBytes);
+    await chmod(priorPacket, 0o444);
+    const file = view.source!.files.find((entry) => entry.path === 'saved-note.txt')!;
+    const input = {
+      ...f.input,
+      instructions: '',
+      expectedGeneration: b.lifecycleGeneration,
+      sourceHead: bHead,
+      files: [{ path: file.path, version: file.version }],
+    };
+    const preview = await f.manager.previewRecoveryFork(b.id, input);
+    expect(preview.blockers).toEqual([]);
+    const request = { ...input, id: 'start-c', expectedBinding: preview.expectedBinding! };
+    codingTransport(f, 'qualified', b.id, '3'.repeat(64));
+    let workerInspected = false;
+    f.ctx.runtime.spawn = vi.fn(async function* () {
+      const record = f.ctx.podRepo.recoveryForks!.parent(b.id)!;
+      const p = record.facts.prepared!;
+      expect(record.facts.qualified?.evidence.outcome).toBe('qualified');
+      expect(await git(p.worktree, 'rev-parse', 'HEAD')).toBe(bHead);
+      expect(await readFile(path.join(p.worktree, 'source.ts'), 'utf8')).toContain('preserved');
+      expect(await readFile(path.join(p.worktree, 'regression.test.ts'), 'utf8')).toContain(
+        'blankRowsCovered',
+      );
+      expect(await readFile(path.join(p.worktree, 'saved-note.txt'), 'utf8')).toContain(
+        'B supplemental',
+      );
+      const bytes = await f.cm.readFile('3'.repeat(64), '/autopod/recovery/handoff.json');
+      expect(bytes).toBe(await readFile(p.packet, 'utf8'));
+      const packet = JSON.parse(bytes);
+      expect(packet.continuationInstruction).toBe(RECOVERY_CONTINUATION_INSTRUCTION);
+      expect(packet.optionalOperatorNote).toBe('');
+      expect(packet.originalFrozenHandoffInstructions).toContain('parser compatibility');
+      expect(packet.quotedHistoricalContext.attempts[0].podId).toBe(a.id);
+      expect(JSON.stringify(packet.quotedHistoricalContext.attempts)).toContain('Attempt A');
+      expect(JSON.stringify(packet.quotedHistoricalContext)).toContain('Attempt B');
+      expect(packet.nextSteps).toContain('next unfinished step');
+      expect(packet.source.head).toBe(bHead);
+      expect(packet.quotedHistoricalContext.omissions.length).toBeGreaterThan(0);
+      workerInspected = true;
+      yield {
+        type: 'error' as const,
+        timestamp: new Date().toISOString(),
+        message: 'Synthetic C stop after byte assertions',
+        fatal: true,
+      };
+    });
+    const second = await f.manager.createRecoveryFork(b.id, request, f.actor);
+    expect((await f.manager.createRecoveryFork(b.id, request, f.actor)).childPodId).toBe(
+      second.childPodId,
+    );
+    await expect(
+      f.manager.createRecoveryFork(b.id, { ...request, id: 'competing' }, f.actor),
+    ).rejects.toThrow('conflict');
+    await f.manager.processPod(second.childPodId!);
+    expect(workerInspected).toBe(true);
+    const c = f.ctx.podRepo.getOrThrow(second.childPodId!);
+    expect(c.worktreePath).not.toBe(b.worktreePath);
+    expect(c).toMatchObject({
+      prUrl: null,
+      linkedPodId: null,
+      autoApprove: false,
+      skipValidation: false,
+    });
+    expect(c.validationAttempts).toBe(b.validationAttempts);
+    expect(f.pod()).toEqual(a);
+    expect(f.ctx.podRepo.recoveryForks!.lineage(c.id).map((row) => row.parentPodId)).toEqual([
+      b.id,
+      a.id,
+    ]);
+    const volumes = vi.mocked(f.cm.spawn).mock.calls.at(-1)![0].volumes!;
+    expect(JSON.stringify(volumes)).not.toContain(
+      f.ctx.podRepo.recoveryForks!.parent(b.id)!.facts.prepared!.snapshot,
+    );
+  });
+
+  it('prepares a durable brief-only packet for unknown ownership without touching any old resource or admitting execution', async () => {
+    const f = await fixture();
+    f.ctx.podRepo.completionJournal!.begin(f.pod());
+    f.cm.getStatus = vi.fn(async () => {
+      throw new Error('Old resource must not be probed');
+    });
+    f.cm.getResourceKey = vi.fn(async () => {
+      throw new Error('Old key must not be probed');
+    });
+    const before = f.ctx.db.prepare('SELECT COUNT(*) AS n FROM pods').get();
+    const request = { expectedGeneration: f.pod().lifecycleGeneration, instructions: '' };
+    const receipt = await f.manager.prepareRecoveryHandoff(f.podId, request, f.actor);
+    expect(receipt).toMatchObject({ coverage: 'brief-only', source: null, workerStarted: false });
+    expect(receipt.packet).toContain('Brief only');
+    expect(await f.manager.getPreparedRecoveryHandoff(f.podId)).toEqual(receipt);
+    expect(await f.manager.prepareRecoveryHandoff(f.podId, request, f.actor)).toEqual(receipt);
+    await expect(
+      f.manager.prepareRecoveryHandoff(
+        f.podId,
+        { ...request, instructions: 'Different selection' },
+        f.actor,
+      ),
+    ).rejects.toThrow('already saved');
+    const filename = path.join(f.root, 'preparation-restart.db');
+    await writeFile(filename, f.ctx.db.serialize());
+    const reopened = openTestDiskDatabase(filename);
+    try {
+      expect(
+        createRecoveryForkRepository(reopened).preparation(f.podId, request.expectedGeneration),
+      ).toEqual(receipt);
+    } finally {
+      reopened.close();
+    }
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    expect(view.available).toBe(false);
+    await expect(
+      f.manager.createRecoveryFork(
+        f.podId,
+        { ...f.input, id: 'blocked-start', expectedBinding: 'a'.repeat(64) },
+        f.actor,
+      ),
+    ).rejects.toThrow();
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.getResourceKey).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.launch.prepareEnvironment).not.toHaveBeenCalled();
+    expect(f.ctx.db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual(before);
+  });
+
+  it('prepares only independently saved Git objects while the original worker and its later edits remain inaccessible', async () => {
+    const f = await fixture();
+    const objectStore = path.join(f.root, 'independently-saved.git');
+    await git(f.root, 'clone', '--bare', '--no-local', f.pod().worktreePath!, objectStore);
+    const head = await git(objectStore, 'rev-parse', 'HEAD');
+    const tree = await git(objectStore, 'rev-parse', 'HEAD^{tree}');
+    const ref = `refs/autopod-quarantine/${f.podId}/1-committed`;
+    await git(objectStore, 'update-ref', ref, head);
+    const now = new Date().toISOString();
+    await f.ctx.podRepo.savedWorkspaceCheckpoints!.save({
+      podId: f.podId,
+      sequence: 1,
+      fingerprint: { head, tree, dirty: false },
+      verifiedAt: now,
+      capturedAt: now,
+      attempts: 1,
+      error: undefined,
+      result: {
+        sequence: 1,
+        sourceHead: head,
+        sourceTree: tree,
+        snapshotCommit: head,
+        snapshotTree: tree,
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: true,
+        materialized: true,
+        quarantineRef: ref,
+        objectStore,
+      },
+    });
+    await writeFile(
+      path.join(f.pod().worktreePath!, 'source.ts'),
+      'Later unsynced edit must not be claimed\n',
+    );
+    f.ctx.podRepo.completionJournal!.begin(f.pod());
+    f.cm.getStatus = vi.fn(async () => {
+      throw new Error('No old resource probe');
+    });
+    f.cm.getResourceKey = vi.fn(async () => {
+      throw new Error('No old resource key');
+    });
+    f.worktrees.inspectSourceAdoption.mockImplementation(async () => {
+      throw new Error('No live checkout inspection');
+    });
+    const receipt = await f.manager.prepareRecoveryHandoff(
+      f.podId,
+      { expectedGeneration: f.pod().lifecycleGeneration },
+      f.actor,
+    );
+    expect(receipt.coverage).toBe('saved-checkpoint');
+    expect(receipt.source).toMatchObject({ podId: f.podId, head, tree });
+    expect(receipt.packet).toContain('Later, unsynced');
+    const row = f.ctx.db
+      .prepare('SELECT archive_path AS archive FROM fresh_handoff_preparations WHERE pod_id=?')
+      .get(f.podId) as { archive: string };
+    const imported = path.join(f.root, 'inspect-prepared-copy');
+    await git(f.root, 'init', imported);
+    await git(
+      imported,
+      'fetch',
+      '--no-write-fetch-head',
+      row.archive,
+      `${ref}:refs/heads/prepared`,
+    );
+    await git(imported, 'checkout', 'prepared');
+    expect(await readFile(path.join(imported, 'source.ts'), 'utf8')).toContain('preserved');
+    expect(await readFile(path.join(f.pod().worktreePath!, 'source.ts'), 'utf8')).toContain(
+      'Later unsynced',
+    );
+    expect(f.worktrees.inspectSourceAdoption).not.toHaveBeenCalled();
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.getResourceKey).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+
+  it.each([
+    'foreign-task',
+    'cycle',
+    'stale-launch',
+  ] as const)('rejects %s lineage before another successor can be admitted', async (kind) => {
+    const f = await fixture();
+    const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    const record = f.ctx.podRepo.recoveryForks!.parent(f.podId)!;
+    // Corrupt synthetic disk data, never relax a production admission guard.
+    f.ctx.db.exec('DROP TRIGGER recovery_forks_immutable_update');
+    if (kind === 'cycle')
+      f.ctx.db
+        .prepare('UPDATE recovery_forks SET parent_pod_id=? WHERE id=?')
+        .run(operation.childPodId, record.id);
+    else
+      f.ctx.db
+        .prepare('UPDATE recovery_forks SET binding=json_set(binding,?,?) WHERE id=?')
+        .run(kind === 'foreign-task' ? '$.taskId' : '$.execution.digest', 'foreign', record.id);
+    expect(() => f.ctx.podRepo.recoveryForks!.lineage(operation.childPodId!)).toThrow();
+    await expect(f.manager.inspectRecoveryFork(operation.childPodId!)).rejects.toThrow();
+    expect(
+      f.ctx.db.prepare("SELECT COUNT(*) AS n FROM recovery_fork_facts WHERE kind='admitted'").get(),
+    ).toEqual({ n: 1 });
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+});
