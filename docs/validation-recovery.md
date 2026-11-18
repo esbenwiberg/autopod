@@ -121,8 +121,8 @@ and the unchanged six-second cleanup-test deadline, with an explicit cached
 Linux image containing `autopod`, Node and `setsid`:
 
 ```sh
-AUTOPOD_DOCKER_REAPING_FIXTURE_IMAGE=sha256:... \\
-AUTOPOD_DOCKER_REAPING_FIXTURE_SOCKET=/path/to/local/docker.sock \\
+AUTOPOD_DOCKER_REAPING_FIXTURE_IMAGE=sha256:... \
+AUTOPOD_DOCKER_REAPING_FIXTURE_SOCKET=/path/to/local/docker.sock \
 npx pnpm --filter @autopod/daemon exec vitest run src/containers/docker-worker-reaping.docker.test.ts
 ```
 
