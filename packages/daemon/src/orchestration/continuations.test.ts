@@ -10,7 +10,7 @@ import { managedGit } from '../managed/source-git.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 
-async function setup() {
+async function setup(workerRequests = 2, maxActive = 1) {
   const f = requestTimeFixture(2);
   const root = await mkdtemp(path.join(tmpdir(), 'native-run-'));
   onTestFinished(async () => {
@@ -26,6 +26,12 @@ async function setup() {
   f.db.exec(
     await readFile(
       new URL('../db/migrations/256_orchestration_checkpoint_custody.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  f.db.exec(
+    await readFile(
+      new URL('../db/migrations/258_orchestration_waves.sql', import.meta.url),
       'utf8',
     ),
   );
@@ -95,7 +101,14 @@ async function setup() {
         ),
     );
   const ledger = () => host().ledger;
-  ledger().open(subject.run, subject.repository, subject.policyDigest, predecessor, 2);
+  ledger().open(
+    subject.run,
+    subject.repository,
+    subject.policyDigest,
+    predecessor,
+    workerRequests,
+    maxActive,
+  );
   const file = path.join(root, 'retention.bundle');
   await managedGit(source, ['bundle', 'create', file, 'HEAD']);
   const bytes = await readFile(file);
@@ -114,6 +127,138 @@ async function setup() {
   await rm(file);
   return { f, root, cp, request, ledger, host, subject, bytes, verify };
 }
+
+it('six start, three return, two follow-ups start without waiting for the other three', async () => {
+  const { f, cp, request, ledger, host } = await setup(16, 6);
+  const child = (n: number, objective: string) => {
+    const r = structuredClone(request);
+    r.startKey = `child-${n}`;
+    r.dispatcherAttemptId = r.effectiveGrant.dispatcherAttemptId = r.startKey;
+    r.task.objective = objective;
+    return resign(r);
+  };
+  let l = ledger();
+  await l.acceptAndContinue(cp, child(1, 'investigate'));
+  for (let i = 2; i <= 6; i++)
+    expect(await l.spawnFromAccepted(cp, child(i, 'investigate'))).toBe(`child-${i}`);
+  expect(await l.recover()).toEqual({ blocked: [] });
+  expect(f.launches()).toBe(6);
+  expect(l.waves.available(cp.run)).toBe(0);
+  const pod = (i: number) => {
+    const row = f.service().lookup('native.example', `child-${i}`);
+    if (!row) throw new Error('missing worker');
+    return row.pod_id;
+  };
+  const live = [pod(2), pod(4), pod(6)];
+  l.waves.park(cp.run, 'first-three', 0, 3);
+  for (const i of [1, 3]) await f.runtime.stop(pod(i));
+  const tick = async () => {
+    const s = f.service();
+    await s.enforceExpiry();
+    await s.artifactPipeline?.tick();
+  };
+  await tick();
+  let calls = 0;
+  await l.waves.dispatch(cp.run, async () => {
+    calls++;
+  });
+  expect(calls).toBe(0);
+  await f.runtime.stop(pod(5));
+  await f.service().enforceExpiry();
+  // Exit alone is not a result. Wait for the third child's retained output state.
+  await l.waves.dispatch(cp.run, async () => {
+    calls++;
+  });
+  expect(calls).toBe(0);
+  await tick();
+  f.restart();
+  l = ledger();
+  let cursor = 0;
+  const turn = async (wake: import('./run-waves.js').ResultWake) => {
+    await ledger().waves.dispatch(cp.run, async () => {
+      throw new Error('concurrent controller turn');
+    });
+    expect(wake.results.map((c) => c.start_key)).toEqual(['child-1', 'child-3', 'child-5']);
+    expect(wake.results.every((c) => c.state === 'complete')).toBe(true);
+    expect(wake.inFlight).toEqual(['child-2', 'child-4', 'child-6']);
+    expect(wake.available).toBe(3);
+    for (const n of [7, 8])
+      await l.spawnFromAccepted(
+        cp,
+        child(n, `Follow up on ${wake.results.map((c) => c.pod_id).join(',')}`),
+      );
+    cursor = wake.cursor;
+    calls++;
+  };
+  await expect(
+    l.waves.dispatch(cp.run, async (wake) => {
+      await turn(wake);
+      throw new Error('lost turn acknowledgement');
+    }),
+  ).rejects.toThrow('lost turn acknowledgement');
+  f.restart();
+  l = ledger();
+  expect(await host().tick(cp.run, turn)).toEqual({ blocked: [] });
+  expect(calls).toBe(2);
+  await l.waves.dispatch(cp.run, async () => {
+    throw new Error('acknowledged wait redelivered');
+  });
+  expect(await l.recover()).toEqual({ blocked: [] });
+  expect(f.launches()).toBe(8);
+  expect(l.waves.available(cp.run)).toBe(1);
+  for (const id of [...live, pod(7), pod(8)])
+    expect((await f.runtime.observe(id)).state).toBe('running');
+  expect(
+    f.db
+      .prepare('SELECT count(*),sum(reserved_requests) FROM orchestration_continuations')
+      .raw()
+      .get(),
+  ).toEqual([8, 16]);
+  expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
+    cp.commit,
+  );
+  await expect(l.spawnFromAccepted(cp, child(9, 'unaffordable'))).rejects.toThrow(
+    'budget-exhausted',
+  );
+  await f.runtime.stop(pod(2));
+  await tick();
+  l.waves.park(cp.run, 'after-restart', cursor, 1);
+  let returned: string[] = [];
+  await l.waves.dispatch(cp.run, async (w) => {
+    returned = w.results.map((c) => c.start_key);
+  });
+  expect(returned).toEqual(['child-2']);
+  l.open('other', cp.repository, cp.policyDigest, cp.commit, 16, 6);
+  expect(() => l.waves.park('other', 'foreign-cursor', cursor, 1)).toThrow('invalid-result-cursor');
+}, 30_000);
+
+it('queues an affordable child until its run has a free worker slot', async () => {
+  const { f, cp, request, ledger } = await setup(4, 1);
+  const l = ledger();
+  await l.acceptAndContinue(cp, request);
+  const next = structuredClone(request);
+  next.startKey = next.dispatcherAttemptId = next.effectiveGrant.dispatcherAttemptId = 'second';
+  resign(next);
+  await l.spawnFromAccepted(cp, next);
+  expect(await l.recover()).toEqual({
+    blocked: [{ run: cp.run, key: 'second', stage: 'capacity' }],
+  });
+  expect(f.launches()).toBe(1);
+  const first = f.service().lookup('native.example', request.startKey);
+  if (!first) throw new Error('missing first');
+  // Revoked is an outcome, not a request to retry the first child.
+  await f.service().runtime.stop(first.pod_id);
+  f.db.prepare('UPDATE managed_pods SET revoked=1 WHERE pod_id=?').run(first.pod_id);
+  await f.service().enforceExpiry();
+  l.waves.park(cp.run, 'return-on-failure', 0, 1);
+  let failed: string[] = [];
+  await l.waves.dispatch(cp.run, async (w) => {
+    failed = w.results.map((c) => c.state);
+  });
+  expect(failed).toEqual(['killed']);
+  expect(await l.recover()).toEqual({ blocked: [] });
+  expect(f.launches()).toBe(2);
+});
 
 async function buildStartupHarness() {
   const daemon = path.resolve(import.meta.dirname, '../..');
@@ -414,7 +559,7 @@ it('rejects insufficient budget and conflicting replay without advancing or doub
   const { f, cp, request, ledger } = await setup();
   const l = ledger();
   f.db.prepare('UPDATE orchestration_runs SET worker_request_limit=1').run();
-  await expect(l.acceptAndContinue(cp, request)).rejects.toThrow('not-admissible');
+  await expect(l.acceptAndContinue(cp, request)).rejects.toThrow('budget-exhausted');
   expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
     cp.predecessor,
   );

@@ -4,6 +4,7 @@ import { canonical, digest } from '../managed/canonical.js';
 import { validateManagedRequest } from '../managed/grants.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { tryRecoveryClaim } from './local-recovery-claim.js';
+import { RunWaves } from './run-waves.js';
 
 /** Host-only reference to pinned source and trusted combined-check evidence. Not a wire API. */
 export interface ContinuationCheckpoint {
@@ -23,7 +24,12 @@ export type WithVerifiedExecutor = <T>(
   checkpoint: Readonly<ContinuationCheckpoint>,
   use: (service: ManagedPodService) => Promise<T>,
 ) => Promise<T>;
+type Kind = 'advance' | 'spawn';
+// Preserve the digest of existing advance intents across the upgrade.
+const operationDigest = (kind: Kind, cp: ContinuationCheckpoint, spec: string) =>
+  digest(kind === 'spawn' ? ['spawn', cp, spec] : [cp, spec]);
 interface Intent {
+  operation_kind: Kind;
   start_key: string;
   request_json: string;
   checkpoint_json: string;
@@ -38,10 +44,13 @@ const principal = (run: string) => `native.${run}`;
 /** Internal acceptance/outbox. One run has one lifetime: cancellation is irreversible.
  * The request limit is the worker allowance after the host sets aside its final-check reserve. */
 export class OrchestrationContinuations {
+  readonly waves: RunWaves;
   constructor(
     private readonly db: Database.Database,
     private readonly resolve: WithVerifiedExecutor,
-  ) {}
+  ) {
+    this.waves = new RunWaves(db);
+  }
 
   open(
     run: string,
@@ -49,6 +58,7 @@ export class OrchestrationContinuations {
     policyDigest: string,
     initialCommit: string,
     workerRequestLimit: number,
+    maxActive = 1,
   ) {
     if (
       !/^[A-Za-z0-9_-]{1,64}$/.test(run) ||
@@ -56,14 +66,16 @@ export class OrchestrationContinuations {
       !hash.test(policyDigest) ||
       !commitId.test(initialCommit) ||
       !Number.isSafeInteger(workerRequestLimit) ||
-      workerRequestLimit < 1
+      workerRequestLimit < 1 ||
+      !Number.isSafeInteger(maxActive) ||
+      maxActive < 1
     )
       throw new Error('invalid-run-envelope');
     this.db
       .prepare(
-        'INSERT INTO orchestration_runs(id, repository, policy_digest, accepted_commit, worker_request_limit) VALUES (?,?,?,?,?)',
+        'INSERT INTO orchestration_runs(id, repository, policy_digest, accepted_commit, worker_request_limit,max_active) VALUES (?,?,?,?,?,?)',
       )
-      .run(run, repository, policyDigest, initialCommit, workerRequestLimit);
+      .run(run, repository, policyDigest, initialCommit, workerRequestLimit, maxActive);
   }
   private prior(run: string, key: string) {
     return this.db
@@ -79,7 +91,13 @@ export class OrchestrationContinuations {
       return use(service);
     });
   }
-  async acceptAndContinue(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
+  acceptAndContinue(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
+    return this.admit('advance', input, raw);
+  }
+  spawnFromAccepted(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
+    return this.admit('spawn', input, raw);
+  }
+  private async admit(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     const cp = { ...input };
     const req = validateManagedRequest(raw);
     const repo = req.effectiveGrant.scope.repositories[0];
@@ -102,38 +120,52 @@ export class OrchestrationContinuations {
       !('maxProviderRequests' in budget)
     )
       throw new Error('invalid-continuation-binding');
-    const operation = digest([cp, req.executionSpecDigest]);
+    const operation = operationDigest(kind, cp, req.executionSpecDigest);
     const replay = () => {
       const prior = this.prior(cp.run, req.startKey);
       if (prior && prior.operation_digest !== operation)
         throw new Error('continuation-key-conflict');
       return !!prior;
     };
-    if (replay()) return;
+    if (replay()) return req.startKey;
     await this.withExecutor(cp, (service) => service.preflight(req, principal(cp.run)));
     this.db
       .transaction(() => {
         if (replay()) return;
+        const run = this.db
+          .prepare(
+            'SELECT worker_request_limit,accepted_evidence FROM orchestration_runs WHERE id=?',
+          )
+          .get(cp.run) as
+          | { worker_request_limit: number; accepted_evidence: string | null }
+          | undefined;
+        if (!run || (kind === 'spawn' && run.accepted_evidence !== cp.evidenceDigest))
+          throw new Error('continuation-not-admissible');
+        const used = this.db
+          .prepare(
+            'SELECT COALESCE(sum(reserved_requests),0) FROM orchestration_continuations WHERE run_id=?',
+          )
+          .pluck()
+          .get(cp.run) as number;
+        if (run.worker_request_limit - used < budget.maxProviderRequests)
+          throw new Error('continuation-budget-exhausted');
         const result = this.db
           .prepare(
-            `UPDATE orchestration_runs SET accepted_commit=?
-             WHERE id=? AND repository=? AND policy_digest=? AND accepted_commit=? AND canceled=0
-               AND worker_request_limit - COALESCE((SELECT sum(reserved_requests)
-                    FROM orchestration_continuations WHERE run_id=?),0) >= ?`,
+            `UPDATE orchestration_runs SET accepted_commit=?, accepted_evidence=?
+             WHERE id=? AND repository=? AND policy_digest=? AND accepted_commit=? AND canceled=0`,
           )
           .run(
             cp.commit,
+            cp.evidenceDigest,
             cp.run,
             cp.repository,
             cp.policyDigest,
-            cp.predecessor,
-            cp.run,
-            budget.maxProviderRequests,
+            kind === 'advance' ? cp.predecessor : cp.commit,
           );
         if (!result.changes) throw new Error('continuation-not-admissible');
         this.db
           .prepare(
-            `INSERT INTO orchestration_continuations(run_id,start_key,attempt_id,operation_digest,checkpoint_json,request_json,reserved_requests) VALUES(?,?,?,?,?,?,?)`,
+            `INSERT INTO orchestration_continuations(run_id,start_key,attempt_id,operation_digest,checkpoint_json,request_json,reserved_requests,operation_kind) VALUES(?,?,?,?,?,?,?,?)`,
           )
           .run(
             cp.run,
@@ -143,9 +175,11 @@ export class OrchestrationContinuations {
             canonical(cp),
             canonical(req),
             budget.maxProviderRequests,
+            kind,
           );
       })
       .immediate();
+    return req.startKey;
   }
 
   cancel(run: string) {
@@ -164,13 +198,13 @@ export class OrchestrationContinuations {
   }
 
   /** One pass, on startup or after admission. A blocked intent must not starve other runs. */
-  async recover() {
+  async recover(run?: string) {
     const pending = this.db
       .prepare(
-        `SELECT c.* FROM orchestration_continuations c JOIN orchestration_runs r ON r.id=c.run_id WHERE r.canceled=0 AND c.pod_id IS NULL ORDER BY c.rowid`,
+        `SELECT c.* FROM orchestration_continuations c JOIN orchestration_runs r ON r.id=c.run_id WHERE r.canceled=0 AND c.pod_id IS NULL AND (? IS NULL OR r.id=?) ORDER BY c.rowid`,
       )
-      .all() as (Intent & { run_id: string })[];
-    type Stage = 'claim' | 'binding' | 'source' | 'launch';
+      .all(run ?? null, run ?? null) as (Intent & { run_id: string })[];
+    type Stage = 'claim' | 'binding' | 'source' | 'launch' | 'capacity';
     const blocked: { run: string; key: string; stage: Stage }[] = [];
     for (const intent of pending) {
       let stage: Stage = 'claim';
@@ -188,7 +222,8 @@ export class OrchestrationContinuations {
         if (
           cp.run !== intent.run_id ||
           req.startKey !== intent.start_key ||
-          digest([cp, req.executionSpecDigest]) !== intent.operation_digest
+          operationDigest(intent.operation_kind, cp, req.executionSpecDigest) !==
+            intent.operation_digest
         )
           throw new Error('continuation-ledger-mismatch');
         stage = 'source';
@@ -202,6 +237,12 @@ export class OrchestrationContinuations {
                 .get(cp.run)
             )
               throw new Error('run-canceled');
+            // Also called inside managed start's SQLite reservation transaction:
+            // concurrent hosts cannot spend the same free slot. Replays own their slot.
+            if (!s.lookup(installation, req.startKey) && !this.waves.available(cp.run)) {
+              stage = 'capacity';
+              throw new Error('run-at-capacity');
+            }
           };
           assertActive();
           const row = s.lookup(installation, req.startKey);

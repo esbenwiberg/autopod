@@ -6,6 +6,8 @@ import type { ManagedPodService } from '../managed/managed-service.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 
+import type { ResultWake } from './run-waves.js';
+
 type Subject = Omit<ContinuationCheckpoint, 'evidenceDigest'>;
 const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const hash = /^sha256:[a-f0-9]{64}$/;
@@ -65,6 +67,11 @@ export class LocalCheckpointHost {
       requirePass(subject, manifest.verification);
       return this.withMirror(subject, row.bundle, (mirror) => use(compose(cp, mirror)));
     });
+  }
+  /** One host scheduler turn, after managed result collection or restart. No waiting worker. */
+  async tick(run: string, controller: (wake: ResultWake) => Promise<void>) {
+    await this.ledger.waves.dispatch(run, controller);
+    return this.ledger.recover(run);
   }
   async retain(input: Subject, bytes: Buffer, verify: Verify): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
