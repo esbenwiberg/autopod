@@ -21,7 +21,7 @@ actual Preview; [hosted rollout/recheck remains pending](fleet-display-repair.md
 | --- | --- | --- |
 | Fleet | Search, repository filter, selection, refresh and creation remain reachable. Lifecycle rail and reported milestone token are separate. Repository identity comes from the pod snapshot/configuration lookup. | DesktopPresentationTests, FleetPodNavigationTests |
 | Explicit pod navigation | History, Schedules, Analytics, palette and Series share a destination that clears stale search/repository filters. A selected archived pod survives the recent-results limit. Ordinary card and Village selections retain context. | FleetPodNavigationTests, AnalyticsWiringTests |
-| Pod details | Overview, Work, Validation, Readiness, Evidence, Diff and Logs retained; Terminal remains conditional on interactive mode. Invalid old tab selection falls back. | DetailPanelTabSelectionTests |
+| Pod details | Overview, Work, Validation, Readiness, Evidence, Diff and Logs retained; Terminal remains conditional on interactive mode. Invalid old tab selection falls back. Fleet header × (Close pod details) removes the trailing split item; clicking a pod reopens it with the valid tab retained. | DetailPanelTabSelectionTests, DesktopDetailNavigationTests, DesktopPodNavigationLayoutTests |
 | Pod actions | Redesigned header menu reuses `headerActions`; fleet context menu reuses `cardMenuActions`. Compared action references against main, then inspected the composition. Status-specific pause/resume/kill/retry/rework/approve/merge/manual repair/fork/delete/PR feedback paths remain wired. | ConfirmedActionRenderingTests, InlineControlRenderingTests, ConnectionOwnershipRenderingTests |
 | Validation | One horizontal icon/status card strip; phase details retain current/history selection. Legacy phase chips remain in the legacy branch. Review infrastructure unavailability remains distinct from a failed verdict. | DetailSectionNavigationTests, ValidationHistoryIdentityTests, ValidationHistoryRefreshTests, ValidationProgressTests |
 | Readiness | Existing findings, source references and waiver actions remain in shared sections. | FactWaiverRefreshTests (client); source review |
@@ -50,6 +50,19 @@ actual Preview; [hosted rollout/recheck remains pending](fleet-display-repair.md
 - Give Profiles its own workspace while keeping Settings and profile deep links.
 
 ## Automated evidence and limits
+
+Fleet detail dismissal (2026-11-17): closing is local navigation, retaining pod
+selection, search/repository filters, sort/view/density and sidebar visibility.
+Explicit History/Series/palette navigation reveals details using the existing
+destination/filter rules. Other workspaces retain their own detail columns;
+embedded detail views omit the optional close callback. No Escape handler is added.
+The renderer unmounts on close without disconnecting or stopping the remote pod
+or terminal session. Across-tab terminal identity is retained; across close/reopen
+the local renderer/scrollback is recreated, with output received while closed
+buffered by the existing data pipe. Event subscriptions keep following selection.
+Native regression tests and constrained-width captures for this change are
+pending Mac/CI execution; Linux source review does not establish rendered fit.
+Check live terminal input, resize and output across close/reopen on a Mac.
 
 At the baseline above, Desktop CI on Xcode 16.4 / Swift 6.1.2 passed 552 Swift
 Testing tests, 13 XCTest tests, 15 Node contract tests, `village:check` and the app

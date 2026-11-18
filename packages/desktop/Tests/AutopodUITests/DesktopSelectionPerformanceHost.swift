@@ -15,20 +15,23 @@ import Testing
     private let defaults: UserDefaults
     private let suite = "desktop-selection-" + UUID().uuidString
 
-    init() throws {
+    init(width: Double = 1_800, redesign: Bool = true,
+         configure: (inout MainView) -> Void = { _ in }) throws {
         NSApplication.shared.finishLaunching()
         defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.set(true, forKey: "autopod.desktop.redesign")
+        defaults.set(redesign, forKey: "autopod.desktop.redesign")
         defaults.set("dark", forKey: "autopod.desktop.appearance")
         let state = inputs
-        let view = DesktopPerformanceFixtures.mainView(selection: Binding(
+        var main = DesktopPerformanceFixtures.mainView(selection: Binding(
             get: { state.selectedID }, set: { state.selectedID = $0 }))
+        configure(&main)
+        let view = main
             .defaultAppStorage(defaults)
             .transaction { $0.disablesAnimations = true }
-            .frame(width: 1_800, height: 1_050)
+            .frame(width: width, height: 1_050)
         hosting = NSHostingView(rootView: AnyView(view))
         hosting.sizingOptions = []
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_800, height: 1_050),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 1_050),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
@@ -45,6 +48,51 @@ import Testing
     }
 
     func layout() { window.layoutIfNeeded(); hosting.layoutSubtreeIfNeeded() }
+    func edit(_ placeholder: String, _ text: String) throws {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let field = try #require(descendants(hosting).compactMap { $0 as? NSTextField }
+            .first { $0.placeholderString == placeholder })
+        window.makeFirstResponder(field)
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    }
+    func fleetSegment(_ label: String) -> (NSSegmentedControl, Int)? {
+        func findSegment(_ view: NSView) -> (NSSegmentedControl, Int)? {
+            if let control = view as? NSSegmentedControl, !control.isHiddenOrHasHiddenAncestor {
+                for index in 0..<control.segmentCount {
+                    if control.label(forSegment: index) == label
+                        || control.image(forSegment: index)?.accessibilityDescription == label {
+                        return (control, index)
+                    }
+                }
+            }
+            return view.subviews.lazy.compactMap(findSegment).first
+        }
+        return findSegment(hosting)
+    }
+    func selectFleetSegment(_ label: String) throws {
+        layout()
+        let (control, index) = try #require(fleetSegment(label))
+        control.selectedSegment = index
+        try #require(control.sendAction(control.action, to: control.target))
+    }
+    func fleetTable(rowCount: Int) -> NSTableView? {
+        func findTable(_ view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView, !table.isHiddenOrHasHiddenAncestor,
+               table.numberOfRows == rowCount { return table }
+            return view.subviews.lazy.compactMap(findTable).first
+        }
+        return findTable(hosting)
+    }
+    func key(_ code: UInt16, characters: String, modifiers: NSEvent.ModifierFlags = []) throws {
+        window.makeKeyAndOrderFront(nil)
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+        if modifiers.contains(.command) { _ = window.performKeyEquivalent(with: event) }
+        else { window.sendEvent(event) }
+    }
     func value(_ node: NSObject, _ key: String) -> Any? {
         let alternate = "is" + key.prefix(1).uppercased() + key.dropFirst()
         guard node.responds(to: NSSelectorFromString(key))
@@ -100,7 +148,10 @@ import Testing
         let current = nodes
         guard let node = find(id: "detail-tab-\(tab)", in: current),
               value(node, "accessibilitySelected") as? Bool == true,
-              let id = inputs.selectedID, current.contains(where: { label($0) == id }) else { return false }
+              let id = inputs.selectedID else { return false }
+        // Work renders a unique summary for the current pod; the legacy
+        // heading groups the pod ID under its copy gesture in AppKit.
+        if tab != "work", !current.contains(where: { label($0) == id }) { return false }
         let marker: String
         switch tab {
         case "overview": marker = "Recent Activity"
