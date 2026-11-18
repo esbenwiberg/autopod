@@ -59,6 +59,10 @@ struct OverviewTab: View {
                 }
                 overviewStatusStrip
 
+                if [.failed, .reviewRequired, .killed].contains(pod.status) {
+                    OverviewFailureReason(detail: pod.currentFailureDetail)
+                }
+
                 readinessCompactCard
 
                 if pod.worktreeCompromised {
@@ -196,9 +200,8 @@ struct OverviewTab: View {
     }
 
     private var overviewStatusTitle: String {
-        if pod.needsExecutionInspection { return "Execution requires recovery inspection" }
-        if pod.worktreeCompromised { return "Worktree needs recovery" }
-        if pod.isFixDeliveryFailure { return "Fix validated, push failed" }
+        if let title = pod.failureWarningTitle { return title }
+        if let title = pod.failureOverviewTitle { return title }
         switch pod.status {
         case .failed: return "Pod failed"
         case .reviewRequired: return "Human review required"
@@ -215,11 +218,11 @@ struct OverviewTab: View {
         if pod.worktreeCompromised {
             return "Recover the worktree before retrying or continuing this pod."
         }
-        if let err = pod.errorSummary, (pod.status == .failed || pod.status == .reviewRequired) {
-            return err
-        }
         if pod.isFixDeliveryFailure {
             return pod.latestActivity ?? "Retry delivery to push the validated fix branch."
+        }
+        if [.failed, .reviewRequired, .killed].contains(pod.status) {
+            return "See recorded reason and validation evidence below."
         }
         if let phase = pod.phase {
             return phase.description
@@ -1147,11 +1150,6 @@ struct OverviewTab: View {
             Text(reviewRequiredExplanation(for: pod.validationChecks, attempts: pod.attempts))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            if let err = pod.errorSummary {
-                Text(err)
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(accentColor)
-            }
             if let a = pod.attempts {
                 Text(validationAttemptLabel(a))
                     .font(.caption)
