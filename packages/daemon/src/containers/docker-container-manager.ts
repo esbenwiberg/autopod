@@ -289,6 +289,9 @@ export class DockerContainerManager implements ContainerManager {
       ? alignMemoryToPageSize(config.memoryBytes)
       : undefined;
     const hostConfig: Record<string, unknown> = {
+      // Tool processes can outlive their exec parent. sleep is not a PID-1 reaper;
+      // without Docker init, reused workers accumulate zombies and /proc cleanup stalls.
+      Init: true,
       Binds: binds.length > 0 ? binds : undefined,
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,

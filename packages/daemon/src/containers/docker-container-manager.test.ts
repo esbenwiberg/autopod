@@ -258,6 +258,7 @@ describe('DockerContainerManager', () => {
           Image: 'node:22-alpine',
           name: 'autopod-sess-abc',
           Cmd: ['sleep', 'infinity'],
+          HostConfig: expect.objectContaining({ Init: true }),
           WorkingDir: '/workspace',
         }),
       );
