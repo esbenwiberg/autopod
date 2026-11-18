@@ -437,6 +437,47 @@ export class AutopodClient {
     return this.request<Pod>('GET', `/pods/${id}`);
   }
 
+  inspectSavedWorkDraft(id: string): Promise<import('@autopod/shared').SavedWorkDraftPreview> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/saved-work-draft`);
+  }
+  cancelSavedWorkDraftPreparation(
+    id: string,
+    input: import('@autopod/shared').SavedWorkDraftPrepare,
+  ): Promise<import('@autopod/shared').SavedWorkDraftPreparationCancellation> {
+    return this.request(
+      'POST',
+      `/pods/${encodeURIComponent(id)}/saved-work-draft/cancel-preparation`,
+      input,
+    );
+  }
+  cancelSavedWorkDraft(
+    id: string,
+    input: import('@autopod/shared').SavedWorkDraftCancel,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/saved-work-draft/cancel`, input);
+  }
+  observeSavedWorkDraft(
+    id: string,
+    requestId: string,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation> {
+    return this.request(
+      'GET',
+      `/pods/${encodeURIComponent(id)}/saved-work-draft/${encodeURIComponent(requestId)}`,
+    );
+  }
+  prepareSavedWorkDraft(
+    id: string,
+    input: import('@autopod/shared').SavedWorkDraftPrepare,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/saved-work-draft/prepare`, input);
+  }
+  confirmSavedWorkDraft(
+    id: string,
+    input: import('@autopod/shared').SavedWorkDraftConfirm,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/saved-work-draft/confirm`, input);
+  }
+
   async archivePod(
     id: string,
     reason: string,

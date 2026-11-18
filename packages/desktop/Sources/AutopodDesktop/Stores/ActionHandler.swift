@@ -216,6 +216,31 @@ public final class ActionHandler {
         await self?.updateFromBase(id) ?? nil
       }
     )
+    result.savedWorkDraft = SavedWorkDraftActions(
+      scope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      isCurrent: { [weak self] in
+        guard let self else { return false }; return self.podStore.isCurrent(self.ownership)
+      }, inspect: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectSavedWorkDraft(id) }
+      }, prepare: { [weak self] id, request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.prepareSavedWorkDraft(id, body: request) }
+      }, confirm: { [weak self] id, request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.confirmSavedWorkDraft(id, body: request) }
+      }, observe: { [weak self] id, requestId in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.observeSavedWorkDraft(id, requestId: requestId) }
+      })
+    result.savedWorkDraft.cancel = { [weak self] id, request in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.cancelSavedWorkDraft(id, body: request) }
+    }
+    result.savedWorkDraft.cancelPreparation = { [weak self] id, request in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.cancelSavedWorkDraftPreparation(id, body: request) }
+    }
     result.recoveryFork = RecoveryForkActions(scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
       journalDirectory: journalRoot?.appendingPathComponent("recovery-fork", isDirectory: true),

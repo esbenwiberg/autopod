@@ -35,6 +35,7 @@ import {
   type PrNarrativeResult,
   type PrTitleResult,
 } from './pr-description-generator.js';
+import { adoSavedDraft } from './saved-work-draft-provider.js';
 
 /**
  * Compose the `CreatePrResult` from generator outcomes. Mirrors the helper
@@ -145,6 +146,25 @@ export class AdoHttpError extends Error {
  * API version: 7.1
  */
 export class AdoPrManager implements PrManager {
+  get savedDraft() {
+    const repository = `${this.orgUrl}/${encodeURIComponent(this.project)}/_git/${encodeURIComponent(this.repoName)}`;
+    return adoSavedDraft(repository, async (url, init, beforeWrite) => {
+      const token = await this.getToken();
+      await beforeWrite?.();
+      const response = await fetch(`${this.baseUrl}${url}`, {
+        ...init,
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+      });
+      if (!response.ok)
+        throw new Error(`ADO draft provider request failed (HTTP ${response.status})`);
+      return response.json();
+    });
+  }
   private readonly orgUrl: string;
   private readonly project: string;
   private readonly repoName: string;

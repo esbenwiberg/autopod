@@ -210,6 +210,35 @@ export interface PodManager {
     actor: OperatorActor,
   ): Promise<import('@autopod/shared').StalledWorkerRecoveryReceipt>;
   inspectRetainedFinalization(podId: string): import('@autopod/shared').RetainedFinalizationView;
+  cancelSavedWorkDraftPreparation(
+    podId: string,
+    request: import('@autopod/shared').SavedWorkDraftPrepare,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftPreparationCancellation>;
+  cancelSavedWorkDraft(
+    podId: string,
+    request: import('@autopod/shared').SavedWorkDraftCancel,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation>;
+  inspectSavedWorkDraft(
+    podId: string,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftPreview>;
+  observeSavedWorkDraft(
+    podId: string,
+    requestId: string,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation>;
+  prepareSavedWorkDraft(
+    podId: string,
+    request: import('@autopod/shared').SavedWorkDraftPrepare,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation>;
+  confirmSavedWorkDraft(
+    podId: string,
+    request: import('@autopod/shared').SavedWorkDraftConfirm,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').SavedWorkDraftOperation>;
   finalizeRetained(
     podId: string,
     request: import('@autopod/shared').RetainedFinalizationRequest,

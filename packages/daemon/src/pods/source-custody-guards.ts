@@ -13,6 +13,7 @@ import {
   checkpointHash,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
+import { assertSavedDraftAvailable } from './saved-work-draft-repository.js';
 import { sourceAdoptionError } from './source-adoption-identity.js';
 import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-repository.js';
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
@@ -45,6 +46,10 @@ export function assertPublicationMutationAllowed(db: Database.Database, podId: s
     );
 }
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  for (const row of db.prepare('SELECT id FROM pods WHERE container_id=?').all(containerId) as {
+    id: string;
+  }[])
+    assertSavedDraftAvailable(db, row.id);
   assertPublicationResourceReleasable(db, containerId);
   assertArtifactChecksResourceAvailable(db, containerId);
   assertRecoveryForkResourceAvailable(db, containerId);
@@ -77,6 +82,7 @@ export function assertSourceAvailable(
   owner = sourceOwnerScope(db).getStore(),
   initialInsert = false,
 ): void {
+  assertSavedDraftAvailable(db, podId);
   assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
   if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
