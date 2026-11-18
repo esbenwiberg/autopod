@@ -17,6 +17,21 @@ import Testing
     #expect(f.created.count == 1 && f.created[0].instructions.isEmpty)
     #expect(model.operation?.state == .queued && model.operation?.childStatus == "queued")
   }
+  @Test func boundWorkerPacketIsAvailableBeforeStartAndMissingPacketKeepsFallbackDisabled() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    let model = RecoveryForkModel(podId: "original", actions: f.actions)
+    await model.refresh(f.actions); model.acknowledged = true
+    await model.review(f.actions)
+    #expect(model.canCreate && model.preview?.workerBrief == f.packet(try #require(model.input)) && f.created.isEmpty)
+    let reviewed = model.preview?.workerBrief
+    await model.create(f.actions)
+    #expect(model.operation?.workerBrief == reviewed && f.created.count == 1)
+    let missing = RecoveryForkFixture(); defer { missing.clean() }; missing.omitProposedPacket = true
+    let fallback = RecoveryForkModel(podId: "original", actions: missing.actions)
+    await fallback.refresh(missing.actions); fallback.acknowledged = true
+    await fallback.review(missing.actions); await fallback.create(missing.actions)
+    #expect(fallback.preview?.available == true && !fallback.canCreate && missing.created.isEmpty)
+  }
   @Test func unreachableWorkerPreparationAndLostReplyReopenWithoutLaunchingOrProbingAgain() async throws {
     let f = RecoveryForkFixture(); defer { f.clean() }
     f.sourceAvailable = false
@@ -307,6 +322,7 @@ import Testing
   var genericCode: Int?
   var sourceAvailable = true
   var chained = false
+  var omitProposedPacket = false
   var current = true; var loseResponse = false; var failObservation = false; var reject = false; var corruptReceipt = false
   var observed: RecoveryForkOperation?
   var head = String(repeating: "a", count: 40)
@@ -324,15 +340,18 @@ import Testing
       "blockers": [], "context": context, "receipt": receipt.map { try! wire($0) } ?? NSNull()])
   }
   func operation(_ request: RecoveryForkRequest) throws -> RecoveryForkOperation {
-    try decode(["version": 1, "id": request.id, "parentPodId": "original", "generation": 3, "actorId": "human", "request": wire(request), "state": "queued", "childPodId": "new-child", "childStatus": "queued", "sourceHead": corruptReceipt ? String(repeating: "f", count: 40) : request.sourceHead, "copiedFiles": request.files.map(\.path), "context": context, "error": NSNull(), "createdAt": "2026-11-10T10:01:00Z"])
+    try decode(["version": 1, "id": request.id, "parentPodId": "original", "generation": 3, "actorId": "human", "request": wire(request), "state": "queued", "childPodId": "new-child", "childStatus": "queued", "sourceHead": corruptReceipt ? String(repeating: "f", count: 40) : request.sourceHead, "copiedFiles": request.files.map(\.path), "context": context, "error": NSNull(), "createdAt": "2026-11-10T10:01:00Z", "workerBrief": packet(request.input), "workerBriefHash": SHA256.hash(data: Data(packet(request.input).utf8)).map { String(format: "%02x", $0) }.joined()])
   }
+  func packet(_ input: RecoveryForkInput) -> String { "Verified fixture worker brief · \(input.sourceHead)\nOptional operator note: \(input.instructions)" }
   var actions: RecoveryForkActions {
     RecoveryForkActions(scope: "fixture", journalDirectory: directory, isCurrent: { self.current }, inspect: { _ in
       self.inspections += 1
       return try self.decode(["version": 1, "podId": "original", "generation": 3, "available": self.observed == nil && self.sourceAvailable, "blockers": self.sourceAvailable ? [] : ["Worker ownership is unresolved. Starting is blocked."], "source": self.source, "context": self.context, "budget": self.budget, "profiles": [["id": "@original", "label": "Original frozen environment"], ["id": "recovery-node", "label": "Recovery Node"]], "operation": self.observed.map { try! self.wire($0) } ?? NSNull(), "lineage": NSNull()])
     }, preview: { _, input in
       self.previews.append(input)
-      return try self.decode(["version": 1, "podId": "original", "generation": 3, "available": true, "blockers": [], "expectedBinding": String(repeating: "e", count: 64), "source": self.source, "context": self.context, "budget": self.budget, "execution": ["profileId": input.executionProfileId, "target": "local", "template": "node-22", "platform": "linux/amd64", "memoryGb": 4, "cpus": 2, "originalTemplate": "node-20", "sameEnvironment": false], "input": self.wire(input)])
+      var object: [String: Any] = ["version": 1, "podId": "original", "generation": 3, "available": true, "blockers": [], "expectedBinding": String(repeating: "e", count: 64), "source": self.source, "context": self.context, "budget": self.budget, "execution": ["profileId": input.executionProfileId, "target": "local", "template": "node-22", "platform": "linux/amd64", "memoryGb": 4, "cpus": 2, "originalTemplate": "node-20", "sameEnvironment": false], "input": try self.wire(input)]
+      if !self.omitProposedPacket { let bytes = self.packet(input); object["workerBrief"] = bytes; object["workerBriefHash"] = SHA256.hash(data: Data(bytes.utf8)).map { String(format: "%02x", $0) }.joined() }
+      return try self.decode(object)
     }, create: { _, request in
       self.created.append(request)
       if self.reject { throw RecoveryForkRejection(podId: "original", request: request, message: "Selection changed before admission.") }

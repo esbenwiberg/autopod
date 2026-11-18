@@ -76,7 +76,7 @@ import Observation
       files: files, acknowledgePartialSource: acknowledged)
   }
   var canPreview: Bool { canEdit && inspection?.available == true && input?.isValid == true }
-  var canCreate: Bool { canPreview && preview?.available == true && preview?.input == input && preview?.expectedBinding != nil }
+  var canCreate: Bool { canPreview && preview?.available == true && preview?.input == input && preview?.expectedBinding != nil && preview?.workerBrief != nil && preview?.workerBriefHash != nil }
   var canDiscardRejected: Bool { !busy && !invalidJournal && pending != nil && pending == rejected && confirmedAbsent && operation == nil }
   func editReview() { if canEdit { preview = nil } }
   func select(_ path: String, selected: Bool) {
@@ -164,7 +164,9 @@ import Observation
     do {
       let value = try await actions.create(podId, request)
       guard bind(actions), !Task.isCancelled else { return }
-      try value.validate(podId: podId, request: request); operation = value
+      try value.validate(podId: podId, request: request)
+      guard value.workerBrief == preview.workerBrief else { throw DaemonError.badRequest("The returned worker packet differs from the reviewed packet. Observe the saved decision; do not start another pod.") }
+      operation = value
     } catch {
       guard bind(actions) else { return }
       if let proof = error as? RecoveryForkRejection, proof.matches(podId: podId, request: request) {

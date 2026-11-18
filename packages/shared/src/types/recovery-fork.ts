@@ -145,6 +145,8 @@ export interface RecoveryForkPreview {
   budget: RecoveryForkBudget | null;
   execution: RecoveryForkExecution | null;
   input: RecoveryForkInput;
+  workerBrief?: string;
+  workerBriefHash?: string;
 }
 export interface RecoveryForkOperation {
   version: 1;
@@ -162,4 +164,5 @@ export interface RecoveryForkOperation {
   error: string | null;
   createdAt: string;
   workerBrief?: string;
+  workerBriefHash?: string;
 }

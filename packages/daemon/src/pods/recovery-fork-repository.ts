@@ -44,6 +44,8 @@ export interface RecoveryForkBinding {
   context: RecoveryForkContext;
   contextHash: string;
   accountingHash: string;
+  supplementalFiles?: Array<{ path: string; sha256: string; size: number }>;
+  packetHash?: string;
 }
 export interface RecoveryForkFacts {
   prepared: {
@@ -195,6 +197,7 @@ export function createRecoveryForkRepository(db: Database.Database) {
         record.binding.contextHash !== configurationDigest(record.binding.context) ||
         p.head !== record.binding.source.head ||
         p.tree !== record.binding.source.tree ||
+        (record.binding.packetHash !== undefined && p.packetHash !== record.binding.packetHash) ||
         result.some((r) => r.binding.taskId !== row!.task)
       )
         recoveryForkError('Recovery admission/source/task lineage does not match');

@@ -208,7 +208,7 @@ struct RecoveryForkView: View {
       if let execution = preview.execution {
         Text("\(execution.template) · \(execution.platform) · \(execution.memoryGb.formatted()) GiB · \(execution.target)").font(.callout.weight(.medium))
         Text(execution.cpus.map { "\($0.formatted()) CPUs" } ?? "Provider-default CPU allocation").font(.caption).foregroundStyle(RecoveryPalette.secondary)
-        if execution.sameEnvironment { RecoveryNotice(title: "Same software as the original", message: "A fresh machine alone may repeat the failure. Confirm that your continuation instructions address it.") }
+        if execution.sameEnvironment { RecoveryNotice(title: "Same software as the original", message: "A fresh machine alone may repeat the failure. Review the recorded failure and check that the selected environment addresses it.") }
         else { Text("Original environment: \(execution.originalTemplate)").font(.caption).foregroundStyle(RecoveryPalette.secondary) }
       }
       Text("Copy the reviewed checkpoint and \(preview.input.files.count) additional files. Create a separate pod with the quoted handoff and your instructions. Keep the original untouched. No published PR, approval or waiver is inherited.").font(.callout)
@@ -216,7 +216,15 @@ struct RecoveryForkView: View {
         DisclosureGroup("Review additional files") { ForEach(preview.input.files, id: \.path) { Text($0.path).font(.system(.caption, design: .monospaced)) } }
       }
       Text("New compute charges and retained original storage charges may apply. A token limit is not a cap on infrastructure charges.").font(.caption).foregroundStyle(RecoveryPalette.secondary)
-      Text(preview.input.instructions).font(.callout).textSelection(.enabled).padding(12).recoverySurface(inset: 0)
+      if let brief = preview.workerBrief {
+        DisclosureGroup("Read the worker’s handoff") { Text(brief).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+          .accessibilityIdentifier("recovery-fork-proposed-packet")
+        if let hash = preview.workerBriefHash { Text("Packet SHA-256 · \(hash)").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+      } else { RecoveryNotice(title: "Worker brief unavailable", message: "The daemon did not supply a bound worker packet for this review. Starting is unavailable; inspect again on a supported daemon.") }
+      if !preview.input.instructions.isEmpty {
+        Text("Optional operator note").font(.caption.weight(.medium))
+        Text(preview.input.instructions).font(.callout).textSelection(.enabled).padding(12).recoverySurface(inset: 0)
+      }
       if let budget = preview.budget { budgetReview(budget) }
       if !preview.blockers.isEmpty { RecoveryNotice(title: "Cannot start", message: preview.blockers.joined(separator: "\n")) }
       Button("Continue in fresh pod…") { confirming = true }.buttonStyle(.borderedProminent)

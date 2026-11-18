@@ -149,10 +149,12 @@ export async function inspectRecoveryForkFiles(
       .filter(Boolean),
   );
   // A prior daemon-selected supplement is excluded in the child's private Git
-  // metadata, but may continue only while its exact independently recorded bytes survive.
+  // metadata. Its current safely saved bytes are a NEW selection; the prior
+  // identity remains in the old receipt and in the proposed packet's history.
   for (const file of inherited) {
     if (tracked.has(file.path)) continue;
-    await verifyRecoveryForkFiles(source, [file]);
+    if (!listing.files.some((current) => current.path === file.path))
+      recoveryForkError('Inherited supplemental file is missing or no longer safe to capture');
     allowed.add(file.path);
   }
   const possible = listing.files.filter((f) => !tracked.has(f.path) && safeForkFile(f.path));
@@ -166,6 +168,26 @@ export async function inspectRecoveryForkFiles(
       files.length -
       listing.files.filter((f) => tracked.has(f.path)).length,
   };
+}
+
+/** Bounded descriptor-relative reads bind the proposed packet to current selected bytes. */
+export async function captureRecoveryForkSelection(
+  source: string,
+  selected: RecoveryForkInput['files'],
+) {
+  const files: Array<{ path: string; sha256: string; size: number }> = [];
+  for (const file of selected) {
+    if (!safeForkFile(file.path)) recoveryForkError('Unsafe supplemental path');
+    const content = parseRecoveryContent(
+      await runHostRecoveryReader(recoveryReaderArgs('read', source, file.path, file.version)),
+      file.path,
+    );
+    assertSupplementalBytes(Buffer.from(content.content, 'base64'));
+    files.push({ path: file.path, sha256: content.sha256, size: content.size });
+  }
+  if (files.reduce((sum, file) => sum + file.size, 0) > RECOVERY_FILE_LIMITS.maxSelectionBytes)
+    recoveryForkError('Selected supplemental bytes exceed 50 MiB');
+  return files;
 }
 
 /** Read back exact selected context without following source links. */
@@ -249,10 +271,11 @@ export async function prepareRecoveryForkSource(
     );
   }
   const packet = path.join(options.root, 'handoff.json');
-  const packetBytes = JSON.stringify({
-    ...JSON.parse(options.packet),
-    importedSupplementalFiles: files,
-  });
+  if (
+    JSON.stringify(JSON.parse(options.packet).importedSupplementalFiles) !== JSON.stringify(files)
+  )
+    recoveryForkError('Selected supplemental bytes changed after packet review');
+  const packetBytes = options.packet;
   if (Buffer.byteLength(packetBytes) > 512_000)
     recoveryForkError('Handoff packet exceeds 512,000 bytes');
   // The enclosing archive is private (0700); the single file is mounted read-only

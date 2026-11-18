@@ -172,8 +172,11 @@ import Observation
   }
   private func forkBinding(_ input: RecoveryForkInput, epoch: Int) throws -> String {
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-    var data = try encoder.encode(input); data.append(contentsOf: "sample:\(session):\(epoch)".utf8)
+    var data = try encoder.encode(input); data.append(contentsOf: "sample:\(session):\(epoch)".utf8); data.append(contentsOf: forkPacket(input).utf8)
     return fileHash(data)
+  }
+  private func forkPacket(_ input: RecoveryForkInput) -> String {
+    "Illustrative worker handoff only. No real execution grant.\nYou are continuing the previous pod’s work. Read the verified handoff and inspect the imported changes before editing; resume at the next unfinished step.\nSelected checkpoint: \(input.sourceHead)\nNext: inspect the saved changes and run the original checks on the reviewed environment. No check or approval is inherited.\nOptional operator note (separate from history): \(input.instructions)"
   }
   private func inspectFork(_ id: String, epoch: Int) throws -> RecoveryForkInspection {
     try requireCurrent(epoch)
@@ -210,7 +213,7 @@ import Observation
           "blockers": supported ? [] : ["Only Linux local-Docker candidates can currently qualify. Choose the Linux Docker · Node 22 sample."],
           "expectedBinding": supported ? (try self.forkBinding(input, epoch: epoch)) : NSNull(), "source": self.forkSource,
           "context": self.forkContext, "budget": self.forkBudget, "execution": execution,
-          "input": self.wire(input)])
+          "input": self.wire(input), "workerBrief": self.forkPacket(input), "workerBriefHash": self.fileHash(Data(self.forkPacket(input).utf8))])
       }, create: { id, request in
         try self.requireCurrent(epoch)
         if let old = self.forkOperation {
@@ -221,7 +224,7 @@ import Observation
           request.expectedBinding == (try self.forkBinding(request.input, epoch: epoch)) else { throw self.unavailable() }
         let operation: RecoveryForkOperation = try self.decode(["version": 1, "id": request.id, "parentPodId": id, "generation": epoch,
           "actorId": self.userId, "request": self.wire(request), "state": "queued", "childPodId": "sample-new-pod-\(epoch)", "childStatus": "sample only — no worker",
-          "sourceHead": request.sourceHead, "copiedFiles": request.files.map(\.path), "context": self.forkContext, "error": NSNull(), "createdAt": self.date])
+          "sourceHead": request.sourceHead, "copiedFiles": request.files.map(\.path), "context": self.forkContext, "error": NSNull(), "createdAt": self.date, "workerBrief": self.forkPacket(request.input), "workerBriefHash": self.fileHash(Data(self.forkPacket(request.input).utf8))])
         self.forkOperation = operation; self.mutationCount += 1; return operation
       }, observe: { id, requestId in
         try self.requireCurrent(epoch)

@@ -187,12 +187,19 @@ public struct RecoveryForkPreview: Codable, Equatable, Sendable {
   public var budget: RecoveryForkBudget?
   public var execution: RecoveryForkExecution?
   public var input: RecoveryForkInput
+  public var workerBrief: String? = nil
+  public var workerBriefHash: String? = nil
   public func validate(podId: String, input: RecoveryForkInput) throws {
     guard version == 1, self.podId == podId, self.input == input, generation >= 0,
       !available || (generation == input.expectedGeneration && source?.head == input.sourceHead
         && execution?.profileId == input.executionProfileId && budget?.allowsAdmission == true
         && RecoveryFilesSnapshot.isHash(expectedBinding ?? "")) else { throw URLError(.badServerResponse) }
     try RecoveryForkValidation.validate(source: source, context: context)
+    guard (workerBrief == nil) == (workerBriefHash == nil) else { throw URLError(.badServerResponse) }
+    if let workerBrief, let workerBriefHash {
+      guard workerBrief.utf8.count <= 512_000, RecoveryFilesSnapshot.isHash(workerBriefHash),
+        SHA256.hash(data: Data(workerBrief.utf8)).map({ String(format: "%02x", $0) }).joined() == workerBriefHash else { throw URLError(.badServerResponse) }
+    }
   }
 }
 public struct RecoveryForkOperation: Codable, Equatable, Sendable {
@@ -212,6 +219,7 @@ public struct RecoveryForkOperation: Codable, Equatable, Sendable {
   public var error: String?
   public var createdAt: String
   public var workerBrief: String? = nil
+  public var workerBriefHash: String? = nil
   public func validate(podId: String, request expected: RecoveryForkRequest? = nil) throws {
     guard version == 1, parentPodId == podId, !actorId.isEmpty, request.isValid,
       id == request.id, generation == request.expectedGeneration, sourceHead == request.sourceHead,
@@ -222,6 +230,11 @@ public struct RecoveryForkOperation: Codable, Equatable, Sendable {
       copiedFiles.allSatisfy({ request.files.map(\.path).contains($0) }),
       ![.queued, .qualifying, .qualified].contains(state) || (childPodId?.isEmpty == false && Set(copiedFiles) == Set(request.files.map(\.path))) else { throw URLError(.badServerResponse) }
     try RecoveryForkValidation.validate(source: nil, context: context)
+    guard (workerBrief == nil) == (workerBriefHash == nil) else { throw URLError(.badServerResponse) }
+    if let workerBrief, let workerBriefHash {
+      guard workerBrief.utf8.count <= 512_000, RecoveryFilesSnapshot.isHash(workerBriefHash),
+        SHA256.hash(data: Data(workerBrief.utf8)).map({ String(format: "%02x", $0) }).joined() == workerBriefHash else { throw URLError(.badServerResponse) }
+    }
   }
 }
 public struct RecoveryHandoffPreparationRequest: Codable, Equatable, Sendable {

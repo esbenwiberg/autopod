@@ -34,6 +34,12 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       });
     log(f.podId, 'Attempt A: parser saved; original checks failed.');
     const a = f.pod();
+    await writeFile(
+      path.join(a.worktreePath!, 'inherited-note.txt'),
+      'A saved supplemental edit\n',
+    );
+    const initial = await f.manager.inspectRecoveryFork(a.id);
+    f.input.files = initial.source!.files.map(({ path, version }) => ({ path, version }));
     codingTransport(f);
     f.ctx.validationEngine.validate = vi.fn(async (config) => ({
       ...createFailingValidationResult(config.podId, config.attempt),
@@ -67,8 +73,12 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
         'Save B regression test',
       );
       bHead = await git(prepared.worktree, 'rev-parse', 'HEAD');
+      await writeFile(
+        path.join(prepared.worktree, 'inherited-note.txt'),
+        'B revised inherited supplemental edit\n',
+      );
       const b = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.admitted!.childPodId;
-      log(b, 'Attempt B: regression saved; test launcher unavailable.');
+      log(b, 'Attempt B: regression and revised supplement saved; checks did not complete.');
       yield {
         type: 'complete' as const,
         timestamp: new Date().toISOString(),
@@ -112,16 +122,19 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     await expect(f.manager.inspectRecoveryFork(b.id)).rejects.toThrow('tampered');
     await writeFile(priorPacket, priorBytes);
     await chmod(priorPacket, 0o444);
-    const file = view.source!.files.find((entry) => entry.path === 'saved-note.txt')!;
     const input = {
       ...f.input,
       instructions: '',
       expectedGeneration: b.lifecycleGeneration,
       sourceHead: bHead,
-      files: [{ path: file.path, version: file.version }],
+      files: view.source!.files.map(({ path, version }) => ({ path, version })),
     };
     const preview = await f.manager.previewRecoveryFork(b.id, input);
     expect(preview.blockers).toEqual([]);
+    expect(preview.workerBriefHash).toBe(recoveryBytesHash(preview.workerBrief!));
+    expect(JSON.parse(preview.workerBrief!).importedSupplementalFiles[0].sha256).toBe(
+      recoveryBytesHash('B revised inherited supplemental edit\n'),
+    );
     const request = { ...input, id: 'start-c', expectedBinding: preview.expectedBinding! };
     codingTransport(f, 'qualified', b.id, '3'.repeat(64));
     let workerInspected = false;
@@ -158,6 +171,8 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       );
       const bytes = await f.cm.readFile('3'.repeat(64), '/autopod/recovery/handoff.json');
       expect(bytes).toBe(await readFile(p.packet, 'utf8'));
+      expect(bytes).toBe(preview.workerBrief);
+      expect(p.packetHash).toBe(preview.workerBriefHash);
       const packet = JSON.parse(bytes);
       expect(packet.continuationInstruction).toBe(RECOVERY_CONTINUATION_INSTRUCTION);
       expect(packet.optionalOperatorNote).toBe('');
@@ -169,11 +184,24 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       expect(packet.source.head).toBe(bHead);
       expect(packet.importedSupplementalFiles).toEqual([
         {
+          path: 'inherited-note.txt',
+          sha256: recoveryBytesHash('B revised inherited supplemental edit\n'),
+          size: Buffer.byteLength('B revised inherited supplemental edit\n'),
+        },
+        {
           path: 'saved-note.txt',
           sha256: recoveryBytesHash(await readFile(path.join(p.worktree, 'saved-note.txt'))),
           size: Buffer.byteLength('Safely captured B supplemental edit\n'),
         },
       ]);
+      expect(packet.priorSupplementalIdentities[0]).toMatchObject({
+        path: 'inherited-note.txt',
+        sha256: recoveryBytesHash('A saved supplemental edit\n'),
+        sourcePodId: a.id,
+      });
+      expect(await readFile(path.join(p.worktree, 'inherited-note.txt'), 'utf8')).toBe(
+        'B revised inherited supplemental edit\n',
+      );
       expect(packet.quotedHistoricalContext.omissions.length).toBeGreaterThan(0);
       workerInspected = true;
       yield {
@@ -208,6 +236,9 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     });
     expect(c.validationAttempts).toBe(b.validationAttempts);
     expect(f.pod()).toEqual(a);
+    expect(await readFile(path.join(a.worktreePath!, 'inherited-note.txt'), 'utf8')).toBe(
+      'A saved supplemental edit\n',
+    );
     expect(f.ctx.podRepo.recoveryForks!.lineage(c.id).map((row) => row.parentPodId)).toEqual([
       b.id,
       a.id,
@@ -510,13 +541,15 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       files: view.source!.files.map(({ path, version }) => ({ path, version })),
     };
     const preview = await f.manager.previewRecoveryFork(f.podId, input);
+    expect(preview.available).toBe(false);
+    expect(preview.blockers.join(' ')).toContain('recognizable credentials');
     await expect(
       f.manager.createRecoveryFork(
         f.podId,
-        { ...input, id: 'private-supplement', expectedBinding: preview.expectedBinding! },
+        { ...input, id: 'private-supplement', expectedBinding: 'a'.repeat(64) },
         f.actor,
       ),
-    ).rejects.toThrow('recognizable credentials');
+    ).rejects.toThrow();
     expect(await readFile(path.join(f.pod().worktreePath!, 'supplement.json'), 'utf8')).toBe(bytes);
     expect(
       f.ctx.db.prepare("SELECT COUNT(*) AS n FROM recovery_fork_facts WHERE kind='admitted'").get(),
