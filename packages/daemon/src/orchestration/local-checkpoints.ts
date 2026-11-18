@@ -5,6 +5,7 @@ import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import type { ProfileLlmClient } from '../providers/llm-client.js';
+import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 import { type ControllerConfig, tickController } from './controller-turns.js';
 import type { ResultWake } from './run-waves.js';
@@ -77,6 +78,15 @@ export class LocalCheckpointHost {
   /** Opt-in model-backed turn. Caller selects an approved client; never discovers credentials. */
   tickController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
     return tickController(this.db, this.ledger, run, config, client);
+  }
+  /** Host-only: qualify an unpublished two-worker integration, without advancing or charging. */
+  retainCombined(
+    input: Subject,
+    bytes: Buffer,
+    inputs: readonly [CandidateRef, CandidateRef],
+    gates: CombinedGates,
+  ) {
+    return this.retain(input, bytes, combinedVerifier(this.db, inputs, gates));
   }
   async retain(input: Subject, bytes: Buffer, verify: Verify): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });

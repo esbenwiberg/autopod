@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import { expect, it, onTestFinished } from 'vitest';
+import type { CombinedGates } from '../orchestration/combined-checkpoint.js';
+import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { digest } from './canonical.js';
 import { ManagedSourceDelivery } from './source-delivery.js';
@@ -26,6 +28,16 @@ async function handoffFixture(maxRequests: number, files: Record<string, string>
     await rm(root, { recursive: true, force: true });
   });
   await managedGit(root, ['init', '-b', 'main', mirror]);
+  await managedGit(mirror, [
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=f@example.invalid',
+    'commit',
+    '--allow-empty',
+    '-m',
+    'genesis',
+  ]);
   for (const [name, content] of Object.entries(files))
     await writeFile(path.join(mirror, name), content);
   await managedGit(mirror, ['add', '.']);
@@ -248,63 +260,78 @@ async function slotsFit(repo: string, sha: string) {
 }
 
 it.each([
-  { outcome: 'accepts', bSlots: 4, passes: true },
-  { outcome: 'rejects', bSlots: 5, passes: false },
-])('$outcome a clean merge of two individually valid worker changes', async ({
-  bSlots,
-  passes,
-}) => {
-  const {
-    root,
-    f,
-    base,
-    mirror,
-    refs,
-    service,
-    start,
-    recipe,
-    sources,
-    workspace,
-    installation,
-    owner,
-    ownedCandidate,
-  } = await handoffFixture(3, { 'pool-a': '0', 'pool-b': '0' });
-  const [a, b] = await Promise.all([
-    start(owner, recipe('worker-a', base)),
-    start(owner, recipe('worker-b', base)),
-  ]);
-  expect(a.podId).not.toBe(b.podId);
-  const workers = [a, b];
-  for (const { podId } of workers)
-    expect(await managedGit(workspace(podId), ['rev-parse', 'HEAD'])).toBe(base);
-  await Promise.all([
-    writeFile(path.join(workspace(a.podId), 'pool-a'), '6'),
-    writeFile(path.join(workspace(b.podId), 'pool-b'), String(bSlots)),
-  ]);
-  await Promise.all(workers.map(({ podId }) => f.runtime.stop(podId)));
+  { bSlots: 3, outcome: 'passes' },
+  { bSlots: 4, outcome: 'review fails' },
+  { bSlots: 5, outcome: 'checks fail' },
+])('gates the next launch on two owned candidates: $outcome', async ({ bSlots, outcome }) => {
+  const { root, f, base, mirror, refs, service, recipe, sources, workspace } = await handoffFixture(
+    3,
+    { 'pool-a': '0', 'pool-b': '0' },
+  );
+  for (const name of [
+    '255_orchestration_continuations',
+    '256_orchestration_checkpoint_custody',
+    '258_orchestration_waves',
+    '259_orchestration_controller_turns',
+  ]) {
+    f.db.exec(await readFile(new URL(`../db/migrations/${name}.sql`, import.meta.url), 'utf8'));
+  }
+  const run = 'pool-test';
+  const installation = 'native.' + run;
+  const host = () =>
+    new LocalCheckpointHost(f.db, path.join(root, 'scratch'), (cp, privateMirror) => {
+      sources.set(cp.commit, privateMirror);
+      return service(cp.commit, privateMirror);
+    });
+  const subject = {
+    run,
+    repository: 'fixture-repo',
+    predecessor: await managedGit(mirror, ['rev-parse', 'HEAD^']),
+    commit: base,
+    tree: await managedGit(mirror, ['rev-parse', 'HEAD^{tree}']),
+    policyDigest: digest('pool-policy'),
+  };
+  host().ledger.open(run, subject.repository, subject.policyDigest, subject.predecessor, 3, 2);
+  const bundle = async (cwd: string, name: string) => {
+    const file = path.join(root, name);
+    await managedGit(cwd, ['bundle', 'create', file, 'HEAD']);
+    return readFile(file);
+  };
+  const initial = await host().retain(subject, await bundle(mirror, 'base.bundle'), async () => ({
+    subjectDigest: digest(subject),
+    checks: { status: 'passed', receiptDigest: digest('initial-checks') },
+    independentReview: { status: 'passed', receiptDigest: digest('initial-review') },
+  }));
+  await host().ledger.acceptAndContinue(initial, recipe('worker-a', base));
+  await host().ledger.spawnFromAccepted(initial, recipe('worker-b', base));
+  expect(await host().ledger.recover()).toEqual({ blocked: [] });
   const s = service();
-  await s.enforceExpiry();
-
-  // In this private clone main is the accepted checkpoint; all merge work happens on a
-  // detached HEAD. Updating main is the acceptance step, not a side effect of merging.
   const draft = path.join(root, 'integration');
   await managedGit(root, ['clone', '--no-local', mirror, draft]);
   await managedGit(draft, ['remote', 'remove', 'origin']);
   await managedGit(draft, ['checkout', '--detach', base]);
-  const importWorker = async (id: string) => {
-    const candidate = await s.source.freeze(installation, id);
-    const { receipt, bundle } = ownedCandidate(owner, id, candidate.candidateDigest);
-    const bundlePath = path.join(root, `${id}.bundle`);
-    await writeFile(bundlePath, bundle, { flag: 'wx', mode: 0o600 });
-    await managedGit(draft, ['fetch', '--no-tags', bundlePath, 'HEAD']);
+  async function freezeAndImport(key: string, file: string, value: number) {
+    const row = s.lookup(installation, key);
+    if (!row) throw new Error('missing owned worker');
+    await writeFile(path.join(workspace(row.pod_id), file), String(value));
+    await f.runtime.stop(row.pod_id);
+    await s.enforceExpiry();
+    const receipt = await s.source.freeze(installation, row.pod_id);
+    const src = s.source.candidate(installation, row.pod_id);
+    await rm(workspace(row.pod_id), { recursive: true });
+    const name = path.join(root, key + '.bundle');
+    await writeFile(name, src.bundle);
+    await managedGit(draft, ['fetch', '--no-tags', name, 'HEAD']);
     expect(await managedGit(draft, ['rev-parse', 'FETCH_HEAD'])).toBe(receipt.newCommit);
-    expect(await managedGit(draft, ['rev-parse', `${receipt.newCommit}^`])).toBe(base);
     expect(await slotsFit(draft, receipt.newCommit)).toBe(true);
-    return receipt.newCommit;
-  };
-  const first = await importWorker(a.podId);
-  const second = await importWorker(b.podId);
-  await managedGit(draft, ['merge', '--ff-only', first]);
+    return {
+      ref: { startKey: key, candidateDigest: receipt.candidateDigest },
+      commit: receipt.newCommit,
+    };
+  }
+  const a = await freezeAndImport('worker-a', 'pool-a', 6);
+  const b = await freezeAndImport('worker-b', 'pool-b', bSlots);
+  await managedGit(draft, ['merge', '--ff-only', a.commit]);
   await managedGit(draft, [
     '-c',
     'user.name=Fixture',
@@ -314,32 +341,124 @@ it.each([
     '--no-ff',
     '-m',
     'Combine worker changes',
-    second,
+    b.commit,
   ]);
-  const merged = await managedGit(draft, ['rev-parse', 'HEAD']);
-  expect(await managedGit(draft, ['show', '-s', '--format=%P', merged])).toBe(`${first} ${second}`);
-  const accepted = () => managedGit(draft, ['rev-parse', 'refs/heads/main']);
-  expect(await accepted()).toBe(base);
-  const advanceAndStart = async () => {
-    if (!(await slotsFit(draft, merged))) return null;
-    await managedGit(draft, ['update-ref', 'refs/heads/main', merged, base]);
-    sources.set(merged, draft);
-    return start(owner, recipe('worker-c', merged));
+  const merged = {
+    ...subject,
+    predecessor: base,
+    commit: await managedGit(draft, ['rev-parse', 'HEAD']),
+    tree: await managedGit(draft, ['rev-parse', 'HEAD^{tree}']),
   };
-  const c = await advanceAndStart();
-  if (passes) {
-    expect(await accepted()).toBe(merged);
-    if (!c) throw new Error('missing-next-worker');
-    const cwd = workspace(c.podId);
-    expect(await managedGit(cwd, ['rev-parse', 'HEAD'])).toBe(merged);
-    for (const sha of [first, second])
-      await managedGit(cwd, ['merge-base', '--is-ancestor', sha, 'HEAD']);
+  const bytes = await bundle(draft, 'merge.bundle');
+  if (outcome === 'passes') {
+    // Same two parents but an extra uncommissioned edit. An ancestry-only gate would pass.
+    await writeFile(path.join(draft, 'extra'), 'not from either worker');
+    await managedGit(draft, ['add', 'extra']);
+    await managedGit(draft, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=f@example.invalid',
+      'commit',
+      '--amend',
+      '--no-edit',
+    ]);
+    const changed = {
+      ...merged,
+      commit: await managedGit(draft, ['rev-parse', 'HEAD']),
+      tree: await managedGit(draft, ['rev-parse', 'HEAD^{tree}']),
+    };
+    const unexpected = async (): Promise<never> => {
+      throw new Error('checks must not run on substituted source');
+    };
+    await expect(
+      host().retainCombined(changed, await bundle(draft, 'changed.bundle'), [a.ref, b.ref], {
+        checks: unexpected,
+        independentReview: unexpected,
+      }),
+    ).rejects.toThrow('combined-source-mismatch');
+  }
+  await rm(draft, { recursive: true });
+  f.restart();
+  let reviews = 0;
+  const gates: CombinedGates = {
+    checks: async (target, repo, inputDigest) => ({
+      role: 'checks',
+      inputDigest,
+      status: (await slotsFit(repo, target.commit)) ? 'passed' : 'failed',
+      evidenceDigest: digest(['capacity', target.tree]),
+    }),
+    // Separate deterministic reviewer fixture inspects the committed combined blob.
+    independentReview: async (target, repo, inputDigest) => {
+      reviews++;
+      const value = await managedGit(repo, ['show', target.commit + ':pool-b']);
+      return {
+        role: 'independentReview',
+        inputDigest,
+        status: Number(value) <= 3 ? 'passed' : 'failed',
+        evidenceDigest: digest(['pool-b-policy', value, target.commit]),
+      };
+    },
+  };
+  const refsAB = [a.ref, b.ref] as const;
+  const qualify = (ports: CombinedGates = gates) =>
+    host().retainCombined(merged, bytes, refsAB, ports);
+  const accepted = () =>
+    f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get();
+  const remaining = () =>
+    f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get();
+  if (outcome === 'passes') {
+    await expect(host().retainCombined(merged, bytes, [b.ref, a.ref], gates)).rejects.toThrow(
+      'combined-source-mismatch',
+    );
+    await expect(
+      host().retainCombined(
+        merged,
+        bytes,
+        [{ ...a.ref, candidateDigest: b.ref.candidateDigest }, b.ref],
+        gates,
+      ),
+    ).rejects.toThrow('combined-input-binding');
+    await expect(
+      qualify({
+        ...gates,
+        independentReview: async () => ({
+          role: 'independentReview',
+          status: 'passed',
+          inputDigest: digest(a.commit),
+          evidenceDigest: digest('stale review'),
+        }),
+      }),
+    ).rejects.toThrow('combined-independentReview-required');
+    expect(accepted()).toBe(base);
+    expect(remaining()).toBe(1);
+    const checkpoint = await qualify();
+    const c = recipe('worker-c', merged.commit);
+    await host().ledger.acceptAndContinue(checkpoint, c);
+    f.restart();
+    expect(await host().ledger.recover()).toEqual({ blocked: [] });
+    await host().ledger.acceptAndContinue(checkpoint, c);
+    expect(await host().ledger.recover()).toEqual({ blocked: [] });
+    const row = service().lookup(installation, c.startKey);
+    if (!row) throw new Error('follow-up not launched');
+    expect(await managedGit(workspace(row.pod_id), ['rev-parse', 'HEAD'])).toBe(merged.commit);
+    expect(await managedGit(workspace(row.pod_id), ['show', '-s', '--format=%P', 'HEAD'])).toBe(
+      a.commit + ' ' + b.commit,
+    );
+    expect(accepted()).toBe(merged.commit);
+    expect(remaining()).toBe(0);
     expect(f.launches()).toBe(3);
   } else {
-    expect(c).toBeNull();
-    expect(await accepted()).toBe(base);
+    await expect(qualify()).rejects.toThrow(
+      outcome === 'checks fail'
+        ? 'combined-checks-required'
+        : 'combined-independentReview-required',
+    );
+    expect(reviews).toBe(outcome === 'checks fail' ? 0 : 1);
+    expect(accepted()).toBe(base);
+    expect(remaining()).toBe(1);
+    expect(service().lookup(installation, 'worker-c')).toBeUndefined();
     expect(f.launches()).toBe(2);
-    expect(s.lookup(installation, 'worker-c')).toBeUndefined();
   }
   expect(await managedGit(mirror, ['show-ref'])).toBe(refs);
-});
+}, 15000);
