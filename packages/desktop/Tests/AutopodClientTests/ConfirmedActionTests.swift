@@ -89,11 +89,17 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
     let state = try await fixture.handler.actions.sandboxRecovery.load(fixture.id)
     #expect(state.podId == fixture.id)
     #expect(state.resources.isEmpty)
+    let checks = try await fixture.handler.actions.memoryChecks.load(fixture.id)
+    #expect(checks.inspection == nil)
+    #expect(checks.operations.isEmpty)
     #expect(fixture.peer.requests.isEmpty)
-    #expect(fixture.peer.immediateRequests.count == 1)
-    #expect(fixture.peer.immediateRequests.first?.httpMethod == "GET")
-    #expect(fixture.peer.immediateRequests.first?.value(forHTTPHeaderField: "Authorization")
-      == "Bearer synthetic-action-token")
+    let observations = fixture.peer.immediateRequests
+    #expect(observations.compactMap { $0.url?.path } == [
+      "/pods/\(fixture.id)/sandbox-recovery", "/pods/\(fixture.id)/checkpoint-recovery",
+    ])
+    #expect(observations.allSatisfy {
+      $0.httpMethod == "GET" && $0.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-action-token"
+    })
   }
 }
 
@@ -129,9 +135,10 @@ func withConfirmedActionFixture(
 
 @MainActor final class ConfirmedActionFixture {
   let id = "observed-pod"
-  // Terminal detail views now perform this observation on first appearance.
-  // Keep it explicit and separate from the held control-operation transport.
+  // Keep detail-view recovery observations separate from held control requests.
   let peer = ConfirmedActionPeer(immediateGETResponses: [
+    "/pods/observed-pod/checkpoint-recovery":
+      #"{"inspection":null,"operations":[]}"#,
     "/pods/observed-pod/sandbox-recovery":
       #"{"podId":"observed-pod","generation":1,"resources":[],"operations":[],"wakeups":[]}"#,
     "/pods/observed-pod/retained-finalization":

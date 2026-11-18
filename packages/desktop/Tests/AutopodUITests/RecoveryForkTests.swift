@@ -22,7 +22,8 @@ import Testing
     let model = RecoveryForkModel(podId: "original", actions: f.actions)
     await model.refresh(f.actions); model.acknowledged = true
     await model.review(f.actions)
-    #expect(model.canCreate && model.preview?.workerBrief == f.packet(try #require(model.input)) && f.created.isEmpty)
+    let input = try #require(model.input)
+    #expect(model.canCreate && model.preview?.workerBrief == f.packet(input) && f.created.isEmpty)
     let reviewed = model.preview?.workerBrief
     await model.create(f.actions)
     #expect(model.operation?.workerBrief == reviewed && f.created.count == 1)
