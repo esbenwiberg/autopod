@@ -13,6 +13,62 @@ import { createPodManager } from './pod-manager.js';
 
 describe('review routing incidents', () => {
   it.each([
+    {
+      diagnostic:
+        'FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory',
+      code: 'VALIDATION_ALLOCATION_FAILED',
+    },
+    {
+      diagnostic:
+        'Error: [vitest-pool]: Worker forks emitted error.\nCaused by: Error: Worker exited unexpectedly',
+      code: 'VALIDATION_RUNNER_CRASHED',
+    },
+  ])('parks a real Docker validation producer on $code without a coding turn or publication', async ({
+    diagnostic,
+    code,
+  }) => {
+    const ctx = createTestContext();
+    try {
+      const execute = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      if (!execute) throw new Error('Missing container fixture');
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (...args) =>
+        args[1].join(' ').includes('crashed-test-runner')
+          ? { stdout: diagnostic, stderr: '', exitCode: 1 }
+          : execute(...args),
+      );
+      const producer = createLocalValidationEngine(ctx.containerManager);
+      vi.mocked(ctx.validationEngine.validate).mockImplementation((config) =>
+        producer.validate({
+          ...config,
+          executionTarget: 'local',
+          hasWebUi: false,
+          testCommand: 'crashed-test-runner',
+          skipPhases: ['setup', 'lint', 'sast', 'build', 'health', 'pages', 'facts', 'review'],
+        }),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Desktop-only work; preserve failed runner evidence' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'review_required',
+        validationAttempts: 0,
+        lastValidationResult: {
+          overall: 'fail',
+          infrastructureFailure: { phase: 'test', code, retryable: false },
+        },
+      });
+      expect(ctx.validationEngine.validate).toHaveBeenCalledOnce();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.podRepo.taskExecutions?.snapshot(pod.id).agentRunCount).toBe(1);
+    } finally {
+      ctx.db.close();
+    }
+  });
+  it.each([
     'validation',
     'revalidation',
   ] as const)('holds unreadable source on %s without starting checks or consuming an attempt', async (entry) => {

@@ -94,9 +94,10 @@ for (const command of declarations) {
   });
 }
 
-test('the heap default is confined to daemon declaration build and typecheck', () => {
+test('heap defaults are confined to daemon declarations and the qualified test runner', () => {
   for (const [name, command] of Object.entries(daemon.scripts)) {
-    if (!declarations.includes(name)) assert.ok(!command.includes('max-old-space-size'), name);
+    if (![...declarations, 'test'].includes(name))
+      assert.ok(!command.includes('max-old-space-size'), name);
   }
   const root = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(root.scripts.typecheck, 'turbo run typecheck');

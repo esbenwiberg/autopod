@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { promisify, stripVTControlCharacters } from 'node:util';
 import type {
   AdvisoryBrowserQaResult,
   DeviationsAssessment,
@@ -1951,7 +1951,7 @@ function isPossiblyKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
-function hasFatalSandboxMemorySignature(output: string): boolean {
+function hasFatalAllocationSignature(output: string): boolean {
   return (
     /RangeError:\s*Array buffer allocation failed/i.test(output) ||
     /FATAL ERROR:.*JavaScript heap out of memory/i.test(output) ||
@@ -1967,10 +1967,39 @@ function classifyCommandResourceFailure(
   if (result.exitCode === 0) return null;
 
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  if (executionTarget === 'sandbox' && hasFatalSandboxMemorySignature(output))
-    return sandboxMemoryExhaustedFailure(phase);
+  if (hasFatalAllocationSignature(output)) return allocationFailure(phase, executionTarget);
   if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
+  // A test assertion and an incomplete test runner are different outcomes. Require
+  // Vitest's unhandled pool-error diagnostic, not arbitrary mentions of a worker exit.
+  const diagnostic = stripVTControlCharacters(output);
+  if (
+    phase === 'test' &&
+    /Error:\s*\[vitest-pool\]: Worker (?:forks|threads) emitted error\./.test(diagnostic) &&
+    /(?:Caused by: )?Error: Worker exited unexpectedly/.test(diagnostic)
+  ) {
+    return {
+      phase,
+      code: 'VALIDATION_RUNNER_CRASHED',
+      message:
+        'The Vitest worker exited without completing its tests. Preserve diagnostics and investigate the runner and test code before another execution; this does not establish OOM or authorize coding correction.',
+      retryable: false,
+    };
+  }
   return null;
+}
+
+function allocationFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+  executionTarget: ValidationEngineConfig['executionTarget'],
+): ValidationInfrastructureFailure {
+  if (executionTarget === 'sandbox') return sandboxMemoryExhaustedFailure(phase);
+  return {
+    phase,
+    code: 'VALIDATION_ALLOCATION_FAILED',
+    message:
+      'Validation did not complete because a process reported a fatal allocation error. Investigate heap limits, resource use and code/test behavior; a container or kernel OOM is not established. Automatic coding correction is not indicated.',
+    retryable: false,
+  };
 }
 
 function killedProcessFailure(
@@ -2051,12 +2080,10 @@ function classifyValidationInfrastructureFailure(
     };
   }
 
-  if (executionTarget === 'sandbox') {
-    const message = error instanceof Error ? error.message : String(error);
-    const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
-    if (hasFatalSandboxMemorySignature(`${message}\n${partial}`)) {
-      return sandboxMemoryExhaustedFailure(phase);
-    }
+  const message = error instanceof Error ? error.message : String(error);
+  const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
+  if (hasFatalAllocationSignature(`${message}\n${partial}`)) {
+    return allocationFailure(phase, executionTarget);
   }
 
   if (!(error instanceof AutopodError) || !error.code.startsWith('AZURE_SANDBOX_')) return null;
