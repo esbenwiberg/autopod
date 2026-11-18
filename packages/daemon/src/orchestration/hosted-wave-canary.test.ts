@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pino from 'pino';
@@ -111,8 +111,12 @@ it.skipIf(!process.env.AUTOPOD_WAVE_DOCKER_IMAGE)(
           );
         }),
       );
+      const databasePath = path.join(root, 'owner.db');
+      await writeFile(databasePath, 'fixture');
+      const alias = path.join(root, 'same-owner.db');
+      await symlink(databasePath, alias);
       const input = {
-        state: path.join(root, 'once'),
+        databasePath,
         socket: process.env.AUTOPOD_MANAGED_DOCKER_SOCKET!,
         image: process.env.AUTOPOD_WAVE_DOCKER_IMAGE!,
         migrations: path.resolve(import.meta.dirname, '../db/migrations'),
@@ -123,7 +127,9 @@ it.skipIf(!process.env.AUTOPOD_WAVE_DOCKER_IMAGE)(
         originalSurvivors: 3,
         stopped: 5,
       });
-      await expect(runHostedWaveCanary(input, stores().bind())).rejects.toMatchObject({
+      await expect(
+        runHostedWaveCanary({ ...input, databasePath: alias }, stores().bind()),
+      ).rejects.toMatchObject({
         code: 'EEXIST',
       });
       expect(routes).toEqual(['kickoff', 'results']);

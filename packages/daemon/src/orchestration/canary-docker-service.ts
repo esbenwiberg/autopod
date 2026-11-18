@@ -78,7 +78,11 @@ export function dockerCanaryService(
       async observe(ref) {
         const { info } = await owned(ref);
         return {
-          state: info.State.Running ? 'running' : 'stopped',
+          state: info.State.Running
+            ? 'running'
+            : ['exited', 'dead'].includes(info.State.Status)
+              ? 'stopped'
+              : 'unknown',
           exitCode: info.State.ExitCode,
           consumedTokens: 0,
         };

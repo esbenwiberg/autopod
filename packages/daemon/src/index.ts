@@ -1300,7 +1300,7 @@ if (process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1') {
     );
     const result = await runHostedWaveCanary(
       {
-        state: `${path.resolve(DB_PATH)}.repofit-wave-v1`,
+        databasePath: path.resolve(DB_PATH),
         migrations: migrationsDir,
         socket: process.env.AUTOPOD_MANAGED_DOCKER_SOCKET ?? '',
         image: process.env.AUTOPOD_WAVE_DOCKER_IMAGE ?? '',

@@ -798,8 +798,12 @@ describe('DockerContainerManager', () => {
       expect(await manager.getStatus('abc123')).toBe('running');
     });
 
-    it('returns "stopped" when container is not running', async () => {
-      container.inspect.mockResolvedValue({ State: { Running: false } });
+    it('does not report a created container as exited', async () => {
+      container.inspect.mockResolvedValue({ State: { Running: false, Status: 'created' } });
+      expect(await manager.getStatus('abc123')).toBe('unknown');
+    });
+    it('returns "stopped" after exit', async () => {
+      container.inspect.mockResolvedValue({ State: { Running: false, Status: 'exited' } });
 
       expect(await manager.getStatus('abc123')).toBe('stopped');
     });

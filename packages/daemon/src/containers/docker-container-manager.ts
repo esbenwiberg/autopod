@@ -980,7 +980,11 @@ export class DockerContainerManager implements ContainerManager {
         logger: this.logger,
         containerId,
       });
-      return info.State.Running ? 'running' : 'stopped';
+      return info.State.Running
+        ? 'running'
+        : ['exited', 'dead'].includes(info.State.Status)
+          ? 'stopped'
+          : 'unknown';
     } catch {
       // Includes DockerCallTimeoutError — a wedged daemon looks the same as
       // "container gone" for status-polling purposes; both yield 'unknown'.

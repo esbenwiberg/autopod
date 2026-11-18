@@ -71,6 +71,10 @@ export interface ManagedPodRow {
   created_at: number;
 }
 
+// Several host-owned service instances may use the same daemon connection. While an
+// ensure is pending a pre-start observation cannot establish terminal worker exit.
+const localStarts = new WeakMap<Database.Database, Map<string, Promise<ManagedPodHandle>>>();
+
 /** A subordinate execution service: no legacy queue, series, fallback or user notification path. */
 export class ManagedPodService {
   catalog?: {
@@ -83,7 +87,7 @@ export class ManagedPodService {
   source?: ManagedSourceDelivery;
   validation?: ManagedValidationRunner;
   onTransition?: (row: ManagedPodRow, key: string, kind: ManagedPodEvent['kind']) => void;
-  private readonly starts = new Map<string, Promise<ManagedPodHandle>>();
+  private readonly starts: Map<string, Promise<ManagedPodHandle>>;
   constructor(
     readonly db: Database.Database,
     readonly admission: ManagedAdmission,
@@ -91,7 +95,10 @@ export class ManagedPodService {
     readonly now: () => number = () => Math.floor(Date.now() / 1000),
     readonly enabled = false,
     readonly runtimeCapabilities: readonly string[] = [],
-  ) {}
+  ) {
+    this.starts = localStarts.get(db) ?? new Map();
+    localStarts.set(db, this.starts);
+  }
 
   health(): DriverHealth {
     return {
@@ -293,7 +300,18 @@ export class ManagedPodService {
         current.observed_exit ||
         this.expired(current)
       ) {
-        if (!current.observed_exit) await this.runtime.stop(result.runtimeRef);
+        if (current.observed_exit) {
+          // A late ensure can contradict an older observation. Fence before stopping,
+          // so a failed stop remains visible to the watchdog instead of disappearing.
+          const fresh = await this.runtime.observe(result.runtimeRef).catch(() => null);
+          if (fresh?.state === 'stopped') throw new Error('grant-inactive');
+          this.db
+            .prepare(
+              "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=0,exit_code=NULL,state='killing' WHERE pod_id=? AND runtime_ref=?",
+            )
+            .run(row.pod_id, result.runtimeRef);
+        }
+        await this.runtime.stop(result.runtimeRef);
         throw new Error('grant-inactive');
       }
       if (fault === 'before-response') throw new Error('injected-before-response');
@@ -357,7 +375,7 @@ export class ManagedPodService {
       .prepare('SELECT * FROM managed_pods WHERE observed_exit=0')
       .all() as ManagedPodRow[];
     for (const row of rows) {
-      if (row.runtime_ref) {
+      if (row.runtime_ref && !this.starts.has(row.pod_id)) {
         const observed = await this.runtime.observe(row.runtime_ref);
         this.db
           .prepare('UPDATE managed_pods SET consumed_tokens=max(consumed_tokens,?) WHERE pod_id=?')
@@ -367,7 +385,12 @@ export class ManagedPodService {
           this.db
             .transaction(() => {
               const latest = this.row(row.dispatcher_installation_id, row.pod_id);
-              if (latest.observed_exit) return;
+              if (
+                latest.observed_exit ||
+                this.starts.has(row.pod_id) ||
+                (row.state === 'queued' && latest.state === 'running')
+              )
+                return;
               // Cancellation may have committed while observe() was in flight.
               const state =
                 latest.revoked || latest.stop_requested || this.expired(latest)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -25,10 +25,17 @@ const mission =
   'At kickoff commission exactly six inspect workers for separate synthetic quality checks and wait for three results. When those reports arrive, commission one inspect follow-up for each distinct reported defect, naming its finding label and what to investigate in the brief. Do not follow up on clean checks. Then hand control back (waitFor null).';
 // No hosted worker, application DB copy, workflow launch, HTTP endpoint or caller-selected prompt.
 export async function runHostedWaveCanary(
-  input: { state: string; migrations: string; socket: string; image: string },
+  input: { databasePath: string; migrations: string; socket: string; image: string },
   provider: ProfileLlmClient,
 ) {
-  const { state, migrations, socket, image } = input;
+  const { databasePath, migrations, socket, image } = input;
+  const canonical = await realpath(databasePath);
+  const identity = await stat(canonical);
+  assert(
+    identity.isFile() && identity.nlink === 1,
+    'canary database must have a single canonical file',
+  );
+  const state = canonical + '.repofit-wave-v1';
   assert(path.isAbsolute(state) && path.isAbsolute(socket) && /^sha256:[a-f0-9]{64}$/.test(image));
   const docker = new Docker({ socketPath: socket, timeout: 15000 });
   assert.equal((await docker.getImage(image).inspect()).Id, image);
