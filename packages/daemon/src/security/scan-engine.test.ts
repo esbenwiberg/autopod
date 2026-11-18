@@ -6,6 +6,7 @@ import type { ScanFinding, SecurityScanPolicy } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BaselineFinding, Detector } from './detectors/detector.js';
+import { createRepoScanner } from './repo-scanner.js';
 import { createScanEngine } from './scan-engine.js';
 import { getPreset } from './scan-policy.js';
 
@@ -73,6 +74,30 @@ describe('scan-engine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     rmSync(workdir, { recursive: true, force: true });
+  });
+
+  it('forwards a caller-owned scan budget without changing the normal push budget', async () => {
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const scanner = createRepoScanner({
+      logger,
+      detectors: [
+        fakeDetector('secrets', () => {
+          now += 61_000;
+          return [];
+        }),
+      ],
+    });
+    const policy = getPreset('default');
+    const context = {
+      podId: 'p1',
+      workdir,
+      profile: { securityScan: { ...policy, push: { ...policy.push, scope: 'full' as const } } },
+    };
+    const normal = await scanner.scan('push', context);
+    expect(normal).toMatchObject({ scanIncomplete: true, filesScanned: 1 });
+    const longer = await scanner.scan('push', { ...context, budgetMs: 8 * 60_000 });
+    expect(longer).toMatchObject({ decision: 'pass', scanIncomplete: false, filesScanned: 2 });
   });
 
   it('produces pass when no detectors are enabled', async () => {

@@ -517,6 +517,16 @@ public struct LiveReviewProgress: Sendable, Equatable {
     }
 }
 
+public struct ValidationPhaseTiming: Sendable {
+    public let startedAt: Date
+    public let estimate: ValidationPhaseEstimateResponse?
+
+    public init(startedAt: Date, estimate: ValidationPhaseEstimateResponse? = nil) {
+        self.startedAt = startedAt
+        self.estimate = estimate
+    }
+}
+
 /// Live per-phase state built up as `pod.validation_phase_*` events arrive.
 public struct ValidationProgress: Sendable {
     public var attempt: Int
@@ -553,6 +563,8 @@ public struct ValidationProgress: Sendable {
 
     // The currently running phase (drives auto-selection in the chip row)
     public var activePhase: ValidationPhase?
+    public private(set) var activePhaseTiming: ValidationPhaseTiming?
+    public private(set) var phaseEventId: Int?
 
     public static func initial(attempt: Int) -> ValidationProgress {
         let idle = ValidationPhaseState.notStarted
@@ -593,9 +605,32 @@ public struct ValidationProgress: Sendable {
         || advisory.status == .running
     }
 
-    public mutating func markStarted(_ phase: ValidationPhase) {
+    /// REST snapshots and replayed WebSocket events share the daemon's event cursor.
+    @discardableResult
+    public mutating func advancePhaseEvent(_ eventId: Int?) -> Bool {
+        guard let eventId else { return true }
+        guard phaseEventId.map({ eventId > $0 }) ?? true else { return false }
+        phaseEventId = eventId
+        return true
+    }
+
+    public mutating func clearRunningPhase() {
+        if let phase = activePhase, state(for: phase).status == .running {
+            setState(.notStarted, for: phase)
+            if phase == .review { reviewProgress = nil }
+        }
+        activePhase = nil
+        activePhaseTiming = nil
+    }
+
+    public mutating func markStarted(_ phase: ValidationPhase, timing: ValidationPhaseTiming? = nil) {
+        if activePhase != phase { clearRunningPhase() }
         activePhase = phase
-        let s = ValidationPhaseState(status: .running)
+        if let timing { activePhaseTiming = timing }
+        setState(ValidationPhaseState(status: .running), for: phase)
+    }
+
+    private mutating func setState(_ s: ValidationPhaseState, for phase: ValidationPhase) {
         switch phase {
         case .setup:   setup   = s
         case .build:   build   = s
@@ -718,7 +753,10 @@ public struct ValidationProgress: Sendable {
                 )
             }
         }
-        if activePhase == phase { activePhase = nil }
+        if activePhase == phase {
+            activePhase = nil
+            activePhaseTiming = nil
+        }
     }
 
     private mutating func markNotStartedDownstreamPhasesSkipped() {

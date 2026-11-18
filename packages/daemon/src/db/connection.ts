@@ -1,8 +1,12 @@
 import Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 
-export function createDatabase(dbPath: string, logger: Logger): Database.Database {
-  const db = new Database(dbPath);
+export function createDatabase(
+  dbPath: string,
+  logger: Logger,
+  options: { fileMustExist?: boolean } = {},
+): Database.Database {
+  const db = new Database(dbPath, options);
 
   // Performance pragmas
   db.pragma('journal_mode = WAL');

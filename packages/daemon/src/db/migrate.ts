@@ -51,18 +51,25 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     namesByVersion.set(version, file);
   }
 
-  // Release b8c9f2ec used 255 for validation timings. Never skip this branch's
-  // different 255 and start installing later orchestration tables on that database.
-  if (
-    namesByVersion.get(255) === '255_orchestration_continuations.sql' &&
-    currentVersion >= 255 &&
-    db
-      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='validation_phase_timings'")
-      .get()
-  ) {
-    throw new Error(
-      'Incompatible migration 255: validation timings and orchestration require a reconciled release',
-    );
+  // Release 255 is authoritative. The unpublished spike used 255–261 before
+  // the orchestration migrations were moved to 262–268. Never relabel its rows
+  // (especially unknown allocations) or run part of the new chain on mixed state.
+  if (namesByVersion.get(262) === '262_orchestration_continuations.sql' && currentVersion >= 255) {
+    const retired = db
+      .prepare('SELECT 1 FROM schema_version WHERE version BETWEEN 256 AND 261 LIMIT 1')
+      .get();
+    const table = (name: string) =>
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    if (
+      retired ||
+      !table('validation_phase_timings') ||
+      !db.prepare('SELECT 1 FROM schema_version WHERE version=255').get() ||
+      (currentVersion < 262 && table('orchestration_runs'))
+    ) {
+      throw new Error(
+        'Unpublished or mixed orchestration migration lineage; database retained unchanged',
+      );
+    }
   }
 
   // Earlier unpublished reliability checkpoints used 151-163, which now overlap

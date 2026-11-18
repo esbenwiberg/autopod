@@ -49,8 +49,8 @@ export async function runHostedWaveCanary(
     db.pragma('foreign_keys=ON');
     const names = await readdir(migrations);
     for (const n of [
-      142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 184, 185, 206, 255, 256, 257, 258,
-      259, 260, 261,
+      142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 184, 185, 206, 262, 263, 264, 265,
+      266, 267, 268,
     ]) {
       const matching = names.filter((p) => p.startsWith(`${n}_`) && p.endsWith('.sql'));
       assert.equal(matching.length, 1);

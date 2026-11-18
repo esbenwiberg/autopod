@@ -4,8 +4,9 @@ import { once } from 'node:events';
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import Docker from 'dockerode';
+import pino from 'pino';
+import { createDatabase } from '../db/connection.js';
 import { dockerCanaryService } from '../orchestration/canary-docker-service.js';
 import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
 import { offlineController } from './offline-controller.js';
@@ -22,7 +23,7 @@ assert(
     (mode === 'first' || mode === 'recover') &&
     process.send,
 );
-const db = new Database(database, { fileMustExist: true });
+const db = createDatabase(database, pino({ level: 'silent' }), { fileMustExist: true });
 const docker = new Docker({ socketPath, timeout: 15000 });
 const run = 'example';
 const recipe: ManagedPodRequest = JSON.parse(

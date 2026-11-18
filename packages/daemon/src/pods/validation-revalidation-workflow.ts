@@ -474,7 +474,7 @@ export function createValidationRevalidationWorkflow(
         result = await validateWithInfrastructureRetries(
           validationConfig,
           revalidateController,
-          buildPhaseEventCallbacks(podId),
+          buildPhaseEventCallbacks(podId, { config: validationConfig, profile }),
           'Revalidation engine threw unexpectedly',
           ownership,
         );

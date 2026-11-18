@@ -3,6 +3,48 @@ import Testing
 @testable import AutopodClient
 @testable import AutopodUI
 
+@Test func validationProgressTracksEstimatedWaitThenReturnsToIndeterminate() throws {
+  let raw = try JSONDecoder().decode(RawSystemEvent.self, from: Data("""
+    {"type":"pod.validation_phase_started","podId":"worker","phase":"test","timestamp":"2026-06-01T12:00:00Z","estimate":{"durationMs":300000,"sampleCount":1}}
+    """.utf8))
+  guard case .validationPhaseStarted(_, .test, let timestamp, let estimate) = SystemEvent.parse(raw) else {
+    Issue.record("Missing test start")
+    return
+  }
+  #expect(timestamp == raw.timestamp)
+  let started = Date(timeIntervalSince1970: 1_000)
+  let timing = ValidationPhaseTiming(startedAt: started, estimate: estimate)
+  var progress = ValidationProgress.initial(attempt: 1)
+  let acceptedStart = progress.advancePhaseEvent(20)
+  #expect(acceptedStart)
+  progress.markStarted(.test, timing: timing)
+  let acceptedStaleEvent = progress.advancePhaseEvent(19)
+  #expect(!acceptedStaleEvent)
+  #expect(validationShouldDisplayLiveProgress(podStatus: .validating, progress: progress, hasPersistedReviewCouncil: true))
+
+  let now = started.addingTimeInterval(134)
+  let predicted = ValidationPhaseClock(timing: progress.activePhaseTiming, now: now)
+  #expect(predicted.label == "~3m left")
+  #expect(predicted.fraction == 134.0 / 300)
+  #expect(predicted.detail == "2m 14s elapsed · ~3m left (last run: 5m)")
+
+  let late = ValidationPhaseClock(timing: timing, now: started.addingTimeInterval(370))
+  #expect(late.fraction == nil)
+  #expect(late.label == "6m 10s elapsed")
+  #expect(late.detail.contains("over estimate"))
+  #expect(ValidationPhaseClock(timing: timing, now: started.addingTimeInterval(300)).fraction == nil)
+
+  let firstRun = ValidationPhaseClock(timing: ValidationPhaseTiming(startedAt: started), now: now)
+  #expect(firstRun.label == "2m 14s elapsed")
+  #expect(firstRun.fraction == nil)
+  #expect(ValidationPhaseClock(timing: nil, now: now).label == "Running")
+
+  progress.markStarted(.health)
+  #expect(progress.test.status == .notStarted)
+  #expect(progress.activePhase == .health)
+  #expect(progress.activePhaseTiming == nil)
+}
+
 @Test func validationProgressCompletesAdvisoryFailureFromPhaseEvent() throws {
   var progress = ValidationProgress.initial(attempt: 1)
   #expect(progress.hasRunningPhase == false)

@@ -16,37 +16,37 @@ export async function setupOrchestrationRun(workerRequests = 2, maxActive = 1) {
   });
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/255_orchestration_continuations.sql', import.meta.url),
+      new URL('../db/migrations/262_orchestration_continuations.sql', import.meta.url),
       'utf8',
     ),
   );
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/256_orchestration_checkpoint_custody.sql', import.meta.url),
+      new URL('../db/migrations/263_orchestration_checkpoint_custody.sql', import.meta.url),
       'utf8',
     ),
   );
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/258_orchestration_waves.sql', import.meta.url),
+      new URL('../db/migrations/265_orchestration_waves.sql', import.meta.url),
       'utf8',
     ),
   );
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/259_orchestration_controller_turns.sql', import.meta.url),
+      new URL('../db/migrations/266_orchestration_controller_turns.sql', import.meta.url),
       'utf8',
     ),
   );
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/260_orchestration_unknown_outcomes.sql', import.meta.url),
+      new URL('../db/migrations/267_orchestration_unknown_outcomes.sql', import.meta.url),
       'utf8',
     ),
   );
   f.db.exec(
     await readFile(
-      new URL('../db/migrations/261_orchestration_kickoffs.sql', import.meta.url),
+      new URL('../db/migrations/268_orchestration_kickoffs.sql', import.meta.url),
       'utf8',
     ),
   );

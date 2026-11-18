@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
+import { createDatabase } from '../db/connection.js';
 import { ArtifactExports } from '../managed/artifact-exports.js';
 import { ManagedArtifactPipeline } from '../managed/artifact-pipeline.js';
 import { MemoryArtifactStore } from '../managed/artifact-store.js';
@@ -17,7 +18,7 @@ import { offlineController } from './offline-controller.js';
 
 const [file, root, mode] = process.argv.slice(2);
 assert(file && root && (mode === 'mid-wave' || mode === 'before-ack' || mode === 'recover'));
-const db = new Database(file, { fileMustExist: true });
+const db = createDatabase(file, pino({ level: 'silent' }), { fileMustExist: true });
 const profile: ManagedPodRequest['profileSnapshot'] = JSON.parse(
   readFileSync(path.join(root, 'profile.json'), 'utf8'),
 );

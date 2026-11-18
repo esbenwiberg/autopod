@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
+import { createDatabase } from '../db/connection.js';
 import { REQUIRED_ENFORCEMENT } from '../managed/grants.js';
 import { ManagedPodService } from '../managed/managed-service.js';
 import { managedGit } from '../managed/source-git.js';
@@ -14,7 +15,7 @@ if (!database || !payload) throw new Error('missing-fixture-input');
 const { cp, request }: { cp: ContinuationCheckpoint; request: ManagedPodRequest } = JSON.parse(
   readFileSync(payload, 'utf8'),
 );
-const db = new Database(database, { fileMustExist: true });
+const db = createDatabase(database, pino({ level: 'silent' }), { fileMustExist: true });
 const profile = request.profileSnapshot;
 const { ledger } = new LocalCheckpointHost(
   db,

@@ -807,6 +807,18 @@ describe('saved-work exact human draft publication', () => {
     expect(f.podRepo.getOrThrow(f.id).lastValidationResult).toBeNull();
   });
 
+  it('never admits a push if the confirmation expires during the full-tree scan', async () => {
+    const f = await fixture();
+    const op = await f.prepare();
+    f.scanPublication.mockImplementationOnce(async () => f.advance());
+    await expect(f.controller().confirm(f.id, f.confirm(op), actor)).rejects.toThrow(
+      /expired during publication checks/,
+    );
+    expect(f.provider.create).not.toHaveBeenCalled();
+    const observed = await f.controller().observe(f.id, op.requestId, actor);
+    expect(observed).toMatchObject({ state: 'prepared', receipt: null });
+  });
+
   it('distinguishes permanent checked history from active rewrite custody', async () => {
     const f = await fixture();
     f.db

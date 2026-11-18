@@ -28,6 +28,7 @@ public struct RawSystemEvent: Codable, Sendable {
   // pod.validation_phase_started / pod.validation_phase_completed
   public let phase: String?
   public let phaseStatus: String?
+  public let estimate: ValidationPhaseEstimateResponse?
   // Phase-specific results (only one is set per validation_phase_completed event):
   public let setupResult: SetupResultResponse?
   public let buildResult: BuildResultResponse?
@@ -142,7 +143,7 @@ public enum SystemEvent: Sendable {
   case agentActivity(podId: String, event: AgentEventResponse)
   case validationStarted(podId: String, attempt: Int)
   case validationCompleted(podId: String, result: ValidationResponse)
-  case validationPhaseStarted(podId: String, phase: ValidationPhase)
+  case validationPhaseStarted(podId: String, phase: ValidationPhase, startedAt: String, estimate: ValidationPhaseEstimateResponse?)
   case validationPhaseCompleted(podId: String, phase: ValidationPhase, result: ValidationPhaseResult)
   case reviewProgress(podId: String, progress: ReviewProgressResponse)
   case escalationCreated(podId: String, escalation: EscalationResponse)
@@ -184,7 +185,7 @@ public enum SystemEvent: Sendable {
     case "pod.validation_phase_started":
       guard let id = raw.podId, let phaseStr = raw.phase,
             let phase = ValidationPhase(rawValue: phaseStr) else { return nil }
-      return .validationPhaseStarted(podId: id, phase: phase)
+      return .validationPhaseStarted(podId: id, phase: phase, startedAt: raw.timestamp, estimate: raw.estimate)
 
     case "pod.validation_phase_completed":
       guard let id = raw.podId, let phaseStr = raw.phase,

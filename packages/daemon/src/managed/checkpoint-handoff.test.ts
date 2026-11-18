@@ -275,10 +275,10 @@ it.each([
     { 'pool-a': '0', 'pool-b': '0' },
   );
   for (const name of [
-    '255_orchestration_continuations',
-    '256_orchestration_checkpoint_custody',
-    '258_orchestration_waves',
-    '259_orchestration_controller_turns',
+    '262_orchestration_continuations',
+    '263_orchestration_checkpoint_custody',
+    '265_orchestration_waves',
+    '266_orchestration_controller_turns',
   ]) {
     f.db.exec(await readFile(new URL(`../db/migrations/${name}.sql`, import.meta.url), 'utf8'));
   }

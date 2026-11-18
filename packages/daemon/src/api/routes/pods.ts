@@ -50,6 +50,7 @@ import {
 } from '../../pods/safety-aggregator.js';
 import { assertTaskExecutionTerminationVerified } from '../../pods/task-execution-ledger.js';
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
+import { latestValidationPhase } from '../../pods/validation-phase-timings.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
@@ -825,15 +826,16 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
+    const pod = podManager.getSession(podId);
     const wire = serializePodForRequest(
-      podManager.getSession(podId),
+      pod,
       request,
       providerAttemptRepo,
       eventRepo,
       podRepo,
     ) as Record<string, unknown>;
+    wire.validationPhaseProgress = latestValidationPhase(pod, eventRepo);
     if (podRepo?.getRepositoryForDisplay) {
-      const pod = podManager.getSession(podId);
       wire.display = {
         repository: podRepo.getRepositoryForDisplay(podId),
         progress: compactMilestoneProgress(pod.progress),
