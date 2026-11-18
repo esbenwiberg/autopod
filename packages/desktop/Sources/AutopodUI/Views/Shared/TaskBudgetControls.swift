@@ -110,9 +110,14 @@ struct TaskBudgetControls: View {
   private func save(continuing: Bool) {
     Task {
       guard await model.save(actions) else { return }
-      // Request admission through the existing repair model, never bypass it.
-      if continuing { await onContinue?() }
-      await onSaved?()
+      if continuing {
+        // The repair model refreshes admission itself before dispatch. A second
+        // refresh afterward would erase its rejection/uncertain-result error.
+        await onContinue?()
+      } else {
+        // Budget-only saves need fresh eligibility for the next explicit action.
+        await onSaved?()
+      }
     }
   }
 }
