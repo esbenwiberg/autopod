@@ -95,6 +95,7 @@ export function operatorSeedInput(
 export function operatorBasePolicy(
   e: Pick<Envelope, 'main' | 'mission' | 'budget' | 'recipes' | 'source'>,
   profiles: ManagedProfileSetConfig,
+  isolatedArtifacts = false,
 ) {
   return digest([
     'autopod.operator-envelope.v1',
@@ -104,6 +105,7 @@ export function operatorBasePolicy(
     e.recipes,
     e.source.bundleDigest,
     profiles,
+    ...(isolatedArtifacts ? ['local-operator-artifacts/v1'] : []),
   ]);
 }
 /** Refuse to orphan a commissioned run or silently reattach its workers to a different
@@ -116,11 +118,24 @@ export function assertOperatorRecovery(db: Database.Database, run: string | null
     .get(run);
   if (missing) throw new Error('operator-enrollment-required-for-recovery');
 }
+export function enrolledOperator(
+  e: Envelope,
+  cli: ManagedCliConfig,
+  profiles: ManagedProfileSetConfig,
+) {
+  const owners = cli.bindings.filter(
+    (b) => b.objectId === e.objectId && b.installationId === profiles.installationId,
+  );
+  if (owners.length !== 1 || !owners[0]) throw new Error('operator-binding-required');
+  return owners[0];
+}
+
 export function composeOperatorEnrollment(
   e: Envelope,
   deps: {
     db: Database.Database;
     databasePath: string;
+    isolatedArtifacts?: boolean;
     profiles: ManagedProfileSetConfig | undefined;
     cli: ManagedCliConfig | undefined;
     runtime: Runtime | undefined;
@@ -137,11 +152,7 @@ export function composeOperatorEnrollment(
     profiles.profiles.some((s) => s.profileSnapshot.route.executionTarget !== 'local')
   )
     throw new Error('operator-local-profile-set-required');
-  const owners = cli.bindings.filter(
-    (b) => b.objectId === e.objectId && b.installationId === profiles.installationId,
-  );
-  const operator = owners[0];
-  if (!operator || owners.length !== 1) throw new Error('operator-binding-required');
+  const operator = enrolledOperator(e, cli, profiles);
   const run = operatorRunId(operator, e.slot);
   const host = new LocalCheckpointHost(
     db,
@@ -173,7 +184,7 @@ export function composeOperatorEnrollment(
       throw new Error('operator-recipe-not-confined');
   }
   if (e.source.commit !== profiles.mirror.baseRevision) throw new Error('operator-source-mismatch');
-  if (e.authorities.basePolicyDigest !== operatorBasePolicy(e, profiles))
+  if (e.authorities.basePolicyDigest !== operatorBasePolicy(e, profiles, deps.isolatedArtifacts))
     throw new Error('operator-policy-mismatch');
   const policyDigest = combinedPolicyDigest(e.authorities);
   const subject = {

@@ -2,6 +2,7 @@ import type { ManagedPodRequest } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { type ManagedPodApiDeps, registerManagedWatchdog } from '../api/routes/managed-pods.js';
 import type { AuthModule } from '../interfaces/auth-module.js';
 import { digest } from '../managed/canonical.js';
 import { type ManagedUserBinding, managedUserAuthenticator } from '../managed/user-auth.js';
@@ -28,6 +29,7 @@ export interface OperatorRunsConfig {
   /** Called with exclusive operator ownership, before any scheduler is attached. */
   lifetimeOwner?: { owns: (db: Database.Database) => boolean };
   prepare?: () => Promise<void>;
+  watchdog?: Pick<ManagedPodApiDeps, 'service' | 'finishOutputs'>;
   cleanup?: (run: string) => Promise<{ run: string; cleaned: number }>;
   host: LocalCheckpointHost;
   db: Database.Database;
@@ -124,6 +126,7 @@ export function registerOperatorRuns(
     }
   });
   app.addHook('onClose', drain);
+  if (config.watchdog) registerManagedWatchdog(app, config.watchdog);
   for (const op of ['status', 'start', 'cancel', 'fence', 'cleanup'] as const) {
     app.route({
       method: op === 'status' ? 'GET' : 'POST',

@@ -17,7 +17,7 @@ it.skipIf(!image || !socket)(
   async () => {
     if (!image || !socket || !path.isAbsolute(socket) || !/^sha256:[a-f0-9]{64}$/.test(image))
       throw new Error('immutable-local-image-required');
-    const { enrollment, profiles, cli, root, f, run } = await operatorSeedFixture(image),
+    const { enrollment, profiles, cli, root, f, run } = await operatorSeedFixture(image, true),
       docker = new Docker({ socketPath: socket });
     const token = randomUUID(),
       trace = () => readFile(path.join(root, 'trace'), 'utf8');
@@ -85,6 +85,11 @@ it.skipIf(!image || !socket)(
       processes.push(first);
       const { url } = await first.message;
       expect((await fetch(url + '/orchestration/runs/inspection/status')).status).toBe(401);
+      const options = await fetch(url + '/managed/catalog/options', {
+        headers: { authorization: 'Bearer ' + token },
+      });
+      expect(options.status).toBe(200);
+      expect((await options.json()).profiles[0].route.executionTarget).toBe('sandbox');
       const res = await status(url, 'start');
       expect(res.status, await res.text()).toBe(202);
       expect(await first.exit).toEqual({ code: null, signal: 'SIGKILL' });

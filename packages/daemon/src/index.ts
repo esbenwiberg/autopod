@@ -57,6 +57,7 @@ import {
   composeOperatorEnrollment,
   parseOperatorEnrollment,
 } from './orchestration/operator-enrollment.js';
+import { operatorPartition } from './orchestration/operator-partition.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -1150,11 +1151,19 @@ await podsitterService.start().catch((err) => {
 });
 
 const enrollment = parseOperatorEnrollment(process.env.AUTOPOD_OPERATOR_ENROLLMENT);
+const separateProfiles = parseManagedProfileSetConfig(process.env.AUTOPOD_OPERATOR_PROFILE_SET);
+const operatorProfiles = separateProfiles ?? managedProfileSetConfig;
+const partition = operatorPartition(
+  enrollment,
+  managedCliConfig,
+  managedProfileSetConfig,
+  separateProfiles,
+);
 if (
   enrollment &&
   (!managedCliConfig ||
-    !managedProfileSetConfig ||
-    managedProfileSetConfig.catalogArtifacts ||
+    !operatorProfiles ||
+    operatorProfiles.catalogArtifacts ||
     !ENTRA_TENANT_ID ||
     !ENTRA_CLIENT_ID ||
     ALLOW_DEV_AUTH ||
@@ -1162,8 +1171,10 @@ if (
     process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1')
 )
   throw new Error('operator-production-boundaries-required');
+if (partition) assertOperatorRecovery(db, partition.run);
 const profileRuntime = managedProfileSetConfig
   ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
+      ownsInstallation: partition?.ordinary,
       db,
       databasePath: DB_PATH,
       manager:
@@ -1187,6 +1198,7 @@ const legacyManagedRuntime = managedAcceptanceConfig
 const managedRuntime =
   managedProfileSetConfig?.catalogArtifacts && profileRuntime
     ? composeManagedCatalog(managedProfileSetConfig, profileRuntime, {
+        ownsInstallation: partition?.ordinary,
         db,
         databasePath: DB_PATH,
         manager:
@@ -1200,13 +1212,37 @@ const managedRuntime =
         worktrees: worktreeManager,
       })
     : legacyManagedRuntime;
+const separateRuntime =
+  separateProfiles && partition && managedCliConfig
+    ? composeManagedProfileSet(
+        separateProfiles,
+        {
+          bindings: managedCliConfig.bindings,
+          artifactDirectory: path.join(
+            path.dirname(fs.realpathSync(DB_PATH)),
+            'managed',
+            'operator-artifacts',
+          ),
+        },
+        {
+          db,
+          databasePath: DB_PATH,
+          manager: containerManager,
+          networkManager,
+          providerAccounts: providerAccountStore,
+          githubAuth,
+          ownsInstallation: partition.operator,
+        },
+      )
+    : undefined;
 const operatorRuns = enrollment
   ? composeOperatorEnrollment(enrollment, {
       db,
       databasePath: DB_PATH,
-      profiles: managedProfileSetConfig,
+      isolatedArtifacts: !!partition,
+      profiles: operatorProfiles,
       cli: managedCliConfig,
-      runtime: profileRuntime,
+      runtime: separateRuntime ?? profileRuntime,
       bind: (pin) =>
         bindHostedControllerProfile(
           pin,
@@ -1219,15 +1255,22 @@ const operatorRuns = enrollment
   : undefined;
 if (!operatorRuns) {
   assertOperatorRecovery(db, null);
-  await managedRuntime?.resume();
 }
+if (!operatorRuns || separateRuntime) await managedRuntime?.resume();
 
 // Server
 const app = await createServer({
   configuration: configuration.routes,
   pim: configuration.scopedTools.pimRoutes,
   authModule,
-  operatorRuns: operatorRuns && { ...operatorRuns, lifetimeOwner },
+  operatorRuns: operatorRuns && {
+    ...operatorRuns,
+    lifetimeOwner,
+    watchdog: separateRuntime && {
+      service: separateRuntime.components.service,
+      finishOutputs: () => separateRuntime.components.pipeline.tick(),
+    },
+  },
   managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
@@ -1515,6 +1558,7 @@ async function shutdown(signal: string) {
   backupManager.stop();
 
   // Close request-time provider gateways before their durable database closes.
+  separateRuntime?.close();
   managedRuntime?.close();
 
   // Close database

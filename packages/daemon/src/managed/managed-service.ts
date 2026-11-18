@@ -95,6 +95,7 @@ export class ManagedPodService {
     readonly now: () => number = () => Math.floor(Date.now() / 1000),
     readonly enabled = false,
     readonly runtimeCapabilities: readonly string[] = [],
+    readonly ownsInstallation: (installation: string) => boolean = () => true,
   ) {
     this.starts = localStarts.get(db) ?? new Map();
     localStarts.set(db, this.starts);
@@ -160,6 +161,7 @@ export class ManagedPodService {
     return request;
   }
   row(installation: string, podId: string): ManagedPodRow {
+    if (!this.ownsInstallation(installation)) throw new Error('managed-pod-not-found');
     const row = this.db
       .prepare('SELECT * FROM managed_pods WHERE pod_id=? AND dispatcher_installation_id=?')
       .get(podId, installation) as ManagedPodRow | undefined;
@@ -167,6 +169,7 @@ export class ManagedPodService {
     return row;
   }
   lookup(installation: string, startKey: string): ManagedPodRow | undefined {
+    if (!this.ownsInstallation(installation)) throw new Error('managed-pod-not-found');
     return this.db
       .prepare(
         'SELECT * FROM managed_pods WHERE dispatcher_installation_id=? AND managed_start_key=?',
@@ -375,6 +378,7 @@ export class ManagedPodService {
       .prepare('SELECT * FROM managed_pods WHERE observed_exit=0')
       .all() as ManagedPodRow[];
     for (const row of rows) {
+      if (!this.ownsInstallation(row.dispatcher_installation_id)) continue;
       if (row.runtime_ref && !this.starts.has(row.pod_id)) {
         const observed = await this.runtime.observe(row.runtime_ref);
         this.db

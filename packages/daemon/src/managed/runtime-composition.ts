@@ -77,6 +77,8 @@ export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsC
 /** Library composition only: never discovers credentials, changes native config or starts a listener.
  * The selected runtime's channel is a reviewed deployment input, not inferred from a profile name.
  */
+import { ownedRuntimeRow } from './owned-runtime-row.js';
+
 export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   const identities = config.bindings.map((binding) =>
     canonical({
@@ -96,10 +98,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   let closed = false;
   const channels = new Map<string, () => void>();
   const pending = new Map<string, Promise<void>>();
-  const rowFor = (ref: string) =>
-    config.db.prepare('SELECT * FROM managed_pods WHERE runtime_ref=?').get(ref) as
-      | ManagedPodRow
-      | undefined;
+  const rowFor = (ref: string) => ownedRuntimeRow(config.db, ref, config.ownsInstallation);
   const workspaces = new ManagedWorkspaces(
     config.db,
     path.join(config.stateRoot, 'workspaces'),
@@ -368,6 +367,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         .prepare('SELECT * FROM managed_pods WHERE runtime_ref IS NOT NULL AND observed_exit=0')
         .all() as ManagedPodRow[];
       for (const row of rows) {
+        if (!components.service.ownsInstallation(row.dispatcher_installation_id)) continue;
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         if (profileIds && !profileIds.has(request.profileSnapshot.profileId)) continue;

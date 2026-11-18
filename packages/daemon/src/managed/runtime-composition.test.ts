@@ -168,6 +168,58 @@ function setup(
     },
   };
 }
+it('partitions restart attachment, observation and output collection by durable owner, not profile or runtime ID', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  const launch = async (owner: string) => {
+    const c = composeManagedRuntime({
+      ...x.config,
+      enabled: true,
+      ownsInstallation: (id) => id === owner,
+    });
+    instances.push(c);
+    try {
+      return await c.service.start(owner, x.request);
+    } finally {
+      c.close();
+    }
+  };
+  const a = await launch('fleet');
+  const b = await launch('worker');
+  f.restart();
+  // Same fixture backend ref and profile; only the durable owner distinguishes the rows.
+  for (const [owner, mine, other] of [
+    ['fleet', a, b],
+    ['worker', b, a],
+  ] as const) {
+    const lane = composeManagedRuntime({
+      ...x.config,
+      db: f.db,
+      enabled: true,
+      ownsInstallation: (id) => id === owner,
+    });
+    instances.push(lane);
+    x.channel.attach.mockClear();
+    await lane.resume();
+    expect(x.channel.attach).toHaveBeenCalledTimes(1);
+    expect(x.channel.attach.mock.calls[0]![0].podId).toBe(mine.podId);
+    await expect(lane.service.start(other.dispatcherInstallationId, x.request)).rejects.toThrow(
+      'not-found',
+    );
+    const observe = vi
+      .spyOn(lane.runtime, 'observe')
+      .mockResolvedValue({ state: 'running', consumedTokens: 7 });
+    await lane.service.enforceExpiry();
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(lane.service.row(owner, mine.podId).consumed_tokens).toBe(7);
+    f.db.prepare("UPDATE managed_pods SET observed_exit=1,state='validating'").run();
+    const finish = vi.spyOn(lane.pipeline, 'finish').mockResolvedValue(undefined);
+    await lane.pipeline.tick();
+    expect(finish.mock.calls).toEqual([[owner, mine.podId]]);
+    f.db.prepare("UPDATE managed_pods SET observed_exit=0,state='running',consumed_tokens=0").run();
+    lane.close();
+  }
+  expect(x.ensure).toHaveBeenCalledTimes(2);
+});
 it('defaults disabled without attaching channels or calling providers', async () => {
   const x = setup();
   const c = x.create();

@@ -193,7 +193,9 @@ export class ManagedArtifactPipeline {
                 WHERE managed_results.pod_id=managed_pods.pod_id AND json_each.value='validation-incomplete')))))`,
       )
       .all() as { pod_id: string; dispatcher_installation_id: string }[];
-    for (const row of rows)
+    for (const row of rows) {
+      if (!this.service.ownsInstallation(row.dispatcher_installation_id)) continue;
       await this.finish(row.dispatcher_installation_id, row.pod_id).catch(() => {});
+    }
   }
 }

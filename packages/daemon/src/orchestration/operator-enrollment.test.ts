@@ -32,6 +32,9 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
     runtime,
     bind: () => provider.provider,
   };
+  expect(() => composeOperatorEnrollment(e, { ...deps, isolatedArtifacts: true })).toThrow(
+    'policy-mismatch',
+  );
   const compose = (envelope = e) => composeOperatorEnrollment(envelope, deps);
   expect(parseOperatorEnrollment(undefined)).toBeUndefined();
   expect(() => parseOperatorEnrollment('{"enabled":true}')).toThrow('invalid-operator-enrollment');

@@ -10,6 +10,7 @@ import { createServer, type ServerDependencies } from '../api/server.js';
 import { DockerContainerManager } from '../containers/docker-container-manager.js';
 import { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import { createDatabase } from '../db/connection.js';
+import { composeManagedCatalog } from '../managed/catalog.js';
 import { codexSse } from '../managed/codex-wire.js';
 import {
   composeManagedProfileSet,
@@ -19,6 +20,7 @@ import {
   composeOperatorEnrollment,
   parseOperatorEnrollment,
 } from '../orchestration/operator-enrollment.js';
+import { operatorPartition } from '../orchestration/operator-partition.js';
 import { offlineController } from './offline-controller.js';
 
 const [root, mode] = process.argv.slice(2);
@@ -124,7 +126,27 @@ networkManager.ensureNetworkForPod = async (pod) => {
   });
   return ensureNetwork(pod);
 };
+const sandboxProfiles = structuredClone(profiles);
+sandboxProfiles.catalogArtifacts = true;
+for (const p of sandboxProfiles.profiles) p.profileSnapshot.route.executionTarget = 'sandbox';
+const partition = operatorPartition(enrollment, cli, sandboxProfiles, profiles)!;
+const sandboxDeps = {
+  db,
+  databasePath: database,
+  manager: {} as never,
+  providerAccounts: providerAccounts as never,
+  githubAuth: {} as never,
+  ownsInstallation: partition.ordinary,
+};
+const legacy = composeManagedProfileSet(sandboxProfiles, cli, sandboxDeps);
+const ordinary = composeManagedCatalog(sandboxProfiles, legacy, {
+  ...sandboxDeps,
+  catalog: {} as never,
+  worktrees: {} as never,
+});
+await ordinary.resume();
 const runtime = composeManagedProfileSet(profiles, cli, {
+  ownsInstallation: partition.operator,
   db,
   databasePath: database,
   manager,
@@ -156,6 +178,7 @@ const config = composeOperatorEnrollment(enrollment, {
   db,
   databasePath: database,
   profiles,
+  isolatedArtifacts: true,
   cli,
   runtime,
   bind: () => provider,
@@ -200,8 +223,14 @@ const authModule = {
 const app = await createServer({
   authModule,
   db,
-  managed: runtime,
-  operatorRuns: config,
+  managed: ordinary,
+  operatorRuns: {
+    ...config,
+    watchdog: {
+      service: runtime.components.service,
+      finishOutputs: () => runtime.components.pipeline.tick(),
+    },
+  },
   logLevel: 'silent',
   prettyLog: false,
   podManager: {},
@@ -220,6 +249,7 @@ if (mode === 'recover') {
   appendFileSync(path.join(root, 'exits-observed'), '8');
   await finish;
   await app.close();
+  ordinary.close();
   runtime.close();
   db.close();
   process.disconnect?.();

@@ -256,6 +256,7 @@ export function composeManagedProfileSet(
     db: Database.Database;
     databasePath: string;
     manager: ContainerManager | undefined;
+    ownsInstallation?: (installation: string) => boolean;
     networkManager?: ManagedLocalNetwork;
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
@@ -316,6 +317,7 @@ export function composeManagedProfileSet(
   }
   const components = composeManagedRuntime({
     db: dependencies.db,
+    ownsInstallation: dependencies.ownsInstallation,
     store,
     enabled: true,
     source,

@@ -15,7 +15,7 @@ import { fixtureSigner } from './gate-signer.js';
 import { resign } from './managed-fixture.js';
 import { setupOrchestrationRun } from './orchestration-run-fixture.js';
 
-export async function operatorSeedFixture(image: string) {
+export async function operatorSeedFixture(image: string, isolatedArtifacts = false) {
   const { root, subject: s, request, bytes } = await setupOrchestrationRun();
   const db = createHistoricalDiskDatabase(path.join(root, 'daemon.db'), [
     { dir: MIGRATIONS_DIR, through: 269 },
@@ -94,7 +94,7 @@ export async function operatorSeedFixture(image: string) {
   const checks = fixtureSigner('checks', 'checker', digest('checks/v1')),
     review = fixtureSigner('independentReview', 'reviewer', digest('review/v1'));
   const authorities = {
-    basePolicyDigest: operatorBasePolicy(data, profiles),
+    basePolicyDigest: operatorBasePolicy(data, profiles, isolatedArtifacts),
     checks: checks.authority,
     independentReview: review.authority,
   };
