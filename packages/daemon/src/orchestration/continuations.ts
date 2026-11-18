@@ -2,6 +2,7 @@ import type { ManagedPodRequest } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { canonical, digest } from '../managed/canonical.js';
 import { validateManagedRequest } from '../managed/grants.js';
+import { signalLocalRun } from '../managed/local-run-signals.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { tryRecoveryClaim } from './local-recovery-claim.js';
 import { RunWaves } from './run-waves.js';
@@ -40,6 +41,31 @@ const commitId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const hash = /^sha256:[0-9a-f]{64}$/;
 // Dot is not a permitted installation character in the managed user authenticator.
 const principal = (run: string) => `native.${run}`;
+
+function boundRequest(cp: ContinuationCheckpoint, raw: ManagedPodRequest) {
+  const req = validateManagedRequest(raw);
+  const repo = req.effectiveGrant.scope.repositories[0];
+  const budget = req.effectiveGrant.budget;
+  if (
+    !commitId.test(cp.commit) ||
+    !commitId.test(cp.tree) ||
+    !commitId.test(cp.predecessor) ||
+    cp.predecessor === cp.commit ||
+    !hash.test(cp.evidenceDigest) ||
+    !hash.test(cp.policyDigest) ||
+    !['none', 'commit'].includes(req.outputs.source.mode) ||
+    req.effectiveGrant.scope.allowedEffects.some(
+      (effect) => effect === 'git.push.worker-branch' || effect.startsWith('pull-request.'),
+    ) ||
+    !repo ||
+    req.effectiveGrant.scope.repositories.length !== 1 ||
+    repo.enrollmentId !== cp.repository ||
+    repo.baseRevision !== cp.commit ||
+    !('maxProviderRequests' in budget)
+  )
+    throw new Error('invalid-continuation-binding');
+  return { req, budget };
+}
 
 /** Internal acceptance/outbox. One run has one lifetime: cancellation is irreversible.
  * The request limit is the worker allowance after the host sets aside its final-check reserve. */
@@ -91,6 +117,66 @@ export class OrchestrationContinuations {
       return use(service);
     });
   }
+  /** Establish a verified starting point and recipe catalog WITHOUT launching a placeholder
+   * child. The first model turn uses a real wait and the same journal/budget as later turns. */
+  async kickoff(
+    input: ContinuationCheckpoint,
+    recipes: Readonly<Record<string, ManagedPodRequest>>,
+  ) {
+    const cp = { ...input };
+    const entries = Object.entries(recipes);
+    if (
+      !entries.length ||
+      entries.length > 16 ||
+      entries.some(([alias]) => !/^[a-z][a-z0-9_-]{0,63}$/.test(alias))
+    )
+      throw new Error('invalid-kickoff-recipes');
+    const catalog = Object.fromEntries(
+      entries.map(([key, raw]) => [key, boundRequest(cp, raw).req]),
+    );
+    const seed = digest([cp, catalog]);
+    const replay = () => {
+      const prior = this.db
+        .prepare('SELECT seed_digest FROM orchestration_kickoffs WHERE run_id=?')
+        .pluck()
+        .get(cp.run);
+      if (prior !== undefined && prior !== seed) throw new Error('kickoff-conflict');
+      return prior !== undefined;
+    };
+    if (replay()) return;
+    await this.withExecutor(cp, async (service) => {
+      for (const req of Object.values(catalog)) await service.preflight(req, principal(cp.run));
+    });
+    this.db
+      .transaction(() => {
+        if (replay()) return;
+        const result = this.db
+          .prepare(
+            'UPDATE orchestration_runs SET accepted_commit=?,accepted_evidence=? WHERE id=? AND repository=? AND policy_digest=? AND accepted_commit=? AND accepted_evidence IS NULL AND canceled=0',
+          )
+          .run(
+            cp.commit,
+            cp.evidenceDigest,
+            cp.run,
+            cp.repository,
+            cp.policyDigest,
+            cp.predecessor,
+          );
+        if (!result.changes) throw new Error('kickoff-not-admissible');
+        this.db
+          .prepare(
+            'INSERT INTO orchestration_kickoffs(run_id,seed_digest,checkpoint_json,recipes_json) VALUES(?,?,?,?)',
+          )
+          .run(cp.run, seed, canonical(cp), canonical(catalog));
+        this.db
+          .prepare(
+            "INSERT INTO orchestration_result_waits(run_id,wait_key,after_cursor,minimum) VALUES(?,'@kickoff',0,1)",
+          )
+          .run(cp.run);
+        signalLocalRun(this.db, principal(cp.run));
+      })
+      .immediate();
+  }
   acceptAndContinue(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     return this.admit('advance', input, raw);
   }
@@ -100,8 +186,22 @@ export class OrchestrationContinuations {
   /** Preflight outside SQLite, then reserve the whole controller proposal or none of it. */
   async spawnWave(input: ContinuationCheckpoint, requests: ManagedPodRequest[]) {
     if (requests.length > 8) throw new Error('controller-wave-too-large');
-    const inserts: Array<() => void> = [];
-    for (const request of requests) inserts.push(await this.prepare('spawn', input, request));
+    await this.admitBatch('spawn', input, requests);
+  }
+  private async admitBatch(
+    kind: Kind,
+    input: ContinuationCheckpoint,
+    requests: ManagedPodRequest[],
+  ) {
+    const cp = { ...input };
+    const pending: ManagedPodRequest[] = [];
+    const inserts = requests.map((request) => this.prepare(kind, cp, request, pending));
+    // Same pinned source for the whole proposal: restore/verify custody once, but
+    // independently preflight every fresh spec. Replayed intents need no new preflight.
+    if (pending.length)
+      await this.withExecutor(cp, async (service) => {
+        for (const req of pending) await service.preflight(req, principal(cp.run));
+      });
     this.db
       .transaction(() => {
         for (const insert of inserts) insert();
@@ -109,33 +209,17 @@ export class OrchestrationContinuations {
       .immediate();
   }
   private async admit(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
-    const insert = await this.prepare(kind, input, raw);
-    this.db.transaction(insert).immediate();
+    await this.admitBatch(kind, input, [raw]);
     return raw.startKey;
   }
-  private async prepare(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
+  private prepare(
+    kind: Kind,
+    input: ContinuationCheckpoint,
+    raw: ManagedPodRequest,
+    pending: ManagedPodRequest[],
+  ) {
     const cp = { ...input };
-    const req = validateManagedRequest(raw);
-    const repo = req.effectiveGrant.scope.repositories[0];
-    const budget = req.effectiveGrant.budget;
-    if (
-      !commitId.test(cp.commit) ||
-      !commitId.test(cp.tree) ||
-      !commitId.test(cp.predecessor) ||
-      cp.predecessor === cp.commit ||
-      !hash.test(cp.evidenceDigest) ||
-      !hash.test(cp.policyDigest) ||
-      !['none', 'commit'].includes(req.outputs.source.mode) ||
-      req.effectiveGrant.scope.allowedEffects.some(
-        (effect) => effect === 'git.push.worker-branch' || effect.startsWith('pull-request.'),
-      ) ||
-      !repo ||
-      req.effectiveGrant.scope.repositories.length !== 1 ||
-      repo.enrollmentId !== cp.repository ||
-      repo.baseRevision !== cp.commit ||
-      !('maxProviderRequests' in budget)
-    )
-      throw new Error('invalid-continuation-binding');
+    const { req, budget } = boundRequest(cp, raw);
     const operation = operationDigest(kind, cp, req.executionSpecDigest);
     const replay = () => {
       const prior = this.prior(cp.run, req.startKey);
@@ -143,8 +227,7 @@ export class OrchestrationContinuations {
         throw new Error('continuation-key-conflict');
       return !!prior;
     };
-    if (!replay())
-      await this.withExecutor(cp, (service) => service.preflight(req, principal(cp.run)));
+    if (!replay()) pending.push(req);
     return () => {
       if (replay()) return;
       const run = this.db
@@ -184,6 +267,7 @@ export class OrchestrationContinuations {
           budget.maxProviderRequests,
           kind,
         );
+      signalLocalRun(this.db, principal(cp.run));
     };
   }
 
@@ -267,6 +351,7 @@ export class OrchestrationContinuations {
               'UPDATE orchestration_continuations SET pod_id=? WHERE run_id=? AND start_key=? AND pod_id IS NULL',
             )
             .run(pod, cp.run, req.startKey);
+          signalLocalRun(this.db, principal(cp.run));
         });
       } catch {
         blocked.push({ run: intent.run_id, key: intent.start_key, stage });

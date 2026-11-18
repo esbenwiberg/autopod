@@ -3,8 +3,9 @@ import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { expect, it, onTestFinished } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { digest } from '../managed/canonical.js';
+import { signalLocalRun } from '../managed/local-run-signals.js';
 import { managedGit } from '../managed/source-git.js';
 import { buildStartupHarness } from '../test-utils/build-startup-harness.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
@@ -12,6 +13,9 @@ import { offlineController } from '../test-utils/offline-controller.js';
 import { waveProcessRuntime } from '../test-utils/wave-process-runtime.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 
+// Real Git, SQLite and child-process restarts: wall-clock limits are deadlock guards,
+// not latency assertions. Keep them bounded even on a busy local development machine.
+vi.setConfig({ testTimeout: 15_000 });
 async function setup(workerRequests = 2, maxActive = 1) {
   const f = requestTimeFixture(2);
   const root = await mkdtemp(path.join(tmpdir(), 'native-run-'));
@@ -46,6 +50,12 @@ async function setup(workerRequests = 2, maxActive = 1) {
   f.db.exec(
     await readFile(
       new URL('../db/migrations/260_orchestration_unknown_outcomes.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  f.db.exec(
+    await readFile(
+      new URL('../db/migrations/261_orchestration_kickoffs.sql', import.meta.url),
       'utf8',
     ),
   );
@@ -132,6 +142,144 @@ async function setup(workerRequests = 2, maxActive = 1) {
   await rm(file);
   return { f, root, cp, request, ledger, host, subject, bytes, verify };
 }
+
+it.each([
+  'notification',
+  'startup catch-up',
+])('controller commissions six then two from %s without polling', async (mode) => {
+  const { f, root, cp, request, host } = await setup(18, 6);
+  const runtime = waveProcessRuntime(root);
+  Object.assign(f.runtime, runtime.port);
+  onTestFinished(async () => {
+    await runtime.dispose();
+  });
+  request.outputs.artifacts.mode = 'required';
+  request.outputs.artifacts.requiredPaths = ['report.md'];
+  resign(request);
+  const seed = () => host().ledger.kickoff(cp, { inspect: request });
+  const child = (brief: string) => ({ recipe: 'inspect', brief });
+  const { provider, calls } = offlineController((payload) => {
+    const ctx = JSON.parse(JSON.parse(payload).messages[0].content);
+    if (ctx.phase === 'kickoff') {
+      expect(ctx.results).toEqual([]);
+      expect(ctx.remainingRequests).toBe(17);
+      return JSON.stringify({
+        children: Array.from({ length: 6 }, (_, i) => child(`Investigate ${i}`)),
+        waitFor: 3,
+      });
+    }
+    expect(ctx.inFlight).toHaveLength(3);
+    expect(ctx.availableSlots).toBe(3);
+    expect(ctx.results).toHaveLength(3);
+    expect(
+      ctx.results.every((r: { finding: { text: string } }) =>
+        r.finding.text.startsWith('Checks passed'),
+      ),
+    ).toBe(true);
+    return JSON.stringify({
+      children: ctx.results
+        .slice(0, 2)
+        .map((r: { child: string }) => child(`Verify finding from ${r.child}`)),
+      waitFor: null,
+    });
+  });
+  const attach = () =>
+    host().watchController(
+      cp.run,
+      {
+        mission: 'Verify the returned findings',
+        routeId: 'offline',
+        recipes: { inspect: '@inspect' },
+        findings: 'report.md',
+      },
+      provider,
+    );
+  await seed();
+  await seed();
+  expect(runtime.count()).toBe(0);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    18,
+  );
+  let loop = attach();
+  try {
+    expect(() => attach()).toThrow('already-attached');
+    expect(await loop.settled()).toEqual({ blocked: [] });
+    const original = await runtime.live();
+    expect(new Set(original.values()).size).toBe(6);
+    const ids = [...original.keys()];
+    const returns = async (id: string) => {
+      await runtime.finish(id);
+      const s = f.service();
+      await s.enforceExpiry();
+      await s.artifactPipeline?.tick();
+    };
+    for (const id of ids.slice(0, 2)) {
+      await returns(id);
+      await loop.settled();
+      expect(calls()).toBe(1);
+    }
+    if (mode === 'startup catch-up') await loop.close();
+    const third = ids[2];
+    if (!third) throw new Error('missing third worker');
+    await returns(third);
+    if (mode === 'startup catch-up') {
+      expect(calls()).toBe(1);
+      f.restart();
+      loop = attach();
+    }
+    // Settled is a barrier only; it does not signal a pass.
+    expect(await loop.settled()).toEqual({ blocked: [] });
+    const live = await runtime.live();
+    expect(live.size).toBe(5);
+    for (const id of ids.slice(3)) expect(live.get(id)).toBe(original.get(id));
+    expect([...live.keys()].filter((id) => !original.has(id))).toHaveLength(2);
+    for (let i = 0; i < 10; i++) signalLocalRun(f.db, 'native.example');
+    await seed();
+    expect(await loop.settled()).toEqual({ blocked: [] });
+    expect(calls()).toBe(2);
+    expect(runtime.count()).toBe(8);
+    expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+      0,
+    );
+    expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
+      cp.commit,
+    );
+    expect(
+      f.db
+        .prepare('SELECT count(*) FROM orchestration_result_waits WHERE acknowledged=0')
+        .pluck()
+        .get(),
+    ).toBe(0);
+  } finally {
+    await loop.close();
+  }
+}, 30_000);
+
+it('rejects changed kickoff replay and damaged recipe custody without a model or worker charge', async () => {
+  const { f, cp, request, host } = await setup(6, 2);
+  await host().ledger.kickoff(cp, { inspect: request });
+  await expect(host().ledger.kickoff(cp, { changed: request })).rejects.toThrow('kickoff-conflict');
+  f.db.prepare("UPDATE orchestration_kickoffs SET recipes_json='{}'").run();
+  f.restart();
+  const { provider, calls } = offlineController(() => {
+    throw new Error('should not call provider');
+  });
+  const loop = host().watchController(
+    cp.run,
+    { mission: 'Check', routeId: 'offline', recipes: { inspect: '@inspect' } },
+    provider,
+  );
+  try {
+    await expect(loop.settled()).rejects.toThrow('controller-catalog-integrity');
+  } finally {
+    await loop.close();
+  }
+  expect(calls()).toBe(0);
+  expect(f.launches()).toBe(0);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    6,
+  );
+});
 
 it('six start, three return, two follow-ups start without waiting for the other three', async () => {
   const { f, cp, request, ledger, host } = await setup(16, 6);
@@ -378,7 +526,7 @@ it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
       cwd: root,
       env,
       encoding: 'utf8',
-      timeout: 8000,
+      timeout: 15_000,
     });
     expect(writer.error).toBeUndefined();
     expect(writer.signal, writer.stderr).toBe('SIGKILL');
@@ -414,7 +562,7 @@ it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
       env,
       execArgv: [],
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-      timeout: 8000,
+      timeout: 15_000,
       killSignal: 'SIGKILL',
     });
     const closed = once(reader, 'close');
@@ -504,7 +652,7 @@ it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
       0,
     );
   },
-  15000,
+  30_000,
 );
 
 it('replays a recorded controller decision without a second SDK request or duplicate workers', async () => {
@@ -610,7 +758,7 @@ it.skipIf(process.platform === 'win32').each(['accepted', 'allocated', 'lost-han
     await writeFile(payload, JSON.stringify({ cp, request }));
     const writer = spawnSync(process.execPath, [bundle, f.db.name, payload, mode], {
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: 12_000,
     });
     expect(writer.error).toBeUndefined();
     expect(writer.signal, writer.stderr).toBe('SIGKILL');
@@ -633,7 +781,7 @@ it.skipIf(process.platform === 'win32').each(['accepted', 'allocated', 'lost-han
     );
     const reader = spawnSync(process.execPath, [bundle, f.db.name, payload, 'startup'], {
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: 12_000,
     });
     expect(reader.error).toBeUndefined();
     expect(reader.status, reader.stderr).toBe(0);

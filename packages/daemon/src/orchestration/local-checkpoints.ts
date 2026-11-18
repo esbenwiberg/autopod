@@ -8,6 +8,7 @@ import type { ProfileLlmClient } from '../providers/llm-client.js';
 import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 import { type ControllerConfig, tickController } from './controller-turns.js';
+import { attachLocalController } from './local-controller-loop.js';
 import type { ResultWake } from './run-waves.js';
 
 import { UnknownOutcomes } from './unknown-outcomes.js';
@@ -82,6 +83,11 @@ export class LocalCheckpointHost {
   /** Opt-in model-backed turn. Caller selects an approved client; never discovers credentials. */
   tickController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
     return tickController(this.db, this.ledger, run, config, client);
+  }
+  /** Subscribe to worker state changes on this daemon connection and catch up from SQLite. */
+  watchController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
+    const policy = structuredClone(config);
+    return attachLocalController(this.db, run, () => this.tickController(run, policy, client));
   }
   /** Host-only: qualify an unpublished two-worker integration, without advancing or charging. */
   retainCombined(

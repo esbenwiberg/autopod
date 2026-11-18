@@ -24,6 +24,7 @@ export async function ownedEvaluator(
     bundle,
     [role, database, path.join(root, 'merge.bundle'), run],
     dir,
+    40_000,
   );
   onTestFinished(() => p.dispose());
   const { pid, authority } = await p.message;

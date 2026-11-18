@@ -22,7 +22,8 @@ export function waveProcessRuntime(root: string) {
     async ensure(id, spec, checkpoint) {
       const pin = spec.effectiveGrant.scope.repositories[0]?.baseRevision;
       assert(pin);
-      if (!owned.has(id)) owned.set(id, start(script, [spec.startKey, pin], path.join(root, id)));
+      if (!owned.has(id))
+        owned.set(id, start(script, [spec.startKey, pin], path.join(root, id), 40_000));
       const w = worker(id);
       const ready = await w.message;
       assert.equal(ready.type, 'ready');

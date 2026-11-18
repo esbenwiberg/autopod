@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { signalLocalRun } from '../managed/local-run-signals.js';
 import { tryRecoveryClaim } from './local-recovery-claim.js';
 
 interface Result {
@@ -73,6 +74,7 @@ export class RunWaves {
             'INSERT INTO orchestration_result_waits(run_id,wait_key,after_cursor,minimum) VALUES (?,?,?,?)',
           )
           .run(run, key, after, minimum);
+        signalLocalRun(this.db, `native.${run}`);
       })
       .immediate();
   }
@@ -111,6 +113,10 @@ export class RunWaves {
         const available = this.available(run);
         const wakes: ResultWake[] = [];
         for (const wait of waits) {
+          if (wait.wait_key === '@kickoff') {
+            wakes.push({ key: wait.wait_key, cursor: 0, results: [], inFlight, queued, available });
+            continue;
+          }
           const results = this.db
             .prepare(
               `SELECT sequence,start_key,pod_id,state,exit_code,artifact_id,candidate_digest FROM orchestration_child_outcomes WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?`,

@@ -10,6 +10,7 @@ export function startFixtureProcess<M extends { type: 'ready' | 'recovered' } = 
   bundle: string,
   args: string[],
   root: string,
+  deadlineMs = DEADLINE_MS,
 ) {
   const child = fork(bundle, args, {
     execPath: process.execPath,
@@ -51,7 +52,7 @@ export function startFixtureProcess<M extends { type: 'ready' | 'recovered' } = 
   };
   const watchdog = setTimeout(
     () => fail(new Error('Fixture process deadline exceeded')),
-    DEADLINE_MS,
+    deadlineMs,
   );
   child.on('error', fail);
   child.on('message', (payload: unknown) => {

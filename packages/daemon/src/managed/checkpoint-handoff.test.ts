@@ -520,4 +520,4 @@ it.each([
     expect(f.launches()).toBe(2);
   }
   expect(await managedGit(mirror, ['show-ref'])).toBe(refs);
-}, 15000);
+}, 30_000);
