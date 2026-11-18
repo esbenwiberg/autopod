@@ -15,11 +15,9 @@ import { ManagedControls } from '../managed/managed-controls.js';
 import { ManagedPodService, type ManagedRuntimePort } from '../managed/managed-service.js';
 import { managedGit } from '../managed/source-git.js';
 import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
-import { liveMission, localWaveModel } from './local-wave-model.js';
 import { offlineController } from './offline-controller.js';
 
-const [database, root, socketPath, image, owner, mode, route] = process.argv.slice(2);
-const live = route === 'local-model';
+const [database, root, socketPath, image, owner, mode] = process.argv.slice(2);
 assert(
   database &&
     root &&
@@ -72,10 +70,9 @@ const compose = (mirror?: string) => {
         Entrypoint: ['/bin/busybox', 'timeout', '-s', 'KILL', '120', '/bin/sh'],
         Cmd: [
           '-ec',
-          `test "$(cat /src/.git/HEAD)" = "$1"; test "$(cat /src/proof.txt)" = 'unpublished checkpoint'; mkfifo /tmp/finish; read -r result </tmp/finish; if test "$2" = live; then printf '%s\\n' "$result" > /out/report.md; else test "$result" = finish; printf 'Checked %s\\n' "$1" > /out/report.md; fi`,
+          `test "$(cat /src/.git/HEAD)" = "$1"; test "$(cat /src/proof.txt)" = 'unpublished checkpoint'; mkfifo /tmp/finish; read -r result </tmp/finish; test "$result" = finish; printf 'Checked %s\\n' "$1" > /out/report.md`,
           'worker',
           pin,
-          live ? 'live' : 'offline',
         ],
         HostConfig: {
           NetworkMode: 'none',
@@ -161,12 +158,12 @@ const { provider } = offlineController((payload) => {
 const loop = host.watchController(
   run,
   {
-    mission: live ? liveMission : 'Verify canary reports',
+    mission: 'Verify canary reports',
     findings: 'report.md',
-    routeId: live ? 'local-ollama' : 'offline',
+    routeId: 'offline',
     recipes: { inspect: '@inspect' },
   },
-  live ? localWaveModel(root, mode) : provider,
+  provider,
 );
 assert.deepEqual(await loop.settled(), { blocked: [] });
 const next = once(process, 'message');
