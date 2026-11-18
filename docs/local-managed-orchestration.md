@@ -35,6 +35,18 @@ The daemon attempts at most two Messages requests (512 output tokens each, 8 KiB
 
 **Release boundary:** this branch incorporates `62a2031f` and preserves released migrations 255 (validation timings) and 256 (immutable fresh handoff preparations). The seven original unpublished orchestration scripts occupy 262–268 with unchanged SQL. Migration 269 records operator ownership independently of retained checkpoint bytes; 257–261 are intentionally unused. A spike or mixed-lineage database is refused, not automatically renumbered or replayed. Keep such a database with its original binary. A populated unpublished 262–268 orchestration database is likewise refused before migration 269; missing custody cannot establish that its runs were nonoperator. `src/db/orchestration-release-upgrade.test.ts` uses a verified online backup of synthetic release-255 and release-256 databases, migrates only a restored copy, and checks preserved evidence, uncertain request accounting, reopen and integrity. This is not a backup or upgrade of the running service. Before rollout, repeat verification on an authorized backup of the intended database and obtain independent release review. The released binary has no canary entry point; the local Docker integration uses a stubbed hosted response, not a live model.
 
+## Launch a controller-managed task
+
+On an enrolled daemon, use the authenticated CLI from outside the service:
+
+```sh
+ap orchestration status inspection
+ap orchestration start inspection
+ap orchestration status inspection
+```
+
+Replace `inspection` with your assigned slot. Start requests work; it does not prove that any child has finished. If the reply is lost, inspect status rather than resubmitting. To stop the run, use `ap orchestration cancel inspection`; after exits are observed use `ap orchestration cleanup inspection`. These commands use the ordinary operator routes, not the startup canary. They do not enable orchestration on an unenrolled server or create a new assignment.
+
 ## Operator lifecycle (opt-in server composition)
 
 With `AUTOPOD_OPERATOR_ENROLLMENT` configured, a registered operator can POST `/orchestration/runs/:slot/start`, GET `.../status`, POST `.../cancel`, or POST `.../fence`. The host must first provision the run envelope, verified checkpoint, recipe catalog, controller policy and client. A slot belongs to an exact issuer/audience/object binding, not everyone in an installation. Start accepts no overrides. Status includes request balance, children, observed exits and inspectable unknown outcomes. Fence takes only an inspected `kind`, `key`, `binding` and a `caseRef`; the daemon supplies the actor and run. Cancel requests stops; it does not claim that workers have exited. After all exits are observed, POST `.../cleanup` removes the run’s containers and networks using replayable managed cleanup operations.
