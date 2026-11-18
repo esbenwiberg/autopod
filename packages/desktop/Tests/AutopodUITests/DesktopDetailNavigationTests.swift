@@ -131,7 +131,10 @@ import Testing
     @Test func sortAndDensitySurviveCloseReopen() async throws {
         let host = try DesktopSelectionPerformanceHost(width: 2_000, redesign: false) { view in
             view.pods = Array(view.pods.prefix(2))
-            for index in view.pods.indices { view.pods[index].status = .failed }
+            for index in view.pods.indices {
+                view.pods[index].status = .failed
+                view.pods[index].updatedAt = Date(timeIntervalSince1970: Double(index))
+            }
         }
         defer { host.close() }
         try await host.selectTab("work")
@@ -162,12 +165,26 @@ import Testing
         let closed = host.press(close)
         #expect(closed, "The native Close control must acknowledge its press")
         try await host.wait { host.find(id: "detail-close") == nil && preferencesRetained() }
-        guard let row = host.find(label: "Open Fixture pod perf-0000") else {
-            Issue.record("Missing native row for perf-0000 after closing detail")
+        // AppKit's native List selection is available on both toolchains,
+        // unlike the legacy card wrapper's accessibility action.
+        try await host.wait { host.fleetSegment("List") != nil }
+        try host.selectFleetSegment("List")
+        try await host.wait { host.fleetTable(rowCount: 2) != nil }
+        guard let table = host.fleetTable(rowCount: 2) else {
+            Issue.record("Missing native fleet table after switching to List")
             return
         }
-        let reopened = host.press(row)
-        #expect(reopened, "The native row must acknowledge its press")
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        try await host.wait { host.inputs.selectedID == "perf-0001" && host.destination("work") }
+        try await host.wait { host.fleetSegment("List") != nil }
+        // AppKit does not consistently expose the other segment's icon label.
+        guard let (mode, listIndex) = host.fleetSegment("List"), mode.segmentCount == 2 else {
+            Issue.record("Missing two-segment Cards/List control after reopening detail")
+            return
+        }
+        mode.selectedSegment = 1 - listIndex
+        let switchedToCards = mode.sendAction(mode.action, to: mode.target)
+        #expect(switchedToCards)
         try await host.wait { host.destination("work") && preferencesRetained() }
     }
 
