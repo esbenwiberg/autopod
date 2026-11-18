@@ -4,7 +4,7 @@ import type {
   SavedDraftTarget,
 } from '../interfaces/pr-manager.js';
 import { draftError } from '../pods/saved-work-draft-repository.js';
-import { parseGitHubRepoUrl } from './github-url-identity.js';
+import { parseGitHubPrUrl, parseGitHubRepoUrl } from './github-url-identity.js';
 import { assertMergeRepository } from './merge-source-identity.js';
 
 export const draftMarker = (id: string) => `<!-- autopod-saved-work-draft:${id} -->`;
@@ -18,6 +18,9 @@ export function verifyDraftObservation(target: SavedDraftTarget, observed: Saved
     url.protocol !== 'https:' ||
     url.username ||
     url.password ||
+    url.port ||
+    url.search ||
+    url.hash ||
     !observed.draft ||
     !observed.open ||
     observed.merged ||
@@ -29,9 +32,22 @@ export function verifyDraftObservation(target: SavedDraftTarget, observed: Saved
     draftError(
       'Provider result is not the operation-owned open draft at the exact selected source and base.',
     );
-  const repo = new URL(target.repository.replace(/\.git$/, ''));
-  if (url.host !== repo.host || !url.pathname.startsWith(`${repo.pathname}/`))
-    draftError('Provider URL does not belong to the selected repository.');
+  let urlRepository: string;
+  if (url.hostname === 'github.com') {
+    const pr = parseGitHubPrUrl(observed.url);
+    urlRepository = `https://github.com/${pr.owner}/${pr.repo}`;
+  } else {
+    const match = url.pathname.match(/^(.*)\/pullrequest\/([1-9][0-9]*)\/?$/i);
+    if (!match || !Number.isSafeInteger(Number(match[2])))
+      draftError('Provider URL does not identify an exact pull request.');
+    urlRepository = `${url.origin}${match[1]}`;
+  }
+  // Reuse provider-aware identity rules (including GitHub casing/.git and ADO
+  // legacy host aliases), not raw path prefixes that can strand valid receipts.
+  assertMergeRepository(
+    { repository: target.repository, branch: target.branch, baseBranch: target.baseBranch },
+    urlRepository,
+  );
   return {
     url: observed.url,
     draft: true as const,
@@ -56,6 +72,9 @@ interface GitHubRow {
 }
 export function githubSavedDraft(request: JsonRequest): SavedDraftProvider {
   return {
+    assertRepository(repository) {
+      parseGitHubRepoUrl(repository);
+    },
     async find(target) {
       const { owner, repo } = parseGitHubRepoUrl(target.repository);
       const query = new URLSearchParams({
@@ -120,6 +139,7 @@ export function ghSavedDraft(
     return JSON.parse(result.stdout);
   });
   return {
+    assertRepository: api.assertRepository,
     find: api.find,
     async create(t, body, onPrepared) {
       await exec(
@@ -156,8 +176,12 @@ export function adoSavedDraft(repository: string, request: JsonRequest): SavedDr
     lastMergeSourceCommit: { commitId: string };
     repository: { webUrl: string };
   }
+  const assertRepository = (requested: string) =>
+    assertMergeRepository({ repository: requested, branch: '', baseBranch: '' }, repository);
   return {
+    assertRepository,
     async find(t) {
+      assertRepository(t.repository);
       const query = new URLSearchParams({
         'api-version': '7.1',
         'searchCriteria.status': 'all',
@@ -184,10 +208,7 @@ export function adoSavedDraft(repository: string, request: JsonRequest): SavedDr
       };
     },
     async create(t, body, onPrepared) {
-      assertMergeRepository(
-        { repository: t.repository, branch: t.branch, baseBranch: t.baseBranch },
-        repository,
-      );
+      assertRepository(t.repository);
       await request(
         '/pullrequests?api-version=7.1',
         {

@@ -97,12 +97,14 @@ export function createSavedWorkDraftPr(deps: {
     const provider = deps.prManagerFactory?.(settings)?.savedDraft;
     if (
       !provider ||
+      typeof provider.assertRepository !== 'function' ||
       !deps.worktreeManager.supportsCreateOnlyPublication ||
       !deps.worktreeManager.observeSourceBranch
     )
       draftError(
         'Provider does not support exact saved-work draft publication; nothing was pushed.',
       );
+    provider.assertRepository(settings.repoUrl);
     const baseBranch = pod.baseBranch ?? settings.defaultBranch;
     if (!baseBranch) draftError('Frozen target branch unavailable.');
     return {

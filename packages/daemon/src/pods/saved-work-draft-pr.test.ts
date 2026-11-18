@@ -23,6 +23,7 @@ import {
 } from '../test-utils/mock-helpers.js';
 import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import { checkpointSandboxWorkspace } from '../worktrees/sandbox-workspace-checkpoint.js';
+import { adoSavedDraft, githubSavedDraft } from '../worktrees/saved-work-draft-provider.js';
 import { checkpointSavedSource } from '../worktrees/saved-work-source.js';
 import { createControlOperationRegistry } from './control-operation-registry.js';
 import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
@@ -105,6 +106,7 @@ async function fixture(sandbox = false) {
   });
   worktrees.observeSourceBranch = vi.fn(async () => remote ?? '');
   const provider: SavedDraftProvider = {
+    assertRepository: vi.fn(),
     find: vi.fn(async () => observed),
     create: vi.fn(async (t, body, onPrepared) => {
       await onPrepared();
@@ -491,6 +493,59 @@ describe('saved-work exact human draft publication', () => {
       .prepare('INSERT INTO source_publication_receipts VALUES(?,?,?)')
       .run('uncertain-publication', '{}', 'now');
     expect((await f.controller().inspect(f.id, actor)).sources.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    'github-for-ado',
+    'ado-for-github',
+  ])('refuses incompatible provider %s before preparing or pushing', async (mismatch) => {
+    const f = await fixture();
+    const ado = 'https://dev.azure.com/org/project/_git/repo';
+    const request = vi.fn(async () => {
+      throw new Error('No provider request allowed');
+    });
+    if (mismatch === 'github-for-ado') {
+      f.settings.repoUrl = ado;
+      f.podRepo.update(f.id, { profileSnapshot: f.settings });
+      await f.git(f.source, 'remote', 'set-url', 'origin', ado);
+    }
+    Object.assign(
+      f.provider,
+      mismatch === 'github-for-ado' ? githubSavedDraft(request) : adoSavedDraft(ado, request),
+    );
+    const preview = await f.controller().inspect(f.id, actor);
+    expect(preview.sources).toEqual([]);
+    expect(preview.blockers.length).toBeGreaterThan(0);
+    await expect(
+      f.controller().prepare(
+        f.id,
+        {
+          requestId: 'unsupported-provider',
+          expectedBinding: preview.binding,
+          sourceId: `local-${await f.git(f.source, 'rev-parse', 'HEAD')}`,
+        },
+        actor,
+      ),
+    ).rejects.toThrow();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(f.podRepo.savedWorkDrafts!.latest(f.id)).toBeNull();
+  });
+
+  it('rechecks provider repository support before an already-prepared operation can push', async () => {
+    const f = await fixture();
+    const op = await f.prepare();
+    const request = vi.fn(async () => {
+      throw new Error('No request allowed');
+    });
+    Object.assign(
+      f.provider,
+      adoSavedDraft('https://dev.azure.com/org/project/_git/repo', request),
+    );
+    await expect(f.controller().confirm(f.id, f.confirm(op), actor)).rejects.toThrow();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(f.podRepo.savedWorkDrafts!.get(f.id, op.requestId)?.state).toBe('prepared');
   });
 
   it('denies unauthorized outputs, actors, native goals, active ownership and stale confirmation', async () => {

@@ -238,6 +238,8 @@ export interface SavedDraftObservation {
   body: string;
 }
 export interface SavedDraftProvider {
+  /** Read-only local admission: reject unsupported/mismatched repositories before any push. */
+  assertRepository(repository: string): void;
   find(target: SavedDraftTarget): Promise<SavedDraftObservation | null>;
   create(target: SavedDraftTarget, body: string, onPrepared: () => Promise<void>): Promise<void>;
 }

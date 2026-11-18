@@ -64,8 +64,11 @@ use a new request ID to escape uncertainty or clear source custody.
 Active worker/validation, deletion, source rewrite, recovery preparation and
 unreconciled publication ownership block this workflow. Permanent historical
 retention alone is not active mutation authority. Unsupported providers refuse
-before push. Supported paths use GitHub `draft:true`, gh `--draft` and ADO
-`isDraft:true`. The deterministic body records task failure, source, freshness,
+before preparation or push: the adapter must locally validate support for the
+frozen repository, including on every later confirmation. Supported paths use
+GitHub `draft:true`, gh `--draft` and ADO `isDraft:true`. Canonical provider PR
+URLs reconcile using repository identity (including GitHub casing/`.git`/trailing
+slashes and ADO legacy host aliases), not a raw URL prefix. The deterministic body records task failure, source, freshness,
 exclusions and historical checks with unknown exact-snapshot applicability. It
 never generates a pass, waiver or AI-authored success narrative.
 

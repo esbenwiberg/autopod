@@ -144,6 +144,8 @@ describe('real saved-work draft provider contract', () => {
     { repository: 'https://github.com/other/repo' },
     { body: 'matching SHA alone is not ownership' },
     { url: 'https://evil.example/pull/9' },
+    { url: 'https://github.com/org/repo/issues/9' },
+    { url: 'https://github.com/org/repo/pull/9?redirect=other' },
   ])('refuses provider result mismatch %j', (override) => {
     const observed: SavedDraftObservation = {
       url: 'https://github.com/org/repo/pull/9',
@@ -158,6 +160,49 @@ describe('real saved-work draft provider contract', () => {
       ...override,
     };
     expect(() => verifyDraftObservation(t, observed)).toThrow();
+  });
+  it.each([
+    'https://github.com/ORG/Repo',
+    'https://github.com/org/repo/',
+    'https://github.com/ORG/Repo.git/',
+  ])('reconciles the canonical PR URL for repository variant %s', (repository) => {
+    expect(
+      verifyDraftObservation(
+        { ...t, repository },
+        {
+          url: 'https://github.com/org/repo/pull/9',
+          repository: 'https://github.com/org/repo',
+          branch: t.branch,
+          baseBranch: t.baseBranch,
+          head: t.head,
+          draft: true,
+          open: true,
+          merged: false,
+          body,
+        },
+      ).url,
+    ).toBe('https://github.com/org/repo/pull/9');
+  });
+  it.each([
+    'https://dev.azure.com/org/project/_git/repo/',
+    'https://org.visualstudio.com/project/_git/repo',
+  ])('reconciles canonical ADO PR URLs for %s', (repository) => {
+    expect(
+      verifyDraftObservation(
+        { ...t, repository },
+        {
+          url: 'https://dev.azure.com/org/project/_git/repo/pullrequest/9',
+          repository: 'https://dev.azure.com/org/project/_git/repo',
+          branch: t.branch,
+          baseBranch: t.baseBranch,
+          head: t.head,
+          draft: true,
+          open: true,
+          merged: false,
+          body,
+        },
+      ).draft,
+    ).toBe(true);
   });
   it('never writes when final source admission fails', async () => {
     const calls = apiMock();
