@@ -97,7 +97,23 @@ export class OrchestrationContinuations {
   spawnFromAccepted(input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     return this.admit('spawn', input, raw);
   }
+  /** Preflight outside SQLite, then reserve the whole controller proposal or none of it. */
+  async spawnWave(input: ContinuationCheckpoint, requests: ManagedPodRequest[]) {
+    if (requests.length > 8) throw new Error('controller-wave-too-large');
+    const inserts: Array<() => void> = [];
+    for (const request of requests) inserts.push(await this.prepare('spawn', input, request));
+    this.db
+      .transaction(() => {
+        for (const insert of inserts) insert();
+      })
+      .immediate();
+  }
   private async admit(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
+    const insert = await this.prepare(kind, input, raw);
+    this.db.transaction(insert).immediate();
+    return raw.startKey;
+  }
+  private async prepare(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     const cp = { ...input };
     const req = validateManagedRequest(raw);
     const repo = req.effectiveGrant.scope.repositories[0];
@@ -127,59 +143,48 @@ export class OrchestrationContinuations {
         throw new Error('continuation-key-conflict');
       return !!prior;
     };
-    if (replay()) return req.startKey;
-    await this.withExecutor(cp, (service) => service.preflight(req, principal(cp.run)));
-    this.db
-      .transaction(() => {
-        if (replay()) return;
-        const run = this.db
-          .prepare(
-            'SELECT worker_request_limit,accepted_evidence FROM orchestration_runs WHERE id=?',
-          )
-          .get(cp.run) as
-          | { worker_request_limit: number; accepted_evidence: string | null }
-          | undefined;
-        if (!run || (kind === 'spawn' && run.accepted_evidence !== cp.evidenceDigest))
-          throw new Error('continuation-not-admissible');
-        const used = this.db
-          .prepare(
-            'SELECT COALESCE(sum(reserved_requests),0) FROM orchestration_continuations WHERE run_id=?',
-          )
-          .pluck()
-          .get(cp.run) as number;
-        if (run.worker_request_limit - used < budget.maxProviderRequests)
-          throw new Error('continuation-budget-exhausted');
-        const result = this.db
-          .prepare(
-            `UPDATE orchestration_runs SET accepted_commit=?, accepted_evidence=?
+    if (!replay())
+      await this.withExecutor(cp, (service) => service.preflight(req, principal(cp.run)));
+    return () => {
+      if (replay()) return;
+      const run = this.db
+        .prepare(
+          'SELECT remaining,accepted_evidence FROM orchestration_runs JOIN orchestration_request_balances USING(id) WHERE id=?',
+        )
+        .get(cp.run) as { remaining: number; accepted_evidence: string | null } | undefined;
+      if (!run || (kind === 'spawn' && run.accepted_evidence !== cp.evidenceDigest))
+        throw new Error('continuation-not-admissible');
+      if (run.remaining < budget.maxProviderRequests)
+        throw new Error('continuation-budget-exhausted');
+      const result = this.db
+        .prepare(
+          `UPDATE orchestration_runs SET accepted_commit=?, accepted_evidence=?
              WHERE id=? AND repository=? AND policy_digest=? AND accepted_commit=? AND canceled=0`,
-          )
-          .run(
-            cp.commit,
-            cp.evidenceDigest,
-            cp.run,
-            cp.repository,
-            cp.policyDigest,
-            kind === 'advance' ? cp.predecessor : cp.commit,
-          );
-        if (!result.changes) throw new Error('continuation-not-admissible');
-        this.db
-          .prepare(
-            `INSERT INTO orchestration_continuations(run_id,start_key,attempt_id,operation_digest,checkpoint_json,request_json,reserved_requests,operation_kind) VALUES(?,?,?,?,?,?,?,?)`,
-          )
-          .run(
-            cp.run,
-            req.startKey,
-            req.dispatcherAttemptId,
-            operation,
-            canonical(cp),
-            canonical(req),
-            budget.maxProviderRequests,
-            kind,
-          );
-      })
-      .immediate();
-    return req.startKey;
+        )
+        .run(
+          cp.commit,
+          cp.evidenceDigest,
+          cp.run,
+          cp.repository,
+          cp.policyDigest,
+          kind === 'advance' ? cp.predecessor : cp.commit,
+        );
+      if (!result.changes) throw new Error('continuation-not-admissible');
+      this.db
+        .prepare(
+          `INSERT INTO orchestration_continuations(run_id,start_key,attempt_id,operation_digest,checkpoint_json,request_json,reserved_requests,operation_kind) VALUES(?,?,?,?,?,?,?,?)`,
+        )
+        .run(
+          cp.run,
+          req.startKey,
+          req.dispatcherAttemptId,
+          operation,
+          canonical(cp),
+          canonical(req),
+          budget.maxProviderRequests,
+          kind,
+        );
+    };
   }
 
   cancel(run: string) {

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import Anthropic from '@anthropic-ai/sdk';
 import { build } from 'esbuild';
 import { expect, it, onTestFinished } from 'vitest';
 import { digest } from '../managed/canonical.js';
@@ -32,6 +33,12 @@ async function setup(workerRequests = 2, maxActive = 1) {
   f.db.exec(
     await readFile(
       new URL('../db/migrations/258_orchestration_waves.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  f.db.exec(
+    await readFile(
+      new URL('../db/migrations/259_orchestration_controller_turns.sql', import.meta.url),
       'utf8',
     ),
   );
@@ -258,6 +265,144 @@ it('queues an affordable child until its run has a free worker slot', async () =
   expect(failed).toEqual(['killed']);
   expect(await l.recover()).toEqual({ blocked: [] });
   expect(f.launches()).toBe(2);
+});
+
+async function controllerFixture(limit: number, reply: (payload: string) => string) {
+  const { f, request, cp, host, ledger } = await setup(limit, 6);
+  const l = ledger();
+  await l.acceptAndContinue(cp, request);
+  expect(await l.recover()).toEqual({ blocked: [] });
+  const first = f.service().lookup('native.example', request.startKey);
+  if (!first) throw new Error('missing first worker');
+  await f.runtime.stop(first.pod_id);
+  await f.service().enforceExpiry();
+  await f.service().artifactPipeline?.tick();
+  l.waves.park(cp.run, 'plan-next', 0, 1);
+  let calls = 0;
+  const model = 'fixture-controller';
+  const client = new Anthropic({
+    apiKey: 'fixture-key-not-real',
+    fetch: async (_url, init) => {
+      calls++;
+      return new Response(
+        JSON.stringify({
+          id: 'message',
+          type: 'message',
+          role: 'assistant',
+          model,
+          content: [{ type: 'text', text: reply(String(init?.body)) }],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 37, output_tokens: 19 },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  const tick = () =>
+    host().tickController(
+      cp.run,
+      {
+        mission: 'Check the completed work',
+        routeId: 'local-test',
+        recipes: { inspect: request.startKey },
+      },
+      { client, model },
+    );
+  return { f, request, cp, tick, calls: () => calls };
+}
+it('replays a recorded controller decision without a second SDK request or duplicate workers', async () => {
+  const { f, tick, calls, request } = await controllerFixture(7, (payload) => {
+    expect(payload).not.toContain('effectiveGrant');
+    expect(payload).not.toContain('profileSnapshot');
+    expect(JSON.parse(payload)).not.toHaveProperty('tools');
+    expect(payload).toContain('complete');
+    return JSON.stringify({
+      children: [
+        { recipe: 'inspect', brief: 'Check CLI' },
+        { recipe: 'inspect', brief: 'Check daemon' },
+      ],
+      waitFor: 1,
+    });
+  });
+  f.db.exec(
+    `CREATE TEMP TRIGGER lose_ack BEFORE UPDATE OF acknowledged ON orchestration_result_waits BEGIN SELECT RAISE(ABORT,'lost-ack'); END`,
+  );
+  await expect(tick()).rejects.toThrow('lost-ack');
+  expect(calls()).toBe(1);
+  // TEMP trigger is lost on reopen; intents, controller receipt and next wait survive.
+  f.restart();
+  expect(await tick()).toEqual({ blocked: [] });
+  expect(calls()).toBe(1);
+  expect(f.launches()).toBe(3);
+  const rows = f.db
+    .prepare(
+      'SELECT request_json FROM orchestration_continuations WHERE start_key!=? ORDER BY rowid',
+    )
+    .pluck()
+    .all(request.startKey) as string[];
+  expect(rows.map((r) => JSON.parse(r).task.objective)).toEqual(
+    ['Check CLI', 'Check daemon'].map(
+      (brief) => request.task.objective + '\n\nFollow-up task:\n' + brief,
+    ),
+  );
+  for (const raw of rows) {
+    const worker = JSON.parse(raw);
+    expect(worker.effectiveGrant.scope).toEqual(request.effectiveGrant.scope);
+    expect(worker.route).toEqual(request.route);
+    expect(worker.startKey).toMatch(/^turn-/);
+  }
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    0,
+  );
+  expect(
+    f.db
+      .prepare('SELECT status,input_tokens,output_tokens FROM orchestration_controller_turns')
+      .raw()
+      .all(),
+  ).toEqual([['decided', 37, 19]]);
+  expect(
+    f.db
+      .prepare('SELECT acknowledged FROM orchestration_result_waits ORDER BY rowid')
+      .pluck()
+      .all(),
+  ).toEqual([1, 0]);
+});
+it.each([
+  'unknown recipe',
+  'raw grant',
+  'uncertain call',
+  'over budget',
+])('blocks %s without partially admitting a wave or recalling the model', async (mode) => {
+  const { f, tick, calls } = await controllerFixture(6, () => {
+    if (mode === 'uncertain call') throw new Error('transport unavailable');
+    return JSON.stringify({
+      children: [
+        { recipe: 'inspect', brief: 'one' },
+        {
+          recipe: mode === 'unknown recipe' ? 'admin' : 'inspect',
+          brief: 'two',
+          ...(mode === 'raw grant' ? { effectiveGrant: {} } : {}),
+        },
+      ],
+      waitFor: null,
+    });
+  });
+  await expect(tick()).rejects.toThrow();
+  f.restart();
+  const error =
+    mode === 'uncertain call'
+      ? 'controller-request-uncertain'
+      : mode === 'over budget'
+        ? 'budget-exhausted'
+        : 'controller-decision-invalid';
+  await expect(tick()).rejects.toThrow(error);
+  expect(calls()).toBe(1);
+  expect(f.launches()).toBe(1);
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_continuations').pluck().get()).toBe(1);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    3,
+  );
 });
 
 async function buildStartupHarness() {

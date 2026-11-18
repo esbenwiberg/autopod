@@ -4,8 +4,9 @@ import type Database from 'better-sqlite3';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
+import type { ProfileLlmClient } from '../providers/llm-client.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
-
+import { type ControllerConfig, tickController } from './controller-turns.js';
 import type { ResultWake } from './run-waves.js';
 
 type Subject = Omit<ContinuationCheckpoint, 'evidenceDigest'>;
@@ -72,6 +73,10 @@ export class LocalCheckpointHost {
   async tick(run: string, controller: (wake: ResultWake) => Promise<void>) {
     await this.ledger.waves.dispatch(run, controller);
     return this.ledger.recover(run);
+  }
+  /** Opt-in model-backed turn. Caller selects an approved client; never discovers credentials. */
+  tickController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
+    return tickController(this.db, this.ledger, run, config, client);
   }
   async retain(input: Subject, bytes: Buffer, verify: Verify): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
