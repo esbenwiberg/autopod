@@ -63,8 +63,8 @@ public struct TaskBudgetActions: Sendable {
       return "Enter a positive whole token count (up to 9007199254740991)."
     }
     guard value > current else { return "Choose a limit higher than the current task limit." }
-    guard value > snapshot.totalRecordedTokens else {
-      return "Choose a limit above the task’s recorded usage."
+    guard value > snapshot.tokensCountedForBudget else {
+      return "Choose a limit above the task’s budget-counted usage."
     }
     return nil
   }

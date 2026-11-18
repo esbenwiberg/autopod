@@ -84,6 +84,8 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let recordedOutputTokens: Int
   public let recordedUnclassifiedTokens: Int?
   public let recordedTotalTokens: Int?
+  public let budgetCountedTokens: Int?
+  public var tokensCountedForBudget: Int { budgetCountedTokens ?? totalRecordedTokens }
   public var totalRecordedTokens: Int {
     recordedTotalTokens ?? (recordedInputTokens + recordedOutputTokens + (recordedUnclassifiedTokens ?? 0))
   }

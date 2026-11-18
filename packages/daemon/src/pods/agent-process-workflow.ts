@@ -19,6 +19,7 @@ import {
   deriveAgentAttempt,
   hasLatestPersistedAgentTerminalEventComplete,
 } from './agent-execution-policy.js';
+import { BUDGET_CONTINUATION_PENDING } from './budget-stop.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { persistEscalation } from './escalation-coordinator.js';
@@ -87,6 +88,16 @@ export function createAgentProcessWorkflow(
       );
       startupAdmission = undefined;
     };
+
+    // A lost explicit retained-coding dispatch is an outcome to inspect, never
+    // a ticket for startup/queue machinery to allocate or replay a worker.
+    if (pod.reworkReason === BUDGET_CONTINUATION_PENDING) {
+      emitActivityStatus(
+        podId,
+        'Retained budget continuation needs its saved request inspected; no automatic worker replay.',
+      );
+      return;
+    }
 
     // Defense-in-depth: processPod must only run for pods in queued/handoff state.
     // The queue's activeIds dedup prevents most races, but this guard ensures

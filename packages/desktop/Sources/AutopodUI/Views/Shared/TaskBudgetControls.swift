@@ -36,7 +36,7 @@ struct TaskBudgetControls: View {
       }
       if let snapshot = model.snapshot {
         Text(
-          "\(snapshot.totalRecordedTokens.formatted()) recorded tokens / \(snapshot.tokenBudget?.formatted() ?? "no limit")"
+          "\(snapshot.tokensCountedForBudget.formatted()) budget-counted tokens / \(snapshot.tokenBudget?.formatted() ?? "no limit")"
         )
         .monospacedDigit().accessibilityIdentifier("task-budget-usage")
         Text(
@@ -65,7 +65,7 @@ struct TaskBudgetControls: View {
         }
       }
       Text(
-        "Cached input counts toward recorded tokens; this is not a dollar spending cap. Changes affect this task only, not its profile or frozen launch configuration. Retry, guidance, source and Goal checks still apply."
+        "Attributed cache reads count at 0.1× toward the token limit; raw recorded usage is retained separately. This is not a dollar spending cap. Changes affect this task only, not its profile or frozen launch configuration. Saving does not restart coding. Retry, guidance, source and Goal checks still apply."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let message = model.message { Text(message).font(.callout).textSelection(.enabled) }

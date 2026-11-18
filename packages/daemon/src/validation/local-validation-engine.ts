@@ -1951,7 +1951,7 @@ function isPossiblyKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
-function hasFatalSandboxMemorySignature(output: string): boolean {
+function hasFatalMemorySignature(output: string): boolean {
   return (
     /RangeError:\s*Array buffer allocation failed/i.test(output) ||
     /FATAL ERROR:.*JavaScript heap out of memory/i.test(output) ||
@@ -1967,8 +1967,16 @@ function classifyCommandResourceFailure(
   if (result.exitCode === 0) return null;
 
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  if (executionTarget === 'sandbox' && hasFatalSandboxMemorySignature(output))
-    return sandboxMemoryExhaustedFailure(phase);
+  if (hasFatalMemorySignature(output))
+    return executionTarget === 'sandbox'
+      ? sandboxMemoryExhaustedFailure(phase)
+      : {
+          phase,
+          code: 'PROCESS_MEMORY_EXHAUSTED',
+          message:
+            'Validation process exhausted its memory or JavaScript heap. Qualify runner/process memory before retrying; a V8 heap limit is not proof of a container OOM. Repository rework is not automatically indicated.',
+          retryable: false,
+        };
   if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
   return null;
 }
@@ -2054,7 +2062,7 @@ function classifyValidationInfrastructureFailure(
   if (executionTarget === 'sandbox') {
     const message = error instanceof Error ? error.message : String(error);
     const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
-    if (hasFatalSandboxMemorySignature(`${message}\n${partial}`)) {
+    if (hasFatalMemorySignature(`${message}\n${partial}`)) {
       return sandboxMemoryExhaustedFailure(phase);
     }
   }

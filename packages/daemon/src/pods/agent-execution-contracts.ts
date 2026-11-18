@@ -115,6 +115,7 @@ export interface AgentProcessCaptured {
 }
 
 export interface AgentConsumerCaptured {
+  preservePodWorkspace(pod: Pod, reason: string): Promise<void>;
   runtimeRegistry: RuntimeRegistry;
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   podRepo: PodRepository;

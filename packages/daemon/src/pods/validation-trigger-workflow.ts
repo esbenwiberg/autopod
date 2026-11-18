@@ -5,6 +5,12 @@ import type { ValidationEngine } from '../interfaces/index.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
+import {
+  assertBudgetCodingNotInterrupted,
+  BUDGET_CONTINUATION_CHECKS_ONLY,
+  continueBudgetStoppedCoding,
+  isBudgetStopped,
+} from './budget-stop.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { assertNoInfrastructureBlocker, persistEscalation } from './escalation-coordinator.js';
@@ -112,7 +118,7 @@ export function createValidationTriggerWorkflow(
     options?: {
       force?: boolean;
       validationOnly?: boolean;
-      onReworkQueued?: (generation: number) => void;
+      onReworkQueued?: (generation: number, mode?: 'retained-budget') => void;
     },
   ): Promise<void> {
     assertExecutionTerminationVerified(podId);
@@ -145,6 +151,9 @@ export function createValidationTriggerWorkflow(
     const lifecycleGeneration = pod.lifecycleGeneration;
     const lifecycleContainerId = pod.containerId;
     const force = options?.force ?? false;
+    if (!force || options?.validationOnly) assertBudgetCodingNotInterrupted(pod);
+    const validationOnly =
+      options?.validationOnly || pod.reworkReason === BUDGET_CONTINUATION_CHECKS_ONLY;
 
     const triggerValidationFromUpdateIntent = () => {
       setImmediate(() =>
@@ -187,6 +196,18 @@ export function createValidationTriggerWorkflow(
       pod.status === 'validated';
     // Interactive pods can always be re-provisioned: no agent, no validation, no worktree required.
     const isInteractive = pod.options.agentMode === 'interactive';
+    if (force && !options?.validationOnly && fromTerminal && isBudgetStopped(pod)) {
+      await continueBudgetStoppedCoding(pod, this, {
+        repo: podRepo,
+        container: containerManagerFactory.get(pod.executionTarget),
+        transition,
+        taskFeedbackEvents,
+        persistRuntimeCredentialsForPod,
+        emitActivityStatus,
+        ...(options?.onReworkQueued ? { onReworkQueued: options.onReworkQueued } : {}),
+      });
+      return;
+    }
     if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
       this.assertCanRework(podId);
       emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
@@ -920,7 +941,7 @@ export function createValidationTriggerWorkflow(
         if (tryConsumeUpdateIntent()) return;
 
         if (
-          options?.validationOnly ||
+          validationOnly ||
           podRepo.retainedCoding?.isOwner(podId) ||
           podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
         ) {

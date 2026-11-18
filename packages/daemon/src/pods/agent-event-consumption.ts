@@ -25,6 +25,11 @@ import {
   hasAlreadyCountedCompleteEvent,
   persistedAgentCompleteEventKeys,
 } from './agent-execution-policy.js';
+import {
+  BUDGET_CONTINUATION_CHECKS_ONLY,
+  BUDGET_CONTINUATION_CODING,
+  BUDGET_CONTINUATION_PENDING,
+} from './budget-stop.js';
 import { assertNoInfrastructureBlocker, isBlockingEscalation } from './escalation-coordinator.js';
 import type { PodUpdates } from './pod-repository.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
@@ -170,6 +175,7 @@ export function createAgentEventConsumption(
         );
       }
     };
+    let budgetStopVerified = false;
     let superseded = false;
     let accountFailover = false;
     let eventError: unknown;
@@ -222,6 +228,15 @@ export function createAgentEventConsumption(
             )
           : undefined;
         const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
+        // The old budget interruption ends only after the new run, retry grant
+        // and provider segment were admitted atomically. Later worker failures
+        // must retain their real cause rather than masquerading as another cap.
+        if (currentPod.reworkReason === BUDGET_CONTINUATION_PENDING)
+          podRepo.update(podId, {
+            pauseReason: null,
+            failureReason: null,
+            reworkReason: BUDGET_CONTINUATION_CODING,
+          });
         if (podRepo.retainedCoding?.isOwner(podId)) {
           if (!runId || !workerAdmission || providerOrdinal === undefined)
             throw new Error('Coding requires durable worker/retry/provider accounting');
@@ -232,7 +247,13 @@ export function createAgentEventConsumption(
           if (cycle === undefined) throw new Error('Coding completion cycle unavailable');
           podRepo.retainedCoding.bindWorker(podId, runId, cycle, providerOrdinal);
         }
-        return { currentPod, currentProfile, runId, providerOrdinal, workerAdmission };
+        return {
+          currentPod: podRepo.getOrThrow(podId),
+          currentProfile,
+          runId,
+          providerOrdinal,
+          workerAdmission,
+        };
       });
       attemptPod = initialized.currentPod;
       attemptProfile = initialized.currentProfile;
@@ -536,8 +557,14 @@ export function createAgentEventConsumption(
                   outputTokens: activeAttempt.outputTokens + (usage.totalOutputTokens ?? 0),
                   costUsd: activeAttempt.costUsd + (usage.costUsd ?? 0),
                 });
-              if (event.type === 'complete')
+              if (event.type === 'complete') {
                 podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
+                // Completion can park on a soft budget before the original
+                // caller reaches handleCompletion. Carry the one-turn boundary
+                // through later human budget approval as well.
+                if (currentSession.reworkReason === BUDGET_CONTINUATION_CODING)
+                  podRepo.update(podId, { reworkReason: BUDGET_CONTINUATION_CHECKS_ONLY });
+              }
             });
           } catch (error) {
             // A live worker cannot continue spending after its counters become unusable.
@@ -639,6 +666,7 @@ export function createAgentEventConsumption(
                 observedTerminalOutcome = 'failed';
                 await stopUsageWorker();
                 if (!ownsRun()) return 'stopped';
+                budgetStopVerified = !lifecycle?.nativeGoal;
               }
               if (policy === 'hard' || !canExtend) {
                 emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
@@ -646,7 +674,14 @@ export function createAgentEventConsumption(
                 if (s.status === 'running') {
                   transition(s, 'failed', {
                     completedAt: new Date().toISOString(),
-                    failureReason: `Token budget exceeded (${usedText}).`,
+                    failureReason:
+                      event.type === 'complete'
+                        ? `Token budget reached after coding completed (${usedText}). Adjust the task budget, then retry checks; no interrupted coding worker remains.`
+                        : `Token budget exceeded (${usedText}).`,
+                    pauseReason: event.type === 'complete' ? null : 'budget',
+                    ...(event.type === 'complete'
+                      ? { reworkReason: BUDGET_CONTINUATION_CHECKS_ONLY }
+                      : {}),
                   });
                 }
                 outcome = 'failed';
@@ -874,7 +909,7 @@ export function createAgentEventConsumption(
                 podRepo.taskExecutions?.finishRun(
                   taskRunId,
                   recordedOutcome,
-                  terminalClassification?.category ?? null,
+                  budgetStopVerified ? 'token_budget' : (terminalClassification?.category ?? null),
                 );
             }
             if (workerAdmissionId)
@@ -899,6 +934,43 @@ export function createAgentEventConsumption(
                   ? null
                   : providerRetryNotBefore,
               );
+            // A verified cap stop is settlement, not successful completion. Record
+            // it only after run accounting closed, and preserve before allowing a
+            // human coding continuation. No result/review/usage finality is invented.
+            const ownsStoppedRun = () =>
+              activeAgentRuns.get(podId)?.token === runToken &&
+              ownsExpectedLifecycle() &&
+              (!deps.providerAttemptRepo ||
+                deps.providerAttemptRepo.listRaw(podId).at(-1)?.ordinal ===
+                  runOwner.providerOrdinal);
+            if (budgetStopVerified && !hasEventError && !superseded && ownsStoppedRun()) {
+              const stopped = podRepo.getOrThrow(podId);
+              const cycle = stopped.finalization?.cycle;
+              if (
+                stopped.status === 'failed' &&
+                cycle !== undefined &&
+                podRepo.taskExecutions?.hasSettledRun?.(stopped, cycle, 'token_budget')
+              ) {
+                podRepo.completionJournal?.settle(stopped);
+                if (stopped.containerId && stopped.worktreePath) {
+                  try {
+                    await captured.preservePodWorkspace(stopped, 'verified token-budget stop');
+                    const current = podRepo.getOrThrow(podId);
+                    if (ownsStoppedRun() && current.finalization?.cycle === cycle)
+                      podRepo.completionJournal?.mark(current, 'ready', true);
+                  } catch (error) {
+                    logger.error(
+                      { error, podId },
+                      'Budget-stop preservation failed; retaining source',
+                    );
+                    emitActivityStatus(
+                      podId,
+                      'Token-budget worker stopped, but preservation is incomplete. Original resources retained; coding continuation remains blocked.',
+                    );
+                  }
+                }
+              }
+            }
           } finally {
             if (activeAgentRuns.get(podId)?.token === runToken) {
               stopCommitPolling(podId);

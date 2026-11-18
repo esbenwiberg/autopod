@@ -1,6 +1,7 @@
 import type { EffectiveLaunchConfig } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCompletionFixture } from '../test-utils/completion-helpers.js';
+import { BUDGET_CONTINUATION_CHECKS_ONLY } from './budget-stop.js';
 import { createCompletionWorkflow } from './completion-workflow.js';
 import { createGoalRepository } from './goal-repository.js';
 
@@ -17,6 +18,15 @@ afterEach(() => {
 });
 
 describe('completion entry', () => {
+  it('runs checks without automatic coding retry after one budget continuation', async () => {
+    const f = fixture();
+    f.running();
+    f.podRepo.update('prepare', { reworkReason: BUDGET_CONTINUATION_CHECKS_ONLY });
+    await f.workflow().handleCompletion.call(f.calls, 'prepare');
+    expect(f.calls.triggerValidation).toHaveBeenCalledExactlyOnceWith('prepare', {
+      validationOnly: true,
+    });
+  });
   it.each([
     'complete',
     'killed',

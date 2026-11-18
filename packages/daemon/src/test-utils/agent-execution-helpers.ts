@@ -26,6 +26,7 @@ export function createAgentExecutionFixture(disk = false) {
     activeAgentRuns: registry.activeAgentRuns,
   });
   const consumerCaptured = {
+    preservePodWorkspace: vi.fn(async () => {}),
     runtimeRegistry: f.deps.runtimeRegistry,
     containerManagerFactory: f.deps.containerManagerFactory,
     ...registry,

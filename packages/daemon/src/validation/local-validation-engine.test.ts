@@ -3309,14 +3309,23 @@ human_review: []
   });
 
   it.each(
-    sandboxMemorySignatures,
-  )('keeps fatal memory output as an ordinary failure for local containers: %s', async (signature) => {
+    sandboxMemoryPhases.flatMap((phase) =>
+      sandboxMemorySignatures.map((signature) => ({ phase, signature })),
+    ),
+  )('classifies $phase fatal Docker memory output as infrastructure: $signature', async ({
+    phase,
+    signature,
+  }) => {
     const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
+    const result = await engine.validate(sandboxMemoryConfig(phase, 'local'));
 
-    const result = await engine.validate(sandboxMemoryConfig('lint', 'local'));
-
-    expect(result.infrastructureFailure).toBeUndefined();
-    expect(result.lint?.status).toBe('fail');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase,
+      code: 'PROCESS_MEMORY_EXHAUSTED',
+      retryable: false,
+    });
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
   });
 
   it.each([
