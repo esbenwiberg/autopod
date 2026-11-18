@@ -9,6 +9,7 @@ import { type CandidateRef, type CombinedGates, combinedVerifier } from './combi
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 import { type ControllerConfig, tickController } from './controller-turns.js';
 import { attachLocalController } from './local-controller-loop.js';
+import { tryControllerOwner } from './local-recovery-claim.js';
 import type { ResultWake } from './run-waves.js';
 
 import { UnknownOutcomes } from './unknown-outcomes.js';
@@ -75,6 +76,9 @@ export class LocalCheckpointHost {
     });
     this.interventions = new UnknownOutcomes(db, this.ledger);
   }
+  usesDatabase(db: Database.Database) {
+    return db === this.db;
+  }
   /** One host scheduler turn, after managed result collection or restart. No waiting worker. */
   async tick(run: string, controller: (wake: ResultWake) => Promise<void>) {
     await this.ledger.waves.dispatch(run, controller);
@@ -87,7 +91,18 @@ export class LocalCheckpointHost {
   /** Subscribe to worker state changes on this daemon connection and catch up from SQLite. */
   watchController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
     const policy = structuredClone(config);
-    return attachLocalController(this.db, run, () => this.tickController(run, policy, client));
+    const release = tryControllerOwner(this.db, run);
+    if (!release) throw new Error('local-controller-already-attached');
+    try {
+      const loop = attachLocalController(this.db, run, () =>
+        this.tickController(run, policy, client),
+      );
+      let closing: Promise<void> | undefined;
+      return { settled: loop.settled, close: () => (closing ??= loop.close().finally(release)) };
+    } catch (e) {
+      release();
+      throw e;
+    }
   }
   /** Host-only: qualify an unpublished two-worker integration, without advancing or charging. */
   retainCombined(

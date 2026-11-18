@@ -1,6 +1,6 @@
 # Local managed orchestration
 
-This internal, opt-in host composition lets a controller commission workers, yield for **N new results**, and plan another wave before the rest finish. SQLite owns the decisions and reservations. A controller reply is a proposal, not permission to choose a grant, accept code, or publish it. There is no general hosted scheduler or public endpoint.
+This internal, opt-in host composition lets a controller commission workers, yield for **N new results**, and plan another wave before the rest finish. SQLite owns the decisions and reservations. A controller reply is a proposal, not permission to choose a grant, accept code, or publish it. The operator routes below are available only when explicitly composed; the normal daemon entry point does not yet provision run slots.
 
 ## Reproduce the overlapping waves
 
@@ -35,6 +35,12 @@ The daemon attempts at most two Messages requests (512 output tokens each, 8 KiB
 
 **Release boundary:** this branch incorporates `b8c9f2ec` and preserves its validation timings migration 255. The seven unpublished orchestration scripts now occupy 262–268 with unchanged SQL; 256–261 are intentionally unused. A spike or mixed-lineage database is refused, not automatically renumbered or replayed. Keep such a database with its original binary. `src/db/orchestration-release-upgrade.test.ts` uses a verified online backup of a synthetic release-255 database, migrates only a restored copy, and checks preserved evidence, uncertain request accounting, reopen and integrity. This is not a backup or upgrade of the running service. Before rollout, repeat verification on an authorized backup of the intended database and obtain independent release review. The released binary has no canary entry point; the local Docker integration uses a stubbed hosted response, not a live model.
 
+## Operator lifecycle (opt-in server composition)
+
+With `ServerDependencies.operatorRuns`, a registered operator can POST `/orchestration/runs/:slot/start`, GET `.../status`, POST `.../cancel`, or POST `.../fence`. The host must first provision the run envelope, verified checkpoint, recipe catalog, controller policy and client. A slot belongs to an exact issuer/audience/object binding, not everyone in an installation. Start accepts no overrides. Status includes request balance, children, observed exits and inspectable unknown outcomes. Fence takes only an inspected `kind`, `key`, `binding` and a `caseRef`; the daemon supplies the actor and run. Cancel requests stops; it does not claim that workers have exited.
+
+Boot takes an OS-released owner lock next to the canonical SQLite file before accepting requests, and reattaches only previously started, uncanceled slots. Do not remove owner lock files from a running installation. The operator route tests use Fastify injection, deterministic provider replies, and persistent SQLite. They cover restart, unauthorized access, replay, and refusal while a separate process holds the owner lock. This does not yet prove a packaged worker or full-daemon crash recovery.
+
 ## Host lifecycle
 
 1. Construct `LocalCheckpointHost` with a private scratch directory and a host-owned managed-service factory. Open a run and retain a verified starting commit. Set the whole-run request allowance and concurrent worker limit separately. For the example, eight worker reservations of two requests plus two controller requests cost 18; six slots suffice.
@@ -48,4 +54,4 @@ The daemon attempts at most two Messages requests (512 output tokens each, 8 KiB
 - Wakes are at-least-once. A recorded decision replays with the same worker keys and reservations. A missing provider reply is not permission for another request. For crash tests run `continuations.test.ts -t 'SIGKILLed scheduler'` with Vitest.
 - Inspect uncertainty with `host.interventions.inspect(run)`. A trusted operator may call `fence(target, actor, caseRef)` on an inspected target. This irreversibly stops new work for the **whole run**, records the action and preserves the charge. An unanswered allocation is not evidence of exit.
 - Findings don't accept code. Report-based children keep the host-approved checkpoint. For a two-worker source integration, `retainCombined` checks the run-owned parents and exact clean tree and verifies separate policy-pinned signatures. `acceptAndContinue` admits a child pinned to that commit. See `src/managed/checkpoint-handoff.test.ts`.
-- This is a local orchestration proof, not a production sandbox or rollout. The tests do not require provider credentials, publish intermediate refs or create a PR. Hosted owner election/event delivery, isolated signing services, operator authentication and final human-approved publication need separate integration and verification.
+- This is a local orchestration proof, not a production sandbox or rollout. The tests do not require provider credentials, publish intermediate refs or create a PR. Hosted owner election/event delivery, isolated signing services, packaged-worker operator composition and final human-approved publication need separate integration and verification.
