@@ -64,6 +64,7 @@ export default defineConfig({
           'src/github/read-broker.ts',
           'src/issue-watcher/issue-watcher-service.ts',
           'src/managed/codex-wire.ts',
+          'src/orchestration/continuations.ts',
           'src/pods/admission-memory-briefing.ts',
           'src/pods/environment-qualification.ts',
           'src/pods/prerequisite-blocker.ts',

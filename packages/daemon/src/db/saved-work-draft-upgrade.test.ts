@@ -19,7 +19,7 @@ it('upgrades applied v253 without skipping draft tables or changing reviewer/pub
       .filter((file) => file.endsWith('.sql'))
       .map((file) => Number.parseInt(file, 10));
     expect(new Set(prefixes).size).toBe(prefixes.length);
-    expect(Math.max(...prefixes)).toBe(254);
+    expect(Math.max(...prefixes)).toBe(255);
     db.prepare(
       'INSERT INTO pod_reviewer_budget_revisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).run(
@@ -48,7 +48,7 @@ it('upgrades applied v253 without skipping draft tables or changing reviewer/pub
       db.prepare("SELECT 1 FROM sqlite_master WHERE name='saved_work_draft_pr_operations'").get(),
     ).toBeUndefined();
     runMigrations(db, MIGRATIONS_DIR, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 254 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 255 });
     expect(
       db.prepare('SELECT * FROM schema_version WHERE version<=253 ORDER BY version').all(),
     ).toEqual(previousVersions);

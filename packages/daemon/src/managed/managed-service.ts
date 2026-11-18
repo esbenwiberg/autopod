@@ -173,7 +173,12 @@ export class ManagedPodService {
       throw new Error('managed-start-conflict');
     }
   }
-  async start(installation: string, raw: unknown, fault?: string): Promise<ManagedPodHandle> {
+  async start(
+    installation: string,
+    raw: unknown,
+    fault?: string,
+    assertOwnerActive?: () => void,
+  ): Promise<ManagedPodHandle> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(installation))
       throw new Error('invalid-service-identity');
     const request = validateManagedRequest(raw);
@@ -184,6 +189,9 @@ export class ManagedPodService {
     await this.preflight(request, installation);
     if (fault === 'before-reservation') throw new Error('injected-before-reservation');
     const reserve = this.db.transaction(() => {
+      // A native run can be canceled during async preflight. Its reservation must
+      // serialize with that fence. Ordinary managed callers have no parent fence.
+      assertOwnerActive?.();
       const existing = this.lookup(installation, request.startKey);
       if (existing) {
         this.assertBinding(existing, request);
