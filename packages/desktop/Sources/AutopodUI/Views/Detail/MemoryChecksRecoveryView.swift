@@ -13,7 +13,7 @@ struct MemoryChecksRecoveryView: View {
           Text("Recorded effective test heap: \(ByteCountFormatter.string(fromByteCount: Int64(measured.heapLimitBytes), countStyle: .memory)). Effective container limit: \(ByteCountFormatter.string(fromByteCount: Int64(measured.containerLimitBytes), countStyle: .memory)).")
             .font(.caption).foregroundStyle(RecoveryPalette.secondary)
         }
-        if model.needsObservation {
+        if model.hasSavedRequest {
           Text(model.outcome).font(.callout)
           if let pending = model.pending { Text("Saved request: \(pending.id)").textSelection(.enabled).font(.caption) }
           Button("Observe saved request") { Task { await model.refresh(actions) } }.disabled(model.busy)

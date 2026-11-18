@@ -237,7 +237,10 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           .digest('hex');
         const repair = podRepo.retainedCheckpoints?.latest(podId);
         const memoryRecovery =
+          pod.executionTarget === 'local' &&
+          repair?.binding.continuation?.infrastructure?.mode === 'checks' &&
           repair?.binding.continuation?.infrastructure?.predecessorChecksId &&
+          repair.originalEvidence.result?.infrastructureFailure?.phase === 'test' &&
           repair.originalEvidence.result?.infrastructureFailure?.code ===
             'PROCESS_MEMORY_EXHAUSTED';
         if (memoryRecovery) {
@@ -274,7 +277,19 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             if (!deps.verifySelectedSource)
               throw new TaskRetryBlockedError('Memory recovery source verifier unavailable');
             await deps.verifySelectedSource(podId);
+            const currentAllocation = await cm.getExecutionMetadata?.(validationConfig.containerId);
+            const currentKey = await cm.getResourceKey?.(validationConfig.containerId);
             ownership.assertCurrent();
+            if (
+              currentAllocation?.memoryLimitBytes !== allocation.memoryLimitBytes ||
+              currentAllocation.cpuLimit !== allocation.cpuLimit ||
+              currentAllocation.resourceIdentity !== allocation.resourceIdentity ||
+              currentAllocation.imageDigest !== allocation.imageDigest ||
+              currentKey !== memory?.evidence.resourceKey
+            )
+              throw new TaskRetryBlockedError(
+                'Selected memory allocation changed before checks or certification',
+              );
           };
         }
         const verifyRepair = async () => {

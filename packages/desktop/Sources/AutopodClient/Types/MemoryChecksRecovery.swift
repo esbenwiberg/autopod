@@ -77,7 +77,10 @@ public struct MemoryChecksOperation: Decodable, Sendable {
   public let checked: Checked?
   public let blocked: Blocked?
   public struct Generation: Decodable, Sendable { public let generation: Int }
-  public struct Checked: Decodable, Sendable { public let result: Result }
+  public struct Checked: Decodable, Sendable {
+    public let result: Result
+    public let source: MemoryChecksInspection.Source?
+  }
   public struct Result: Decodable, Sendable { public let overall: String }
   public struct Blocked: Decodable, Sendable { public let code: String }
   public struct Binding: Decodable, Sendable {
@@ -105,6 +108,15 @@ public struct MemoryChecksOperation: Decodable, Sendable {
       binding.continuation?.execution?.profileId == request.executionProfileId,
       binding.continuation?.execution?.digest == request.expectedExecutionDigest else {
       throw DaemonError.decodingError("Uncorrelated checks receipt; observe the saved request")
+    }
+    if let activated, activated.generation != request.expectedGeneration + 1 {
+      throw DaemonError.decodingError("Unexpected checks generation; observe the saved request")
+    }
+    if let checking, checking.generation != activated?.generation {
+      throw DaemonError.decodingError("Uncorrelated checks dispatch; observe the saved request")
+    }
+    if let checked, checking == nil || checked.source?.head != request.checkpointHead {
+      throw DaemonError.decodingError("Checks source is unverified; observe the saved request")
     }
   }
 }

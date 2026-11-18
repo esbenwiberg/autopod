@@ -2179,7 +2179,7 @@ export function createRetainedCheckpointRecovery(deps: {
       repo.freezeRepairCandidate(record.id, { head: source.commitSha, tree: source.treeSha });
     }
     const candidate = repo.get(record.id)?.infrastructure?.candidate;
-    return inspectCheckpointSource({
+    const observed = await inspectCheckpointSource({
       podId,
       worktreePath: record.prepared.worktree,
       branch: record.binding.branch,
@@ -2188,6 +2188,16 @@ export function createRetainedCheckpointRecovery(deps: {
       worktreeManager: deps.worktreeManager,
       assertCurrent,
     });
+    if (
+      record.originalEvidence.result?.infrastructureFailure?.phase === 'test' &&
+      record.originalEvidence.result.infrastructureFailure.code === 'PROCESS_MEMORY_EXHAUSTED' &&
+      (observed.head !== record.prepared.head || observed.tree !== record.prepared.tree)
+    )
+      checkpointError(
+        'Memory checks require the exact saved commit and tree, including no extra checkpoint commits',
+        'CHECKPOINT_SOURCE_CHANGED',
+      );
+    return observed;
   }
   const repair = deps.podRepo.retainedCoding
     ? createRepairContinuation({

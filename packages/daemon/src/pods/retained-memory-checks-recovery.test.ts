@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { retainedContinuationLaunch } from '../configuration/retained-continuation-launch.js';
 import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
@@ -338,6 +339,50 @@ describe('retained memory checks through SQLite, real retained Git and productio
     await f.manager.processPod(f.podId).catch(() => {});
     expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+  it.each([
+    'allocation',
+    'source',
+    'owner',
+    'missing-process-proof',
+  ] as const)('refuses certification after %s changes during checks', async (fault) => {
+    const { f, request } = await fixture();
+    await f.recovery.recoverInfrastructure(f.podId, request, f.actor);
+    await f.recovery.wait(request.id);
+    f.ctx.podRepo.taskRetries!.authorize(
+      f.podId,
+      'certification-fence-fixture',
+      'One check to verify actual allocation and source certification fences',
+      f.actor,
+    );
+    const checks = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      const result = await checks(config);
+      if (fault === 'source')
+        await writeFile(
+          path.join(config.worktreePath, 'source.ts'),
+          'export const drift = true;\n',
+        );
+      if (fault === 'owner')
+        f.ctx.db.prepare('UPDATE pods SET user_id=? WHERE id=?').run('other-owner', f.podId);
+      if (fault === 'allocation') {
+        const metadata = f.cm.getExecutionMetadata!;
+        f.cm.getExecutionMetadata = vi.fn(async (id) => ({
+          ...(await metadata(id)),
+          memoryLimitBytes: 16 * GiB,
+        }));
+      }
+      if (fault === 'missing-process-proof') result.test = { status: 'pass', duration: 2 };
+      return result;
+    });
+    await f.manager.processPod(f.podId).catch(() => {});
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    expect(
+      f.recovery.list(f.podId).find((r) => r.id === request.id)?.checked?.result.overall,
+    ).not.toBe('pass');
+    expect(f.pod().status).not.toBe('validated');
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
   });
   it('does not widen review-required status for unrelated infrastructure failures', async () => {
     const { f, request } = await fixture();

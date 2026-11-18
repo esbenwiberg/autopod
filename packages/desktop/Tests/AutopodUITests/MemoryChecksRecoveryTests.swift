@@ -56,6 +56,30 @@ import Testing
     #expect(model.nextStep.contains("missing"))
   }
 
+  @Test func observesACorrelatedCompletedRequestWithoutSendingAgain() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    var records: [[String: Any]] = []
+    var posts = 0
+    let actions = MemoryChecksActions(scope: "scope", draftScope: "daemon-owner", journalDirectory: folder,
+      load: { _ in try inspection(operations: records) }, preview: { _, _ in try preview() },
+      submit: { _, _ in posts += 1; throw URLError(.networkConnectionLost) })
+    let model = MemoryChecksRecoveryModel(podId: "concerned-pheasant", actions: actions)
+    await model.refresh(actions); model.profileId = "memory"; await model.loadPreview(actions)
+    model.reason = "Retry saved checks within existing permission"; model.confirmed = true
+    await model.submit(actions)
+    let saved = try #require(model.pending)
+    records = [["id": saved.id, "podId": "concerned-pheasant", "generation": 2, "reason": saved.reason,
+      "binding": ["head": saved.checkpointHead, "resultHash": saved.expectedResultHash,
+        "continuation": ["execution": ["profileId": saved.executionProfileId, "digest": saved.expectedExecutionDigest],
+          "infrastructure": ["mode": "checks", "qualification": saved.qualification, "predecessorChecksId": "prior"]]],
+      "activated": ["generation": 3], "checking": ["generation": 3],
+      "checked": ["result": ["overall": "pass"], "source": ["head": saved.checkpointHead, "tree": String(repeating: "b", count: 40)]]]]
+    await model.refresh(actions)
+    #expect(posts == 1 && model.hasSavedRequest && !model.needsObservation)
+    #expect(model.outcome.contains("Fresh checks passed") && !model.canConfirm)
+  }
+
   @Test func staleGenerationOrConnectionPreventsSavingOrSending() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }

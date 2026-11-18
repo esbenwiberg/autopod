@@ -46,7 +46,8 @@ public struct MemoryChecksActions: Sendable {
     journal = RepairContinuationJournal(scope: "memory-checks:\(actions.draftScope)", podId: podId, directory: actions.journalDirectory)
   }
   var memory: MemoryChecksInspection.Memory? { assessment?.memoryRecovery }
-  var needsObservation: Bool { invalid || pending != nil }
+  var hasSavedRequest: Bool { invalid || pending != nil }
+  var needsObservation: Bool { invalid || (pending != nil && operation?.checked == nil) }
   var canPreview: Bool {
     !busy && !invalid && !stale && pending == nil && memory?.version == 1
       && memory?.state == "requires_candidate" && memory?.candidateQualification == "not_run"
