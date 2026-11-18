@@ -1350,6 +1350,9 @@ public struct MainView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel("Sort")
+            .accessibilityValue(sortOrder.rawValue)
+            .accessibilityIdentifier("fleet-compact-sort")
             .help("Sort: \(sortOrder.rawValue)")
         } else {
             Picker("", selection: $sortOrder) {
@@ -1376,7 +1379,10 @@ public struct MainView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Density: \(cardDensity == .compact ? "Compact" : "Detailed")")
+            .accessibilityLabel("Card density")
+            .accessibilityValue(cardDensity.label)
+            .accessibilityIdentifier("fleet-compact-density")
+            .help("Density: \(cardDensity.label)")
         } else {
             Picker("", selection: $cardDensity) {
                 Text("Compact").tag(CardDensity.compact)

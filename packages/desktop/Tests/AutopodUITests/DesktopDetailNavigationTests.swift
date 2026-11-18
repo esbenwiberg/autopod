@@ -137,19 +137,26 @@ import Testing
         try await host.selectTab("work")
         try host.selectFleetSegment("Last Active")
         try host.selectFleetSegment("Compact")
-        func selected(_ label: String) -> Bool {
+        func selected(_ label: String, compactID: String) -> Bool {
+            // Closing changes available width. ViewThatFits can replace the
+            // segmented control with a menu, or vice versa.
+            if let menu = host.nodes.first(where: {
+                host.value($0, "accessibilityIdentifier") as? String == compactID
+            }) {
+                return host.value(menu, "accessibilityValue") as? String == label
+            }
             guard let (control, index) = host.fleetSegment(label) else { return false }
             return control.selectedSegment == index
         }
-        try await host.wait { selected("Last Active") && selected("Compact") }
+        func preferencesRetained() -> Bool {
+            selected("Last Active", compactID: "fleet-compact-sort")
+                && selected("Compact", compactID: "fleet-compact-density")
+        }
+        try await host.wait { preferencesRetained() }
         #expect(host.press(try #require(host.find(id: "detail-close"))))
-        try await host.wait { host.find(id: "detail-close") == nil }
-        #expect(selected("Last Active"))
-        #expect(selected("Compact"))
+        try await host.wait { host.find(id: "detail-close") == nil && preferencesRetained() }
         #expect(host.press(try #require(host.find(label: "Open Fixture pod perf-0000"))))
-        try await host.wait { host.destination("work") }
-        #expect(selected("Last Active"))
-        #expect(selected("Compact"))
+        try await host.wait { host.destination("work") && preferencesRetained() }
     }
 
     @Test func commandPaletteIntentionallyRevealsDismissedDetails() async throws {
