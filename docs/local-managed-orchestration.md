@@ -27,6 +27,12 @@ The first scheduler launches six workers against read-only synthetic source. Thr
 
 This uses a fixed Docker workload through a test runtime port. It is not the packaged Codex worker, a real model, the full HTTP daemon or hosted startup. See [managed local Docker](managed-local-docker.md) for the separate production-runtime tests.
 
+### Optional live controller
+
+For a separately authorized single live run, use the same command and local image above, adding `AUTOPOD_WAVE_LOCAL_MODEL=1` and Vitest `--retry=0`. This selects an already installed `qwen3:8b` via Ollama's Messages API on loopback only. It permits one kickoff request and one results request (512 output tokens each; at most 8 KiB request body before sending). No fallback. The oracle checks for separate briefs about the ticket-total and archive-export defects and none about the clean display check. Each new invocation is a **new budget**, not recovery of a failed model call.
+
+First live attempt: the kickoff hit the existing 30-second controller deadline. One request, no recorded reply, zero worker containers, no retry. Follow-up selection was **not evaluated**. The deterministic Docker control passed. Do not infer a bad planning decision or replay the uncertain call.
+
 ## Host lifecycle
 
 1. Construct `LocalCheckpointHost` with a private scratch directory and a host-owned managed-service factory. Open a run and retain a verified starting commit. Set the whole-run request allowance and concurrent worker limit separately. For the example, eight worker reservations of two requests plus two controller requests cost 18; six slots suffice.

@@ -11,7 +11,8 @@ import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.j
 import { startFixtureProcess } from '../test-utils/owned-fixture-process.js';
 
 const image = process.env.AUTOPOD_WAVE_DOCKER_IMAGE;
-it.skipIf(!image)(
+const liveModel = process.env.AUTOPOD_WAVE_LOCAL_MODEL === '1';
+it.skipIf(!image && !liveModel)(
   'keeps three original Docker IDs through scheduler SIGKILL, starts only two follow-ups, then stops all five',
   async () => {
     const socket = process.env.AUTOPOD_MANAGED_DOCKER_SOCKET;
@@ -44,7 +45,7 @@ it.skipIf(!image)(
     const start = (mode: string) =>
       startFixtureProcess<{ type: 'ready'; pid: number }>(
         script,
-        [f.db.name, root, socket, image, owner, mode],
+        [f.db.name, root, socket, image, owner, mode, liveModel ? 'local-model' : 'offline'],
         root,
         90000,
       );
@@ -57,8 +58,23 @@ it.skipIf(!image)(
       const original = await active();
       expect(original).toHaveLength(6);
       expect(await calls()).toEqual([String(ready.pid)]);
+      const decision = (kickoff: boolean) =>
+        JSON.parse(
+          f.db
+            .prepare(
+              "SELECT decision_json FROM orchestration_controller_turns WHERE (wait_key='@kickoff')=?",
+            )
+            .pluck()
+            .get(Number(kickoff)) as string,
+        ) as { children: { brief: string }[]; waitFor: number | null };
+      expect(decision(true).waitFor).toBe(3);
+      const reports = [
+        'MAPLE: The ticket total double-counts the first entry.',
+        'CEDAR: Display formatting passes every check; no defect.',
+        'IRIS: The archive export omits the final row.',
+      ];
       const survivors = original.slice(3);
-      for (const id of original.slice(0, 3)) {
+      for (const [i, id] of original.slice(0, 3).entries()) {
         // FIFO release, not a sleep or simulated exit. Docker wait observes normal completion.
         await promisify(execFile)(
           'docker',
@@ -69,7 +85,9 @@ it.skipIf(!image)(
             id,
             '/bin/sh',
             '-ec',
-            'test -p /tmp/finish && echo finish > /tmp/finish',
+            'test -p /tmp/finish && printf "%s\\n" "$1" > /tmp/finish',
+            'release',
+            liveModel ? reports[i]! : 'finish',
           ],
           { env: { PATH: process.env.PATH, HOME: root }, timeout: 10000 },
         );
@@ -102,6 +120,23 @@ it.skipIf(!image)(
       expect(
         f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get(),
       ).toBe(0);
+      if (liveModel) {
+        const plan = decision(false);
+        expect(plan.waitFor).toBeNull();
+        expect(plan.children).toHaveLength(2);
+        const briefs = plan.children.map((c) => c.brief);
+        expect(
+          briefs.filter(
+            (b) => /\bMAPLE\b/i.test(b) && /double|count|total/i.test(b) && !/IRIS|CEDAR/i.test(b),
+          ),
+        ).toHaveLength(1);
+        expect(
+          briefs.filter(
+            (b) =>
+              /\bIRIS\b/i.test(b) && /archive|export|final row/i.test(b) && !/MAPLE|CEDAR/i.test(b),
+          ),
+        ).toHaveLength(1);
+      }
       const second = start('recover');
       children.push(second);
       const recovered = await second.message;
@@ -142,6 +177,18 @@ it.skipIf(!image)(
         f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get(),
       ).toBe(0);
     } finally {
+      if (liveModel) {
+        for (const phase of ['kickoff', 'results']) {
+          const reply = await readFile(path.join(root, 'reply-' + phase), 'utf8').catch(() => null);
+          console.info('local model ' + phase + ': ' + (reply ?? 'no recorded reply'));
+        }
+        console.info(
+          'attempts:',
+          (await calls().catch(() => [])).length,
+          'containers:',
+          (await list()).length,
+        );
+      }
       await Promise.all(children.map((p) => p.dispose()));
       for (const info of await list()) {
         expect(info.Labels[label]).toBe(owner);
