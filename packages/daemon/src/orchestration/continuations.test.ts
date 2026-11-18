@@ -307,8 +307,43 @@ async function controllerFixture(limit: number, reply: (payload: string) => stri
       },
       provider,
     );
-  return { f, request, cp, host, tick, calls };
+  return { f, request, cp, host, tick, calls, provider };
 }
+it('a rolled-back partial wave does not wake its own controller watcher', async () => {
+  const { f, request, cp, host, provider, calls } = await controllerFixture(6, () =>
+    JSON.stringify({
+      children: [
+        { recipe: 'inspect', brief: 'one' },
+        { recipe: 'inspect', brief: 'two' },
+      ],
+      waitFor: null,
+    }),
+  );
+  const owner = host();
+  const pass = owner.tickController.bind(owner);
+  let passes = 0;
+  vi.spyOn(owner, 'tickController').mockImplementation((...args) => {
+    if (++passes > 1) throw new Error('unexpected second pass');
+    return pass(...args);
+  });
+  const loop = owner.watchController(
+    cp.run,
+    {
+      mission: 'Check the completed work',
+      routeId: 'local-test',
+      recipes: { inspect: request.startKey },
+    },
+    provider,
+  );
+  try {
+    await expect(loop.settled()).rejects.toThrow('continuation-budget-exhausted');
+    expect(passes).toBe(1);
+    expect(calls()).toBe(1);
+    expect(f.db.prepare('SELECT count(*) FROM orchestration_continuations').pluck().get()).toBe(1);
+  } finally {
+    await loop.close();
+  }
+});
 it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
   'recovers a SIGKILLed scheduler while three original worker PIDs stay live: %s',
   async (boundary) => {

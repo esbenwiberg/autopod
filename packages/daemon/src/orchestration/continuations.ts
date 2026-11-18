@@ -202,11 +202,14 @@ export class OrchestrationContinuations {
       await this.withExecutor(cp, async (service) => {
         for (const req of pending) await service.preflight(req, principal(cp.run));
       });
-    this.db
+    const changed = this.db
       .transaction(() => {
-        for (const insert of inserts) insert();
+        let changed = false;
+        for (const insert of inserts) if (insert()) changed = true;
+        return changed;
       })
       .immediate();
+    if (changed) signalLocalRun(this.db, principal(cp.run));
   }
   private async admit(kind: Kind, input: ContinuationCheckpoint, raw: ManagedPodRequest) {
     await this.admitBatch(kind, input, [raw]);
@@ -229,7 +232,7 @@ export class OrchestrationContinuations {
     };
     if (!replay()) pending.push(req);
     return () => {
-      if (replay()) return;
+      if (replay()) return false;
       const run = this.db
         .prepare(
           'SELECT remaining,accepted_evidence FROM orchestration_runs JOIN orchestration_request_balances USING(id) WHERE id=?',
@@ -267,7 +270,7 @@ export class OrchestrationContinuations {
           budget.maxProviderRequests,
           kind,
         );
-      signalLocalRun(this.db, principal(cp.run));
+      return true;
     };
   }
 
