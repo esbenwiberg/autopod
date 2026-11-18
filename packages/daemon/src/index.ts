@@ -1286,6 +1286,35 @@ try {
   process.exit(1);
 }
 
+// Explicit owner-only one-shot. No HTTP trigger, profile workflow, startup retry or live DB fixture rows.
+if (process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1') {
+  void (async () => {
+    const { createConfigurationStore } = await import('./configuration/configuration-store.js');
+    const { bindCanaryProfile } = await import('./orchestration/canary-profile.js');
+    const { runHostedWaveCanary } = await import('./orchestration/hosted-wave-canary.js');
+    const provider = bindCanaryProfile(
+      createConfigurationStore(db),
+      providerAccountStore,
+      providerAccountHealth,
+      logger,
+    );
+    const result = await runHostedWaveCanary(
+      {
+        state: `${path.resolve(DB_PATH)}.repofit-wave-v1`,
+        migrations: migrationsDir,
+        socket: process.env.AUTOPOD_MANAGED_DOCKER_SOCKET ?? '',
+        image: process.env.AUTOPOD_WAVE_DOCKER_IMAGE ?? '',
+      },
+      provider,
+    );
+    logger.info(result, 'repofit wave canary passed');
+  })().catch(() =>
+    logger.warn(
+      'repofit wave canary did not pass; inspect the private canary ledger before any new attempt',
+    ),
+  );
+}
+
 // Background warmup of ML detectors so /health reports a real status and the
 // first scan doesn't pay the model-load cost. Errors are already logged inside
 // model-manager; we just emit a single line summary on completion so an

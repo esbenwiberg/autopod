@@ -51,6 +51,20 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     namesByVersion.set(version, file);
   }
 
+  // Release b8c9f2ec used 255 for validation timings. Never skip this branch's
+  // different 255 and start installing later orchestration tables on that database.
+  if (
+    namesByVersion.get(255) === '255_orchestration_continuations.sql' &&
+    currentVersion >= 255 &&
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='validation_phase_timings'")
+      .get()
+  ) {
+    throw new Error(
+      'Incompatible migration 255: validation timings and orchestration require a reconciled release',
+    );
+  }
+
   // Earlier unpublished reliability checkpoints used 151-163, which now overlap
   // the managed lane's authoritative 151-152. Never reinterpret or auto-renumber
   // a database from that lineage merely because MAX(version) looks recent.

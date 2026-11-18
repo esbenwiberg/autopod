@@ -109,6 +109,33 @@ it.each([
   }
 }, 30_000);
 
+it('refuses the released validation timings lineage before installing any orchestration migration', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'released-255-'));
+  const migrations = resolve(import.meta.dirname, 'migrations');
+  const db = createHistoricalDiskDatabase(join(root, 'existing.db'), [
+    { dir: migrations, through: 254 },
+  ]);
+  try {
+    db.exec(
+      "CREATE TABLE validation_phase_timings(timing_key TEXT PRIMARY KEY,durations_ms TEXT NOT NULL); INSERT INTO validation_phase_timings VALUES ('keep','[123]'); INSERT INTO schema_version(version) VALUES (255)",
+    );
+    const before = db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all();
+    await expect(runMigrationsWithBackups(db, migrations, logger)).rejects.toThrow(
+      'Incompatible migration 255',
+    );
+    expect(db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all()).toEqual(
+      before,
+    );
+    expect(db.prepare('SELECT max(version) FROM schema_version').pluck().get()).toBe(255);
+    expect(db.prepare('SELECT durations_ms FROM validation_phase_timings').pluck().get()).toBe(
+      '[123]',
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('refuses an unpublished native checkpoint lineage before changing any migration records or retained rows', () => {
   const root = mkdtempSync(join(tmpdir(), 'native-lineage-'));
   const migrations = resolve(import.meta.dirname, 'migrations');

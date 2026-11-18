@@ -1,6 +1,6 @@
 # Local managed orchestration
 
-This internal, opt-in host composition lets a controller commission workers, yield for **N new results**, and plan another wave before the rest finish. SQLite owns the decisions and reservations. A controller reply is a proposal, not permission to choose a grant, accept code, or publish it. There is no hosted startup switch or public endpoint.
+This internal, opt-in host composition lets a controller commission workers, yield for **N new results**, and plan another wave before the rest finish. SQLite owns the decisions and reservations. A controller reply is a proposal, not permission to choose a grant, accept code, or publish it. There is no general hosted scheduler or public endpoint.
 
 ## Reproduce the overlapping waves
 
@@ -26,6 +26,14 @@ AUTOPOD_WAVE_DOCKER_IMAGE="$(docker image inspect alpine:3 --format '{{.Id}}')" 
 The first scheduler launches six workers against read-only synthetic source. Three write reports and exit on an explicit FIFO barrier. After the follow-up decision and reservations commit, the test sends the scheduler itself SIGKILL before wake acknowledgement. A different scheduler process restores from SQLite and uses Docker's persisted container IDs. The canary checks eight distinct containers, five running (including the three original survivors), two offline controller requests total, 16 worker request reservations and no refund. It cancels, verifies Docker and the ledger both report exit, and removes only containers carrying the test's random ownership label.
 
 This uses a fixed Docker workload through a test runtime port. It is not the packaged Codex worker, a real model, the full HTTP daemon or hosted startup. See [managed local Docker](managed-local-docker.md) for the separate production-runtime tests.
+
+## Credential-owning daemon: one-shot hosted-model canary
+
+This branch has an opt-in **synthetic test**, not a rollout switch. On a compatible daemon build the operator can set `AUTOPOD_REPOFIT_WAVE_CANARY=1`, an absolute `AUTOPOD_MANAGED_DOCKER_SOCKET` and an already-installed Alpine image ID in `AUTOPOD_WAVE_DOCKER_IMAGE`. The daemon must have Docker CLI access to that engine and local bind mounts. It checks the reviewed repofit profile revision 2, AI revision 8 and hosted Anthropic Pro main account/model. Only provider binding is reused. No profile repository, workflows, external tools, failover, developer credentials, or local models are used.
+
+The daemon attempts at most two Messages requests (512 output tokens each, 8 KiB request body limit, no retries). It checks six initial workers, three real reports, separate MAPLE and IRIS follow-ups and none for clean CEDAR. A private directory `<DB_PATH>.repofit-wave-v1` holds the synthetic ledger and Docker ownership label. Its exclusive creation prevents a restart from spending again; do not delete it to retry. After interruption, inspect the retained ledger and matching containers; timeout or a missing reply is not proof of zero usage. The regular Docker crash test separately covers scheduler restart.
+
+**Release boundary:** the connected daemon at `b8c9f2ec` has no such entry point and its migration 255 is validation timings, not orchestration. Do not start this branch on that database. Reconcile the migration histories and verify upgrade on a backup before any separate deployment decision. Local integration tests exercise the hosted request path with a stubbed wire response, not a live provider.
 
 ## Host lifecycle
 
