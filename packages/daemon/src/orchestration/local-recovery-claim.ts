@@ -30,6 +30,19 @@ export function tryOperatorDaemonOwner(db: Database.Database) {
   return tryOwnerSlot(db, 'operator-daemon');
 }
 
+/** Stock daemon lifetime, including unenrolled mode. Acquire before migrations or resume. */
+export function claimDaemonLifetime(db: Database.Database) {
+  let release = tryOperatorDaemonOwner(db);
+  if (!release) throw new Error('operator-daemon-owner-active');
+  return {
+    owns: (other: Database.Database) => !!release && db === other,
+    close: () => {
+      release?.();
+      release = null;
+    },
+  };
+}
+
 function tryOwnerSlot(db: Database.Database, slot: string) {
   const file = realpathSync(db.name);
   if (statSync(file).nlink !== 1) throw new Error('ambiguous-controller-database');

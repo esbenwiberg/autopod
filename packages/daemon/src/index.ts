@@ -51,6 +51,7 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import { bindHostedControllerProfile } from './orchestration/hosted-controller-profile.js';
+import { claimDaemonLifetime } from './orchestration/local-recovery-claim.js';
 import {
   assertOperatorRecovery,
   composeOperatorEnrollment,
@@ -258,6 +259,7 @@ const managedCliConfig = parseManagedCliConfig(
 );
 
 const db = createDatabase(DB_PATH, logger);
+const lifetimeOwner = claimDaemonLifetime(db);
 
 // Migrations
 const migrationsDir =
@@ -1225,7 +1227,7 @@ const app = await createServer({
   configuration: configuration.routes,
   pim: configuration.scopedTools.pimRoutes,
   authModule,
-  operatorRuns,
+  operatorRuns: operatorRuns && { ...operatorRuns, lifetimeOwner },
   managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
@@ -1517,6 +1519,7 @@ async function shutdown(signal: string) {
 
   // Close database
   db.close();
+  lifetimeOwner.close();
 
   logger.info('Shutdown complete');
   process.exit(0);

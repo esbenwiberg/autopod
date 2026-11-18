@@ -285,6 +285,34 @@ it('queues an affordable child until its run has a free worker slot', async () =
   expect(f.launches()).toBe(2);
 });
 
+it('serves a paid queued worker even if the later controller reply is permanently lost', async () => {
+  const { f, cp, request, host } = await setup(6, 1);
+  const owner = host();
+  await owner.ledger.kickoff(cp, { inspect: request });
+  const { provider, calls } = offlineController((payload) => {
+    if (JSON.parse(JSON.parse(payload).messages[0].content).phase !== 'kickoff')
+      throw new Error('lost');
+    return JSON.stringify({
+      children: ['one', 'two'].map((brief) => ({ recipe: 'inspect', brief })),
+      waitFor: 1,
+    });
+  });
+  const config = { mission: 'check', routeId: 'offline', recipes: { inspect: '@inspect' } };
+  await owner.tickController(cp.run, config, provider);
+  expect(f.launches()).toBe(1);
+  const id = String(f.db.prepare('SELECT pod_id FROM managed_pods').pluck().get());
+  await f.service().runtime.stop(id);
+  f.db.prepare('UPDATE managed_pods SET revoked=1 WHERE pod_id=?').run(id);
+  await f.service().enforceExpiry();
+  await expect(owner.tickController(cp.run, config, provider)).rejects.toThrow();
+  expect(f.launches()).toBe(2);
+  f.restart();
+  await expect(host().tickController(cp.run, config, provider)).rejects.toThrow(
+    'controller-request-uncertain',
+  );
+  expect(calls()).toBe(2);
+  expect(f.launches()).toBe(2);
+});
 async function controllerFixture(limit: number, reply: (payload: string) => string) {
   const { f, request, cp, host, ledger } = await setup(limit, 6);
   const l = ledger();

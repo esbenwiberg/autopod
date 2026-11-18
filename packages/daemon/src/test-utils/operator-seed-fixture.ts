@@ -98,9 +98,9 @@ export async function operatorSeedFixture(image: string) {
     checks: checks.authority,
     independentReview: review.authority,
   };
-  const sign = (policy: typeof authorities, reviewer = review) => {
+  const sign = (policy: typeof authorities, reviewer = review, tree = s.tree) => {
     const inputDigest = operatorSeedInput(
-      { ...s, run, policyDigest: combinedPolicyDigest(policy) },
+      { ...s, run, tree, policyDigest: combinedPolicyDigest(policy) },
       source.bundleDigest,
     );
     return {

@@ -6,7 +6,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ConfigurationStore } from '../configuration/configuration-store.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import type { ProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
+import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { bindCanaryProfile } from './canary-profile.js';
+import { bindHostedControllerProfile } from './hosted-controller-profile.js';
 import { runHostedWaveCanary } from './hosted-wave-canary.js';
 
 const profile = { name: 'repofit', revision: 2, payload: { aiId: 'ai-2aa5da9e201c0adf52150c71' } };
@@ -44,6 +46,51 @@ it('rejects changed main route and an unhealthy account without reading credenti
   t.health.current.mockReturnValue({ state: 'auth_revoked' });
   expect(t.bind).toThrow('unavailable');
   expect(t.accounts.get).not.toHaveBeenCalled();
+});
+it.each([
+  'revoked',
+  'oversized',
+] as const)('keeps host recovery available and rejects %s before the controller reservation', async (mode) => {
+  const { f, cp, request, host } = await setupOrchestrationRun(6, 1);
+  const s = stores();
+  if (mode === 'revoked') s.health.current.mockReturnValue({ state: 'auth_revoked' });
+  const provider = bindHostedControllerProfile(
+    {
+      profileId: 'p',
+      profileName: 'repofit',
+      profileRevision: 2,
+      aiId: profile.payload.aiId,
+      aiRevision: 8,
+      model: ai.payload.main.model,
+      accountId: 'anth-pro',
+    },
+    s.config as unknown as ConfigurationStore,
+    s.accounts as unknown as ProviderAccountStore,
+    s.health as unknown as ProviderAccountHealthStore,
+    pino({ level: 'silent' }),
+  );
+  const owner = host();
+  await owner.ledger.kickoff(cp, { inspect: request });
+  const wire = vi.fn(() => {
+    throw new Error('unexpected external request');
+  });
+  vi.stubGlobal('fetch', wire);
+  await expect(
+    owner.tickController(
+      cp.run,
+      {
+        mission: mode === 'oversized' ? '漢'.repeat(4000) : 'Inspect',
+        routeId: 'hosted-main',
+        recipes: { inspect: '@inspect' },
+      },
+      provider,
+    ),
+  ).rejects.toThrow(mode === 'oversized' ? 'request-limit' : 'unavailable');
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_controller_turns').pluck().get()).toBe(0);
+  expect(s.accounts.get).not.toHaveBeenCalled();
+  expect(wire).not.toHaveBeenCalled();
+  owner.ledger.cancel(cp.run);
+  expect(f.db.prepare('SELECT canceled FROM orchestration_runs').pluck().get()).toBe(1);
 });
 it('reserves the wire phase on a lost response and does not follow a redirect or retry', async () => {
   const wire = vi.fn(async () => {

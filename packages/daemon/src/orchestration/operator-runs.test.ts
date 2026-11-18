@@ -6,6 +6,7 @@ import { buildStartupHarness } from '../test-utils/build-startup-harness.js';
 import { offlineController } from '../test-utils/offline-controller.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { startFixtureProcess } from '../test-utils/owned-fixture-process.js';
+import { claimDaemonLifetime } from './local-recovery-claim.js';
 import { operatorRunId, registerOperatorRuns } from './operator-runs.js';
 
 const operator = {
@@ -140,6 +141,7 @@ it('refuses startup under another local process, including through a DB alias; S
     try {
       expect((await successor.call('status')).json()).toMatchObject({ started: false });
       expect(calls()).toBe(0);
+      expect(() => claimDaemonLifetime(f.db)).toThrow('operator-daemon-owner-active');
     } finally {
       await successor.app.close();
     }

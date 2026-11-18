@@ -33,6 +33,16 @@ export function attachLocalController(db: Database.Database, run: string, pass: 
   const detach = subscribeLocalRun(db, `native.${run}`, enqueue);
   enqueue();
   return {
+    status() {
+      const reason = failure?.error instanceof Error ? failure.error.message : '';
+      return {
+        planning: failure ? 'blocked' : active ? 'active' : 'idle',
+        ...(failure
+          ? { reason: /^controller-[a-z-]{1,64}$/.test(reason) ? reason : 'controller-pass-failed' }
+          : {}),
+        blocked: outcome.blocked,
+      };
+    },
     /** Join work already signaled; does not request another pass. Surfaces blocked intents or failures. */
     async settled() {
       while (active) await active;

@@ -39,6 +39,15 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
     'policy-mismatch',
   );
   expect(() => compose({ ...e, review: e.checks })).toThrow('independentReview-required');
+  // A pair of valid receipts for the wrong Git tree still cannot pin a broken envelope.
+  const wrongTree = '1'.repeat(40);
+  const invalidSeed = {
+    ...e,
+    source: { ...e.source, tree: wrongTree },
+    ...sign(e.authorities, undefined, wrongTree),
+  };
+  await expect(compose(invalidSeed).prepare!()).rejects.toThrow('checkpoint-source-mismatch');
+  expect(f.db.prepare('SELECT 1 FROM orchestration_runs WHERE id=?').get(run)).toBeUndefined();
   const seeded = compose();
   await seeded.prepare!();
   expect(resume).toHaveBeenCalledTimes(1);
@@ -73,6 +82,14 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
   seeded.host.ledger.cancel(run);
   expect(() => assertOperatorRecovery(f.db, null)).not.toThrow();
   expect(provider.calls()).toBe(0);
+  const other = 'x'.repeat(64);
+  seeded.host.ledger.open(other, cp.repository, cp.policyDigest, cp.commit, 4);
+  f.db
+    .prepare(
+      'INSERT INTO orchestration_kickoffs(run_id,seed_digest,checkpoint_json,recipes_json) VALUES(?,?,?,?)',
+    )
+    .run(other, digest(1), JSON.stringify(cp), '{}');
+  expect(() => assertOperatorRecovery(f.db, null)).not.toThrow();
 });
 it('rejects the wrong seed file before opening a run or resuming any runtime', async () => {
   const { f, enrollment, profiles, cli, run } = await operatorSeedFixture(image);

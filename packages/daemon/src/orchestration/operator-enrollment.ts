@@ -110,7 +110,7 @@ export function operatorBasePolicy(
  * enrollment. Canceled, fully cleaned history can be retained with the feature off. */
 export function assertOperatorRecovery(db: Database.Database, run: string | null) {
   const missing = db
-    .prepare(`SELECT 1 FROM orchestration_runs r WHERE length(r.id)=64 AND r.id IS NOT ?
+    .prepare(`SELECT 1 FROM orchestration_runs r WHERE EXISTS(SELECT 1 FROM orchestration_checkpoint_custody c WHERE c.run_id=r.id AND json_extract(c.manifest,'$.origin')='operator-enrollment/v1') AND r.id IS NOT ?
  AND ( (r.canceled=0 AND EXISTS(SELECT 1 FROM orchestration_kickoffs k WHERE k.run_id=r.id))
  OR EXISTS(SELECT 1 FROM managed_pods p WHERE p.dispatcher_installation_id='native.'||r.id AND (p.observed_exit=0 OR (p.runtime_ref IS NOT NULL AND p.cleanup<>'observed')))) LIMIT 1`)
     .get(run);
@@ -192,6 +192,7 @@ export function composeOperatorEnrollment(
   };
   const manifest = canonical({
     version: 1,
+    origin: 'operator-enrollment/v1',
     subject,
     bundleDigest: e.source.bundleDigest,
     verification,
@@ -249,16 +250,11 @@ export function composeOperatorEnrollment(
         await fd.close();
       }
       if (sha256(bytes) !== e.source.bundleDigest) throw new Error('operator-seed-damaged');
-      if (!prior)
-        host.ledger.open(
-          run,
-          subject.repository,
-          policyDigest,
-          subject.predecessor,
-          e.budget.requests,
-          e.budget.active,
-        );
-      const retained = await host.retain(subject, bytes, async () => verification);
+      if (prior) throw new Error('operator-custody-missing');
+      const retained = await host.retain(subject, bytes, async () => verification, {
+        requests: e.budget.requests,
+        active: e.budget.active,
+      });
       if (retained.evidenceDigest !== checkpoint.evidenceDigest)
         throw new Error('operator-custody-changed');
     }

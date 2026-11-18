@@ -26,6 +26,7 @@ export interface OperatorRunSlot {
 }
 export interface OperatorRunsConfig {
   /** Called with exclusive operator ownership, before any scheduler is attached. */
+  lifetimeOwner?: { owns: (db: Database.Database) => boolean };
   prepare?: () => Promise<void>;
   cleanup?: (run: string) => Promise<{ run: string; cleaned: number }>;
   host: LocalCheckpointHost;
@@ -103,8 +104,12 @@ export function registerOperatorRuns(
     releaseOwner = undefined;
   };
   app.addHook('onReady', async () => {
-    releaseOwner = tryOperatorDaemonOwner(db) ?? undefined;
-    if (!releaseOwner) throw new Error('operator-daemon-owner-active');
+    if (config.lifetimeOwner) {
+      if (!config.lifetimeOwner.owns(db)) throw new Error('operator-daemon-owner-invalid');
+    } else {
+      releaseOwner = tryOperatorDaemonOwner(db) ?? undefined;
+      if (!releaseOwner) throw new Error('operator-daemon-owner-active');
+    }
     try {
       await config.prepare?.();
       // Check every enrollment before waking any run. A boot with a stale catalog
@@ -159,6 +164,7 @@ export function registerOperatorRuns(
             run,
             canceled: canceled(run) === 1,
             started: kicked(run),
+            controller: loops.get(run)?.status() ?? { planning: 'detached' },
             remainingRequests: db
               .prepare('SELECT remaining FROM orchestration_request_balances WHERE id=?')
               .pluck()

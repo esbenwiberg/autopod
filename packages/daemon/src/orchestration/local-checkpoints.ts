@@ -110,7 +110,11 @@ export class LocalCheckpointHost {
         this.tickController(run, policy, client),
       );
       let closing: Promise<void> | undefined;
-      return { settled: loop.settled, close: () => (closing ??= loop.close().finally(release)) };
+      return {
+        status: loop.status,
+        settled: loop.settled,
+        close: () => (closing ??= loop.close().finally(release)),
+      };
     } catch (e) {
       release();
       throw e;
@@ -125,7 +129,12 @@ export class LocalCheckpointHost {
   ) {
     return this.retain(input, bytes, combinedVerifier(this.db, inputs, gates));
   }
-  async retain(input: Subject, bytes: Buffer, verify: Verify): Promise<ContinuationCheckpoint> {
+  async retain(
+    input: Subject,
+    bytes: Buffer,
+    verify: Verify,
+    operatorSeed?: { requests: number; active: number },
+  ): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
     if (!bytes.length || bytes.length > MAX_CANDIDATE_BYTES)
       throw new Error('checkpoint-bundle-size');
@@ -136,15 +145,30 @@ export class LocalCheckpointHost {
           `SELECT 1 FROM orchestration_runs WHERE id=? AND repository=? AND policy_digest=? AND accepted_commit=? AND canceled=0`,
         )
         .get(subject.run, subject.repository, subject.policyDigest, subject.predecessor);
-    if (!current()) throw new Error('checkpoint-run-mismatch');
+    if (!operatorSeed && !current()) throw new Error('checkpoint-run-mismatch');
     const verification = await this.withMirror(subject, bundle, (mirror) =>
       verify(subject, mirror),
     );
     requirePass(subject, verification);
-    const manifest = canonical({ version: 1, subject, bundleDigest: sha256(bundle), verification });
+    const manifest = canonical({
+      version: 1,
+      ...(operatorSeed ? { origin: 'operator-enrollment/v1' } : {}),
+      subject,
+      bundleDigest: sha256(bundle),
+      verification,
+    });
     const evidenceDigest = sha256(manifest);
     this.db
       .transaction(() => {
+        if (operatorSeed)
+          this.ledger.open(
+            subject.run,
+            subject.repository,
+            subject.policyDigest,
+            subject.predecessor,
+            operatorSeed.requests,
+            operatorSeed.active,
+          );
         if (!current()) throw new Error('checkpoint-run-mismatch');
         this.db
           .prepare(

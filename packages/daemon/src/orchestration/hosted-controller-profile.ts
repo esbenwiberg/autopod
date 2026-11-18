@@ -45,7 +45,7 @@ export function bindHostedControllerProfile(
       throw new Error('controller-route-changed');
     assertRouteAccountHealthy({ providerAccountId: accountId, failover: [] }, health);
   };
-  validate();
+  if (ordered) validate(); // One-shot preflight; ordinary controls must survive a revoked route.
   let sent = 0;
   // A placeholder SDK emits the normal controller request. Resolve auth on its one permitted
   // wire path, after ledger reservation. No SDK env endpoint, failover, redirects or tools.
@@ -97,5 +97,13 @@ export function bindHostedControllerProfile(
       });
     },
   });
-  return { client, model };
+  return {
+    client,
+    model,
+    preflightControllerRequest: (body: unknown) => {
+      validate();
+      if (Buffer.byteLength(JSON.stringify(body)) > 8192)
+        throw new Error('controller-request-limit');
+    },
+  };
 }
