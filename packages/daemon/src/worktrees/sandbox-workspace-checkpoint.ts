@@ -113,8 +113,7 @@ async function quarantinedCheckpointSourceHead(
     )
   )
     return checkpoint;
-  if (!refs.some((ref) => ref.startsWith(namespace) && /^\d+$/.test(ref.slice(namespace.length))))
-    return null;
+  if (!refs.some((ref) => ref.startsWith(namespace))) return null;
 
   // Raw headers, rather than revision-walker parents: replace refs/grafts must
   // not turn another commit into owned single-parent checkpoint evidence.

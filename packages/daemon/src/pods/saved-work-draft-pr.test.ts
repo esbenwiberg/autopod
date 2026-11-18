@@ -412,6 +412,52 @@ describe('saved-work exact human draft publication', () => {
     ).rejects.toThrow(/Preview changed/);
   });
 
+  it('prepares the exact committed sandbox source even when host promotion was refused', async () => {
+    const f = await fixture(true);
+    const head = await f.git(f.source, 'rev-parse', 'HEAD');
+    const tree = await f.git(f.source, 'rev-parse', 'HEAD^{tree}');
+    const quarantineRef = `refs/autopod-quarantine/${f.id}/1-committed`;
+    await f.git(f.source, 'update-ref', quarantineRef, head);
+    await f.git(f.source, 'commit', '--allow-empty', '-m', 'independent host change');
+    const host = await f.git(f.source, 'rev-parse', 'HEAD');
+    await f.podRepo.savedWorkspaceCheckpoints!.save({
+      podId: f.id,
+      sequence: 1,
+      fingerprint: { head, tree, dirty: false },
+      verifiedAt: null,
+      attempts: 1,
+      result: {
+        sequence: 1,
+        sourceHead: head,
+        sourceTree: tree,
+        snapshotCommit: head,
+        snapshotTree: tree,
+        quarantineRef,
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: false,
+        materialized: false,
+        error: {
+          phase: 'promotion',
+          code: 'LINEAGE_CONFLICT',
+          retryable: false,
+          message: 'Diverged',
+        },
+      },
+    });
+    const draft = await f.prepare('checkpoint-1');
+    expect(draft.source).toMatchObject({ commit: head, tree, parent: null, parentTree: null });
+    expect(
+      await f.git(path.join(f.root, 'drafts', draft.id, 'worktree'), 'rev-parse', 'HEAD'),
+    ).toBe(head);
+    expect(await f.git(f.source, 'rev-parse', 'HEAD')).toBe(host);
+    await f.git(f.source, 'update-ref', '-d', quarantineRef);
+    const preview = await f.controller().inspect(f.id, actor);
+    expect(preview.sources.some((source) => source.id === 'checkpoint-1')).toBe(false);
+  });
+
   it('reverifies raw checkpoint author, committer and subject rather than trusting ledger flags', async () => {
     const f = await fixture(true);
     const parent = await f.git(f.source, 'rev-parse', 'HEAD');
