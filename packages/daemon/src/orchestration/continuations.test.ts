@@ -1,12 +1,12 @@
 import { fork, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { build } from 'esbuild';
 import { expect, it, onTestFinished } from 'vitest';
 import { digest } from '../managed/canonical.js';
 import { managedGit } from '../managed/source-git.js';
+import { buildStartupHarness } from '../test-utils/build-startup-harness.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { offlineController } from '../test-utils/offline-controller.js';
 import { waveProcessRuntime } from '../test-utils/wave-process-runtime.js';
@@ -594,24 +594,6 @@ it.each([
     3,
   );
 });
-
-async function buildStartupHarness(entry = 'continuation-crash-fixture') {
-  const daemon = path.resolve(import.meta.dirname, '../..');
-  await mkdir(path.join(daemon, '.turbo'), { recursive: true });
-  const dir = await mkdtemp(path.join(daemon, '.turbo', 'continuation-crash-'));
-  onTestFinished(() => rm(dir, { recursive: true, force: true }));
-  const bundle = path.join(dir, 'writer.mjs');
-  await build({
-    entryPoints: [path.join(daemon, `src/test-utils/${entry}.ts`)],
-    outfile: bundle,
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'esm',
-    packages: 'external',
-  });
-  return bundle;
-}
 
 it.skipIf(process.platform === 'win32').each(['accepted', 'allocated', 'lost-handle', 'cancel'])(
   'recovers the committed continuation across SIGKILL: %s',

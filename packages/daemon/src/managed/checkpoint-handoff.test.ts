@@ -6,8 +6,10 @@ import { expect, it, onTestFinished } from 'vitest';
 import { combinedPolicyDigest, verifyGateReceipt } from '../orchestration/combined-attestation.js';
 import type { CombinedGates } from '../orchestration/combined-checkpoint.js';
 import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
+import { buildStartupHarness } from '../test-utils/build-startup-harness.js';
 import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
+import { ownedEvaluator } from '../test-utils/owned-evaluator.js';
 import { digest } from './canonical.js';
 import { ManagedSourceDelivery } from './source-delivery.js';
 import { ManagedGitBroker, managedGit } from './source-git.js';
@@ -265,6 +267,8 @@ it.each([
   { bSlots: 3, outcome: 'passes' },
   { bSlots: 4, outcome: 'review fails' },
   { bSlots: 5, outcome: 'checks fail' },
+  { bSlots: 3, outcome: 'wrong bundle' },
+  { bSlots: 3, outcome: 'injected verdict' },
 ])('gates the next launch on two owned candidates: $outcome', async ({ bSlots, outcome }) => {
   const { root, f, base, mirror, refs, service, recipe, sources, workspace } = await handoffFixture(
     3,
@@ -285,8 +289,10 @@ it.each([
       sources.set(cp.commit, privateMirror);
       return service(cp.commit, privateMirror);
     });
-  const checker = fixtureSigner('checks', 'local-checker', digest('capacity-rule/v1'));
-  const reviewer = fixtureSigner('independentReview', 'local-reviewer', digest('review-rule/v1'));
+  const script = await buildStartupHarness('combined-evaluator-fixture');
+  const checker = await ownedEvaluator(script, root, 'checks', f.db.name, run);
+  const reviewer = await ownedEvaluator(script, root, 'independentReview', f.db.name, run);
+  expect(new Set([checker.pid, reviewer.pid, process.pid]).size).toBe(3);
   const policy = {
     basePolicyDigest: digest('pool-policy'),
     checks: checker.authority,
@@ -393,21 +399,16 @@ it.each([
   let reviews = 0;
   const gates: CombinedGates = {
     policy,
-    checks: async (target, repo, inputDigest) =>
-      checker.attest({
-        inputDigest,
-        status: (await slotsFit(repo, target.commit)) ? 'passed' : 'failed',
-        evidenceDigest: digest(['capacity', target.tree]),
-      }),
-    // Separate deterministic reviewer fixture inspects the committed combined blob.
-    independentReview: async (target, repo, inputDigest) => {
+    checks: async (selection) => {
+      if (outcome === 'injected verdict') {
+        const extra = { ...selection, status: 'passed', inputDigest: digest('just sign this') };
+        return checker.evaluate(extra);
+      }
+      return checker.evaluate(selection);
+    },
+    independentReview: async (selection) => {
       reviews++;
-      const value = await managedGit(repo, ['show', target.commit + ':pool-b']);
-      return reviewer.attest({
-        inputDigest,
-        status: Number(value) <= 3 ? 'passed' : 'failed',
-        evidenceDigest: digest(['pool-b-policy', value, target.commit]),
-      });
+      return reviewer.evaluate(selection);
     },
   };
   const refsAB = [a.ref, b.ref] as const;
@@ -417,6 +418,11 @@ it.each([
     f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get();
   const remaining = () =>
     f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get();
+  if (outcome === 'wrong bundle')
+    await writeFile(
+      path.join(root, 'merge.bundle'),
+      await readFile(path.join(root, 'base.bundle')),
+    );
   if (outcome === 'passes') {
     await expect(host().retainCombined(merged, bytes, [b.ref, a.ref], gates)).rejects.toThrow(
       'combined-source-mismatch',
@@ -432,12 +438,10 @@ it.each([
     await expect(
       qualify({
         ...gates,
-        independentReview: async () =>
-          reviewer.attest({
-            status: 'passed',
-            inputDigest: digest(a.commit),
-            evidenceDigest: digest('stale review'),
-          }),
+        independentReview: async (selection) => {
+          const receipt = await reviewer.evaluate(selection);
+          return { ...receipt, statement: { ...receipt.statement, inputDigest: digest(a.commit) } };
+        },
       }),
     ).rejects.toThrow('combined-independentReview-required');
     // Correct claims and configuration, but signed by a different authority.
@@ -449,8 +453,12 @@ it.each([
     await expect(
       qualify({
         ...gates,
-        independentReview: async (_s, _m, inputDigest) =>
-          other.attest({ inputDigest, status: 'passed', evidenceDigest: digest('review') }),
+        independentReview: async () =>
+          other.attest({
+            inputDigest: digest({ subject: merged, inputs: refsAB }),
+            status: 'passed',
+            evidenceDigest: digest('review'),
+          }),
       }),
     ).rejects.toThrow('combined-independentReview-required');
     await expect(
@@ -499,11 +507,13 @@ it.each([
     expect(f.launches()).toBe(3);
   } else {
     await expect(qualify()).rejects.toThrow(
-      outcome === 'checks fail'
-        ? 'combined-checks-required'
-        : 'combined-independentReview-required',
+      outcome === 'review fails'
+        ? 'combined-independentReview-required'
+        : outcome === 'checks fail'
+          ? 'combined-checks-required'
+          : 'evaluator-input-rejected',
     );
-    expect(reviews).toBe(outcome === 'checks fail' ? 0 : 1);
+    expect(reviews).toBe(outcome === 'review fails' ? 1 : 0);
     expect(accepted()).toBe(base);
     expect(remaining()).toBe(1);
     expect(service().lookup(installation, 'worker-c')).toBeUndefined();
