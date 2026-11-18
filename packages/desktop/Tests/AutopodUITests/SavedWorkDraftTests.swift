@@ -112,12 +112,12 @@ import Testing
     model.selectedSource = "checkpoint-2"
     #expect(model.canPrepare)
   }
-  @Test func failedCompromisedTaskShowsNativeActionWithoutPassingChecks() async throws {
+  @Test(arguments: [false, true]) func failedCompromisedTaskShowsNativeActionWithoutPassingChecks(redesign: Bool) async throws {
     // Native accessibility proof must execute on a Mac.
     let pod = Pod(id: "polite-tarsier", status: .failed, hasWorktree: true, branch: "feature",
       profileName: "fixture", task: "Saved source review", model: "fixture", startedAt: .now)
     var compromised = pod; compromised.worktreeCompromised = true
-    let host = LaunchComposerHost(DetailPanelView(pod: compromised, events: [], actions: PodActions()), width: 1100)
+    let host = LaunchComposerHost(DetailPanelView(pod: compromised, events: [], actions: PodActions()), width: 1100, redesign: redesign)
     defer { host.close() }
     try await host.wait { host.has("saved-work-draft-action") }
     #expect(host.enabled("saved-work-draft-action"))

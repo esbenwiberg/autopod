@@ -586,6 +586,7 @@ public struct DetailPanelView: View {
             if let fixLifecycle = pod.prFixLifecycleLabel {
                 Text(fixLifecycle).font(.caption2).foregroundStyle(.secondary)
             }
+            if offersSavedWorkDraft { savedWorkDraftAction }
             if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(DesktopTheme.surface)
     }
@@ -786,6 +787,16 @@ public struct DetailPanelView: View {
     }
 
 
+    private var offersSavedWorkDraft: Bool {
+        pod.pod.output == .pr && [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
+    }
+
+    private var savedWorkDraftAction: some View {
+        Button("Create draft PR from saved work…") { showSavedWorkDraft = true }
+            .buttonStyle(.bordered).controlSize(.small)
+            .accessibilityIdentifier("saved-work-draft-action")
+    }
+
     @ViewBuilder
     private var headerActions: some View {
         Group {
@@ -811,11 +822,8 @@ public struct DetailPanelView: View {
                 .tint(.orange)
                 .help("Repopulate the host worktree from the live container or, if the container is gone, restore deleted files from the agent's last commit on the bare repo. Clears the compromised flag on success.")
             }
-            if pod.pod.output == .pr && [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
-                Button("Create draft PR from saved work…") { showSavedWorkDraft = true }
-                    .buttonStyle(.bordered).controlSize(.small)
-                    .accessibilityIdentifier("saved-work-draft-action")
-            }
+            // The redesigned header surfaces this directly, not in its closed overflow menu.
+            if !redesign && offersSavedWorkDraft { savedWorkDraftAction }
             switch pod.status {
             case .queued:
                 // Kick — re-enqueues a stuck queued pod (e.g. orphaned by a missing
