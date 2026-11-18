@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
@@ -104,6 +105,39 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     path.join(config.stateRoot, 'workspaces'),
     config.mirrors,
   );
+  // This scope exists only while the owner is restoring an admitted continuation.
+  // It is not a request field. Ordinary managed starts keep the enrolled mirror.
+  const checkpointScope = new AsyncLocalStorage<{
+    run: string;
+    repository: string;
+    commit: string;
+    mirror: string;
+  }>();
+  const prepareWorkspaces = async (podId: string, request: ManagedPodRequest) => {
+    const owner = config.db
+      .prepare('SELECT dispatcher_installation_id FROM managed_pods WHERE pod_id=?')
+      .pluck()
+      .get(podId);
+    const cp = checkpointScope.getStore();
+    if (typeof owner !== 'string') throw new Error('managed-workspace-owner-missing');
+    if (!owner.startsWith('native.') && !cp) return workspaces.prepare(podId, request);
+    const [repo] = request.effectiveGrant.scope.repositories;
+    const enrolled = config.mirrors.filter((m) => m.enrollmentId === repo?.enrollmentId);
+    if (
+      !cp ||
+      owner !== 'native.' + cp.run ||
+      request.route.executionTarget !== 'local' ||
+      request.effectiveGrant.scope.repositories.length !== 1 ||
+      !repo ||
+      repo.baseRevision !== cp.commit ||
+      repo.enrollmentId !== cp.repository ||
+      enrolled.length !== 1 ||
+      enrolled[0]?.remote !== repo.remote
+    )
+      throw new Error('managed-checkpoint-workspace-binding');
+    const source = { ...enrolled[0]!, path: cp.mirror, baseRevision: cp.commit };
+    return new ManagedWorkspaces(config.db, workspaces.root, [source]).prepare(podId, request);
+  };
   const attach = async (index: number, podId: string, ref: string, root: string) => {
     if (closed) throw new Error('managed-composition-closed');
     if (channels.has(podId)) return;
@@ -206,7 +240,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         return true;
       },
       prepare: async (podId, request) => {
-        const volumes = await workspaces.prepare(podId, request);
+        const volumes = await prepareWorkspaces(podId, request);
         for (const input of components.service.inputs!.mounts(podId))
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
         return {
@@ -319,6 +353,13 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     ...components,
     runtime,
     workspaces,
+    withCheckpoint<T>(
+      cp: { run: string; repository: string; commit: string },
+      mirror: string,
+      use: (service: typeof components.service) => Promise<T>,
+    ) {
+      return checkpointScope.run({ ...cp, mirror }, () => use(components.service));
+    },
     /** Reattach leases/channels to durable identities; never allocate or restart a worker. */
     async resume(profileIds?: ReadonlySet<string>) {
       if (!components.service.enabled) throw new Error('managed-lane-disabled');

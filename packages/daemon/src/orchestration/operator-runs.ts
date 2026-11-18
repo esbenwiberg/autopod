@@ -25,6 +25,9 @@ export interface OperatorRunSlot {
   provider: ProfileLlmClient;
 }
 export interface OperatorRunsConfig {
+  /** Called with exclusive operator ownership, before any scheduler is attached. */
+  prepare?: () => Promise<void>;
+  cleanup?: (run: string) => Promise<{ run: string; cleaned: number }>;
   host: LocalCheckpointHost;
   db: Database.Database;
   slots: readonly OperatorRunSlot[];
@@ -103,6 +106,7 @@ export function registerOperatorRuns(
     releaseOwner = tryOperatorDaemonOwner(db) ?? undefined;
     if (!releaseOwner) throw new Error('operator-daemon-owner-active');
     try {
+      await config.prepare?.();
       // Check every enrollment before waking any run. A boot with a stale catalog
       // must not charge a different slot and then fail halfway through startup.
       const active = [...slots].filter(([run]) => kicked(run) && canceled(run) === 0);
@@ -115,7 +119,7 @@ export function registerOperatorRuns(
     }
   });
   app.addHook('onClose', drain);
-  for (const op of ['status', 'start', 'cancel', 'fence'] as const) {
+  for (const op of ['status', 'start', 'cancel', 'fence', 'cleanup'] as const) {
     app.route({
       method: op === 'status' ? 'GET' : 'POST',
       url: `/orchestration/runs/:slot/${op}`,
@@ -141,6 +145,10 @@ export function registerOperatorRuns(
             host.ledger.cancel(run);
             return reply.code(202).send({ run, stopRequested: true });
           }
+          if (op === 'cleanup') {
+            if (!config.cleanup) throw new Error('cleanup-unavailable');
+            return await config.cleanup(run);
+          }
           if (op === 'fence') {
             const v = fence.safeParse(req.body);
             if (!v.success) return reply.code(400).send({ code: 'operator-body-invalid' });
@@ -161,7 +169,7 @@ export function registerOperatorRuns(
               .get(run),
             children: db
               .prepare(
-                `SELECT c.start_key AS child,p.pod_id AS pod,p.state,p.observed_exit AS observedExit FROM orchestration_continuations c LEFT JOIN managed_pods p ON p.dispatcher_installation_id=('native.'||c.run_id) AND p.managed_start_key=c.start_key WHERE c.run_id=? ORDER BY c.rowid`,
+                `SELECT c.start_key AS child,p.pod_id AS pod,p.state,p.observed_exit AS observedExit,p.cleanup FROM orchestration_continuations c LEFT JOIN managed_pods p ON p.dispatcher_installation_id=('native.'||c.run_id) AND p.managed_start_key=c.start_key WHERE c.run_id=? ORDER BY c.rowid`,
               )
               .all(run),
             ...host.interventions.inspect(run),

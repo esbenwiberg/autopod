@@ -39,7 +39,15 @@ function requirePass(subject: Subject, v: Verification) {
     throw new Error('checkpoint-verification-required');
 }
 
-/** Offline composition only. Caller supplies a private host scratch directory and an executor
+type ScopedExecutor = {
+  withCheckpoint<T>(
+    checkpoint: Readonly<ContinuationCheckpoint>,
+    mirror: string,
+    use: (service: ManagedPodService) => Promise<T>,
+  ): Promise<T>;
+};
+
+/** Local-host composition only. Caller supplies a private host scratch directory and an executor
  * that makes independent worker copies before returning; never mount the scratch mirror. */
 export class LocalCheckpointHost {
   readonly ledger: OrchestrationContinuations;
@@ -47,7 +55,7 @@ export class LocalCheckpointHost {
   constructor(
     private readonly db: Database.Database,
     private readonly scratch: string,
-    compose: ComposeLocal,
+    compose: ComposeLocal | ScopedExecutor,
   ) {
     this.ledger = new OrchestrationContinuations(db, async (cp, use) => {
       const { evidenceDigest, ...subject } = cp;
@@ -72,7 +80,11 @@ export class LocalCheckpointHost {
       )
         throw new Error('checkpoint-custody-integrity');
       requirePass(subject, manifest.verification);
-      return this.withMirror(subject, row.bundle, (mirror) => use(compose(cp, mirror)));
+      return this.withMirror(subject, row.bundle, (mirror) =>
+        typeof compose === 'function'
+          ? use(compose(cp, mirror))
+          : compose.withCheckpoint(cp, mirror, use),
+      );
     });
     this.interventions = new UnknownOutcomes(db, this.ledger);
   }

@@ -260,7 +260,7 @@ export function composeManagedProfileSet(
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
   },
-): ManagedAcceptanceRuntime {
+): ManagedAcceptanceRuntime & Pick<ReturnType<typeof composeManagedRuntime>, 'withCheckpoint'> {
   const manager = dependencies.manager;
   if (
     !cli ||
@@ -414,9 +414,10 @@ export function composeManagedProfileSet(
   });
   return {
     components,
+    withCheckpoint: components.withCheckpoint,
     config: { db: dependencies.db, store },
     bindings: cli.bindings,
-    resume: (profileIds) => components.resume(profileIds),
+    resume: (profileIds?: ReadonlySet<string>) => components.resume(profileIds),
     close: () => components.close(),
   };
 }

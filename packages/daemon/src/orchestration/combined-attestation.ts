@@ -13,7 +13,7 @@ const base64url = (bytes: number) =>
 const authority = z
   .object({ identity, configurationDigest: hash, publicKey: base64url(32) })
   .strict();
-const policySchema = z
+export const gatePolicySchema = z
   .object({ basePolicyDigest: hash, checks: authority, independentReview: authority })
   .strict()
   .refine(
@@ -21,7 +21,7 @@ const policySchema = z
       p.checks.identity !== p.independentReview.identity &&
       p.checks.publicKey !== p.independentReview.publicKey,
   );
-export type CombinedPolicy = z.infer<typeof policySchema>;
+export type CombinedPolicy = z.infer<typeof gatePolicySchema>;
 export type Role = 'checks' | 'independentReview';
 const statementSchema = z
   .object({
@@ -34,12 +34,14 @@ const statementSchema = z
   })
   .strict();
 export type GateStatement = z.infer<typeof statementSchema>;
-const signedSchema = z.object({ statement: statementSchema, signature: base64url(64) }).strict();
-export type SignedGateReceipt = z.infer<typeof signedSchema>;
+export const signedGateSchema = z
+  .object({ statement: statementSchema, signature: base64url(64) })
+  .strict();
+export type SignedGateReceipt = z.infer<typeof signedGateSchema>;
 
 /** Freeze this digest at run creation. The base digest retains other run restrictions. */
 export function combinedPolicyDigest(policy: CombinedPolicy) {
-  return digest(['autopod.combined-policy.v1', policySchema.parse(policy)]);
+  return digest(['autopod.combined-policy.v1', gatePolicySchema.parse(policy)]);
 }
 export function gateStatementBytes(statement: GateStatement) {
   return Buffer.from(canonical(['autopod.combined-gate.v1', statementSchema.parse(statement)]));
@@ -51,7 +53,7 @@ export function verifyGateReceipt(
   inputDigest: string,
   raw: unknown,
 ) {
-  const parsed = signedSchema.safeParse(raw);
+  const parsed = signedGateSchema.safeParse(raw);
   if (parsed.success) {
     const { statement: s, signature } = parsed.data;
     const expected = policy[role];

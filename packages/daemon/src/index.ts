@@ -50,6 +50,12 @@ import {
   createRateLimiter,
   createTeamsAdapter,
 } from './notifications/index.js';
+import { bindHostedControllerProfile } from './orchestration/hosted-controller-profile.js';
+import {
+  assertOperatorRecovery,
+  composeOperatorEnrollment,
+  parseOperatorEnrollment,
+} from './orchestration/operator-enrollment.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -1141,6 +1147,33 @@ await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');
 });
 
+const enrollment = parseOperatorEnrollment(process.env.AUTOPOD_OPERATOR_ENROLLMENT);
+if (
+  enrollment &&
+  (!managedCliConfig ||
+    !managedProfileSetConfig ||
+    managedProfileSetConfig.catalogArtifacts ||
+    !ENTRA_TENANT_ID ||
+    !ENTRA_CLIENT_ID ||
+    ALLOW_DEV_AUTH ||
+    MOCK_DOCKER ||
+    process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1')
+)
+  throw new Error('operator-production-boundaries-required');
+const profileRuntime = managedProfileSetConfig
+  ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
+      db,
+      databasePath: DB_PATH,
+      manager:
+        managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+          ? containerManager
+          : sandboxContainerManager,
+      networkManager,
+      providerAccounts: providerAccountStore,
+      githubAuth,
+    })
+  : undefined;
+
 const legacyManagedRuntime = managedAcceptanceConfig
   ? composeManagedAcceptance(managedAcceptanceConfig, managedCliConfig, {
       db,
@@ -1148,24 +1181,10 @@ const legacyManagedRuntime = managedAcceptanceConfig
       manager: sandboxContainerManager,
       providerAccounts: providerAccountStore,
     })
-  : managedProfileSetConfig
-    ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
-        db,
-        databasePath: DB_PATH,
-        manager:
-          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
-            ? containerManager
-            : sandboxContainerManager,
-        networkManager,
-        providerAccounts: providerAccountStore,
-        githubAuth,
-      })
-    : undefined;
+  : profileRuntime;
 const managedRuntime =
-  managedProfileSetConfig?.catalogArtifacts &&
-  legacyManagedRuntime &&
-  'components' in legacyManagedRuntime
-    ? composeManagedCatalog(managedProfileSetConfig, legacyManagedRuntime, {
+  managedProfileSetConfig?.catalogArtifacts && profileRuntime
+    ? composeManagedCatalog(managedProfileSetConfig, profileRuntime, {
         db,
         databasePath: DB_PATH,
         manager:
@@ -1179,13 +1198,34 @@ const managedRuntime =
         worktrees: worktreeManager,
       })
     : legacyManagedRuntime;
-if (managedRuntime) await managedRuntime.resume();
+const operatorRuns = enrollment
+  ? composeOperatorEnrollment(enrollment, {
+      db,
+      databasePath: DB_PATH,
+      profiles: managedProfileSetConfig,
+      cli: managedCliConfig,
+      runtime: profileRuntime,
+      bind: (pin) =>
+        bindHostedControllerProfile(
+          pin,
+          configuration.store,
+          providerAccountStore,
+          providerAccountHealth,
+          logger,
+        ),
+    })
+  : undefined;
+if (!operatorRuns) {
+  assertOperatorRecovery(db, null);
+  await managedRuntime?.resume();
+}
 
 // Server
 const app = await createServer({
   configuration: configuration.routes,
   pim: configuration.scopedTools.pimRoutes,
   authModule,
+  operatorRuns,
   managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
