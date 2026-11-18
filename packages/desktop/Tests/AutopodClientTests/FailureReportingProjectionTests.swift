@@ -9,7 +9,7 @@ import AutopodUI
 
   @Test func compactHydrationFreshnessAndReplacement() async throws {
     try await withPodStoreLifetimeFixture { f in
-      func discover(_ stamp: String) async throws {
+      @MainActor func discover(_ stamp: String) async throws {
         let task = f.start { await f.store.loadSessions() }
         let page = lifetimePage(id: "residential-cod", hasNext: false, status: "failed", updatedAt: stamp)
           .replacingOccurrences(of: "\"failureReason\":null", with: "\"failureReason\":\"Compact preview only\"")
@@ -17,7 +17,7 @@ import AutopodUI
         try await f.next(f.a, "/pods/scores").respond(body: "[]")
         _ = await task.value
       }
-      func hydrate(_ stamp: String, reason: String?) async throws {
+      @MainActor func hydrate(_ stamp: String, reason: String?) async throws {
         let task = f.start { await f.store.refreshSession("residential-cod") }
         try await f.next(f.a, "/pods/residential-cod").respond(body: failurePod(stamp: stamp, reason: reason))
         _ = await task.value
