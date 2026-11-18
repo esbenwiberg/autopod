@@ -22,6 +22,7 @@ import { boundedDockerCall } from '../containers/docker-bounds.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
+import { directNodeTest, memoryCommandHash } from '../validation/test-process-memory.js';
 import { assertApprovalRepairStorage } from '../worktrees/approval-rewrite-repair-source.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
@@ -66,7 +67,11 @@ export function observeCheckpointSelection<T>(read: () => T) {
   } catch (error) {
     if (
       !(error instanceof AutopodError) ||
-      error.code !== 'CHECKPOINT_RECOVERY_BLOCKED' ||
+      ![
+        'CHECKPOINT_RECOVERY_BLOCKED',
+        'MEMORY_RECOVERY_UNAVAILABLE',
+        'MEMORY_RECOVERY_REQUIRED',
+      ].includes(error.code) ||
       error.statusCode !== 409
     )
       throw error;
@@ -229,6 +234,44 @@ export function createRetainedCheckpointRecovery(deps: {
   }
   const predecessorSource = (prior: CheckpointRecoveryRecord) =>
     prior.checked?.source ?? prior.selected ?? prior.prepared;
+  const isMemoryFailure = (pod: Pod) =>
+    pod.executionTarget === 'local' &&
+    pod.lastValidationResult?.infrastructureFailure?.phase === 'test' &&
+    pod.lastValidationResult.infrastructureFailure.code === 'PROCESS_MEMORY_EXHAUSTED' &&
+    Boolean(repo.latest(pod.id)?.binding.continuation);
+  function memoryPredecessor(
+    pod: Pod,
+    infrastructure?: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'],
+  ) {
+    if (!isMemoryFailure(pod)) return null;
+    const prior = failedChecksPredecessor(pod, infrastructure);
+    const memory = prior?.checked?.result.test?.memoryEvidence;
+    const command = deps.executionForPod(pod).testCommand;
+    if (
+      !prior ||
+      pod.linkedPodId ||
+      pod.executionTarget !== 'local' ||
+      pod.lastValidationResult?.infrastructureFailure?.phase !== 'test' ||
+      !memory ||
+      !command ||
+      !directNodeTest(command) ||
+      memory.commandHash !== memoryCommandHash(command) ||
+      memory.containerId !== pod.containerId ||
+      !memory.resourceKey ||
+      !memory.imageDigest ||
+      memory.version !== 1 ||
+      memory.kind !== 'node-heap' ||
+      !Number.isSafeInteger(memory.heapLimitBytes) ||
+      memory.heapLimitBytes <= 0 ||
+      !Number.isSafeInteger(memory.containerLimitBytes) ||
+      memory.containerLimitBytes <= memory.heapLimitBytes
+    )
+      checkpointError(
+        'Prior effective test-process heap/container evidence is unavailable for this exact saved command; no qualified memory retry exists',
+        'MEMORY_RECOVERY_UNAVAILABLE',
+      );
+    return prior;
+  }
   function policy(
     pod: Pod,
     continuation = false,
@@ -238,6 +281,12 @@ export function createRetainedCheckpointRecovery(deps: {
     guidanceRecord?: CheckpointRecoveryRecord,
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
+    const memory = isMemoryFailure(pod) ? memoryPredecessor(pod, infrastructure) : null;
+    if (memory && (!infrastructure || infrastructure.mode !== 'checks'))
+      checkpointError(
+        'Retained memory failure requires explicit checks-only infrastructure recovery; no coding or Resume is authorized',
+        'MEMORY_RECOVERY_REQUIRED',
+      );
     const sealed = repo.prevalidationSource(pod);
     if (
       sealed &&
@@ -289,7 +338,8 @@ export function createRetainedCheckpointRecovery(deps: {
     if (
       infrastructure &&
       (pod.executionTarget !== 'local' ||
-        pod.status !== 'failed' ||
+        (pod.status !== 'failed' &&
+          !(pod.status === 'review_required' && memory && predecessor?.id === memory.id)) ||
         deps.readLaunch?.(pod.id)?.ai.reviewer.mode !== 'independent' ||
         (!predecessor &&
           (!deps.podRepo.hasInfrastructureBlocker?.(pod.id) ||
@@ -447,7 +497,9 @@ export function createRetainedCheckpointRecovery(deps: {
   function original(record: CheckpointRecoveryRecord) {
     const current = deps.podRepo.getOrThrow(record.podId);
     if (
-      record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+      (record.binding.continuation?.execution?.buildOnlyEnvironmentKeys ||
+        record.originalEvidence.result?.infrastructureFailure?.code ===
+          'PROCESS_MEMORY_EXHAUSTED') &&
       (record.actor.type !== 'human' || current.userId !== record.actor.userId)
     )
       throw new AutopodError('Build-only environment selection owner changed', 'FORBIDDEN', 403);
@@ -558,6 +610,9 @@ export function createRetainedCheckpointRecovery(deps: {
             mode,
             qualification: '',
             originalTree: '',
+            ...(mode === 'checks' && isMemoryFailure(pod) && failedChecksPredecessor(pod)
+              ? { predecessorChecksId: failedChecksPredecessor(pod)!.id }
+              : {}),
           }),
         ),
       ]),
@@ -575,6 +630,28 @@ export function createRetainedCheckpointRecovery(deps: {
             expectedGeneration: selection.expectedGeneration,
             expectedResultHash: selection.expectedResultHash,
           }
+        : null,
+      memoryRecovery: isMemoryFailure(pod)
+        ? (() => {
+            const assessed = observeCheckpointSelection(() => memoryPredecessor(pod));
+            const policy = infrastructurePolicies.checks!;
+            const prior = failedChecksPredecessor(pod);
+            return {
+              version: 1,
+              state:
+                assessed.refusal || policy.state === 'blocked'
+                  ? 'unavailable'
+                  : 'requires_candidate',
+              reason:
+                assessed.refusal?.reason ??
+                policy.reason ??
+                'Select a compatible environment; actual test-process heap improvement must be proved before checks dispatch.',
+              source: prior ? predecessorSource(prior) : null,
+              priorMemory: assessed.selection?.checked?.result.test?.memoryEvidence ?? null,
+              predecessorId: prior?.id ?? null,
+              candidateQualification: 'not_run',
+            };
+          })()
         : null,
       infrastructure: {
         state: infrastructure.needs.length ? ('reported' as const) : ('none_recorded' as const),
@@ -892,7 +969,8 @@ export function createRetainedCheckpointRecovery(deps: {
     };
     const assertScopeOwner = () => {
       if (
-        (input as RetainedContinuationRequest).buildOnlyEnvironmentKeys !== undefined &&
+        ((input as RetainedContinuationRequest).buildOnlyEnvironmentKeys !== undefined ||
+          isMemoryFailure(deps.podRepo.getOrThrow(podId))) &&
         deps.podRepo.getOrThrow(podId).userId !== actor.userId
       )
         throw new AutopodError(
@@ -947,6 +1025,14 @@ export function createRetainedCheckpointRecovery(deps: {
           }
         : undefined;
     policy(pod, continuation, repair, addReview, infrastructure);
+    if (
+      isMemoryFailure(pod) &&
+      (!(input as RetainedContinuationRequest).executionProfileId ||
+        (input as RetainedContinuationRequest).buildOnlyEnvironmentKeys)
+    )
+      checkpointError(
+        'Memory recovery requires an exact candidate execution preview and unchanged frozen commands',
+      );
     if (predecessor && input.checkpointHead !== predecessorSource(predecessor)?.head)
       checkpointError('Selected source differs from completed failed repair');
     const containerManager = deps.getContainerManager(pod.executionTarget);
@@ -981,6 +1067,21 @@ export function createRetainedCheckpointRecovery(deps: {
     const afterProvider = replay();
     if (afterProvider) return afterProvider;
     assertCurrent();
+    if (isMemoryFailure(pod)) {
+      const memory = pod.lastValidationResult!.test!.memoryEvidence!;
+      const metadata = await containerManager.getExecutionMetadata?.(containerId);
+      assertCurrent();
+      if (
+        memory.resourceKey !== resourceKey ||
+        metadata?.podId !== pod.id ||
+        metadata.imageDigest !== memory.imageDigest ||
+        !metadata.memoryLimitBytes ||
+        metadata.memoryLimitBytes < memory.containerLimitBytes
+      )
+        checkpointError(
+          'Prior actual allocation or resource identity differs from saved command memory evidence',
+        );
+    }
     if (status !== 'stopped' && !(infrastructure && status === 'running'))
       checkpointError(
         'Only a retained stopped original is eligible; no original wake, stop, clone or deletion is performed',
@@ -1106,6 +1207,8 @@ export function createRetainedCheckpointRecovery(deps: {
         Boolean(codingClaim),
         infrastructure?.mode,
       );
+      if (isMemoryFailure(pod) && execution.target !== 'local')
+        checkpointError('Memory checks recovery requires a compatible local Docker environment');
     }
     if (codingClaim) {
       const finalOriginalKey = await containerManager.getResourceKey(containerId);
@@ -1299,12 +1402,15 @@ export function createRetainedCheckpointRecovery(deps: {
       true,
       undefined,
       true,
-      pod.linkedPodId
+      pod.linkedPodId || isMemoryFailure(pod)
         ? {
             version: 1,
             mode: infrastructureMode,
             qualification: '',
             originalTree: '',
+            ...(isMemoryFailure(pod) && failedChecksPredecessor(pod)
+              ? { predecessorChecksId: failedChecksPredecessor(pod)!.id }
+              : {}),
           }
         : undefined,
     );
@@ -1519,7 +1625,9 @@ export function createRetainedCheckpointRecovery(deps: {
   ) {
     const record = repo.get(input.id) ?? checkpointError('Recovery unavailable');
     if (
-      record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+      (record.binding.continuation?.execution?.buildOnlyEnvironmentKeys ||
+        record.originalEvidence.result?.infrastructureFailure?.code ===
+          'PROCESS_MEMORY_EXHAUSTED') &&
       (actor.type !== 'human' || deps.podRepo.getOrThrow(podId).userId !== actor.userId)
     )
       throw new AutopodError(
@@ -1987,7 +2095,9 @@ export function createRetainedCheckpointRecovery(deps: {
       repo.assertAvailable(podId);
       const current = deps.podRepo.getOrThrow(podId);
       if (
-        record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+        (record.binding.continuation?.execution?.buildOnlyEnvironmentKeys ||
+          record.originalEvidence.result?.infrastructureFailure?.code ===
+            'PROCESS_MEMORY_EXHAUSTED') &&
         (record.actor.type !== 'human' || current.userId !== record.actor.userId)
       )
         throw new AutopodError(
@@ -2069,7 +2179,7 @@ export function createRetainedCheckpointRecovery(deps: {
       repo.freezeRepairCandidate(record.id, { head: source.commitSha, tree: source.treeSha });
     }
     const candidate = repo.get(record.id)?.infrastructure?.candidate;
-    return inspectCheckpointSource({
+    const observed = await inspectCheckpointSource({
       podId,
       worktreePath: record.prepared.worktree,
       branch: record.binding.branch,
@@ -2078,6 +2188,16 @@ export function createRetainedCheckpointRecovery(deps: {
       worktreeManager: deps.worktreeManager,
       assertCurrent,
     });
+    if (
+      record.originalEvidence.result?.infrastructureFailure?.phase === 'test' &&
+      record.originalEvidence.result.infrastructureFailure.code === 'PROCESS_MEMORY_EXHAUSTED' &&
+      (observed.head !== record.prepared.head || observed.tree !== record.prepared.tree)
+    )
+      checkpointError(
+        'Memory checks require the exact saved commit and tree, including no extra checkpoint commits',
+        'CHECKPOINT_SOURCE_CHANGED',
+      );
+    return observed;
   }
   const repair = deps.podRepo.retainedCoding
     ? createRepairContinuation({

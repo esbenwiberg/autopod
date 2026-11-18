@@ -111,6 +111,8 @@ struct RecoveryHubSheet: View {
 
   @ViewBuilder private var destination: some View {
     switch route {
+    case .memoryChecks:
+      MemoryChecksRecoveryView(model: model.memoryChecks, actions: actions.memoryChecks)
     case .overview: overview
     case .continueWork: continueWork
     case .recoverFiles:
@@ -151,8 +153,34 @@ struct RecoveryHubSheet: View {
   }
 
   private var overview: some View {
-    GeometryReader { geometry in
-      ScrollView { overviewContents(compact: geometry.size.width < 700) }
+    Group {
+      if (pod.validationChecks?.infrastructureFailure?.code == "PROCESS_MEMORY_EXHAUSTED" && pod.validationChecks?.infrastructureFailure?.phase == "test") || model.memoryChecks.needsObservation {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            RecoverySectionTitle(title: "The test process ran out of memory.", subtitle: "Inspect the saved checks before selecting a compatible environment.")
+            RecoveryStatusCard(title: "Saved source and failed checks", symbol: "doc.text", detail: model.memoryChecks.savedWork)
+            Text(model.memoryChecks.nextStep).font(.callout).textSelection(.enabled)
+            Button(model.memoryChecks.needsObservation ? "Observe saved checks request" : "Review checks-only recovery…") { route = .memoryChecks }
+              .buttonStyle(.borderedProminent).disabled(!model.canOpen(.memoryChecks))
+              .accessibilityIdentifier("memory-checks-review")
+            DisclosureGroup("Technical details and handoff") {
+              VStack(alignment: .leading, spacing: 12) {
+                Text("Pod: \(pod.id). A larger configured container alone does not prove a higher effective test heap. No complete passing report is implied.")
+                Text(InfrastructureRecoveryHandoff.inspectionCommand(podId: pod.id)).textSelection(.enabled)
+                if let failure = model.failureSummary(for: pod) { Text(failure).textSelection(.enabled) }
+                if actions.recoveryFork.available {
+                  Button("Inspect supported saved-work handoff…") { route = .freshPod }
+                    .disabled(!model.canOpen(.freshPod))
+                }
+              }.font(.caption).padding(.top, 8)
+            }
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+      } else {
+        GeometryReader { geometry in
+          ScrollView { overviewContents(compact: geometry.size.width < 700) }
+        }
+      }
     }
   }
 

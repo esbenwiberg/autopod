@@ -698,6 +698,7 @@ export type {
   SmokeResult,
   StructuredReviewFinding,
   TaskReviewResult,
+  TestProcessMemoryEvidence,
   ValidationFinding,
   ValidationInfrastructureFailure,
   ValidationOverride,

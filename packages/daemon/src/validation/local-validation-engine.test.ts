@@ -3181,6 +3181,44 @@ describe('validate() — facts + review gate', () => {
     expect(result.infrastructureFailure?.message).toContain('OOM evidence is unavailable');
   });
 
+  it.each([
+    'probe',
+    'preload',
+  ] as const)('runs ordinary frozen tests when optional memory %s collection fails', async (fault) => {
+    const cm = stubContainerManager();
+    const command = 'node --test --experimental-test-isolation=none tests.js';
+    cm.getExecutionMetadata = vi.fn(async () => ({
+      podId: 'test-pod',
+      imageDigest: 'sha256:fixture',
+      memoryLimitBytes: 8 * 1024 ** 3,
+      cpuLimit: 1,
+      networkMode: 'fixture',
+    }));
+    cm.getResourceKey = vi.fn(async () => 'docker:fixture:exact');
+    cm.writeFile = vi.fn(async () => {
+      throw new Error('Preload collection unavailable');
+    });
+    const tests = vi.fn();
+    cm.execInContainer = vi.fn(async (_id, args) => {
+      if (args.some((arg) => arg.includes('getHeapStatistics'))) {
+        if (fault === 'probe') throw new Error('Optional probe transport unavailable');
+        return {
+          stdout: JSON.stringify({ heap: 1024 ** 3, container: 8 * 1024 ** 3, pid: 1 }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (args[2] === command) tests();
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({ podId: 'test-pod', executionTarget: 'local', testCommand: command }),
+    );
+    expect(tests).toHaveBeenCalledTimes(1);
+    expect(result.test?.status).toBe('pass');
+    expect(result.test?.memoryEvidence).toBeUndefined();
+  });
+
   it('classifies a killed test command without claiming confirmed OOM', async () => {
     const base = stubContainerManager();
     const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
