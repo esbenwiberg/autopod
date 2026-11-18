@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { recoveryForkInputSchema, recoveryForkRequestSchema } from './recovery-fork.js';
+import {
+  recoveryForkInputSchema,
+  recoveryForkRequestSchema,
+  recoveryHandoffPreparationSchema,
+} from './recovery-fork.js';
 
 const input = {
   version: 1,
@@ -11,11 +15,11 @@ const input = {
   acknowledgePartialSource: true,
 };
 describe('explicit recovery fork contract', () => {
-  it('requires source, instructions and partial-source acknowledgement without accepting authority overrides', () => {
+  it('requires source and partial-source acknowledgement without accepting authority overrides', () => {
     expect(recoveryForkInputSchema.parse(input)).toEqual(input);
     for (const change of [
       { acknowledgePartialSource: false },
-      { instructions: 'short' },
+      { instructions: 'x'.repeat(8001) },
       { expectedGeneration: 0 },
       { sourceHead: 'main' },
       { actor: 'admin' },
@@ -24,6 +28,24 @@ describe('explicit recovery fork contract', () => {
     ]) {
       expect(recoveryForkInputSchema.safeParse({ ...input, ...change }).success).toBe(false);
     }
+  });
+  it('accepts an optional note while keeping preparation free of execution authority', () => {
+    const { instructions: _note, ...withoutNote } = input;
+    expect(recoveryForkInputSchema.parse(withoutNote).instructions).toBe('');
+    expect(recoveryForkInputSchema.parse({ ...input, instructions: '  ' }).instructions).toBe('');
+    expect(recoveryHandoffPreparationSchema.parse({ expectedGeneration: 3 })).toEqual({
+      expectedGeneration: 3,
+      instructions: '',
+    });
+    for (const change of [
+      { execute: true },
+      { actorId: 'human' },
+      { tokenBudget: 100 },
+      { expectedGeneration: 0 },
+    ])
+      expect(
+        recoveryHandoffPreparationSchema.safeParse({ expectedGeneration: 3, ...change }).success,
+      ).toBe(false);
   });
   it('binds one immutable request key and reviewed selection; rejects duplicate supplemental paths', () => {
     expect(

@@ -24,6 +24,7 @@ import Observation
   var acknowledged = false { didSet { preview = nil } }
   private(set) var selectedPaths: Set<String> = []
   private(set) var preparedHandoff: RecoveryHandoffPreparation?
+  private(set) var preparationState: RecoveryHandoffPreparationState?
   private(set) var preparationUncertain = false
 
   init(podId: String, actions: RecoveryForkActions) {
@@ -47,8 +48,13 @@ import Observation
       guard let preview, preview.expectedBinding == pending.expectedBinding, preview.input == pending.input else { return nil }
       return preview.context
     }
-    return preview?.context ?? inspection?.context
+    if let current = preview?.context ?? inspection?.context { return current }
+    if let preparedHandoff {
+      return try? JSONDecoder().decode(PreparedPacketContext.self, from: Data(preparedHandoff.packet.utf8)).quotedHistoricalContext
+    }
+    return preparationState?.context
   }
+  private struct PreparedPacketContext: Decodable { let quotedHistoricalContext: RecoveryForkContext }
   var selectionIssue: String? {
     if selectedPaths.count > 100 { return "Select at most 100 additional files." }
     if selectedBytes > 50 * 1024 * 1024 { return "Selected files exceed 50 MiB. Remove files before review." }
@@ -79,14 +85,27 @@ import Observation
   }
   func refresh(_ actions: RecoveryForkActions, forStart: Bool = false) async {
     guard !busy, bind(actions) else { return }
+    if pending == nil {
+      preview = nil
+      if actions.preparationAvailable || forStart { inspection = nil }
+    }
     busy = true; error = nil; defer { busy = false }
     do {
-      if actions.preparationAvailable && !forStart {
-        let saved = try await actions.prepared(podId)
+      if actions.preparationAvailable && !forStart && pending == nil {
+        let state = try await actions.prepared(podId)
         guard bind(actions), !Task.isCancelled else { return }
-        try saved?.validate(podId: podId)
-        preparedHandoff = saved
-        if saved != nil { preparationUncertain = false; return }
+        try state?.validate(podId: podId)
+        preparationState = state
+        preparedHandoff = state?.receipt
+        if let observed = state?.operation {
+          try observed.validate(podId: podId)
+          if let old = operation, old.id != observed.id { throw DaemonError.badRequest("A different durable decision owns this source. Observe it on the owning daemon.") }
+          do { try journal.save(observed.request); pending = observed.request }
+          catch { invalidJournal = true; throw error }
+          operation = observed
+        }
+        if state?.receipt != nil { preparationUncertain = false }
+        if state != nil { return }
       }
       let value = try await actions.inspect(podId)
       guard bind(actions), !Task.isCancelled else { return }
@@ -120,15 +139,17 @@ import Observation
   }
   func prepareHandoff(_ actions: RecoveryForkActions) async {
     guard canEdit, actions.preparationAvailable, !preparationUncertain,
-      preparedHandoff == nil, let inspection, instructions.utf16.count <= 8000, bind(actions) else { return }
+      preparedHandoff == nil, preparationState?.available != false,
+      let generation = preparationState?.generation ?? inspection?.generation,
+      instructions.utf16.count <= 8000, bind(actions) else { return }
     busy = true; error = nil; preparationUncertain = true
     defer { busy = false }
     do {
       let value = try await actions.prepare(podId, RecoveryHandoffPreparationRequest(
-        expectedGeneration: inspection.generation, instructions: instructions))
+        expectedGeneration: generation, instructions: instructions))
       guard bind(actions), !Task.isCancelled else { return }
       try value.validate(podId: podId)
-      guard value.generation == inspection.generation else { throw URLError(.badServerResponse) }
+      guard value.generation == generation else { throw URLError(.badServerResponse) }
       preparedHandoff = value; preparationUncertain = false
     } catch { if bind(actions) { self.error = "\(error.localizedDescription) Check the saved handoff; no start was requested." } }
   }
@@ -204,6 +225,8 @@ import Observation
   private func bind(_ actions: RecoveryForkActions) -> Bool {
     guard actions.available, actions.scope == scope, actions.isCurrent() else {
       inspection = nil; preview = nil; error = "Connection changed. Reopen on the owning daemon. Saved decisions and originals remain retained."
+      preparedHandoff = nil
+      preparationState = nil
       return false
     }
     return true

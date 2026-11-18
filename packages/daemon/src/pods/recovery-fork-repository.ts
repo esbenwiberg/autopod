@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
@@ -19,10 +19,11 @@ import { recoveryForkError } from './recovery-fork-rejection.js';
 
 export { recoveryForkError } from './recovery-fork-rejection.js';
 
-import { recoveryBytesHash } from '../worktrees/recovery-fork-source.js';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 
 export const recoveryForkProcessEpoch = randomUUID();
+const packetBytesHash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 export interface RecoveryForkBinding {
   version: 1;
   parentPodId: string;
@@ -123,7 +124,7 @@ export function createRecoveryForkRepository(db: Database.Database) {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 512_000)
       recoveryForkError('Recovery packet exceeds safe bounds or is not a regular file');
     const bytes = readFileSync(prepared.packet, 'utf8');
-    if (recoveryBytesHash(bytes) !== prepared.packetHash)
+    if (packetBytesHash(bytes) !== prepared.packetHash)
       recoveryForkError('Recovery lineage packet bytes are unavailable or tampered');
     return bytes;
   }
@@ -164,10 +165,17 @@ export function createRecoveryForkRepository(db: Database.Database) {
         break;
       }
       const p = record.facts.prepared;
+      const { id: _requestId, expectedBinding, ...input } = record.request;
+      if (expectedBinding !== configurationDigest({ binding: record.binding, input }))
+        recoveryForkError('Recovery selection binding changed');
       const { digest: configDigest, ...configBody } = config ?? {};
       if (
         !p ||
         !config ||
+        record.binding.version !== 1 ||
+        record.request.version !== 1 ||
+        record.binding.generation !== record.request.expectedGeneration ||
+        config.derivation?.kind !== 'recovery-fork' ||
         row!.parent !== record.parentPodId ||
         record.parentPodId === current ||
         record.binding.parentPodId !== record.parentPodId ||
@@ -351,6 +359,16 @@ export function createRecoveryForkRepository(db: Database.Database) {
     child,
     lineage,
     packet,
+    latestSavedCheckpoint(podId: string) {
+      const row = db
+        .prepare(`SELECT sequence,result,verified_at AS verifiedAt,created_at AS capturedAt
+        FROM workspace_checkpoints WHERE pod_id=? AND json_extract(result,'$.hostImported')=1
+        ORDER BY sequence DESC LIMIT 1`)
+        .get(podId) as
+        | { sequence: number; result: string; verifiedAt: string | null; capturedAt: string }
+        | undefined;
+      return row ? { ...row, result: JSON.parse(row.result) as WorkspaceCheckpointResult } : null;
+    },
     preparationArchive(podId: string, generation: number) {
       const row = db
         .prepare(
@@ -365,7 +383,7 @@ export function createRecoveryForkRepository(db: Database.Database) {
         .get(podId, generation) as { receipt: string } | undefined;
       if (!row) return null;
       const receipt = JSON.parse(row.receipt) as RecoveryHandoffPreparation;
-      if (recoveryBytesHash(receipt.packet) !== receipt.packetHash)
+      if (packetBytesHash(receipt.packet) !== receipt.packetHash)
         recoveryForkError('Prepared packet identity changed');
       return receipt;
     },
@@ -511,14 +529,25 @@ export function createRecoveryForkRepository(db: Database.Database) {
         );
     },
     workerSettled(podId: string) {
-      const worker = child(podId)?.facts.worker;
+      const record = child(podId);
+      const worker = record?.facts.worker;
       return (
+        !!record &&
         !!worker &&
+        !record.facts.failed &&
+        !record.facts.unknown &&
+        record.facts.qualified?.evidence.outcome === 'qualified' &&
+        evidenceBound(record, podId) &&
         !!db
           .prepare(
-            "SELECT 1 FROM retained_task_agent_runs WHERE id=? AND ended_at IS NOT NULL AND failure_category IS NOT 'execution_termination_unverified'",
+            `SELECT 1 FROM retained_task_agent_runs r JOIN retained_pods p ON p.id=r.pod_id
+            WHERE r.id=? AND r.pod_id=? AND r.generation=? AND r.cycle=?
+            AND p.lifecycle_generation=r.generation AND p.container_id=?
+            AND json_extract(r.binding,'$.resource.containerId')=p.container_id
+            AND json_extract(r.binding,'$.resource.executionTarget')=p.execution_target
+            AND r.ended_at IS NOT NULL AND r.failure_category IS NOT 'execution_termination_unverified'`,
           )
-          .get(worker.runId)
+          .get(worker.runId, podId, worker.generation, worker.cycle, worker.containerId)
       );
     },
     assertBoundWorker(podId: string) {

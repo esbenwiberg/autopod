@@ -14,7 +14,7 @@ public struct RecoveryForkActions: Sendable {
   public let observe: @MainActor @Sendable (String, String) async throws -> RecoveryForkOperation
   public let openPod: @MainActor @Sendable (String) async throws -> Void
   public var prepare: @MainActor @Sendable (String, RecoveryHandoffPreparationRequest) async throws -> RecoveryHandoffPreparation = { _, _ in throw URLError(.unsupportedURL) }
-  public var prepared: @MainActor @Sendable (String) async throws -> RecoveryHandoffPreparation? = { _ in nil }
+  public var prepared: @MainActor @Sendable (String) async throws -> RecoveryHandoffPreparationState? = { _ in nil }
   public var preparationAvailable = false
   public init(scope: String, draftScope: String? = nil, available: Bool = true, isFixture: Bool = false,
     journalDirectory: URL? = nil, isCurrent: @escaping @MainActor @Sendable () -> Bool = { true },

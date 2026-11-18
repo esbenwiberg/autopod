@@ -82,6 +82,24 @@ export function recoveryFileExclusions(files: ReadonlyArray<{ path: string }>) {
     '\n'
   );
 }
+/** Never sanitize coding bytes in place: reject recognizable private material. */
+function assertSupplementalBytes(bytes: Buffer) {
+  const text = bytes.toString('utf8');
+  if (
+    /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/-]{12,}|https?:\/\/[^\s/@]+:[^\s/@]+@|\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/.test(
+      text,
+    ) ||
+    /["']?(?:api[_-]?key|access[_-]?token|password|authorization)["']?\s*[:=]\s*["'][^"'\r\n]{8,}["']/i.test(
+      text,
+    ) ||
+    /"(?:type|kind)"\s*:\s*"(?:tool_use|tool_result|tool_execution_start|tool_execution_end|session_meta|session_start)"/.test(
+      text,
+    )
+  )
+    recoveryForkError(
+      'Selected supplemental bytes contain recognizable credentials, raw tool payloads or provider session data; they cannot enter the worker handoff',
+    );
+}
 export async function inspectRecoveryForkFiles(
   source: string,
   inherited: ReadonlyArray<{ path: string; sha256: string; size: number }> = [],
@@ -180,6 +198,8 @@ export async function prepareRecoveryForkSource(
     inheritedFiles?: ReadonlyArray<{ path: string; sha256: string; size: number }>;
   },
 ) {
+  if (Buffer.byteLength(options.packet) > 512_000)
+    recoveryForkError('Handoff packet exceeds 512,000 bytes');
   const catalog = await inspectRecoveryForkFiles(options.source, options.inheritedFiles);
   options.assertCurrent();
   const chosen = options.input.files.map((f) => {
@@ -208,12 +228,14 @@ export async function prepareRecoveryForkSource(
       file.path,
     );
     options.assertCurrent();
+    const bytes = Buffer.from(content.content, 'base64');
+    assertSupplementalBytes(bytes);
     const destination = path.join(prepared.worktree, file.path);
     // Tracked symlinks were rejected; the brand-new checkout has no untrusted parent links.
     await mkdir(path.dirname(destination), { recursive: true });
     if ((await lstat(path.dirname(destination))).isSymbolicLink())
       recoveryForkError('Unsafe destination');
-    await writeFile(destination, Buffer.from(content.content, 'base64'), {
+    await writeFile(destination, bytes, {
       flag: 'wx',
       mode: 0o644,
     });
@@ -227,11 +249,17 @@ export async function prepareRecoveryForkSource(
     );
   }
   const packet = path.join(options.root, 'handoff.json');
+  const packetBytes = JSON.stringify({
+    ...JSON.parse(options.packet),
+    importedSupplementalFiles: files,
+  });
+  if (Buffer.byteLength(packetBytes) > 512_000)
+    recoveryForkError('Handoff packet exceeds 512,000 bytes');
   // The enclosing archive is private (0700); the single file is mounted read-only
   // so the non-root worker can read it across differing host/container UIDs.
-  await writeFile(packet, options.packet, { flag: 'wx', mode: 0o444 });
+  await writeFile(packet, packetBytes, { flag: 'wx', mode: 0o444 });
   const packetHash = recoveryBytesHash(await readFile(packet));
-  if (packetHash !== recoveryBytesHash(options.packet)) recoveryForkError('Handoff packet changed');
+  if (packetHash !== recoveryBytesHash(packetBytes)) recoveryForkError('Handoff packet changed');
   options.assertCurrent();
   return { ...prepared, files, packet, packetHash, branch: options.childBranch };
 }

@@ -497,6 +497,7 @@ export async function checkpointSandboxWorkspace(
           hostImported: true,
           lineageVerified: true,
           quarantineRef,
+          objectStore: bare,
           error: {
             phase: 'promotion',
             code: 'LINEAGE_CONFLICT',
@@ -536,6 +537,7 @@ export async function checkpointSandboxWorkspace(
             lineageVerified: true,
             promoted: false,
             quarantineRef,
+            objectStore: bare,
           };
         }
         return {
@@ -570,6 +572,7 @@ export async function checkpointSandboxWorkspace(
           hostImported: true,
           lineageVerified: true,
           quarantineRef,
+          objectStore: bare,
           error: {
             phase: 'materialize',
             code: 'MATERIALIZATION_FAILED',

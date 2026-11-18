@@ -28,7 +28,9 @@ import Testing
       } catch { return error.localizedDescription } }
       let get = try await f.a.next()
       #expect(get.request.httpMethod == "GET" && get.request.url?.path == "/pods/pod/recovery-fork/prepared-handoff")
-      get.respond(body: response); #expect(await observation.value == "observed")
+      let state: [String: Any] = ["version": 1, "podId": "pod", "generation": 3, "available": true,
+        "blockers": [], "context": ["summary": "Original task", "failure": "Worker unreachable", "messages": [], "truncated": false, "omissions": []], "receipt": receipt]
+      get.respond(body: String(decoding: try JSONSerialization.data(withJSONObject: state), as: UTF8.self)); #expect(await observation.value == "observed")
       #expect(f.a.requests.count == 2 && f.b.requests.isEmpty)
       var changed = try JSONDecoder().decode(RecoveryHandoffPreparation.self, from: Data(response.utf8))
       changed.packet += "tampered"

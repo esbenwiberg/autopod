@@ -27,12 +27,12 @@ export function recoveryForkContext(pod: Pod, events: EventRepository): Recovery
     recoveryForkError('Bounded visible event projection unavailable');
   const messages: RecoveryForkContext['messages'] = [];
   let remaining = 24_000;
-  let truncated = visible.truncated;
-  for (const row of visible.messages) {
+  let truncated = visible.truncated || visible.messages.length > 100;
+  for (const row of visible.messages.slice(-100).reverse()) {
     const { text, role } = row;
     const safe = recoveryText(text, Math.min(4000, remaining));
     if (safe.length < text.length) truncated = true;
-    remaining -= safe.length;
+    remaining -= Buffer.byteLength(safe);
     if (safe) messages.push({ role, text: safe, timestamp: row.timestamp, eventId: row.eventId });
     if (remaining <= 0) {
       truncated = true;
@@ -48,14 +48,14 @@ export function recoveryForkContext(pod: Pod, events: EventRepository): Recovery
       pod.failureReason ?? pod.lastCorrectionMessage ?? 'No visible failure description recorded.',
       4000,
     ),
-    messages,
+    messages: messages.reverse(),
     truncated,
     omissions: [
       'Bounded visible text only. Earlier history, reasoning, tools, credentials, runtime sessions and uncorrelated human replies are omitted. Known credential patterns are redacted; content is not guaranteed secret-free.',
     ],
     reports: [
       ['lastValidationResult.setup.output', pod.lastValidationResult?.setup?.output],
-      ['lastValidationResult.smoke.build.output', pod.lastValidationResult?.smoke.build.output],
+      ['lastValidationResult.smoke.build.output', pod.lastValidationResult?.smoke?.build?.output],
       ['lastValidationResult.test.stdout', pod.lastValidationResult?.test?.stdout],
       ['lastValidationResult.test.stderr', pod.lastValidationResult?.test?.stderr],
     ]

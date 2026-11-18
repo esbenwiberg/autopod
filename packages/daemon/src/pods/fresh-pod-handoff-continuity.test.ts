@@ -1,11 +1,18 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { AUTOPOD_INSTRUCTIONS_PATH } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { createConfigurationStore } from '../configuration/configuration-store.js';
+import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { RECOVERY_CONTINUATION_INSTRUCTION } from '../configuration/recovery-fork-launch.js';
 import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { codingTransport, fixture, git } from '../test-utils/fresh-handoff-helpers.js';
 import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
 import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
+import { recoveryBytesHash } from '../worktrees/recovery-fork-source.js';
+import { createEventRepository } from './event-repository.js';
+import { createPodManager } from './pod-manager.js';
+import { createPodRepository } from './pod-repository.js';
 import { createRecoveryForkRepository } from './recovery-fork-repository.js';
 
 // Two production admissions and real independent Git imports per chain.
@@ -122,6 +129,25 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       const record = f.ctx.podRepo.recoveryForks!.parent(b.id)!;
       const p = record.facts.prepared!;
       expect(record.facts.qualified?.evidence.outcome).toBe('qualified');
+      const current = f.ctx.podRepo.getOrThrow(record.facts.admitted!.childPodId);
+      expect(current).toMatchObject({
+        lastValidationResult: null,
+        validationWaiver: null,
+        autoApprove: false,
+        tokenBudget: a.tokenBudget,
+        prFixAttempts: b.prFixAttempts,
+        maxPrFixAttempts: b.maxPrFixAttempts,
+      });
+      expect(
+        vi
+          .mocked(f.cm.writeFile)
+          .mock.calls.some(
+            ([id, file, bytes]) =>
+              id === '3'.repeat(64) &&
+              file === AUTOPOD_INSTRUCTIONS_PATH &&
+              bytes.includes(RECOVERY_CONTINUATION_INSTRUCTION),
+          ),
+      ).toBe(true);
       expect(await git(p.worktree, 'rev-parse', 'HEAD')).toBe(bHead);
       expect(await readFile(path.join(p.worktree, 'source.ts'), 'utf8')).toContain('preserved');
       expect(await readFile(path.join(p.worktree, 'regression.test.ts'), 'utf8')).toContain(
@@ -141,6 +167,13 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       expect(JSON.stringify(packet.quotedHistoricalContext)).toContain('Attempt B');
       expect(packet.nextSteps).toContain('next unfinished step');
       expect(packet.source.head).toBe(bHead);
+      expect(packet.importedSupplementalFiles).toEqual([
+        {
+          path: 'saved-note.txt',
+          sha256: recoveryBytesHash(await readFile(path.join(p.worktree, 'saved-note.txt'))),
+          size: Buffer.byteLength('Safely captured B supplemental edit\n'),
+        },
+      ]);
       expect(packet.quotedHistoricalContext.omissions.length).toBeGreaterThan(0);
       workerInspected = true;
       yield {
@@ -160,6 +193,12 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     await f.manager.processPod(second.childPodId!);
     expect(workerInspected).toBe(true);
     const c = f.ctx.podRepo.getOrThrow(second.childPodId!);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(c.id).taskId).toBe(
+      f.ctx.podRepo.taskExecutions!.snapshot(a.id).taskId,
+    );
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(c.id).recordedTotalTokens).toBeGreaterThanOrEqual(
+      70,
+    );
     expect(c.worktreePath).not.toBe(b.worktreePath);
     expect(c).toMatchObject({
       prUrl: null,
@@ -182,6 +221,18 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
   it('prepares a durable brief-only packet for unknown ownership without touching any old resource or admitting execution', async () => {
     const f = await fixture();
     f.ctx.podRepo.completionJournal!.begin(f.pod());
+    const unknown = f.ctx.podRepo.taskExecutions!.beginRun(
+      f.podId,
+      f.pod().lifecycleGeneration,
+      f.pod().finalization!.cycle,
+      {
+        runtime: f.pod().runtime,
+        model: f.pod().model,
+        providerAccountId: 'account',
+        resource: { containerId: f.containerId, executionTarget: 'local' },
+      },
+    );
+    f.ctx.podRepo.taskExecutions!.retainUnverifiedRun(unknown);
     f.cm.getStatus = vi.fn(async () => {
       throw new Error('Old resource must not be probed');
     });
@@ -193,7 +244,7 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     const receipt = await f.manager.prepareRecoveryHandoff(f.podId, request, f.actor);
     expect(receipt).toMatchObject({ coverage: 'brief-only', source: null, workerStarted: false });
     expect(receipt.packet).toContain('Brief only');
-    expect(await f.manager.getPreparedRecoveryHandoff(f.podId)).toEqual(receipt);
+    expect((await f.manager.getPreparedRecoveryHandoff(f.podId)).receipt).toEqual(receipt);
     expect(await f.manager.prepareRecoveryHandoff(f.podId, request, f.actor)).toEqual(receipt);
     await expect(
       f.manager.prepareRecoveryHandoff(
@@ -209,6 +260,22 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       expect(
         createRecoveryForkRepository(reopened).preparation(f.podId, request.expectedGeneration),
       ).toEqual(receipt);
+      const snapshots = createLaunchSnapshotRepository(
+        reopened,
+        createConfigurationStore(reopened),
+      );
+      const restarted = createPodManager({
+        ...f.ctx.deps,
+        podRepo: createPodRepository(reopened),
+        eventRepo: createEventRepository(reopened),
+        launchConfiguration: { ...f.launch, read: (id) => snapshots.get(id), goals: undefined },
+      });
+      expect((await restarted.getPreparedRecoveryHandoff(f.podId)).receipt).toEqual(receipt);
+      expect(
+        reopened
+          .prepare("SELECT COUNT(*) AS n FROM recovery_fork_facts WHERE kind='admitted'")
+          .get(),
+      ).toEqual({ n: 0 });
     } finally {
       reopened.close();
     }
@@ -242,7 +309,7 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
       podId: f.podId,
       sequence: 1,
       fingerprint: { head, tree, dirty: false },
-      verifiedAt: now,
+      verifiedAt: null,
       capturedAt: now,
       attempts: 1,
       error: undefined,
@@ -256,8 +323,8 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
         bundleVerified: true,
         hostImported: true,
         lineageVerified: true,
-        promoted: true,
-        materialized: true,
+        promoted: false,
+        materialized: false,
         quarantineRef: ref,
         objectStore,
       },
@@ -307,6 +374,8 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     expect(f.cm.spawn).not.toHaveBeenCalled();
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
     expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    await writeFile(row.archive, 'tampered bundle');
+    await expect(f.manager.getPreparedRecoveryHandoff(f.podId)).rejects.toThrow('bytes changed');
   });
 
   it.each([
@@ -332,6 +401,126 @@ describe('fresh-pod handoff continuity with real Git and SQLite', () => {
     expect(
       f.ctx.db.prepare("SELECT COUNT(*) AS n FROM recovery_fork_facts WHERE kind='admitted'").get(),
     ).toEqual({ n: 1 });
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+
+  it('refuses an older clean host checkout when a newer independently imported checkpoint exists', async () => {
+    const f = await fixture();
+    const source = f.pod().worktreePath!;
+    const old = await git(source, 'rev-parse', 'HEAD');
+    await writeFile(
+      path.join(source, 'newer-regression.ts'),
+      'export const newerSavedWork = true;\n',
+    );
+    await git(source, 'add', 'newer-regression.ts');
+    await git(
+      source,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'Newer independently saved work',
+    );
+    const head = await git(source, 'rev-parse', 'HEAD');
+    const tree = await git(source, 'rev-parse', 'HEAD^{tree}');
+    const now = new Date().toISOString();
+    await f.ctx.podRepo.savedWorkspaceCheckpoints!.save({
+      podId: f.podId,
+      sequence: 1,
+      fingerprint: { head, tree, dirty: false },
+      verifiedAt: now,
+      capturedAt: now,
+      attempts: 1,
+      error: undefined,
+      result: {
+        sequence: 1,
+        sourceHead: head,
+        sourceTree: tree,
+        snapshotCommit: head,
+        snapshotTree: tree,
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: false,
+        materialized: false,
+        quarantineRef: `refs/autopod-quarantine/${f.podId}/1`,
+      },
+    });
+    await git(source, 'reset', '--hard', old);
+    const inspection = await f.manager.inspectRecoveryFork(f.podId);
+    expect(inspection.available).toBe(false);
+    expect(inspection.blockers.join(' ')).toContain('latest independently saved checkpoint');
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
+
+  it('bounds recent UTF-8 history and identifies sanitized report excerpt bytes without inheriting a check', async () => {
+    const f = await fixture();
+    for (let i = 0; i < 110; i++)
+      f.ctx.deps.eventRepo!.insert({
+        type: 'pod.agent_activity',
+        podId: f.podId,
+        timestamp: new Date().toISOString(),
+        event: {
+          type: 'status',
+          timestamp: new Date().toISOString(),
+          message: `visible-${i}: ${'π'.repeat(2100)}`,
+        },
+      });
+    const result = createFailingValidationResult(f.podId);
+    f.ctx.podRepo.update(f.podId, {
+      lastValidationResult: {
+        ...result,
+        setup: {
+          status: 'fail',
+          duration: 1,
+          output: 'TOKEN=synthetic-secret\nMissing fixture launcher',
+        },
+      },
+    });
+    const inspection = await f.manager.inspectRecoveryFork(f.podId);
+    expect(inspection.context.truncated).toBe(true);
+    expect(inspection.context.messages.length).toBeLessThanOrEqual(100);
+    expect(
+      inspection.context.messages.reduce((n, message) => n + Buffer.byteLength(message.text), 0),
+    ).toBeLessThanOrEqual(24000);
+    expect(inspection.context.messages.at(-1)?.text).toContain('visible-109');
+    const report = inspection.context.reports!.find(
+      (r) => r.source === 'lastValidationResult.setup.output',
+    )!;
+    expect(report.text).not.toContain('synthetic-secret');
+    expect(report.text).toContain('Missing fixture launcher');
+    expect(report.sha256).toBe(recoveryBytesHash(report.text));
+    expect(report.omissions).toContain('not a passing report');
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
+  it.each([
+    '{"password":"synthetic-not-a-real-credential"}',
+    '{"type":"tool_use","input":{"command":"synthetic fixture"}}',
+  ])('keeps recognizable private supplemental content out of every worker mount', async (bytes) => {
+    const f = await fixture();
+    await writeFile(path.join(f.pod().worktreePath!, 'supplement.json'), bytes);
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    const input = {
+      ...f.input,
+      files: view.source!.files.map(({ path, version }) => ({ path, version })),
+    };
+    const preview = await f.manager.previewRecoveryFork(f.podId, input);
+    await expect(
+      f.manager.createRecoveryFork(
+        f.podId,
+        { ...input, id: 'private-supplement', expectedBinding: preview.expectedBinding! },
+        f.actor,
+      ),
+    ).rejects.toThrow('recognizable credentials');
+    expect(await readFile(path.join(f.pod().worktreePath!, 'supplement.json'), 'utf8')).toBe(bytes);
+    expect(
+      f.ctx.db.prepare("SELECT COUNT(*) AS n FROM recovery_fork_facts WHERE kind='admitted'").get(),
+    ).toEqual({ n: 0 });
     expect(f.cm.spawn).not.toHaveBeenCalled();
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
   });

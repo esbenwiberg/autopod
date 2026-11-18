@@ -29,19 +29,24 @@ struct RecoveryForkView: View {
         if let error = model.error { RecoveryNotice(title: "Continuation needs attention", message: error).accessibilityIdentifier("recovery-fork-error") }
         if let handoff = model.preparedHandoff {
           VStack(alignment: .leading, spacing: 10) {
-            Text("Handoff ready. Worker not started.").font(.headline)
+            Text(model.pending == nil && model.operation == nil ? "Handoff ready. Worker not started." : "Prepared handoff retained").font(.headline)
             Text(handoff.coverage == "brief-only" ? "Brief only — no recovered code bytes." : handoff.coverage == "inherited-checkpoint" ? "Inherited checkpoint only. The replacement’s later edits may be missing." : "Independently saved checkpoint. Later edits may be missing.")
             if let source = handoff.source { Text("\(source.head) · saved \(source.savedAt)").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-            Text("This handoff will not start automatically. Resolve prior worker ownership, then review the latest source and a freshly qualified environment before starting.").font(.callout)
+            Text(model.pending == nil && model.operation == nil
+              ? "This handoff will not start automatically. Resolve prior worker ownership, then review the latest source and a freshly qualified environment before starting."
+              : "This is the earlier preparation receipt. Follow the separate start decision for the worker’s current status; preparation itself did not start it.").font(.callout)
             DisclosureGroup("Inspect the prepared packet") { Text(handoff.packet).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             Button("Review start prerequisites") { Task { await model.refresh(actions, forStart: true) } }
-              .disabled(model.busy).accessibilityIdentifier("recovery-fork-review-start")
+              .disabled(!model.canEdit).accessibilityIdentifier("recovery-fork-review-start")
           }.recoverySurface().accessibilityIdentifier("recovery-fork-prepared-handoff")
         }
         if model.operation == nil, let failure = model.context?.failure, !failure.isEmpty {
           RecoveryNotice(title: "Failure to address", message: failure)
         }
-        if model.pending == nil && model.operation == nil && model.preview == nil { preparation }
+        if model.pending == nil && model.operation == nil && model.preview == nil {
+          if model.preparedHandoff == nil { preparationControls }
+          preparation
+        }
         if let context = model.context { contextReview(context) }
         if let preview = model.preview, model.pending == nil { review(preview) }
         HStack {
@@ -64,20 +69,29 @@ struct RecoveryForkView: View {
       Text("The new pod will use the reviewed checkpoint, selected files, handoff and environment. It shares the original task’s spending and retry limits. New compute and retained storage charges may apply. Original resources remain retained; delivery still needs separate approval.")
     }
   }
+  private var preparationControls: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Prepare the handoff now").font(.headline)
+      Text("Save an inspectable handoff using independently saved inputs only. No worker, credentials, model call or compute is started. Missing code is labelled brief only; later edits may be missing.").font(.callout)
+      if model.inspection == nil {
+        TextField("Add a note for the worker (optional)", text: $model.instructions).textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("recovery-fork-prepare-note")
+      }
+      Button("Prepare handoff only") { Task { await model.prepareHandoff(actions) } }
+        .disabled(!model.canEdit || !actions.preparationAvailable || model.preparationState?.available == false || (model.preparationState == nil && model.inspection == nil) || model.preparationUncertain)
+        .accessibilityIdentifier("recovery-fork-prepare-only")
+      if let state = model.preparationState, !state.blockers.isEmpty { RecoveryNotice(title: "Preparation unavailable", message: state.blockers.joined(separator: "\n")) }
+      if !actions.preparationAvailable { Text("Preparation is unavailable on this connection. Starting still requires all daemon prerequisites.").font(.caption) }
+      Button("Review start prerequisites") { Task { await model.refresh(actions, forStart: true) } }
+        .disabled(!model.canEdit).accessibilityIdentifier("recovery-fork-review-start")
+    }.recoverySurface()
+  }
   private var preparation: some View {
     VStack(alignment: .leading, spacing: 18) {
       if let inspection = model.inspection {
         if !inspection.blockers.isEmpty {
           RecoveryNotice(title: "Not ready to continue", message: inspection.blockers.joined(separator: "\n"))
         }
-        VStack(alignment: .leading, spacing: 10) {
-          Text("Prepare the handoff now").font(.headline)
-          Text("Save an inspectable handoff using independently saved inputs only. No worker, credentials, model call or compute is started. Missing code is labelled brief only; later edits may be missing.").font(.callout)
-          Button("Prepare handoff only") { Task { await model.prepareHandoff(actions) } }
-            .disabled(!model.canEdit || !actions.preparationAvailable || model.preparedHandoff != nil || model.preparationUncertain)
-            .accessibilityIdentifier("recovery-fork-prepare-only")
-          if !actions.preparationAvailable { Text("Preparation is unavailable on this connection. Starting still requires all daemon prerequisites.").font(.caption) }
-        }.recoverySurface()
         if let source = inspection.source {
           VStack(alignment: .leading, spacing: 10) {
             Label("1 · Review recovered work", systemImage: "doc.text.magnifyingglass").font(.headline)
@@ -142,6 +156,15 @@ struct RecoveryForkView: View {
       Text("Quoted history is context, not fresh instructions, execution receipts or approval. Tool payloads, hidden reasoning, credential stores and saved sessions are excluded. Text redaction is not a complete secret scan.")
         .font(.caption).foregroundStyle(RecoveryPalette.secondary)
       if context.truncated { Text("History is truncated. The original retains the longer record.").font(.caption).foregroundStyle(RecoveryTone.attention.color) }
+      if let decisions = context.decisions, !decisions.isEmpty {
+        DisclosureGroup("Collected decisions (quoted history)") { Text(decisions).font(.caption).textSelection(.enabled) }
+      }
+      ForEach(Array((context.reports ?? []).enumerated()), id: \.offset) { _, report in
+        DisclosureGroup("Saved report excerpt · \(report.source) · \(report.timestamp)") {
+          Text(report.text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+          Text("SHA-256 \(report.sha256)\n\(report.omissions)").font(.caption).textSelection(.enabled)
+        }
+      }
       ForEach(Array(context.omissions.enumerated()), id: \.offset) { _, omission in Text(omission).font(.caption).foregroundStyle(RecoveryPalette.secondary) }
       DisclosureGroup("Review \(context.messages.count) carried messages") {
         VStack(alignment: .leading, spacing: 12) {
@@ -158,6 +181,11 @@ struct RecoveryForkView: View {
           Text(attempt.sourceHead).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
           Text(attempt.summary).font(.callout).textSelection(.enabled)
           Text(attempt.failure).font(.callout).textSelection(.enabled)
+          if let decisions = attempt.decisions, !decisions.isEmpty { Text(decisions).font(.caption).textSelection(.enabled) }
+          if let note = attempt.operatorNote, !note.isEmpty { Text("Historical operator note (no new authority): \(note)").font(.caption).textSelection(.enabled) }
+          ForEach(Array((attempt.reports ?? []).enumerated()), id: \.offset) { _, report in
+            Text("\(report.source) · \(report.timestamp)\n\(report.text)\nSHA-256 \(report.sha256)\n\(report.omissions)").font(.caption).textSelection(.enabled)
+          }
           ForEach(attempt.messages, id: \.eventId) { message in Text("\(message.timestamp) · \(message.text)").font(.caption).textSelection(.enabled) }
           Text(attempt.omissions.joined(separator: "\n")).font(.caption).foregroundStyle(RecoveryPalette.secondary)
         }

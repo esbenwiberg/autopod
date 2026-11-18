@@ -43,6 +43,16 @@ export interface RecoveryHandoffPreparation {
   packetHash: string;
   workerStarted: false;
 }
+export interface RecoveryHandoffPreparationState {
+  version: 1;
+  podId: string;
+  generation: number;
+  available: boolean;
+  blockers: string[];
+  context: RecoveryForkContext;
+  receipt: RecoveryHandoffPreparation | null;
+  operation?: RecoveryForkOperation | null;
+}
 export interface RecoveryForkFile {
   path: string;
   size: number;
@@ -58,6 +68,7 @@ export interface RecoveryForkSource {
   truncated: boolean;
   skippedEntries: number;
   caveats: string[];
+  savedCheckpointHash?: string;
 }
 export interface RecoveryForkContext {
   summary: string;

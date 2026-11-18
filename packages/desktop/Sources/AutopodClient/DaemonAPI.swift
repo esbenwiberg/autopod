@@ -58,9 +58,9 @@ public actor DaemonAPI {
     let result: RecoveryHandoffPreparation = try await request("POST", try recoveryForkPath(id) + "/prepare-handoff", body: encode(body), timeout: 180)
     try result.validate(podId: id); return result
   }
-  public func getPreparedRecoveryHandoff(_ id: String) async throws -> RecoveryHandoffPreparation? {
-    let result: RecoveryHandoffPreparation? = try await request("GET", try recoveryForkPath(id) + "/prepared-handoff")
-    try result?.validate(podId: id); return result
+  public func getPreparedRecoveryHandoff(_ id: String) async throws -> RecoveryHandoffPreparationState {
+    let result: RecoveryHandoffPreparationState = try await request("GET", try recoveryForkPath(id) + "/prepared-handoff")
+    try result.validate(podId: id); return result
   }
   public func previewRecoveryFork(_ id: String, input: RecoveryForkInput) async throws -> RecoveryForkPreview {
     guard input.isValid else { throw DaemonError.badRequest("Review the source and continuation instructions first.") }

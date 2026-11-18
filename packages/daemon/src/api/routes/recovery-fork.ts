@@ -1,4 +1,9 @@
-import { AutopodError, recoveryForkInputSchema, recoveryForkRequestSchema } from '@autopod/shared';
+import {
+  AutopodError,
+  recoveryForkInputSchema,
+  recoveryForkRequestSchema,
+  recoveryHandoffPreparationSchema,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PodManager } from '../../pods/pod-manager.js';
@@ -36,10 +41,14 @@ export function recoveryForkRoutes(
     if (!request.user?.oid?.trim())
       throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
     z.object({}).strict().parse(request.query);
-    return manager.prepareRecoveryHandoff(params.parse(request.params).podId, request.body, {
-      type: 'human',
-      userId: request.user.oid,
-    });
+    return manager.prepareRecoveryHandoff(
+      params.parse(request.params).podId,
+      recoveryHandoffPreparationSchema.parse(request.body),
+      {
+        type: 'human',
+        userId: request.user.oid,
+      },
+    );
   });
   app.get('/pods/:podId/recovery-fork/prepared-handoff', async (request) => {
     if (!request.user?.oid?.trim())
