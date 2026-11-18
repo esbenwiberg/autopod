@@ -90,8 +90,8 @@ export function bindHostedControllerProfile(
       validate();
       init?.signal?.throwIfAborted();
       const reserve = beforeSend.getStore();
-      if (!reserve && !ordered) throw new Error('controller-send-outside-turn');
-      reserve?.();
+      if (!reserve) throw new Error('controller-send-outside-turn');
+      reserve();
       sent++;
       return fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',

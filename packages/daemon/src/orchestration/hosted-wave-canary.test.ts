@@ -147,7 +147,7 @@ it('reserves the wire phase on a lost response and does not follow a redirect or
     throw new Error('fixture-lost');
   });
   vi.stubGlobal('fetch', wire);
-  const { client, model } = stores().bind();
+  const { client, model, atControllerSend } = stores().bind();
   const send = () =>
     client.messages.create(
       {
@@ -158,7 +158,11 @@ it('reserves the wire phase on a lost response and does not follow a redirect or
       { maxRetries: 0 },
     );
   await expect(send()).rejects.toThrow();
-  await expect(send()).rejects.toThrow();
+  expect(wire).not.toHaveBeenCalled();
+  const reserve = vi.fn();
+  await expect(atControllerSend(reserve, send)).rejects.toThrow();
+  await expect(atControllerSend(reserve, send)).rejects.toThrow();
+  expect(reserve).toHaveBeenCalledTimes(1);
   expect(wire).toHaveBeenCalledTimes(1);
   expect(wire).toHaveBeenCalledWith(
     'https://api.anthropic.com/v1/messages',

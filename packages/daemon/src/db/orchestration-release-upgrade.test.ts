@@ -101,6 +101,25 @@ it.each([
   }
 });
 
+it('refuses a populated pre-ownership database even when no custody bytes remain', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'pre-ownership-'));
+  const db = createHistoricalDiskDatabase(path.join(root, 'partial.db'), [
+    { dir: MIGRATIONS_DIR, through: 268 },
+  ]);
+  try {
+    db.prepare(
+      'INSERT INTO orchestration_runs(id,repository,policy_digest,accepted_commit,worker_request_limit) VALUES(?,?,?,?,?)',
+    ).run('run', 'repo', 'policy', 'source', 6);
+    const before = db.serialize();
+    await expect(runMigrationsWithBackups(db, MIGRATIONS_DIR, logger)).rejects.toThrow(
+      'ownership requires explicit reconciliation',
+    );
+    expect(db.serialize().equals(before)).toBe(true);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 it('resumes a valid partially applied orchestration prefix', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'orch-prefix-'));
   const db = createHistoricalDiskDatabase(path.join(root, 'partial.db'), [

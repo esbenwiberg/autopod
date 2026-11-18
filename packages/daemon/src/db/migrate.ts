@@ -84,6 +84,20 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     }
   }
 
+  // No released database has pre-269 orchestration runs. Even an empty/missing
+  // custody table does not establish that such a run was nonoperator. Do not
+  // guess ownership when upgrading a populated unpublished intermediate build.
+  if (
+    namesByVersion.get(269) === '269_operator_run_ownership.sql' &&
+    currentVersion >= 262 &&
+    currentVersion < 269 &&
+    db.prepare('SELECT 1 FROM orchestration_runs LIMIT 1').get()
+  ) {
+    throw new Error(
+      'Unpublished run ownership requires explicit reconciliation; database retained unchanged',
+    );
+  }
+
   // Earlier unpublished reliability checkpoints used 151-163, which now overlap
   // the managed lane's authoritative 151-152. Never reinterpret or auto-renumber
   // a database from that lineage merely because MAX(version) looks recent.
