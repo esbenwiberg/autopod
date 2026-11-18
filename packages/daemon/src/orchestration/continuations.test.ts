@@ -6,7 +6,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import { build } from 'esbuild';
 import { expect, it, onTestFinished } from 'vitest';
 import { digest } from '../managed/canonical.js';
-import { ManagedPodService } from '../managed/managed-service.js';
 import { managedGit } from '../managed/source-git.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
@@ -81,31 +80,22 @@ async function setup(workerRequests = 2, maxActive = 1) {
   resign(request);
   f.admission.profiles = new Map([[profile.snapshotDigest, profile]]);
   const host = () =>
-    new LocalCheckpointHost(
-      f.db,
-      path.join(root, 'scratch'),
-      (_cp, mirror) =>
-        new ManagedPodService(
-          f.db,
-          f.admission,
-          {
-            ...f.runtime,
-            ensure: async (id, spec, checkpoint, fault) => {
-              const pin = spec.effectiveGrant.scope.repositories[0]?.baseRevision;
-              if (!pin) throw new Error('missing-pin');
-              const cwd = path.join(root, id);
-              await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, cwd]);
-              await managedGit(cwd, ['checkout', '--detach', pin]);
-              expect(await managedGit(cwd, ['rev-parse', 'HEAD'])).toBe(cp.commit);
-              expect(await readFile(path.join(cwd, 'proof.txt'), 'utf8')).toBe(
-                'unpublished checkpoint\n',
-              );
-              return f.runtime.ensure(id, spec, checkpoint, fault);
-            },
-          },
-          () => 100,
-          true,
-        ),
+    new LocalCheckpointHost(f.db, path.join(root, 'scratch'), (_cp, mirror) =>
+      f.service({
+        ...f.runtime,
+        ensure: async (id, spec, checkpoint, fault) => {
+          const pin = spec.effectiveGrant.scope.repositories[0]?.baseRevision;
+          if (!pin) throw new Error('missing-pin');
+          const cwd = path.join(root, id);
+          await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, cwd]);
+          await managedGit(cwd, ['checkout', '--detach', pin]);
+          expect(await managedGit(cwd, ['rev-parse', 'HEAD'])).toBe(cp.commit);
+          expect(await readFile(path.join(cwd, 'proof.txt'), 'utf8')).toBe(
+            'unpublished checkpoint\n',
+          );
+          return f.runtime.ensure(id, spec, checkpoint, fault);
+        },
+      }),
     );
   const ledger = () => host().ledger;
   ledger().open(
@@ -278,6 +268,20 @@ async function controllerFixture(limit: number, reply: (payload: string) => stri
   await f.service().enforceExpiry();
   await f.service().artifactPipeline?.tick();
   l.waves.park(cp.run, 'plan-next', 0, 1);
+  const { provider, calls } = offlineController(reply);
+  const tick = () =>
+    host().tickController(
+      cp.run,
+      {
+        mission: 'Check the completed work',
+        routeId: 'local-test',
+        recipes: { inspect: request.startKey },
+      },
+      provider,
+    );
+  return { f, request, cp, tick, calls };
+}
+function offlineController(reply: (payload: string) => string) {
   let calls = 0;
   const model = 'fixture-controller';
   const client = new Anthropic({
@@ -299,18 +303,126 @@ async function controllerFixture(limit: number, reply: (payload: string) => stri
       );
     },
   });
+  return { provider: { client, model }, calls: () => calls };
+}
+it('commissions two workers from three verified reports while three other workers keep running', async () => {
+  const { f, request, cp, ledger, host } = await setup(17, 6);
+  const l = ledger();
+  const reports = new Map<string, string>();
+  f.runtime.extractOutput = async (id, dest) => {
+    await mkdir(dest, { recursive: true });
+    const report = reports.get(id);
+    if (!report) throw new Error('missing report fixture');
+    await writeFile(path.join(dest, 'report.md'), report);
+    await writeFile(path.join(dest, 'private.txt'), 'sibling contents must not escape');
+  };
+  for (let i = 0; i < 6; i++) {
+    const r = structuredClone(request);
+    r.dispatcherAttemptId = r.effectiveGrant.dispatcherAttemptId = r.startKey = `worker-${i}`;
+    r.outputs.artifacts.mode = 'required';
+    r.outputs.artifacts.requiredPaths = ['report.md'];
+    if (i === 0) await l.acceptAndContinue(cp, resign(r));
+    else await l.spawnFromAccepted(cp, resign(r));
+  }
+  expect(await l.recover()).toEqual({ blocked: [] });
+  l.waves.park(cp.run, 'read-three', 0, 3);
+  for (const [i, report] of [
+    'Issue: CLI retries',
+    'Issue: cache expiry',
+    'Checks passed',
+  ].entries()) {
+    const id = f.service().lookup('native.example', `worker-${i}`)?.pod_id;
+    if (!id) throw new Error('missing worker');
+    reports.set(id, `${report}\n${'é'.repeat(1300)}hidden-tail`);
+    await f.runtime.stop(id);
+  }
+  await f.service().enforceExpiry();
+  await f.service().artifactPipeline?.tick();
+  expect(
+    f.db.prepare("SELECT count(*) FROM artifact_exports WHERE status='committed'").pluck().get(),
+  ).toBe(3);
+  const { provider, calls } = offlineController((payload) => {
+    const ctx = JSON.parse(JSON.parse(payload).messages[0].content);
+    expect(ctx.inFlightCount).toBe(3);
+    expect(payload).not.toMatch(/sibling contents|hidden-tail|�/);
+    const children = [];
+    for (const r of ctx.results) {
+      expect(r.finding.status).toBe('excerpt');
+      expect(r.finding.truncated).toBe(true);
+      expect(Buffer.byteLength(r.finding.text)).toBeLessThanOrEqual(2048);
+      const issue = /^Issue: (.+)$/m.exec(r.finding.text)?.[1];
+      if (issue) children.push({ recipe: 'inspect', brief: `Investigate ${issue}` });
+    }
+    return JSON.stringify({ children, waitFor: 1 });
+  });
   const tick = () =>
     host().tickController(
       cp.run,
       {
-        mission: 'Check the completed work',
-        routeId: 'local-test',
-        recipes: { inspect: request.startKey },
+        findings: 'report.md',
+        mission: 'Investigate reported issues',
+        routeId: 'offline',
+        recipes: { inspect: 'worker-0' },
       },
-      { client, model },
+      provider,
     );
-  return { f, request, cp, tick, calls: () => calls };
-}
+  const [pod] = reports.keys();
+  if (!pod) throw new Error('missing returned worker');
+  const bundle = f.db
+    .prepare('SELECT bundle_bytes FROM artifact_exports WHERE pod_id=?')
+    .pluck()
+    .get(pod) as Buffer;
+  const replace = (bytes: Buffer) =>
+    f.db.prepare('UPDATE artifact_exports SET bundle_bytes=? WHERE pod_id=?').run(bytes, pod);
+  replace(Buffer.from('damaged'));
+  await expect(tick()).rejects.toThrow('artifact-integrity-failure');
+  expect(calls()).toBe(0);
+  expect(f.db.prepare('SELECT remaining FROM orchestration_request_balances').pluck().get()).toBe(
+    5,
+  );
+  replace(bundle);
+  // The result cursor is not an artifact capability: swapping in a sibling's real
+  // export must not disclose that sibling's bytes, even in the same installation.
+  const [original, sibling] = f.db
+    .prepare('SELECT artifact_id FROM orchestration_child_outcomes ORDER BY sequence')
+    .pluck()
+    .all() as string[];
+  if (!original || !sibling) throw new Error('missing artifact fixture');
+  const swap = (id: string) =>
+    f.db
+      .prepare('UPDATE orchestration_child_outcomes SET artifact_id=? WHERE pod_id=?')
+      .run(id, pod);
+  swap(sibling);
+  await expect(tick()).rejects.toThrow('controller-artifact-binding');
+  expect(calls()).toBe(0);
+  swap(original);
+  f.db.exec(
+    "CREATE TEMP TRIGGER lose_ack BEFORE UPDATE OF acknowledged ON orchestration_result_waits BEGIN SELECT RAISE(ABORT,'lost-ack'); END",
+  );
+  await expect(tick()).rejects.toThrow('lost-ack');
+  replace(Buffer.from('damaged after decision'));
+  f.restart();
+  expect(await tick()).toEqual({ blocked: [] });
+  expect(calls()).toBe(1);
+  expect(f.launches()).toBe(8);
+  expect(ledger().waves.available(cp.run)).toBe(1);
+  expect(
+    f.db
+      .prepare(
+        "SELECT json_extract(request_json,'$.task.objective') FROM orchestration_continuations WHERE start_key LIKE 'turn-%' ORDER BY rowid",
+      )
+      .pluck()
+      .all(),
+  ).toEqual(
+    ['CLI retries', 'cache expiry'].map(
+      (issue) => `${request.task.objective}\n\nFollow-up task:\nInvestigate ${issue}`,
+    ),
+  );
+  expect(f.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
+    cp.commit,
+  );
+}, 15000);
+
 it('replays a recorded controller decision without a second SDK request or duplicate workers', async () => {
   const { f, tick, calls, request } = await controllerFixture(7, (payload) => {
     expect(payload).not.toContain('effectiveGrant');
