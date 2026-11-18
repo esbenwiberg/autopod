@@ -115,6 +115,8 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     }
     Self.applyTheme(tv, palette: palette)
     context.coordinator.appliedPalette = palette
+    context.coordinator.onSendData = onSendData
+    context.coordinator.onResize = onResize
     tv.terminalDelegate = context.coordinator
     if dataPipe.retainedTerminalView == nil {
       dataPipe.retainedTerminalView = tv
@@ -147,6 +149,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
   }
 
   public func updateNSView(_ wrapper: TerminalScrollInterceptor, context: Context) {
+    guard wrapper.terminalView.superview === wrapper else { return }
     context.coordinator.onSendData = onSendData
     context.coordinator.onResize = onResize
     if context.coordinator.appliedPalette != palette {
@@ -159,12 +162,17 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     let tv = wrapper.terminalView
     // SwiftUI may mount the replacement before dismantling this wrapper.
     guard tv.superview === wrapper else { return }
-    tv.terminalDelegate = nil
+    // Keep protocol replies flowing while the emulator is detached. Only
+    // suppress sizes from off-screen layout; makeNSView restores resizing.
+    coordinator.onResize = nil
     tv.removeFromSuperview()
   }
 
   public func makeCoordinator() -> Coordinator {
-    Coordinator(onSendData: onSendData, onResize: onResize)
+    if let retained = dataPipe.retainedTerminalCoordinator { return retained }
+    let coordinator = Coordinator(onSendData: onSendData, onResize: onResize)
+    dataPipe.retainedTerminalCoordinator = coordinator
+    return coordinator
   }
 
   // MARK: - Coordinator (TerminalViewDelegate)
@@ -172,7 +180,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
   public final class Coordinator: NSObject, TerminalViewDelegate {
     var appliedPalette: DesktopPaletteColors?
     var onSendData: ([UInt8]) -> Void
-    var onResize: (Int, Int) -> Void
+    var onResize: ((Int, Int) -> Void)?
 
     init(
       onSendData: @escaping ([UInt8]) -> Void,
@@ -190,7 +198,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
       // Mount/unmount can briefly produce an empty frame. Never resize the
       // remote PTY to an invalid size while local navigation removes details.
       guard newCols > 0, newRows > 0 else { return }
-      onResize(newCols, newRows)
+      onResize?(newCols, newRows)
     }
 
     public func setTerminalTitle(source: TerminalView, title: String) {}

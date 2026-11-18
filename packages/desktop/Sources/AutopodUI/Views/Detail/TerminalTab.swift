@@ -51,8 +51,8 @@ public struct TerminalTab: View {
           // Keep the terminal view alive during reconnection so scrollback is preserved
           TerminalEmulatorView(
             dataPipe: pipe,
-            onSendData: { bytes in onSendData?(bytes) },
-            onResize: { cols, rows in onResize?(cols, rows) },
+            onSendData: onSendData ?? { _ in },
+            onResize: onResize ?? { _, _ in },
             palette: palette
           )
           .id(ObjectIdentifier(pipe))

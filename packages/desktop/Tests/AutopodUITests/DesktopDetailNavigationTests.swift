@@ -19,6 +19,7 @@ import Testing
     var connects = 0
     var disconnects = 0
     var sizes: [(Int, Int)] = []
+    var terminalReplies: [[UInt8]] = []
 }
 
 @MainActor private struct DetailNavigationFixtureView: View {
@@ -28,6 +29,7 @@ import Testing
             DesktopDetailNavigationHost(navigation: inputs.navigation) { selected, requested in
                 DetailPanelView(pod: inputs.pod, events: [],
                     terminalState: "connected", terminalDataPipe: inputs.pipe,
+                    onTerminalSendData: { [weak inputs] in inputs?.terminalReplies.append($0) },
                     onTerminalResize: { inputs.sizes.append(($0, $1)) },
                     onTerminalConnect: { inputs.connects += 1 },
                     onTerminalDisconnect: { inputs.disconnects += 1 },
@@ -347,6 +349,13 @@ import Testing
         #expect(inputs.connects == 0)
         #expect(inputs.disconnects == 0)
         inputs.pipe.feed(Data("output while closed\r\n".utf8))
+        // Cursor position queries must get a reply even while there is no view.
+        inputs.terminalReplies.removeAll()
+        inputs.pipe.feed(Data("\u{1b}[6n".utf8))
+        #expect(inputs.terminalReplies.contains { reply in
+            let text = String(decoding: reply, as: UTF8.self)
+            return text.hasPrefix("\u{1b}[") && text.hasSuffix("R")
+        })
         inputs.navigation.reveal()
         try await host.wait { terminal(host.hosting) != nil }
         let reopened = try #require(terminal(host.hosting))

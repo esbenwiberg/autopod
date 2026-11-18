@@ -13,6 +13,7 @@ public final class TerminalDataPipe: @unchecked Sendable {
   // The pipe is scoped to one connection. Keep its emulator (and VT state)
   // alive when the detail pane is removed, without retaining the pane itself.
   var retainedTerminalView: TerminalView?
+  var retainedTerminalCoordinator: TerminalEmulatorView.Coordinator?
   private var receiver: (([UInt8]) -> Void)?
   private var buffer: [[UInt8]] = []
 

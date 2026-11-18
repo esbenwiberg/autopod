@@ -43,8 +43,9 @@ public final class TerminalManager {
       baseURL: baseURL,
       token: token,
       tokenProvider: tokenProvider,
-      onData: { data in
-        Task { @MainActor in
+      onData: { [weak self] data in
+        Task { @MainActor [weak self] in
+          guard self?.dataPipe === pipe else { return }
           pipe.feed(data)
         }
       },
