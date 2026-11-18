@@ -2,24 +2,26 @@ import { parseManagedRecord } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { digest } from '../managed/canonical.js';
 import { managedGit } from '../managed/source-git.js';
+import {
+  type CombinedPolicy,
+  combinedPolicyDigest,
+  type Role,
+  type SignedGateReceipt,
+  verifyGateReceipt,
+} from './combined-attestation.js';
 import type { ContinuationCheckpoint } from './continuations.js';
 
 type Subject = Omit<ContinuationCheckpoint, 'evidenceDigest'>;
-type Role = 'checks' | 'independentReview';
 export type CandidateRef = Readonly<{ startKey: string; candidateDigest: string }>;
 type Gate = (
   subject: Readonly<Subject>,
   mirror: string,
   inputDigest: string,
-) => Promise<{
-  role: Role;
-  inputDigest: string;
-  status: 'passed' | 'failed';
-  evidenceDigest: string;
-}>;
+) => Promise<SignedGateReceipt>;
 /** Host-selected trusted backends, not controller operations. Each must return the binding
  * from its actual evaluation, not relabel a previous receipt with the supplied digest. */
 export interface CombinedGates {
+  policy: CombinedPolicy;
   checks: Gate;
   independentReview: Gate;
 }
@@ -30,7 +32,11 @@ export function combinedVerifier(
   gates: CombinedGates,
 ) {
   const refs = structuredClone(inputs);
+  const policy = structuredClone(gates.policy);
+  const selected = { checks: gates.checks, independentReview: gates.independentReview };
   return async (subject: Readonly<Subject>, mirror: string) => {
+    if (combinedPolicyDigest(policy) !== subject.policyDigest)
+      throw new Error('combined-policy-mismatch');
     if (refs.length !== 2 || refs[0].startKey === refs[1].startKey)
       throw new Error('combined-inputs-required');
     const lookup =
@@ -73,23 +79,22 @@ export function combinedVerifier(
     )
       throw new Error('combined-source-mismatch');
     const inputDigest = digest({ subject, inputs: refs });
-    const check = async (role: Role) => {
-      const receipt = await gates[role](subject, mirror, inputDigest);
-      if (
-        receipt.role !== role ||
-        receipt.inputDigest !== inputDigest ||
-        receipt.status !== 'passed' ||
-        !/^sha256:[a-f0-9]{64}$/.test(receipt.evidenceDigest)
-      )
-        throw new Error(`combined-${role}-required`);
-      return {
-        status: 'passed' as const,
-        receiptDigest: digest(receipt),
-        evidenceDigest: receipt.evidenceDigest,
-      };
-    };
+    const check = async (role: Role) =>
+      verifyGateReceipt(
+        policy,
+        role,
+        inputDigest,
+        await selected[role](subject, mirror, inputDigest),
+      );
     const checks = await check('checks');
     const independentReview = await check('independentReview');
-    return { subjectDigest: digest(subject), inputs: refs, inputDigest, checks, independentReview };
+    return {
+      subjectDigest: digest(subject),
+      inputs: refs,
+      inputDigest,
+      gatePolicy: policy,
+      checks,
+      independentReview,
+    };
   };
 }

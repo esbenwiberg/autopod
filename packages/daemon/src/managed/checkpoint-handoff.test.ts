@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import { expect, it, onTestFinished } from 'vitest';
+import { combinedPolicyDigest, verifyGateReceipt } from '../orchestration/combined-attestation.js';
 import type { CombinedGates } from '../orchestration/combined-checkpoint.js';
 import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
+import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { requestTimeFixture, resign } from '../test-utils/managed-fixture.js';
 import { digest } from './canonical.js';
 import { ManagedSourceDelivery } from './source-delivery.js';
@@ -283,13 +285,20 @@ it.each([
       sources.set(cp.commit, privateMirror);
       return service(cp.commit, privateMirror);
     });
+  const checker = fixtureSigner('checks', 'local-checker', digest('capacity-rule/v1'));
+  const reviewer = fixtureSigner('independentReview', 'local-reviewer', digest('review-rule/v1'));
+  const policy = {
+    basePolicyDigest: digest('pool-policy'),
+    checks: checker.authority,
+    independentReview: reviewer.authority,
+  };
   const subject = {
     run,
     repository: 'fixture-repo',
     predecessor: await managedGit(mirror, ['rev-parse', 'HEAD^']),
     commit: base,
     tree: await managedGit(mirror, ['rev-parse', 'HEAD^{tree}']),
-    policyDigest: digest('pool-policy'),
+    policyDigest: combinedPolicyDigest(policy),
   };
   host().ledger.open(run, subject.repository, subject.policyDigest, subject.predecessor, 3, 2);
   const bundle = async (cwd: string, name: string) => {
@@ -373,6 +382,7 @@ it.each([
     };
     await expect(
       host().retainCombined(changed, await bundle(draft, 'changed.bundle'), [a.ref, b.ref], {
+        policy,
         checks: unexpected,
         independentReview: unexpected,
       }),
@@ -382,22 +392,22 @@ it.each([
   f.restart();
   let reviews = 0;
   const gates: CombinedGates = {
-    checks: async (target, repo, inputDigest) => ({
-      role: 'checks',
-      inputDigest,
-      status: (await slotsFit(repo, target.commit)) ? 'passed' : 'failed',
-      evidenceDigest: digest(['capacity', target.tree]),
-    }),
+    policy,
+    checks: async (target, repo, inputDigest) =>
+      checker.attest({
+        inputDigest,
+        status: (await slotsFit(repo, target.commit)) ? 'passed' : 'failed',
+        evidenceDigest: digest(['capacity', target.tree]),
+      }),
     // Separate deterministic reviewer fixture inspects the committed combined blob.
     independentReview: async (target, repo, inputDigest) => {
       reviews++;
       const value = await managedGit(repo, ['show', target.commit + ':pool-b']);
-      return {
-        role: 'independentReview',
+      return reviewer.attest({
         inputDigest,
         status: Number(value) <= 3 ? 'passed' : 'failed',
         evidenceDigest: digest(['pool-b-policy', value, target.commit]),
-      };
+      });
     },
   };
   const refsAB = [a.ref, b.ref] as const;
@@ -422,20 +432,59 @@ it.each([
     await expect(
       qualify({
         ...gates,
-        independentReview: async () => ({
-          role: 'independentReview',
-          status: 'passed',
-          inputDigest: digest(a.commit),
-          evidenceDigest: digest('stale review'),
-        }),
+        independentReview: async () =>
+          reviewer.attest({
+            status: 'passed',
+            inputDigest: digest(a.commit),
+            evidenceDigest: digest('stale review'),
+          }),
       }),
     ).rejects.toThrow('combined-independentReview-required');
+    // Correct claims and configuration, but signed by a different authority.
+    const other = fixtureSigner(
+      'independentReview',
+      reviewer.authority.identity,
+      reviewer.authority.configurationDigest,
+    );
+    await expect(
+      qualify({
+        ...gates,
+        independentReview: async (_s, _m, inputDigest) =>
+          other.attest({ inputDigest, status: 'passed', evidenceDigest: digest('review') }),
+      }),
+    ).rejects.toThrow('combined-independentReview-required');
+    await expect(
+      qualify({
+        ...gates,
+        policy: { ...policy, independentReview: other.authority },
+        checks: async () => {
+          throw new Error('policy must be checked before dispatch');
+        },
+      }),
+    ).rejects.toThrow('combined-policy-mismatch');
     expect(accepted()).toBe(base);
     expect(remaining()).toBe(1);
     const checkpoint = await qualify();
     const c = recipe('worker-c', merged.commit);
     await host().ledger.acceptAndContinue(checkpoint, c);
     f.restart();
+    const retained = JSON.parse(
+      f.db
+        .prepare('SELECT manifest FROM orchestration_checkpoint_custody WHERE evidence_digest=?')
+        .pluck()
+        .get(checkpoint.evidenceDigest) as string,
+    );
+    const evidence = retained.verification;
+    expect(combinedPolicyDigest(evidence.gatePolicy)).toBe(subject.policyDigest);
+    for (const role of ['checks', 'independentReview'] as const)
+      expect(
+        verifyGateReceipt(
+          evidence.gatePolicy,
+          role,
+          digest({ subject: merged, inputs: refsAB }),
+          evidence[role].receipt,
+        ).receiptDigest,
+      ).toBe(evidence[role].receiptDigest);
     expect(await host().ledger.recover()).toEqual({ blocked: [] });
     await host().ledger.acceptAndContinue(checkpoint, c);
     expect(await host().ledger.recover()).toEqual({ blocked: [] });
