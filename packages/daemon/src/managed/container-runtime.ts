@@ -4,6 +4,7 @@ import type { ArtifactOutput, FollowUpEnvelope, ManagedPodRequest, Route } from 
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { canonical } from './canonical.js';
 import type { ManagedRuntimePort } from './managed-service.js';
+import { allocateSandboxCheckpoint } from './sandbox-checkpoint.js';
 
 export interface ReviewedContainerBoundary {
   route: Route;
@@ -19,7 +20,10 @@ export interface ReviewedContainerBoundary {
   sourceWorkspace?(podId: string, repositoryId: string): string;
   cleanupNetwork?(podId: string): Promise<void>;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
-  prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
+  prepare(
+    podId: string,
+    request: ManagedPodRequest,
+  ): Promise<ContainerSpawnConfig & { sandboxCheckpoint?: { repository: string; commit: string } }>;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
   sendMessage?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   quotaReady(request: ManagedPodRequest): Promise<boolean>;
@@ -201,11 +205,15 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     }
     const allocate = boundary.manager.ensureManagedContainer;
     if (!allocate) throw new Error('managed-allocation-unavailable');
-    const runtimeRef = await allocate.call(boundary.manager, {
-      ...config,
+    const { sandboxCheckpoint, ...spawn } = config;
+    const launch = {
+      ...spawn,
       managedSpecDigest: request.executionSpecDigest,
       onCreated: checkpoint,
-    });
+    };
+    const runtimeRef = sandboxCheckpoint
+      ? await allocateSandboxCheckpoint(boundary.manager, launch, sandboxCheckpoint)
+      : await allocate.call(boundary.manager, launch);
     checkpoint(runtimeRef);
     this.known.set(runtimeRef, boundary);
     if (fault === 'after-runtime-identity') throw new Error('injected-after-runtime-identity');

@@ -8,22 +8,24 @@ export function operatorPartition(
   enrollment: ReturnType<typeof parseOperatorEnrollment>,
   cli: ManagedCliConfig | undefined,
   ordinary: ManagedProfileSetConfig | undefined,
-  local: ManagedProfileSetConfig | undefined,
+  worker: ManagedProfileSetConfig | undefined,
 ) {
-  if (!local) return undefined;
+  if (!worker) return undefined;
+  const target = worker.profiles[0]?.profileSnapshot.route.executionTarget;
   if (
     !enrollment ||
     !cli ||
     !ordinary ||
     ordinary.profiles.some((p) => p.profileSnapshot.route.executionTarget !== 'sandbox') ||
-    local.profiles.some((p) => p.profileSnapshot.route.executionTarget !== 'local') ||
-    local.catalogArtifacts ||
-    local.githubRead ||
-    local.source ||
-    local.mirror.dependencyCachePath
+    (target !== 'local' && target !== 'sandbox') ||
+    worker.profiles.some((p) => p.profileSnapshot.route.executionTarget !== target) ||
+    worker.catalogArtifacts ||
+    worker.githubRead ||
+    worker.source ||
+    worker.mirror.dependencyCachePath
   )
     throw new Error('operator-local-sandbox-pair-required');
-  const run = operatorRunId(enrolledOperator(enrollment, cli, local), enrollment.slot);
+  const run = operatorRunId(enrolledOperator(enrollment, cli, worker), enrollment.slot);
   const operator = (installation: string) => installation === 'native.' + run;
-  return { run, operator, ordinary: (installation: string) => !operator(installation) };
+  return { run, operator, target, ordinary: (installation: string) => !operator(installation) };
 }

@@ -143,13 +143,15 @@ export function composeOperatorEnrollment(
   },
 ): OperatorRunsConfig {
   const { profiles, cli, runtime, db } = deps;
+  const target = profiles?.profiles[0]?.profileSnapshot.route.executionTarget;
   if (
     !profiles ||
     !cli ||
     !runtime ||
     runtime.config.db !== db ||
     profiles.catalogArtifacts ||
-    profiles.profiles.some((s) => s.profileSnapshot.route.executionTarget !== 'local')
+    (target !== 'local' && !(deps.isolatedArtifacts && target === 'sandbox')) ||
+    profiles.profiles.some((s) => s.profileSnapshot.route.executionTarget !== target)
   )
     throw new Error('operator-local-profile-set-required');
   const operator = enrolledOperator(e, cli, profiles);
@@ -168,7 +170,7 @@ export function composeOperatorEnrollment(
     profileSetRequestPolicy(profiles)(r);
     const scope = r.effectiveGrant.scope;
     if (
-      r.route.executionTarget !== 'local' ||
+      r.route.executionTarget !== target ||
       r.route.runtime !== 'codex' ||
       r.outputs.source.mode !== 'none' ||
       r.outputs.artifacts.mode !== 'required' ||

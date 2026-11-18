@@ -257,6 +257,7 @@ export function composeManagedProfileSet(
     databasePath: string;
     manager: ContainerManager | undefined;
     ownsInstallation?: (installation: string) => boolean;
+    sandboxCheckpoints?: boolean;
     networkManager?: ManagedLocalNetwork;
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
@@ -318,6 +319,7 @@ export function composeManagedProfileSet(
   const components = composeManagedRuntime({
     db: dependencies.db,
     ownsInstallation: dependencies.ownsInstallation,
+    sandboxCheckpoints: dependencies.sandboxCheckpoints,
     store,
     enabled: true,
     source,

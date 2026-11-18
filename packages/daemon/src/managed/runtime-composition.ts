@@ -71,6 +71,7 @@ export interface ManagedRuntimeBinding {
 }
 export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsConfig, 'runtime'> {
   mirrors: readonly ManagedRepositoryMirror[];
+  sandboxCheckpoints?: boolean;
   bindings: readonly ManagedRuntimeBinding[];
 }
 
@@ -125,7 +126,12 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     if (
       !cp ||
       owner !== 'native.' + cp.run ||
-      request.route.executionTarget !== 'local' ||
+      (request.route.executionTarget !== 'local' &&
+        !(
+          request.route.executionTarget === 'sandbox' &&
+          config.sandboxCheckpoints &&
+          repo?.access === 'read'
+        )) ||
       request.effectiveGrant.scope.repositories.length !== 1 ||
       !repo ||
       repo.baseRevision !== cp.commit ||
@@ -239,10 +245,14 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         return true;
       },
       prepare: async (podId, request) => {
+        const cp = checkpointScope.getStore();
         const volumes = await prepareWorkspaces(podId, request);
         for (const input of components.service.inputs!.mounts(podId))
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
         return {
+          ...(cp && request.route.executionTarget === 'sandbox'
+            ? { sandboxCheckpoint: { repository: cp.repository, commit: cp.commit } }
+            : {}),
           ...(await binding.network(request, podId)),
           podId,
           image: binding.image,
@@ -369,6 +379,9 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       for (const row of rows) {
         if (!components.service.ownsInstallation(row.dispatcher_installation_id)) continue;
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
+        // A bound Azure ID is not evidence that the checkpoint upload was verified
+        // or a worker started. Preserve ambiguous queued allocations for inspection.
+        if (config.sandboxCheckpoints && row.state === 'queued') continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         if (profileIds && !profileIds.has(request.profileSnapshot.profileId)) continue;
         const index = bindings.findIndex(

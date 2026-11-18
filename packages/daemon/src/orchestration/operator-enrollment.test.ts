@@ -95,6 +95,36 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
     .run(other, digest(1), JSON.stringify(cp), '{}');
   expect(() => assertOperatorRecovery(f.db, null)).not.toThrow();
 });
+it('requires a separately enrolled, signed sandbox target and never starts a fresh run during preparation', async () => {
+  const { f, profiles, enrollment, cli } = await operatorSeedFixture(
+    'registry.example/worker@sha256:' + 'b'.repeat(64),
+    true,
+    'sandbox',
+  );
+  const resume = vi.fn(),
+    bind = vi.fn(
+      () =>
+        offlineController(() => {
+          throw new Error('unexpected-call');
+        }).provider,
+    );
+  const deps = {
+    db: f.db,
+    databasePath: f.db.name,
+    profiles,
+    cli,
+    bind,
+    runtime: { config: { db: f.db }, resume } as unknown as NonNullable<
+      Parameters<typeof composeOperatorEnrollment>[1]['runtime']
+    >,
+  };
+  expect(() => composeOperatorEnrollment(enrollment, deps)).toThrow();
+  const run = composeOperatorEnrollment(enrollment, { ...deps, isolatedArtifacts: true });
+  await run.prepare!();
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(f.db.prepare('select count(*) from orchestration_kickoffs').pluck().get()).toBe(0);
+  expect(f.db.prepare('select count(*) from managed_sandbox_allocations').pluck().get()).toBe(0);
+});
 it('rejects the wrong seed file before opening a run or resuming any runtime', async () => {
   const { f, enrollment, profiles, cli, run } = await operatorSeedFixture(image);
   await writeFile(enrollment.source.bundlePath, 'wrong bytes');

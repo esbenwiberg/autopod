@@ -1227,7 +1227,8 @@ const separateRuntime =
         {
           db,
           databasePath: DB_PATH,
-          manager: containerManager,
+          manager: partition.target === 'sandbox' ? sandboxContainerManager : containerManager,
+          sandboxCheckpoints: partition.target === 'sandbox',
           networkManager,
           providerAccounts: providerAccountStore,
           githubAuth,

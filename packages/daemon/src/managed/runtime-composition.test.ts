@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -219,6 +220,54 @@ it('partitions restart attachment, observation and output collection by durable 
     lane.close();
   }
   expect(x.ensure).toHaveBeenCalledTimes(2);
+});
+it('starts one checkpoint-backed sandbox with only approved bytes, then reattaches without another upload or allocation', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  const scope = x.request.effectiveGrant.scope.repositories[0]!;
+  x.config.sandboxCheckpoints = true;
+  x.config.ownsInstallation = (i) => i === 'native.fixture';
+  // Ordinary configured mirror is deliberately unavailable. Only checkpoint custody works.
+  x.config.mirrors = [{ ...x.config.mirrors[0]!, path: path.join(root, 'missing') }];
+  const c = x.create(true);
+  const order: string[] = [];
+  x.ensure.mockImplementation(async (cfg) => {
+    const src = cfg.volumes!.find((v) => v.container === '/repositories/' + scope.enrollmentId)!;
+    expect(src.readOnly).toBe(true);
+    expect(readFileSync(path.join(src.host, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
+    expect(() => readFileSync(path.join(src.host, '.git', 'HEAD'))).toThrow();
+    order.push('allocated');
+    cfg.onCreated?.('sandbox-1');
+    return 'sandbox-1';
+  });
+  x.exec.mockImplementation(async (_ref, cmd) => {
+    if (cmd[2]?.includes('sandbox checkpoint verification failed')) {
+      order.push('verified');
+      return {
+        exitCode: 0,
+        stdout: createHash('sha256').update(cmd[4]!).digest('hex'),
+        stderr: '',
+      };
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const h = await c.withCheckpoint(
+    { run: 'fixture', repository: scope.enrollmentId, commit: scope.baseRevision },
+    x.mirror,
+    (service) => service.start('native.fixture', x.request),
+  );
+  expect(order).toEqual(['allocated', 'verified']);
+  expect(c.service.row('native.fixture', h.podId).runtime_ref).toBe('sandbox-1');
+  c.close();
+  f.restart();
+  const reopened = x.create(true);
+  f.db.prepare("UPDATE managed_pods SET state='queued' WHERE pod_id=?").run(h.podId);
+  x.channel.attach.mockClear();
+  await reopened.resume();
+  expect(x.channel.attach).not.toHaveBeenCalled();
+  f.db.prepare("UPDATE managed_pods SET state='running' WHERE pod_id=?").run(h.podId);
+  await reopened.resume();
+  expect(x.channel.attach).toHaveBeenCalledTimes(1);
+  expect(order).toEqual(['allocated', 'verified']);
 });
 it('defaults disabled without attaching channels or calling providers', async () => {
   const x = setup();

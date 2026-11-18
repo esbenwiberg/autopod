@@ -15,7 +15,11 @@ import { fixtureSigner } from './gate-signer.js';
 import { resign } from './managed-fixture.js';
 import { setupOrchestrationRun } from './orchestration-run-fixture.js';
 
-export async function operatorSeedFixture(image: string, isolatedArtifacts = false) {
+export async function operatorSeedFixture(
+  image: string,
+  isolatedArtifacts = false,
+  target: 'local' | 'sandbox' = 'local',
+) {
   const { root, subject: s, request, bytes } = await setupOrchestrationRun();
   const db = createHistoricalDiskDatabase(path.join(root, 'daemon.db'), [
     { dir: MIGRATIONS_DIR, through: 269 },
@@ -30,7 +34,9 @@ export async function operatorSeedFixture(image: string, isolatedArtifacts = fal
   };
   const slot = 'inspection',
     run = operatorRunId(operator, slot);
+  request.route.executionTarget = target;
   for (const bound of [request.profileSnapshot, request.effectiveGrant]) {
+    bound.route.executionTarget = target;
     bound.budget.expiresAt = Math.floor(Date.now() / 1000) + 600;
     bound.budget.maxDurationSeconds = 480;
   }
