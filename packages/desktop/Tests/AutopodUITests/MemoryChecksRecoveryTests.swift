@@ -15,7 +15,9 @@ import Testing
   }
   private func preview() throws -> MemoryChecksPreview {
     try JSONDecoder().decode(MemoryChecksPreview.self, from: JSONSerialization.data(withJSONObject: [
-      "profileId": "memory", "digest": String(repeating: "d", count: 64), "target": "local"]))
+      "profileId": "memory", "digest": String(repeating: "d", count: 64), "target": "local",
+      "main": ["memoryGb": 12, "cpus": 4, "storageGb": NSNull()],
+      "resolvedEnvironment": ["pinnedBase": "node:22@sha256:fixture", "imageKey": "fixture-image-key"]]))
   }
 
   @Test func eligibleInspectionIsReadOnlyAndConfirmationIsExplicit() async throws {
@@ -30,6 +32,7 @@ import Testing
     #expect(model.canPreview && !model.canConfirm && posts == 0)
     #expect(model.savedWork.contains(String(repeating: "a", count: 40)))
     await model.loadPreview(actions); model.reason = "Retry saved checks within existing permission"
+    #expect(model.preview?.main.memoryGb == 12 && model.preview?.main.cpus == 4)
     #expect(!model.canConfirm)
     model.confirmed = true
     #expect(model.canConfirm)

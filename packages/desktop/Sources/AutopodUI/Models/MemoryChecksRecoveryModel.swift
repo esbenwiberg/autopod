@@ -57,6 +57,7 @@ public struct MemoryChecksActions: Sendable {
   }
   var canConfirm: Bool {
     canPreview && confirmed && preview?.profileId == profileId && preview?.target == "local"
+      && preview?.main.memoryGb.map { $0.isFinite && $0 > 0 } == true
       && makeRequest(id: "validation") != nil
   }
   var savedWork: String {

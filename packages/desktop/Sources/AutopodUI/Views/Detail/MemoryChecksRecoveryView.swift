@@ -27,6 +27,10 @@ struct MemoryChecksRecoveryView: View {
               .disabled(!model.canPreview)
             if let preview = model.preview {
               Text("Candidate \(preview.profileId) · \(preview.digest)").font(.caption).textSelection(.enabled)
+              Text("Selected Docker allocation: \(preview.main.memoryGb.map { String($0) + " GB memory" } ?? "memory unspecified") · \(preview.main.cpus.map { String($0) + " CPUs" } ?? "CPU limit unspecified") · \(preview.main.storageGb.map { String($0) + " GB storage" } ?? "storage uses the existing Docker host").")
+                .font(.callout).textSelection(.enabled)
+              Text("Selected software base: \(preview.resolvedEnvironment.pinnedBase)\nSoftware image key: \(preview.resolvedEnvironment.imageKey)")
+                .font(.caption).textSelection(.enabled)
               Text("Configuration preview only. After confirmation the actual allocation and effective heap of the unchanged test command must improve before any checks dispatch. The task keeps its existing allowance and retry permission. More memory does not guarantee a pass.")
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
               TextField("Reason for this checks-only attempt", text: $model.reason, axis: .vertical)

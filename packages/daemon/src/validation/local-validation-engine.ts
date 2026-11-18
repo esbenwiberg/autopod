@@ -1867,11 +1867,13 @@ async function runTests(
 
   const testCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   await config.assertTestMemoryCurrent?.();
-  const memory = await prepareTestMemory(
-    containerManager,
-    config,
-    config.assertTestMemoryOwnership,
-  );
+  let memory: Awaited<ReturnType<typeof prepareTestMemory>>;
+  try {
+    memory = await prepareTestMemory(containerManager, config, config.assertTestMemoryOwnership);
+  } catch (error) {
+    if (config.requiredTestMemory) throw error;
+    log?.warn('Optional test-process memory evidence unavailable; running the frozen test command');
+  }
   if (config.requiredTestMemory)
     requireMemoryImprovement(config.requiredTestMemory, memory?.evidence);
   await config.assertTestMemoryCurrent?.();

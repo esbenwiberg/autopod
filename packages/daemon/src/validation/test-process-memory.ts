@@ -20,6 +20,8 @@ export function directNodeTest(command: string) {
   return match
     ? {
         prefix: `${match[1] ? `${match[1]} ` : ''}${match[2]}`,
+        assignment: match[1],
+        node: match[2],
         tests: command.slice(command.indexOf(' --test')),
       }
     : null;
@@ -87,7 +89,7 @@ export async function prepareTestMemory(
   const observed = await cm.execInContainer(
     config.containerId,
     wrapValidationExecCommand(
-      `${direct.prefix} -e '${probe.replaceAll("'", "'\\''")}'`,
+      `${direct.assignment ? `${direct.assignment}; export NODE_OPTIONS; ` : ''}case "\${NODE_OPTIONS-}" in '') ;; --max-old-space-size=*) case "\${NODE_OPTIONS#--max-old-space-size=}" in ''|*[!0-9]*) exit 78;; esac;; *) exit 78;; esac; ${direct.node} -e '${probe.replaceAll("'", "'\\''")}'`,
       config.extraExecEnv,
       config.nonSecretExecEnv,
     ),

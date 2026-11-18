@@ -36,6 +36,17 @@ public struct MemoryChecksPreview: Decodable, Sendable {
   public let profileId: String
   public let digest: String
   public let target: String
+  public let main: Resources
+  public let resolvedEnvironment: Software
+  public struct Software: Decodable, Sendable {
+    public let pinnedBase: String
+    public let imageKey: String
+  }
+  public struct Resources: Decodable, Sendable {
+    public let memoryGb: Double?
+    public let cpus: Double?
+    public let storageGb: Double?
+  }
 }
 
 public struct MemoryChecksRequest: Codable, Equatable, Sendable {
