@@ -348,6 +348,35 @@ func dependencyMetadataEnrichesEqualVersionsButCannotRegressNewerRecords(hydrate
   #expect(store.pods.first?.status == .failed)
   #expect(await recorder.detailPaths == ["/pods/selected-pod", "/pods/selected-pod"])
 }
+@MainActor @Test(arguments: [false, true])
+func profileNamesAndAvailabilityRefreshWithoutChangingIdentityOrExecutionTimestamp(hydrate: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/profile-pod" { return SelfResponse.json(fullPod(id: "profile-pod"), for: request) }
+    let state = await mode.isNewer ? "archived" : "active"
+    let profile = #""profileDisplay":{"id":"test","name":"Works Claude","state":"\#(state)"},"title":"#
+    let page = compactPage(id: "profile-pod", hasNext: false)
+      .replacingOccurrences(of: "\"title\":", with: profile)
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  #expect(store.pods.first?.profileLabel == "Works Claude")
+  if hydrate { await store.hydrateSessionIfNeeded("profile-pod") }
+  #expect(store.pods.first?.profileLabel == "Works Claude", "Older detail responses must not erase discovery labels")
+  let timestamp = store.pods.first?.updatedAt
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.profileLabel == "Works Claude (archived)")
+  #expect(store.pods.first?.profileName == "test")
+  #expect(store.pods.first?.updatedAt == timestamp)
+}
+
 @MainActor @Test func fleetDisplayArrivesBeforeSelectionAndSurvivesHydrationAndRefresh() async throws {
   let mode = FleetMode()
   let configuration = URLSessionConfiguration.ephemeral

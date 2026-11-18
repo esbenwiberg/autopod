@@ -25,6 +25,7 @@ extension EnvironmentValues {
     @Entry var desktopRepositories: [String: DesktopRepository] = [:]
     @Entry var desktopPodSelection: ((String) -> Void)? = nil
     @Entry var desktopRepositoryFilter: ((String) -> Void)? = nil
+    @Entry var desktopOpenProfile: ((String) -> Void)? = nil
 }
 
 @MainActor

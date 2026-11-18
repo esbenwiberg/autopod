@@ -69,6 +69,7 @@ import {
   createFleetArchiveRepository,
   type FleetArchiveRepository,
 } from './fleet-archive-repository.js';
+import { displayProfile, profileDisplayColumns } from './pod-display-profile.js';
 import { displayRepository, repositoryDisplayColumns } from './pod-display-repository.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
@@ -366,6 +367,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   getFindingsReceipts?(id: string): NonNullable<Pod['researchFindings']>[];
   getOrThrow(id: string): Pod;
   getRepositoryForDisplay?(id: string): import('@autopod/shared').PodRepositoryDisplay;
+  getProfileForDisplay?(id: string): import('@autopod/shared').PodProfileDisplay;
   getActiveTimeForDisplay?(id: string): import('@autopod/shared').PodFleetDisplay['activeTime'];
   /** Read one live or archived pod without admitting further execution. */
   getForHistory?(id: string): Pod;
@@ -810,7 +812,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
   });
   const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
   const rowToDisplaySession = (row: Record<string, unknown>) =>
-    withFleetArchive(decodeDisplaySessionRow(row));
+    withFleetArchive({
+      ...decodeDisplaySessionRow(row),
+      ...('display_profile' in row ? { profileDisplay: displayProfile(row) } : {}),
+    });
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -1591,12 +1596,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     listForHistory(filters?: PodFilters): Pod[] {
-      return Array.from(listRows(filters, HISTORY_POD_COLUMNS, 'retained_pods'), (row) => {
-        const pod = rowToDisplaySession(row);
-        for (const field of HISTORY_JSON_FIELDS)
-          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
-        return pod;
-      });
+      return Array.from(
+        listRows(
+          filters,
+          `${HISTORY_POD_COLUMNS}, launch_config_digest, ${profileDisplayColumns('retained_pods')}`,
+          'retained_pods',
+        ),
+        (row) => {
+          const pod = rowToDisplaySession(row);
+          for (const field of HISTORY_JSON_FIELDS)
+            if (row[`${field}_oversized`])
+              pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+          return pod;
+        },
+      );
     },
 
     getActiveTimeForDisplay(id: string) {
@@ -1604,6 +1617,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .prepare('SELECT elapsed_ms, active_since FROM pod_active_time WHERE pod_id = ?')
         .get(id) as { elapsed_ms: number; active_since: string | null } | undefined;
       return row ? { elapsedMs: row.elapsed_ms, activeSince: row.active_since } : null;
+    },
+
+    getProfileForDisplay(id: string) {
+      const row = db
+        .prepare(`SELECT profile_name, launch_config_digest, ${profileDisplayColumns('retained_pods')}
+        FROM retained_pods WHERE id=?`)
+        .get(id) as Record<string, unknown> | undefined;
+      return row ? displayProfile(row) : { id: null, name: null, state: 'unavailable' };
     },
 
     getRepositoryForDisplay(id: string) {
@@ -1619,7 +1640,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {
       return Array.from(
-        listRows(filters, `${COMPACT_POD_COLUMNS}, ${repositoryDisplayColumns('pods')}`),
+        listRows(
+          filters,
+          `${COMPACT_POD_COLUMNS}, ${repositoryDisplayColumns('pods')}, ${profileDisplayColumns('pods')}`,
+        ),
         (row) => {
           const pod = rowToDisplaySession(row);
           for (const field of COMPACT_JSON_FIELDS) {
@@ -1646,7 +1670,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     listForDisplay(filters?: PodFilters): Pod[] {
-      return Array.from(listRows(filters), (row) => {
+      return Array.from(listRows(filters, `*, ${profileDisplayColumns('pods')}`), (row) => {
         const pod = rowToDisplaySession(row);
         return { ...pod, finalization: completionJournal.get(pod.id, pod.lifecycleGeneration) };
       });

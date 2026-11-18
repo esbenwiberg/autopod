@@ -34,7 +34,8 @@ import AutopodUI
   let json = """
   {
     "id": "feat-oauth-a1b2",
-    "profileName": "my-app",
+    "profileName": "profile-uuid",
+    "profileDisplay": { "id": "profile-uuid", "name": "Works Claude", "state": "active" },
     "task": "Add OAuth login",
     "status": "running",
     "lastRecoveryTrigger": "restart",
@@ -88,6 +89,9 @@ import AutopodUI
   let pod = PodMapper.map(response)
 
   #expect(pod.id == "feat-oauth-a1b2")
+  #expect(pod.profileName == "profile-uuid")
+  #expect(pod.profileLabel == "Works Claude")
+  #expect(pod.profileDisplay?.id == "profile-uuid")
   #expect(pod.status == .running)
   #expect(pod.latestActivity == "Recovery paused: task execution ownership remains unresolved.")
   #expect(pod.plan?.summary == "Add OAuth flow")

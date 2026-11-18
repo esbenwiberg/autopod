@@ -608,7 +608,7 @@ public struct SessionCardFinal: View {
                     .foregroundStyle(.secondary)
             }
         default:
-            Text(pod.profileName)
+            Text(pod.profileLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -668,7 +668,7 @@ public struct SessionCardFinal: View {
         VStack(alignment: .leading, spacing: 10) {
             // Profile context
             HStack(spacing: 4) {
-                Text(pod.profileName)
+                Text(pod.profileLabel)
                     .foregroundStyle(.secondary)
                 if !pod.isWorkspace {
                     Text("·")

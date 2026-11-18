@@ -21,6 +21,14 @@ enum ConfigurationAdvisoryBrowserQA {
   }
 }
 
+enum ProfileLibrarySearch {
+  static func matches(_ profile: ConfigurationDocument, query: String, details: [String] = []) -> Bool {
+    let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    return query.isEmpty || ([profile.name, profile.id] + details).joined(separator: " ")
+      .localizedCaseInsensitiveContains(query)
+  }
+}
+
 private enum ConfigurationLibraryPage: String {
   case profiles, buildingBlocks, repositories, watchers, deployments
 }
@@ -115,10 +123,14 @@ public struct ConfigurationLibraryView: View {
   }
 
   private func openRequestedProfile() {
-    guard let requested = profileToOpen,
-      let profile = actions.list(.profile).first(where: { $0.id == requested || $0.name == requested })
-    else { return }
-    edit(profile); profileToOpen = nil
+    guard let requested = profileToOpen else { return }
+    let profiles = actions.list(.profile)
+    if let profile = profiles.first(where: { $0.id == requested }) ?? profiles.first(where: { $0.name == requested }) {
+      error = nil; edit(profile); profileToOpen = nil
+    } else if !actions.documents.isEmpty {
+      error = "Profile is not available in the loaded configuration: \(requested). Refresh to check for changes or archived profiles."
+      // Keep the requested identity so a later refresh can open newly loaded configuration.
+    }
   }
 
   private var libraryBody: some View {
@@ -487,9 +499,8 @@ public struct ConfigurationLibraryView: View {
       let repositories = repositories(for: profile)
       let matchesRepository = selectedRepositoryID == nil
         || repositories.contains(where: { $0.id == selectedRepositoryID })
-      let searchable = ([profile.name] + repositories.map(\.libraryTitle)
-        + profileRows(for: profile).map(\.value)).joined(separator: " ")
-      return matchesRepository && (search.isEmpty || searchable.localizedCaseInsensitiveContains(search))
+      return matchesRepository && ProfileLibrarySearch.matches(profile, query: search,
+        details: repositories.map(\.libraryTitle) + profileRows(for: profile).map(\.value))
     }
     switch profileSort {
     case .recentlyEdited: profiles.sort { $0.updatedAt > $1.updatedAt }

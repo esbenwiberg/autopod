@@ -133,7 +133,7 @@ struct PodActivityPanel: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 4) {
-                Text(pod.profileName)
+                Text(pod.profileLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("·")

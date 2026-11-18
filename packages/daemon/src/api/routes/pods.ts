@@ -202,6 +202,7 @@ function compactPod(
     },
     taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
+    profileDisplay: pod.profileDisplay,
     status: pod.status,
     model: pod.model,
     runtime: pod.runtime,
@@ -264,6 +265,7 @@ function serializePodForRequest(
   request: FastifyRequest,
   providerAttemptRepo?: ProviderAttemptRepository,
   eventRepo?: EventRepository,
+  podRepo?: PodRepository,
 ): unknown {
   const attempts = providerAttemptRepo?.list(pod.id) ?? [];
   const latestAttempt = attempts.at(-1);
@@ -279,6 +281,7 @@ function serializePodForRequest(
       }
     : pod;
   const wire = serializePodForWire(projectedPod) as Record<string, unknown>;
+  wire.profileDisplay = pod.profileDisplay ?? podRepo?.getProfileForDisplay?.(pod.id);
   wire.providerAttempts = attempts;
   wire.reviewProgress = latestActiveReviewProgress(pod, eventRepo);
   if (typeof wire.previewUrl === 'string') {
@@ -607,7 +610,7 @@ export function podRoutes(
         actor: humanActor(request),
       });
       reply.status(201);
-      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
+      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo, podRepo);
     }
     const body = createPodRequestSchema.parse(request.body);
 
@@ -677,7 +680,7 @@ export function podRoutes(
         humanActor(request),
       );
       reply.status(201);
-      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo);
+      return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo, podRepo);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
@@ -766,7 +769,9 @@ export function podRoutes(
       return response;
     }
     const pods = readPods(filters);
-    return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo, eventRepo));
+    return pods.map((pod) =>
+      serializePodForRequest(pod, request, providerAttemptRepo, eventRepo, podRepo),
+    );
   });
 
   // Metadata-only visibility controls deliberately do not use destructive lifecycle recovery.
@@ -824,6 +829,7 @@ export function podRoutes(
       request,
       providerAttemptRepo,
       eventRepo,
+      podRepo,
     ) as Record<string, unknown>;
     if (podRepo?.getRepositoryForDisplay) {
       const pod = podManager.getSession(podId);
