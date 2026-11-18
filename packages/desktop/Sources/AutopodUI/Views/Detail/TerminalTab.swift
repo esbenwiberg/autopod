@@ -55,6 +55,7 @@ public struct TerminalTab: View {
             onResize: { cols, rows in onResize?(cols, rows) },
             palette: palette
           )
+          .id(ObjectIdentifier(pipe))
         } else {
           // Not yet connected — auto-connect on appear, show manual button as fallback
           VStack(spacing: 12) {

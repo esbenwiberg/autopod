@@ -319,12 +319,13 @@ import Testing
         inputs.navigation.reveal()
         try await host.wait { terminal(host.hosting) != nil }
         let reopened = try #require(terminal(host.hosting))
+        #expect(reopened.terminalView === original.terminalView)
         let engine = reopened.terminalView.getTerminal()
         try await host.wait {
-            (0..<engine.rows).contains { row in
-                engine.getLine(row: row)?.translateToString(trimRight: true)
-                    .contains("output while closed") == true
-            }
+            let lines = (0..<engine.rows).compactMap {
+                engine.getLine(row: $0)?.translateToString(trimRight: true)
+            }.joined(separator: "\n")
+            return lines.contains("retained scrollback") && lines.contains("output while closed")
         }
         #expect(inputs.navigation.selectedTab == .terminal)
         #expect(inputs.connects == 0)

@@ -18,6 +18,7 @@ public final class TerminalScrollInterceptor: NSView {
   init(terminalView: TerminalView) {
     self.terminalView = terminalView
     super.init(frame: .zero)
+    terminalView.removeFromSuperview()
     addSubview(terminalView)
     terminalView.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
@@ -28,8 +29,8 @@ public final class TerminalScrollInterceptor: NSView {
     ])
 
     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-      guard let self = self,
-            event.deltaY != 0 else { return event }
+      guard let self = self, let window = self.window,
+            event.window === window, event.deltaY != 0 else { return event }
 
       let terminal = self.terminalView.terminal!
 
@@ -102,21 +103,24 @@ public struct TerminalEmulatorView: NSViewRepresentable {
   }
 
   public func makeNSView(context: Context) -> TerminalScrollInterceptor {
-    let tv = TerminalView(frame: .zero)
+    let tv: TerminalView
+    if let retained = dataPipe.retainedTerminalView {
+      tv = retained
+    } else {
+      tv = TerminalView(frame: .zero)
+      tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+      // Keep click/drag selection local; TerminalScrollInterceptor handles
+      // mouse wheel reporting for applications such as tmux.
+      tv.allowMouseReporting = false
+    }
     Self.applyTheme(tv, palette: palette)
     context.coordinator.appliedPalette = palette
-    tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     tv.terminalDelegate = context.coordinator
-
-    // Disable SwiftTerm's built-in mouse reporting so click/drag events
-    // stay local (native text selection) instead of being sent to the app
-    // (tmux). Our scroll monitor handles mouse-wheel separately by checking
-    // terminal.mouseMode directly.
-    tv.allowMouseReporting = false
-
-    // Register to receive data from the pipe
-    dataPipe.setReceiver { bytes in
-      tv.feed(byteArray: ArraySlice(bytes))
+    if dataPipe.retainedTerminalView == nil {
+      dataPipe.retainedTerminalView = tv
+      dataPipe.setReceiver { [weak tv] bytes in
+        tv?.feed(byteArray: ArraySlice(bytes))
+      }
     }
 
     // Report initial size once SwiftTerm has a real frame (not .zero).
@@ -152,27 +156,28 @@ public struct TerminalEmulatorView: NSViewRepresentable {
   }
 
   public static func dismantleNSView(_ wrapper: TerminalScrollInterceptor, coordinator: Coordinator) {
-    coordinator.dataPipe.clearReceiver()
+    let tv = wrapper.terminalView
+    // SwiftUI may mount the replacement before dismantling this wrapper.
+    guard tv.superview === wrapper else { return }
+    tv.terminalDelegate = nil
+    tv.removeFromSuperview()
   }
 
   public func makeCoordinator() -> Coordinator {
-    Coordinator(dataPipe: dataPipe, onSendData: onSendData, onResize: onResize)
+    Coordinator(onSendData: onSendData, onResize: onResize)
   }
 
   // MARK: - Coordinator (TerminalViewDelegate)
 
   public final class Coordinator: NSObject, TerminalViewDelegate {
-    let dataPipe: TerminalDataPipe
     var appliedPalette: DesktopPaletteColors?
     var onSendData: ([UInt8]) -> Void
     var onResize: (Int, Int) -> Void
 
     init(
-      dataPipe: TerminalDataPipe,
       onSendData: @escaping ([UInt8]) -> Void,
       onResize: @escaping (Int, Int) -> Void
     ) {
-      self.dataPipe = dataPipe
       self.onSendData = onSendData
       self.onResize = onResize
     }

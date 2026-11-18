@@ -10,7 +10,7 @@ public final class TerminalManager {
 
   public private(set) var state = "disconnected"
   public private(set) var connectedSessionId: String?
-  public let dataPipe = TerminalDataPipe()
+  public private(set) var dataPipe = TerminalDataPipe()
 
   private var socket: TerminalSocket?
   private let baseURL: URL
@@ -50,12 +50,13 @@ public final class TerminalManager {
       },
       onStateChange: { [weak self] newState in
         Task { @MainActor [weak self] in
+          guard let self, self.dataPipe === pipe else { return }
           switch newState {
-          case .disconnected: self?.state = "disconnected"
-          case .connecting: self?.state = "connecting"
-          case .connected: self?.state = "connected"
-          case .reconnecting(let attempt): self?.state = "reconnecting (\(attempt))"
-          case .error(let msg): self?.state = "error: \(msg)"
+          case .disconnected: self.state = "disconnected"
+          case .connecting: self.state = "connecting"
+          case .connected: self.state = "connected"
+          case .reconnecting(let attempt): self.state = "reconnecting (\(attempt))"
+          case .error(let msg): self.state = "error: \(msg)"
           }
         }
       }
@@ -72,6 +73,7 @@ public final class TerminalManager {
     socket = nil
     state = "disconnected"
     connectedSessionId = nil
+    dataPipe = TerminalDataPipe()
     if let oldSocket {
       Task { await oldSocket.disconnect() }
     }
