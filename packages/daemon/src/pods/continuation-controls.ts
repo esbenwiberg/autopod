@@ -40,6 +40,7 @@ type Captured = Pick<
   | 'completeFixPodAfterPush'
   | 'emitActivityStatus'
   | 'pushAndCreatePr'
+  | 'reconcilePendingPublication'
   | 'transition'
 >;
 
@@ -71,6 +72,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     completeFixPodAfterPush,
     emitActivityStatus,
     pushAndCreatePr,
+    reconcilePendingPublication,
     transition,
   } = captured;
 
@@ -227,8 +229,22 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           409,
         );
     }
-    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
+    const publicationPod = podRepo.getOrThrow(podId);
+    if (
+      ['pr', 'branch'].includes(publicationPod.options.output ?? 'pr') &&
+      ['failed', 'review_required'].includes(publicationPod.status) &&
+      podRepo.sourcePublications?.pending?.(publicationPod)
+    ) {
+      assertValidationExecutionSettled(
+        publicationPod,
+        podRepo.validationExecutions?.isSettled(publicationPod),
+      );
+      // Record only the original physical fact. Guidance, infrastructure holds,
+      // and current checks still independently gate ALL subsequent work.
+      await reconcilePendingPublication(publicationPod);
+    }
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertGuidanceCollected(podId);
     const pendingCollection = artifactResumeRuns.get(podId);
     if (pendingCollection) {

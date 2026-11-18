@@ -1,6 +1,5 @@
 import { AutopodError } from '@autopod/shared';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
-import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { isolatedReviewDiffLimit } from '../validation/reviewer-input-bounds.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import {
@@ -26,6 +25,7 @@ import {
   guardValidationContainer,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+import { captureReviewSource } from './validation-review-source.js';
 import {
   assertProtectedOperationalPathsInScope,
   getPodValidationSkipPhases,
@@ -375,33 +375,16 @@ export function createValidationRevalidationWorkflow(
           startCommitSha: pod.startCommitSha,
         }),
       };
-      const [diff, commitLog] = pod.worktreePath
-        ? await owned(() =>
-            Promise.all([
-              worktreeManager.getDiff(
-                revalidationWorktreePath,
-                revalDefaultBranch,
-                isolatedReviewDiffLimit(pod.launchConfigDigest),
-                pod.startCommitSha ?? undefined,
-              ),
-              worktreeManager.getCommitLog(
-                revalidationWorktreePath,
-                revalDefaultBranch,
-                undefined,
-                pod.startCommitSha ?? undefined,
-              ),
-            ]),
-          )
-        : ['', ''];
-      const changedPathsAgainstBase =
-        pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
-          ? await owned(() =>
-              worktreeManager.getChangedPathsAgainstBase!(
-                revalidationWorktreePath,
-                revalDefaultBranch,
-              ),
-            )
-          : parseDiffFilePaths(diff);
+      const { diff, commitLog, changedPathsAgainstBase, reviewSource } = await owned(() =>
+        captureReviewSource(
+          worktreeManager,
+          revalidationWorktreePath,
+          pod.branch,
+          revalDefaultBranch,
+          isolatedReviewDiffLimit(pod.launchConfigDigest),
+          pod.startCommitSha ?? undefined,
+        ),
+      );
       assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
       const codeReviewSkill = pod.worktreePath
@@ -435,6 +418,7 @@ export function createValidationRevalidationWorkflow(
         validationSuite,
         task: pod.task,
         diff,
+        ...(reviewSource ? { reviewSource } : {}),
         testCommand: profile.testCommand,
         buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
         testTimeout: (profile.testTimeout ?? 600) * 1_000,

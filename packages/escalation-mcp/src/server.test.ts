@@ -497,10 +497,8 @@ describe('decision and infrastructure tool contracts', () => {
     const { createEscalationMcpServer } = await import('./server.js');
     createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });
     const tool = getTool('report_blocker');
-    expect(tool.description).toContain(
-      'expected host-only macOS checks explicitly deferred to a Mac',
-    );
-    expect(tool.description).toContain('Required Mac runner failures remain blockers');
+    expect(tool.description).toContain('expected external check');
+    expect(tool.description).toContain('required runner failures remain blockers');
     const schema = z.object(tool.schema);
     const report = schema.parse({
       description: 'Runner unavailable',

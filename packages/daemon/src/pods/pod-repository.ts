@@ -95,7 +95,11 @@ import {
   createSourceAdoptionRepository,
   type SourceAdoptionRepository,
 } from './source-adoption-repository.js';
-import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
+import {
+  assertPublicationMutationAllowed,
+  assertSourceAvailable,
+  assertSourceDeliveryAllowed,
+} from './source-custody-guards.js';
 import {
   createSourcePublicationLedger,
   type SourcePublicationLedger,
@@ -113,6 +117,10 @@ import {
   listValidationExecutionResourceIds,
   type ValidationExecutionLedger,
 } from './validation-execution-ledger.js';
+import {
+  createValidationSourceEvidence,
+  type ValidationSourceEvidence,
+} from './validation-source-evidence.js';
 
 export interface NewPod {
   /** Server-only, insertion-only logical task lineage; never PR-fix semantics. */
@@ -350,6 +358,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   deliveryLedger?: DeliveryLedger;
   approvalRewrites?: ApprovalSourceRewriteRepository;
   sourcePublications?: SourcePublicationLedger;
+  validationSources?: ValidationSourceEvidence;
   externalDeliveries?: ExternalDeliveryRepository;
   sandboxWakeups?: SandboxWakeupJournal;
   sourceAdoptions?: SourceAdoptionRepository;
@@ -918,6 +927,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     deliveryLedger: createDeliveryLedger(db),
     approvalRewrites: createApprovalSourceRewriteRepository(db),
     sourcePublications: createSourcePublicationLedger(db),
+    validationSources: createValidationSourceEvidence(db),
     externalDeliveries,
     sandboxWakeups,
     sourceAdoptions,
@@ -1108,8 +1118,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
           'providerIdSnapshot',
           'providerAccountIdSnapshot',
         ].some((field) => Object.hasOwn(changes, field))
-      )
+      ) {
+        assertPublicationMutationAllowed(db, id);
         assertSourceAvailable(db, id, '');
+      }
       if (
         [
           'status',
@@ -1565,6 +1577,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       })();
     },
     incrementLifecycleGeneration(id: string): number {
+      assertPublicationMutationAllowed(db, id);
       assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
       assertSourceAvailable(db, id);
@@ -1699,6 +1712,15 @@ export function createPodRepository(db: Database.Database): PodRepository {
       return [
         ...new Set([
           ...rows.map((r) => r.container_id),
+          ...(
+            db
+              .prepare(`SELECT s.container_id FROM source_publication_resources s
+            LEFT JOIN source_publication_receipts r ON r.intent_id=s.intent_id
+            WHERE r.intent_id IS NULL AND s.container_id IS NOT NULL`)
+              .all() as { container_id: string }[]
+          ).map((row) => row.container_id),
+          ...externalDeliveries.retainedSandboxIds(),
+          ...createApprovalSourceRewriteRepository(db).retainedSandboxIds(),
           ...listValidationExecutionResourceIds(db),
           ...createRetainedFinalizationRepository(db).resourceIds(),
         ]),
@@ -1713,6 +1735,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     assertRerunSourceAvailable(podId: string): void {
+      assertPublicationMutationAllowed(db, podId);
       assertSourceAvailable(db, podId, '');
       createRetainedFinalizationRepository(db).assertAvailable(podId);
       deletionOwnership.assertTaskAvailable(podId);

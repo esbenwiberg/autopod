@@ -897,6 +897,14 @@ export function createLocalValidationEngine(
                   MAX_ISOLATED_REVIEW_INPUT_BYTES));
           const inputFailure =
             'Review failed: incomplete isolated reviewer input (truncated or oversized packet); complete bounded source capture is required.';
+          if (incompleteInput) {
+            infrastructureFailure = {
+              phase: 'review',
+              code: 'REVIEW_INPUT_UNAVAILABLE',
+              message: inputFailure,
+              retryable: false,
+            };
+          }
           let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = incompleteInput
             ? {
                 requiredReviewUnavailable: true,
@@ -1314,6 +1322,19 @@ export function createLocalValidationEngine(
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
+        if (
+          !infrastructureFailure &&
+          (reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout')
+        ) {
+          infrastructureFailure = {
+            phase: 'review',
+            code: 'REVIEW_UNAVAILABLE',
+            message: reviewSkipReason ?? 'Required reviewer did not produce a conclusive result.',
+            // The reviewer owns its bounded inner retry. Do not add another
+            // validation/inference replay after it stops or requires reconciliation.
+            retryable: false,
+          };
+        }
         // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
         // Missing review output from a timeout/infra failure is a failed Review phase, not a skip.
         const reviewStatus: 'pass' | 'fail' | 'skip' =
@@ -1365,7 +1386,8 @@ export function createLocalValidationEngine(
         const { infrastructureFailure: _healthInfrastructureFailure, ...storedHealthResult } =
           infrastructureAwareHealth;
 
-        if (!infrastructureFailure) boundary?.assertVerified();
+        if (!infrastructureFailure || infrastructureFailure.phase === 'review')
+          boundary?.assertVerified();
         return {
           podId: config.podId,
           attempt: config.attempt,

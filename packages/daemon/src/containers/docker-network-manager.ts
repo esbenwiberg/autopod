@@ -51,6 +51,8 @@ export interface SubnetPruneOutcome {
   retained: number;
   attached: number;
   failed: number;
+  /** Allocating/live or unverified owners protected from automatic GC. */
+  owned?: number;
   /** Superseded retained bridges released under pressure (oldest first). */
   released?: number;
 }
@@ -60,7 +62,8 @@ export function hostNetworkCapacityError(outcome: SubnetPruneOutcome): AutopodEr
   return new AutopodError(
     `Host network capacity exhausted: Docker has no free address-pool subnet for a new pod ` +
       `network. ${outcome.totalPodNetworks} autopod networks exist; ${outcome.retained} are held ` +
-      `by retained checkpoints, ${outcome.attached} are attached to containers, ` +
+      `by retained checkpoints, ${outcome.owned ?? 0} have live or unverified owners, ` +
+      `${outcome.attached} are attached to containers, ` +
       `${outcome.removed} unattached were pruned, ${outcome.released ?? 0} superseded retained ` +
       `bridges were released and ${outcome.failed} could not be inspected or removed. Current ` +
       `retained, finalized and recovery-fork bridges are never released automatically. To free ` +
@@ -228,6 +231,44 @@ export class DockerNetworkManager {
     for (const id of containerIds) assertCheckpointResourceNotRetained(this.managedDatabase, id);
   }
 
+  /** Automatic GC is not the exact owner's teardown authority. */
+  private assertNetworkPrunable(name: string): void {
+    const refuse: () => never = () => {
+      throw new AutopodError(
+        'Network has a live or unverified allocation owner; retain it for owner cleanup.',
+        'NETWORK_OWNER_RETAINED',
+        409,
+      );
+    };
+    const db = this.managedDatabase;
+    if (!db || !name.startsWith('autopod-')) refuse();
+    const id = name.slice('autopod-'.length);
+    const pod = db.prepare('SELECT status, container_id FROM pods WHERE id=?').get(id) as
+      | { status: string; container_id: string | null }
+      | undefined;
+    // Failed/paused/validated is not a release receipt. Provisioning may own
+    // an empty bridge before the container or its durable ID exists.
+    if (pod) {
+      if (!['complete', 'killed'].includes(pod.status) || pod.container_id) refuse();
+      return;
+    }
+    const reviewer = db
+      .prepare('SELECT state,cleanup,reconciled_at FROM isolated_reviewer_runs WHERE id=?')
+      .get(id) as { state: string; cleanup: string; reconciled_at: string | null } | undefined;
+    if (reviewer) {
+      if (
+        reviewer.cleanup !== 'clean' ||
+        ['preparing', 'running'].includes(reviewer.state) ||
+        (reviewer.state === 'uncertain' && !reviewer.reconciled_at)
+      )
+        refuse();
+      return;
+    }
+    // Other isolated protocols do not share the ordinary pod ownership table.
+    // Missing records there cannot authorize tearing down their allocation.
+    if (/^(review-|system-|deploy-)/.test(id) || id.includes('-artifact-checks-')) refuse();
+  }
+
   private async inspectNetworkCustody(network: ReturnType<Dockerode['getNetwork']>, name: string) {
     this.assertNetworkMutable(name);
     if (!this.managedDatabase) return;
@@ -237,7 +278,7 @@ export class DockerNetworkManager {
       timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
       logger: this.logger,
     });
-    if (!live?.Name) throw new Error('Docker network identity unavailable');
+    if (!live?.Name || live.Name !== name) throw new Error('Docker network identity unavailable');
     this.assertNetworkMutable(live.Name, Object.keys(live.Containers ?? {}));
     return live;
   }
@@ -288,11 +329,10 @@ export class DockerNetworkManager {
     } catch (err: unknown) {
       if (isSubnetExhausted(err)) {
         // Docker's default subnet pool is exhausted by orphaned autopod networks.
-        // Prune any autopod network that has no containers attached (safe to
-        // remove — active networks always have at least the pod or a sidecar).
-        // Networks held by retained custody are never removed here.
+        // An unattached bridge can still belong to an in-flight allocation.
+        // Require durable owner/custody checks as well as fresh attachment state.
         this.logger.warn({ podId }, 'Subnet pool exhausted — pruning unattached autopod networks');
-        const prune = { candidates: 0, removed: 0, retained: 0, attached: 0, failed: 0 };
+        const prune = { candidates: 0, removed: 0, retained: 0, attached: 0, failed: 0, owned: 0 };
         const nets = await boundedDockerCall(
           this.docker.listNetworks({
             filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
@@ -311,6 +351,8 @@ export class DockerNetworkManager {
         await Promise.all(
           candidates.map(async (n) => {
             try {
+              this.assertNetworkMutable(n.Name);
+              this.assertNetworkPrunable(n.Name);
               const network = this.docker.getNetwork(n.Id);
               const live = await this.inspectNetworkCustody(network, n.Name);
               if (live && Object.keys(live.Containers ?? {}).length > 0) {
@@ -318,6 +360,7 @@ export class DockerNetworkManager {
                 return;
               }
               this.assertNetworkMutable(n.Name, Object.keys(live?.Containers ?? {}));
+              this.assertNetworkPrunable(n.Name);
               await boundedDockerCall(network.remove(), {
                 label: 'network.remove',
                 timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
@@ -327,7 +370,10 @@ export class DockerNetworkManager {
             } catch (pruneErr) {
               // Best effort. Custody refusals (409) are expected for retained
               // checkpoints and are counted separately from Docker failures.
-              if (pruneErr instanceof AutopodError && pruneErr.statusCode === 409) prune.retained++;
+              if (pruneErr instanceof AutopodError && pruneErr.code === 'NETWORK_OWNER_RETAINED')
+                prune.owned++;
+              else if (pruneErr instanceof AutopodError && pruneErr.statusCode === 409)
+                prune.retained++;
               else prune.failed++;
             }
           }),
@@ -424,6 +470,7 @@ export class DockerNetworkManager {
         if (!podId || activePodIds.has(podId)) return;
         const network = this.docker.getNetwork(net.Id);
         try {
+          this.assertNetworkPrunable(net.Name);
           // A previous daemon crash can leave containers attached to the network.
           // Docker rejects `network rm` with 403 ("has active endpoints") until
           // every endpoint is detached, so force-disconnect each one first. The
@@ -432,6 +479,7 @@ export class DockerNetworkManager {
           await this.detachEndpoints(network, net);
           const live = await this.inspectNetworkCustody(network, net.Name);
           this.assertNetworkMutable(net.Name, Object.keys(live?.Containers ?? {}));
+          this.assertNetworkPrunable(net.Name);
           await boundedDockerCall(network.remove(), {
             label: 'network.remove',
             timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
@@ -477,6 +525,7 @@ export class DockerNetworkManager {
       containerIds.map(async (containerId) => {
         try {
           this.assertNetworkMutable(listEntry.Name, [containerId]);
+          this.assertNetworkPrunable(listEntry.Name);
           await boundedDockerCall(network.disconnect({ Container: containerId, Force: true }), {
             label: 'network.disconnect',
             timeoutMs: DOCKER_CALL_TIMEOUTS.disconnectNetwork,

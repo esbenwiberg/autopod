@@ -303,7 +303,22 @@ describe('saved-work exact human draft publication', () => {
     const head = await f.git(f.source, 'rev-parse', 'HEAD');
     const tree = await f.git(f.source, 'rev-parse', 'HEAD^{tree}');
     const snapshot = (
-      await exec('git', ['commit-tree', tree, '-p', head, '-m', 'snapshot'], { cwd: f.source })
+      await exec(
+        'git',
+        [
+          '-c',
+          'user.name=Autopod',
+          '-c',
+          'user.email=autopod@localhost',
+          'commit-tree',
+          tree,
+          '-p',
+          head,
+          '-m',
+          'autopod sandbox checkpoint',
+        ],
+        { cwd: f.source },
+      )
     ).stdout.trim();
     await f.git(f.source, 'update-ref', `refs/autopod-quarantine/${f.id}/1`, snapshot);
     const result = {
@@ -393,6 +408,89 @@ describe('saved-work exact human draft publication', () => {
           actor,
         ),
     ).rejects.toThrow(/Preview changed/);
+  });
+
+  it('reverifies raw checkpoint author, committer and subject rather than trusting ledger flags', async () => {
+    const f = await fixture(true);
+    const parent = await f.git(f.source, 'rev-parse', 'HEAD');
+    const tree = await f.git(f.source, 'rev-parse', 'HEAD^{tree}');
+    const valid = [
+      `tree ${tree}`,
+      `parent ${parent}`,
+      'author Autopod <autopod@localhost> 1700000000 +0000',
+      'committer Autopod <autopod@localhost> 1700000000 +0000',
+      '',
+      'autopod sandbox checkpoint',
+      '',
+    ].join('\n');
+    const quarantineRef = `refs/autopod-quarantine/${f.id}/1`;
+    for (const raw of [
+      valid.replace('author Autopod', 'author Impostor'),
+      valid.replace('committer Autopod', 'committer Impostor'),
+      valid.replace('autopod sandbox checkpoint', 'unowned snapshot'),
+      valid.replace(`parent ${parent}`, `parent ${parent}\nparent ${parent}`),
+    ]) {
+      const object = path.join(f.root, 'raw-commit');
+      await writeFile(object, raw);
+      const commit = await f.git(f.source, 'hash-object', '-t', 'commit', '-w', object);
+      await f.git(f.source, 'update-ref', quarantineRef, commit);
+      await expect(
+        checkpointSavedSource(
+          f.id,
+          f.source,
+          f.settings.repoUrl,
+          {
+            podId: f.id,
+            sequence: 1,
+            fingerprint: { head: parent, tree, dirty: true },
+            verifiedAt: null,
+            attempts: 1,
+            result: {
+              sequence: 1,
+              sourceHead: parent,
+              sourceTree: tree,
+              snapshotCommit: commit,
+              snapshotTree: tree,
+              quarantineRef,
+              transferVerified: true,
+              bundleVerified: true,
+              hostImported: true,
+              lineageVerified: true,
+              promoted: false,
+              materialized: false,
+            },
+          },
+          1,
+        ),
+      ).rejects.toThrow(/checkpoint|parent/);
+    }
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    false,
+    true,
+  ])('blocks unreconciled ordinary publication before any draft effect (prepared=%s)', async (prepared) => {
+    const f = await fixture();
+    const op = prepared ? await f.prepare() : null;
+    const taskId = f.podRepo.taskExecutions!.snapshot(f.id).taskId;
+    f.db
+      .prepare('INSERT INTO source_publication_intents VALUES(?,?,?,?,?,?,?)')
+      .run('uncertain-publication', 'original-publication-identity', f.id, taskId, 0, '{}', 'now');
+    const preview = await f.controller().inspect(f.id, actor);
+    expect(preview.sources).toEqual([]);
+    expect(preview.blockers.join()).toContain('requires reconciliation');
+    if (op)
+      await expect(f.controller().confirm(f.id, f.confirm(op), actor)).rejects.toThrow(
+        /requires reconciliation/,
+      );
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(f.provider.create).not.toHaveBeenCalled();
+    // Confirmed historical publication is a fact, not active mutation ownership.
+    f.db
+      .prepare('INSERT INTO source_publication_receipts VALUES(?,?,?)')
+      .run('uncertain-publication', '{}', 'now');
+    expect((await f.controller().inspect(f.id, actor)).sources.length).toBeGreaterThan(0);
   });
 
   it('denies unauthorized outputs, actors, native goals, active ownership and stale confirmation', async () => {

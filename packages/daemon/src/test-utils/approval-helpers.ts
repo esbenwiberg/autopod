@@ -15,6 +15,7 @@ import { createCompletionGuards } from '../pods/completion-guards.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { createPassingValidationResult } from './mock-helpers.js';
 import { createProvisioningFixture } from './provisioning-helpers.js';
+import { seedCheckedValidationSource } from './validation-source-helpers.js';
 
 export const pendingFact: NonNullable<ValidationResult['factValidation']>['results'][number] = {
   factId: 'fact-one',
@@ -61,6 +62,7 @@ export function createApprovalFixture(disk = false) {
     enqueueSession: vi.fn(),
     podRepo: f.podRepo,
     resolveApprovalReadiness: context.resolveApprovalReadiness,
+    assertExecutionTerminationVerified: guards.assertExecutionTerminationVerified,
     assertApprovalCurrent: context.assertApprovalCurrent,
     executionForPod: f.captured.resolveEffectiveBoundProfile,
     worktreeManager: f.worktreeManager,
@@ -127,6 +129,16 @@ export function createApprovalFixture(disk = false) {
         ...createApprovalDeliveryExecution(mainCaptured),
       }),
     controls: () => createApprovalControls(controlsCaptured),
+    /** Explicit positive unit premise, not automatic repository evidence. */
+    checked() {
+      this.validated();
+      seedCheckedValidationSource(
+        f.podRepo,
+        f.pod(),
+        f.captured.resolveEffectiveBoundProfile(f.pod()),
+        f.pod().lastValidationResult!,
+      );
+    },
     validated() {
       const result = createPassingValidationResult('prepare');
       f.podRepo.update('prepare', {

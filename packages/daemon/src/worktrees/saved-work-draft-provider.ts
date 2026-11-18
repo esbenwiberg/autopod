@@ -61,7 +61,8 @@ export function githubSavedDraft(request: JsonRequest): SavedDraftProvider {
       const query = new URLSearchParams({
         state: 'all',
         head: `${owner}:${target.branch}`,
-        base: target.baseBranch,
+        // Observe all dispositions/targets for this operation branch. Filtering
+        // by the expected base could hide an occupied or retargeted PR.
         per_page: '2',
       });
       const rows = (await request(
@@ -161,7 +162,6 @@ export function adoSavedDraft(repository: string, request: JsonRequest): SavedDr
         'api-version': '7.1',
         'searchCriteria.status': 'all',
         'searchCriteria.sourceRefName': `refs/heads/${t.branch}`,
-        'searchCriteria.targetRefName': `refs/heads/${t.baseBranch}`,
         $top: '2',
       });
       const result = (await request(`/pullrequests?${query}`)) as { value: Row[] };

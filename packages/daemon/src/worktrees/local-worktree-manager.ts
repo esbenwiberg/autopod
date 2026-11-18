@@ -621,9 +621,22 @@ export class LocalWorktreeManager implements WorktreeManager {
     worktreePath: string,
     repository: string,
     branch: string,
+    pat?: string,
   ): Promise<string> {
-    const remote = await this.getAuthenticatedRemote(worktreePath);
-    assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
+    // Publication receipts also support local file transports (including the
+    // real-Git fixture). This is source-ref observation, not provider merge authority.
+    if (repository.startsWith('file:')) {
+      const observed = path.isAbsolute(remote.url) ? `file://${remote.url}` : remote.url;
+      const canonical = (value: string) => {
+        const url = new URL(value);
+        if (url.protocol !== 'file:' || url.username || url.password || url.search || url.hash)
+          throw new Error('Invalid local source repository');
+        return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`;
+      };
+      if (canonical(repository) !== canonical(observed))
+        throw new Error('Local publication repository changed');
+    } else assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
     await git(['check-ref-format', `refs/heads/${branch}`], { cwd: worktreePath });
     try {
       const result = await git(['ls-remote', '--exit-code', remote.url, `refs/heads/${branch}`], {
@@ -1213,11 +1226,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const base = sinceCommit ?? (await this.resolveMergeBase(worktreePath, baseBranch));
 
     if (!base) {
-      this.logger.warn(
-        { worktreePath, baseBranch },
-        'getDiff: could not resolve base ref — returning empty diff',
-      );
-      return '';
+      throw new Error('getDiff: could not resolve base ref');
     }
 
     try {
@@ -1251,21 +1260,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         purpose === 'preview' ? DIFF_EXCLUDE_PATHSPECS : REVIEW_DIFF_EXCLUDE_PATHSPECS;
       const { stdout: rawDiff } = await git(['diff', base, ...excludes], bufOpts);
 
-      // If sinceCommit produced an empty diff, fall back to merge-base.
-      // This handles the case where the worktree wasn't synced from the container
-      // (git history didn't carry over) but the branch diverged from defaultBranch.
-      if (!rawDiff.trim() && sinceCommit) {
-        const mergeBase = await this.resolveMergeBase(worktreePath, baseBranch);
-        if (mergeBase && mergeBase !== sinceCommit) {
-          const { stdout: mbDiff } = await git(['diff', mergeBase, ...excludes], bufOpts);
-          return truncateDiffAtFileBoundary(stripModeOnlyChanges(mbDiff), maxLength);
-        }
-      }
-
       return truncateDiffAtFileBoundary(stripModeOnlyChanges(rawDiff), maxLength);
     } catch (err) {
       this.logger.warn({ err: sanitizeGitError(err), worktreePath }, 'getDiff: git diff failed');
-      return '';
+      throw sanitizeGitError(err);
     }
   }
 

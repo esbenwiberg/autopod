@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
-import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import {
+  createMockProfileStore,
+  createPassingValidationResult,
+  createTestDb,
+  insertTestProfile,
+} from '../test-utils/mock-helpers.js';
+import { seedCheckedValidationSource } from '../test-utils/validation-source-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
@@ -35,6 +41,92 @@ function fixture(db = createTestDb()) {
   return { db, repo, ledger: createSourcePublicationLedger(db), pod: repo.getOrThrow('source') };
 }
 describe('durable source publication', () => {
+  it.each([
+    'failed',
+    'review_required',
+    'complete',
+  ] as const)('allows only factual settlement of an existing push from %s without another admission', (status) => {
+    const f = fixture();
+    try {
+      const id = f.ledger.admit(f.pod, proof);
+      f.repo.update('source', {
+        status,
+        lastValidationResult: { ...createPassingValidationResult('source'), overall: 'fail' },
+      });
+      const current = f.repo.getOrThrow('source');
+      expect(f.ledger.pending?.(current)?.id).toBe(id);
+      expect(() => f.ledger.admit(current, proof)).toThrow();
+      f.ledger.confirm(current, id, proof);
+      expect(f.ledger.get(id)?.state).toBe('confirmed');
+      expect(f.repo.getOrThrow('source')).toMatchObject({
+        status,
+        lastValidationResult: { overall: 'fail' },
+      });
+      expect(f.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get()).toEqual({
+        n: 1,
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it('uses the immutable resolved validation target for a legacy non-main profile', () => {
+    const f = fixture();
+    try {
+      expect(f.pod.baseBranch).toBeNull();
+      expect(f.pod.profileSnapshot).toBeNull();
+      const profile = {
+        ...createMockProfileStore(f.db).get('test-profile'),
+        defaultBranch: 'develop',
+      };
+      seedCheckedValidationSource(f.repo, f.pod, profile, createPassingValidationResult('source'));
+      const pod = f.repo.getOrThrow('source');
+      const checked = f.repo.validationSources!.checked(pod, profile);
+      expect(() =>
+        f.ledger.admit(pod, proof, { validationId: checked.validationId, checkpoints: [] }),
+      ).not.toThrow();
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it.each([
+    false,
+    true,
+  ])('keeps historical publication evidence across a fresh same-source check (context changed=%s)', (changed) => {
+    const f = fixture();
+    try {
+      const profile = createMockProfileStore(f.db).get('test-profile');
+      seedCheckedValidationSource(f.repo, f.pod, profile, createPassingValidationResult('source'));
+      let pod = f.repo.getOrThrow('source');
+      const first = f.repo.validationSources!.checked(pod, profile);
+      const id = f.ledger.admit(pod, proof, { validationId: first.validationId, checkpoints: [] });
+      f.ledger.confirm(pod, id, proof);
+      if (changed)
+        f.repo.update('source', { task: 'A different task is not prior publication authority' });
+      seedCheckedValidationSource(f.repo, f.repo.getOrThrow('source'), profile, {
+        ...createPassingValidationResult('source'),
+        duration: 2,
+      });
+      pod = f.repo.getOrThrow('source');
+      const next = f.repo.validationSources!.checked(pod, profile);
+      expect(next.validationId).not.toBe(first.validationId);
+      const admit = () =>
+        f.ledger.admit(pod, proof, { validationId: next.validationId, checkpoints: [] });
+      if (changed) expect(admit).toThrow();
+      else expect(admit()).toBe(id);
+      expect(
+        f.db
+          .prepare(
+            'SELECT validation_id FROM validation_source_publications WHERE publication_id=?',
+          )
+          .all(id),
+      ).toContainEqual({ validation_id: first.validationId });
+    } finally {
+      f.db.close();
+    }
+  });
+
   it.each([
     null,
     'https://github.com/org/repo/pull/27',
@@ -151,8 +243,16 @@ describe('durable source publication', () => {
     const f = fixture();
     try {
       const id = f.ledger.admit(f.pod, proof);
-      if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
-      if (change === 'worktree') f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' });
+      if (change === 'generation') {
+        expect(() => f.repo.incrementLifecycleGeneration(f.pod.id)).toThrow();
+        f.db
+          .prepare('UPDATE pods SET lifecycle_generation=lifecycle_generation+1 WHERE id=?')
+          .run(f.pod.id);
+      }
+      if (change === 'worktree') {
+        expect(() => f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' })).toThrow();
+        f.db.prepare('UPDATE pods SET worktree_path=? WHERE id=?').run('/tmp/replaced', f.pod.id);
+      }
       if (change === 'branch')
         f.db.prepare("UPDATE pods SET branch = 'replacement' WHERE id = ?").run(f.pod.id);
       if (change === 'decision') f.repo.update(f.pod.id, { status: 'awaiting_input' });

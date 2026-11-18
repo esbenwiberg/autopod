@@ -33,12 +33,12 @@ describe('provisioning agent materials', () => {
       expect(f.cm.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', target === 'local' ? '0400' : '0444', AGENT_ENV_PATH],
-        { timeout: 5_000 },
+        { timeout: target === 'sandbox' ? 60_000 : 5_000 },
       );
       expect(f.cm.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', target === 'local' ? '0500' : '0555', AGENT_SHIM_PATH],
-        { timeout: 5_000 },
+        { timeout: target === 'sandbox' ? 60_000 : 5_000 },
       );
       expect(result.secretEnv).toMatchObject({ POD_ID: 'prepare' });
       expect(result.systemInstructions).toContain('Original task');

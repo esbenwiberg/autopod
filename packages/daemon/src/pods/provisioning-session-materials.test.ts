@@ -13,8 +13,13 @@ afterEach(() => {
 });
 
 describe('provisioning session materials', () => {
-  it('writes the credential guard through the real git-dir lookup before automatic materials', async () => {
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('writes the credential guard with a backend-specific setup budget on %s', async (target) => {
     const f = fixture();
+    const populated = await f.population();
+    populated.pod.executionTarget = target;
     const result = await f.session();
     expect(result.kind).toBe('ready');
     expect(f.cm.writeFile).toHaveBeenCalledWith(
@@ -25,7 +30,7 @@ describe('provisioning session materials', () => {
     expect(f.cm.execInContainer).toHaveBeenCalledWith(
       'container-123',
       expect.arrayContaining([expect.stringContaining('git -C /workspace rev-parse --git-dir')]),
-      { timeout: 5_000 },
+      { timeout: target === 'sandbox' ? 60_000 : 5_000 },
     );
     expect(f.run.finishStartup).not.toHaveBeenCalled();
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();

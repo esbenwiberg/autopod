@@ -59,6 +59,10 @@ describe('real saved-work draft provider contract', () => {
     });
     expect(admission).toHaveBeenCalledTimes(1);
     const observed = await manager.savedDraft.find(t);
+    const query = new URL(calls[1]!.url).searchParams;
+    expect(query.get('head')).toBe(`org:${t.branch}`);
+    expect(query.get('state')).toBe('all');
+    expect(query.has('base')).toBe(false); // Retargeted PRs must remain visible and blocked.
     expect(verifyDraftObservation(t, observed!)).toMatchObject({ draft: true, head: t.head });
   });
   it('gh CLI sends --draft with daemon credentials and exact target', async () => {
@@ -93,6 +97,7 @@ describe('real saved-work draft provider contract', () => {
     const repo = 'https://dev.azure.com/org/project/_git/repo';
     const target = { ...t, repository: repo };
     const calls: RequestInit[] = [];
+    const urls: string[] = [];
     const row = {
       pullRequestId: 9,
       sourceRefName: `refs/heads/${t.branch}`,
@@ -105,8 +110,9 @@ describe('real saved-work draft provider contract', () => {
     };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (_url: string, init: RequestInit) => {
+      vi.fn(async (url: string, init: RequestInit) => {
         calls.push(init);
+        urls.push(url);
         return new Response(JSON.stringify(init.method === 'POST' ? row : { value: [row] }));
       }),
     );
@@ -123,6 +129,10 @@ describe('real saved-work draft provider contract', () => {
       draft: true,
       head: t.head,
     });
+    const query = new URL(urls[1]!).searchParams;
+    expect(query.get('searchCriteria.sourceRefName')).toBe(`refs/heads/${t.branch}`);
+    expect(query.get('searchCriteria.status')).toBe('all');
+    expect(query.has('searchCriteria.targetRefName')).toBe(false);
   });
   it.each([
     { draft: false },

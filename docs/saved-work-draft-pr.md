@@ -39,7 +39,8 @@ confirmation expires after 15 minutes if no push has been admitted.
 The source list prefers the latest verified saved checkpoint, including a fully
 host-imported, lineage-verified snapshot whose original promotion failed solely
 with `LINEAGE_CONFLICT`. Commit, tree, single parent, parent tree, pod-owned
-quarantine ref and actual local objects are reverified. Partial transfer or a
+quarantine ref, raw daemon author/committer/subject and actual local objects are
+reverified. Partial transfer or a
 compromise flag alone never establish proof. Older checkpoints are labeled
 `older-saved` and require explicit selection. Host HEAD is a separate
 `host-commit-only` selection with unknown capture freshness; dirty files, staged
@@ -93,7 +94,10 @@ review a new selection. No preparation is resubmitted and no source is deleted.
 
 Dedicated suites are daemon `pods/saved-work-draft-pr.test.ts`, daemon
 `worktrees/saved-work-draft-provider.test.ts`, and CLI
-`commands/saved-work-draft-pr.test.ts`. Provider effects are mocked; snapshot and
+`commands/saved-work-draft-pr.test.ts`. The v253 upgrade regression is
+`db/saved-work-draft-upgrade.test.ts`; this unpublished feature allocates migration
+**254_saved_work_draft_pr.sql**, after main's applied reviewer-budget (252) and
+validation-source (253) migrations, whose bytes remain unchanged. Provider effects are mocked; snapshot and
 divergence preservation use disposable real Git repositories. Native tests live
 in `SavedWorkDraftTests.swift`. Run `bash scripts/test-desktop.sh` and the desktop
 build on a Mac. Linux results do not prove Swift compilation or UI behavior.

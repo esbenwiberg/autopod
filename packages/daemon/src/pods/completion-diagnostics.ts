@@ -4,7 +4,7 @@ import type { CompletionDiagnosticsCaptured } from './completion-ports.js';
 
 const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
 
-export type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
+export type OperatorFailurePhase = 'setup' | 'agent' | 'validation' | 'completion';
 
 export function summarizeAgentCompletionBlocker(result: string): string | null {
   const normalized = result.toLowerCase();
@@ -49,9 +49,11 @@ export function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase):
   const prefix =
     phase === 'setup'
       ? 'Pod setup failed before the agent could finish'
-      : phase === 'completion'
-        ? 'Pod failed while finalizing after the agent run'
-        : 'Pod failed while the agent was running';
+      : phase === 'validation'
+        ? 'Pod failed during validation'
+        : phase === 'completion'
+          ? 'Pod failed while finalizing after the agent run'
+          : 'Pod failed while the agent was running';
   return sanitizeFailureReason(err, prefix);
 }
 

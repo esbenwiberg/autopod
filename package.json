@@ -7,6 +7,7 @@
     "village:check": "node scripts/update-village-renderer.mjs --check",
     "build": "turbo run build",
     "test": "turbo run test --concurrency=1 && node --test scripts/*.test.mjs && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh",
+    "test:pr": "bash scripts/test-pr.sh",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
     "format:check": "biome format .",

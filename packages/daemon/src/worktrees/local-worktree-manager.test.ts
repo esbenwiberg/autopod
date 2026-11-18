@@ -708,7 +708,7 @@ describe('LocalWorktreeManager', () => {
       expect(result).not.toContain('AADGroups');
     });
 
-    it('returns empty string on error', async () => {
+    it('rejects when the base cannot be inspected', async () => {
       execFileMock.mockImplementation(
         (_file: string, _args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -717,8 +717,7 @@ describe('LocalWorktreeManager', () => {
         },
       );
 
-      const result = await manager.getDiff('/not/a/repo', 'main');
-      expect(result).toBe('');
+      await expect(manager.getDiff('/not/a/repo', 'main')).rejects.toThrow();
     });
 
     it('only excludes injected runtime caches from review diffs', async () => {

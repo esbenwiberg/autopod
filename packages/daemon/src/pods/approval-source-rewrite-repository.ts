@@ -201,6 +201,53 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
 
   return {
     get,
+    predecessorDelivered(id: string) {
+      return Boolean(
+        db
+          .prepare('SELECT 1 FROM approval_rewrite_predecessor_deliveries WHERE rewrite_id=?')
+          .get(id),
+      );
+    },
+    recordPredecessorDelivery(id: string, pod: Pod, mergeIntentId: string) {
+      const row = get(id) ?? rewriteError('Rewrite admission unavailable.');
+      const intent = db
+        .prepare(
+          'SELECT publication_id FROM merge_intents WHERE id=? AND pod_id=? AND generation=?',
+        )
+        .get(mergeIntentId, pod.id, pod.lifecycleGeneration) as
+        | { publication_id: string }
+        | undefined;
+      const observed = db
+        .prepare(`SELECT 1 FROM merge_disposition_observations WHERE intent_id=? AND disposition='merged'
+        UNION ALL SELECT 1 FROM merge_external_observations WHERE intent_id=?`)
+        .get(mergeIntentId, mergeIntentId);
+      if (
+        !db.inTransaction ||
+        !row.prepared ||
+        row.activated ||
+        row.repairId ||
+        row.generation !== pod.lifecycleGeneration ||
+        row.binding.worktreePath !== pod.worktreePath ||
+        row.binding.containerId !== pod.containerId ||
+        row.binding.prUrl !== pod.prUrl ||
+        row.binding.validationHash !== rewriteHash(pod.lastValidationResult) ||
+        intent?.publication_id !== row.binding.publicationId ||
+        !observed
+      )
+        rewriteError(
+          'Only the prepared original predecessor owner may record its delivery. Activated or uncertain candidate checks retain their own owner.',
+        );
+      db.prepare('INSERT INTO approval_rewrite_predecessor_deliveries VALUES(?,?,?,?)').run(
+        id,
+        mergeIntentId,
+        JSON.stringify({
+          generation: pod.lifecycleGeneration,
+          source: row.binding.predecessor,
+          validationHash: row.binding.validationHash,
+        }),
+        new Date().toISOString(),
+      );
+    },
     has: (podId: string) =>
       Boolean(db.prepare('SELECT 1 FROM approval_source_rewrites WHERE pod_id=?').get(podId)),
     latest,
@@ -337,6 +384,14 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
     assertDelivery(pod: Pod, allowPrepared = false) {
       const row = latest(pod);
       if (!row) return null;
+      if (
+        db
+          .prepare('SELECT 1 FROM approval_rewrite_predecessor_deliveries WHERE rewrite_id=?')
+          .get(row.id)
+      )
+        rewriteError(
+          'The original predecessor is delivered; its unactivated candidate and original reports remain retained. No candidate execution is authorized.',
+        );
       if (row.repairId) {
         const repair = createRetainedCheckpointRepository(db).get(row.repairId);
         if (repair?.binding.approvalRewrite?.taskHash !== rewriteHash(pod.task))

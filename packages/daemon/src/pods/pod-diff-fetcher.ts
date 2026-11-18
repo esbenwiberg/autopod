@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { promisify } from 'node:util';
+import { AutopodError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -90,8 +91,8 @@ export interface PodCommitDiffsResult {
  *      The container holds the agent's commits in /workspace/.git long before
  *      `syncWorkspaceBack()` mirrors them to the host, so the in-container view
  *      is always fresh — host worktree is not.
- *   2. Fall back to the host worktree only when the container is gone or the
- *      in-container exec fails.
+ *   2. Display previews may fall back to the host when container exec fails.
+ *      Review requires a successful live read or an explicitly host-only source.
  *
  * Mirrors the strategy used by /pods/:id/diff (routes/diff.ts) so live tools
  * and the desktop diff view see the same bytes.
@@ -126,16 +127,40 @@ export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffR
     }
   }
 
+  // A failed live observation does not certify that a host snapshot is current.
+  // Best-effort fallback is for display only, never reviewer evidence.
+  if (purpose === 'review' && pod.containerId)
+    throw new AutopodError(
+      'Live review source could not be observed; host fallback is not current-source proof.',
+      'REVIEW_SOURCE_UNAVAILABLE',
+      409,
+    );
+
   if (pod.worktreePath && worktreeManager) {
     const worktreeDiff = await worktreeManager
       .getDiff(pod.worktreePath, defaultBranch, maxLength, pod.startCommitSha ?? undefined, purpose)
       .catch((err) => {
         logger?.warn({ err }, 'computePodDiff: host worktree fallback failed');
+        if (purpose === 'review')
+          throw new AutopodError(
+            'Host review source could not be read; no review input was produced.',
+            'REVIEW_SOURCE_UNAVAILABLE',
+            409,
+          );
         return '';
       });
-    return { diff: worktreeDiff, source: worktreeDiff ? 'worktree' : 'none' };
+    return {
+      diff: worktreeDiff,
+      source: purpose === 'review' || worktreeDiff ? 'worktree' : 'none',
+    };
   }
 
+  if (purpose === 'review')
+    throw new AutopodError(
+      'No owned source is available for review.',
+      'REVIEW_SOURCE_UNAVAILABLE',
+      409,
+    );
   return { diff: '', source: 'none' };
 }
 

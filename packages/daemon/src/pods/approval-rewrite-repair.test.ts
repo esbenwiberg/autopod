@@ -798,6 +798,10 @@ it.each([
     return { ...result, repository };
   });
   f.worktrees.inspectSource = f.worktrees.inspectSourceAdoption;
+  f.worktrees.observeSourceBranch = vi.fn(async (_cwd, expectedRepository, branch) => {
+    expect(expectedRepository).toBe(repository);
+    return repairGit(remote, 'rev-parse', `refs/heads/${branch}`);
+  });
   const provider = {
     createPr: vi.fn(async () => ({ url: f.pod().prUrl!, usedFallback: false })),
     mergePr: vi.fn(async () => ({ merged: false, autoMergeScheduled: false })),

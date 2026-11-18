@@ -10,6 +10,7 @@ import { recoveryFileExclusions } from '../worktrees/recovery-fork-source.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { renderPiHandoffFile } from './continuation-policy.js';
 import type { ContainerPrepared } from './provisioning-container.js';
+import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import { normalizeCommitEmail } from './provisioning-materials.js';
 import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provisioning-ports.js';
 import { hasPendingProviderContinuation } from './recovery-context.js';
@@ -43,6 +44,8 @@ export function createProvisioningWorkspacePopulation(
       hostPreviewUrl,
     } = input;
     const { emitStatus } = input.run;
+    const setupTimeout = (localTimeout: number) =>
+      provisioningExecTimeout(pod.executionTarget, localTimeout);
     // Copy worktree content from bind mount to container's native filesystem.
     // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
     // Dependency/tooling caches are intentionally skipped: they contain native binaries
@@ -61,7 +64,7 @@ export function createProvisioningWorkspacePopulation(
       const preclear = await containerManager.execInContainer(
         containerId,
         ['rm', '-rf', '/workspace/.git'],
-        { timeout: 30_000 },
+        { timeout: setupTimeout(30_000) },
       );
       if (preclear.exitCode !== 0) {
         throw new Error(
@@ -79,7 +82,7 @@ export function createProvisioningWorkspacePopulation(
             WORKSPACE_RUNTIME_CACHE_EXCLUDES,
           ),
         ],
-        { timeout: 120_000 },
+        { timeout: setupTimeout(120_000) },
       );
       if (populate.exitCode !== 0) {
         throw new Error(
@@ -96,7 +99,7 @@ export function createProvisioningWorkspacePopulation(
             '-c',
             'find /workspace \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -exec chmod +x {} + 2>/dev/null || true',
           ],
-          { timeout: 15_000 },
+          { timeout: setupTimeout(15_000) },
         )
         .catch(() => null);
       // Convert /workspace/.git from a gitlink file into a self-contained real .git
@@ -130,7 +133,7 @@ export function createProvisioningWorkspacePopulation(
             'cp "${BARE_ROOT}/packed-refs" /workspace/.git/ 2>/dev/null || true',
           ].join(' && '),
         ],
-        { timeout: 15_000 },
+        { timeout: setupTimeout(15_000) },
       );
       if (repoint.exitCode !== 0) {
         throw new Error(`Git workspace setup failed (exit ${repoint.exitCode}): ${repoint.stderr}`);
@@ -145,7 +148,7 @@ export function createProvisioningWorkspacePopulation(
         const info = await containerManager.execInContainer(
           containerId,
           ['mkdir', '-p', '/workspace/.git/info'],
-          { timeout: 5000 },
+          { timeout: setupTimeout(5000) },
         );
         if (info.exitCode !== 0) throw new Error('Recovery exclusion directory unavailable');
         await containerManager.writeFile(
@@ -163,13 +166,13 @@ export function createProvisioningWorkspacePopulation(
       const hasTrackedFiles = await containerManager.execInContainer(
         containerId,
         ['sh', '-c', 'git -C /workspace ls-files | head -1 | grep -q .'],
-        { timeout: 5_000 },
+        { timeout: setupTimeout(5_000) },
       );
       if (hasTrackedFiles.exitCode === 0) {
         const restore = await containerManager.execInContainer(
           containerId,
           ['git', '-C', '/workspace', 'restore', '.'],
-          { timeout: 30_000 },
+          { timeout: setupTimeout(30_000) },
         );
         if (restore.exitCode !== 0) {
           throw new Error(
@@ -202,7 +205,7 @@ export function createProvisioningWorkspacePopulation(
               `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
             ].join('\n'),
           ],
-          { timeout: 10_000 },
+          { timeout: setupTimeout(10_000) },
         );
         if (guard.exitCode !== 0) {
           throw new Error(
@@ -233,7 +236,7 @@ export function createProvisioningWorkspacePopulation(
       const clean = await containerManager.execInContainer(
         containerId,
         ['git', '-C', '/workspace', 'clean', '-fd'],
-        { timeout: 30_000 },
+        { timeout: setupTimeout(30_000) },
       );
       if (clean.exitCode !== 0 && recovery) throw new Error('Recovery workspace cleanup failed');
       if (clean.exitCode !== 0) {
@@ -283,7 +286,7 @@ export function createProvisioningWorkspacePopulation(
         const cacheGuard = await containerManager.execInContainer(
           containerId,
           ['sh', '-c', script],
-          { timeout: 10_000 },
+          { timeout: setupTimeout(10_000) },
         );
         if (cacheGuard.exitCode !== 0) {
           // Non-fatal: worst case is the historical deletion-guard loop returns. Log
@@ -333,7 +336,7 @@ export function createProvisioningWorkspacePopulation(
               'fi',
             ].join('\n'),
           ],
-          { timeout: 10_000 },
+          { timeout: setupTimeout(10_000) },
         );
         if (guard.exitCode !== 0) {
           throw new Error(
@@ -363,7 +366,7 @@ export function createProvisioningWorkspacePopulation(
               `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
             ].join('\n'),
           ],
-          { timeout: 10_000 },
+          { timeout: setupTimeout(10_000) },
         );
         if (guard.exitCode !== 0) {
           throw new Error(
@@ -387,7 +390,7 @@ export function createProvisioningWorkspacePopulation(
           '-c',
           `git config --global user.email ${shellQuote(email)} && git config --global user.name ${shellQuote(name)}`,
         ],
-        { timeout: 5_000 },
+        { timeout: setupTimeout(5_000) },
       );
       if (gitIdentity.exitCode !== 0) {
         // Non-fatal: the worst case is the user re-runs the two commands manually.
@@ -408,7 +411,7 @@ export function createProvisioningWorkspacePopulation(
     if (referenceRepos.length > 0) {
       emitStatus('Cloning reference repos…');
       await containerManager.execInContainer(containerId, ['mkdir', '-p', '/repos'], {
-        timeout: 5_000,
+        timeout: setupTimeout(5_000),
       });
       for (const repo of referenceRepos) {
         const destPath = `/repos/${repo.mountPath}`;
@@ -422,18 +425,18 @@ export function createProvisioningWorkspacePopulation(
                 await readFile(staged.archivePath),
               );
               await containerManager.execInContainer(containerId, ['mkdir', '-p', destPath], {
-                timeout: 5_000,
+                timeout: setupTimeout(5_000),
               });
               await containerManager.execInContainer(
                 containerId,
                 ['tar', '-xzf', staged.containerArchive, '-C', destPath],
-                { timeout: 60_000 },
+                { timeout: setupTimeout(60_000) },
               );
             } finally {
               await rm(staged.archivePath, { force: true });
               await containerManager
                 .execInContainer(containerId, ['rm', '-f', staged.containerArchive], {
-                  timeout: 5_000,
+                  timeout: setupTimeout(5_000),
                 })
                 .catch(() => {});
             }
@@ -441,7 +444,7 @@ export function createProvisioningWorkspacePopulation(
             await containerManager.execInContainer(
               containerId,
               ['git', 'clone', '--depth', '1', repo.url, destPath],
-              { timeout: 60_000 },
+              { timeout: setupTimeout(60_000) },
             );
           }
         } catch (err) {

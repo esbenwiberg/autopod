@@ -34,11 +34,16 @@ import { CodexRuntime } from '../runtimes/codex-runtime.js';
 import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
   collectAndAcknowledgeGuidance,
+  createMockContainerManager as createSharedMockContainerManager,
+  createMockWorktreeManager as createSharedMockWorktreeManager,
   mockBranchPublication,
   mockCommittedPublication,
+  mockFixBranchPublication,
   mockPrMerge,
   mockSourceSnapshot,
+  seedMockRemotePublication,
 } from '../test-utils/mock-helpers.js';
+import { seedCheckedValidationSource } from '../test-utils/validation-source-helpers.js';
 import { runToolUseReview } from '../validation/review-tool-runner.js';
 import { createNudgeRepository } from './nudge-repository.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
@@ -369,23 +374,9 @@ function createMockContainerManager(): ContainerManager {
     readFile: vi.fn(async () => ''),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
-    execInContainer: vi.fn(async (_containerId, command) => {
-      if (command[2]?.includes('autopod-command-preflight-v1')) {
-        const names = JSON.parse(command[3] ?? '[]') as string[];
-        return {
-          stdout: JSON.stringify(names.map((executable) => ({ executable, available: true }))),
-          stderr: '',
-          exitCode: 0,
-        };
-      }
-      if (command.join(' ') === 'codex --version') {
-        return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
-      }
-      if (['claude --version', 'copilot --version', 'pi --version'].includes(command.join(' '))) {
-        return { stdout: `${command[0]} 1.0.0\n`, stderr: '', exitCode: 0 };
-      }
-      return { stdout: '', stderr: '', exitCode: 0 };
-    }),
+    // Keep the native checked-source protocol consistent with the central
+    // infrastructure fake, rather than returning empty successful Git reads.
+    execInContainer: createSharedMockContainerManager().execInContainer,
     execStreaming: vi.fn(),
     attachTerminal: vi.fn(async () => ({
       onData: vi.fn(),
@@ -399,7 +390,9 @@ function createMockContainerManager(): ContainerManager {
 }
 
 function createMockWorktreeManager(): WorktreeManager {
+  const publications = createSharedMockWorktreeManager();
   return {
+    inspectSourceAdoption: publications.inspectSourceAdoption,
     inspectSource: vi.fn(mockSourceSnapshot),
     inspectContractBase: vi.fn(async (_path, _base, facts) => ({
       baseCommitSha: 'a'.repeat(40),
@@ -427,11 +420,12 @@ function createMockWorktreeManager(): WorktreeManager {
     hasChangesAgainstBase: vi.fn(async () => true),
     getChangedPathsAgainstBase: vi.fn(async () => ['file.ts']),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
-    mergeBranch: vi.fn(mockCommittedPublication),
+    mergeBranch: publications.mergeBranch,
     commitFiles: vi.fn(async () => {}),
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
-    pushBranch: vi.fn(mockBranchPublication),
+    pushBranch: publications.pushBranch,
+    observeSourceBranch: publications.observeSourceBranch,
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     prepareApprovalRebase: vi.fn(async () => ({
@@ -544,6 +538,7 @@ function makeCouncilReviewFailure(
   issue: string,
   semanticId: string,
   current: boolean,
+  reviewedHead?: string,
 ): ValidationResult {
   return makeValidationResult({
     podId,
@@ -556,7 +551,10 @@ function makeCouncilReviewFailure(
       model: 'reviewer',
       screenshots: [],
       diff: '+change',
-      reviewBatch: makeTestReviewBatch(batchId, issue, semanticId, current),
+      reviewBatch: {
+        ...makeTestReviewBatch(batchId, issue, semanticId, current),
+        ...(reviewedHead ? { reviewedHead } : {}),
+      },
     },
   });
 }
@@ -602,6 +600,45 @@ function validatedPodUpdates(
     lastValidationResult: makeValidationResult({ podId }),
     ...updates,
   };
+}
+
+/** Explicit positive unit premise; negative legacy/missing-source cases must not call this builder. */
+function setCheckedPodFixture(
+  ctx: TestContext,
+  podId: string,
+  updates: Parameters<TestContext['podRepo']['update']>[1] = {},
+) {
+  const prior = ctx.podRepo.getOrThrow(podId);
+  ctx.podRepo.update(
+    podId,
+    validatedPodUpdates(podId, {
+      worktreePath: prior.worktreePath ?? '/tmp/checked-source',
+      containerId: prior.containerId ?? 'checked-container',
+      ...updates,
+    }),
+  );
+  const pod = ctx.podRepo.getOrThrow(podId);
+  if (!pod.worktreePath || !pod.containerId)
+    throw new Error('Checked source fixture requires an original resource');
+  if (!pod.lastValidationResult || pod.lastValidationResult.overall !== 'pass')
+    throw new Error('Checked source fixture requires a completed passing result');
+  seedCheckedValidationSource(
+    ctx.podRepo,
+    pod,
+    ctx.profileStore.get(pod.profileName),
+    pod.lastValidationResult,
+  );
+}
+
+/** Fake engine outcomes still belong to the actual dispatched request, not a placeholder pod. */
+function validationReply(result: ValidationResult) {
+  return async (
+    config: Parameters<ValidationEngine['validate']>[0],
+  ): Promise<ValidationResult> => ({
+    ...result,
+    podId: config.podId,
+    attempt: config.attempt,
+  });
 }
 
 function makeReviewInfraFailure(overrides: Partial<ValidationResult> = {}): ValidationResult {
@@ -669,7 +706,12 @@ function makeSetupFailure(): ValidationResult {
 function createMockValidationEngine(result?: Partial<ValidationResult>): ValidationEngine {
   return {
     validate: vi.fn(async (config: Parameters<ValidationEngine['validate']>[0]) =>
-      makeValidationResult({ validationSuite: config.validationSuite, ...result }),
+      makeValidationResult({
+        podId: config.podId,
+        attempt: config.attempt,
+        validationSuite: config.validationSuite,
+        ...result,
+      }),
     ),
     runAdvisoryBrowserQa: vi.fn(async () => null),
   };
@@ -1062,6 +1104,7 @@ function seedPollDelivery(ctx: TestContext, id: string, planned = false) {
   };
   const publicationId = publications.admit(pod, proof);
   publications.confirm(pod, publicationId, proof);
+  seedMockRemotePublication(ctx.worktreeManager, proof);
   const target = { repository: proof.repository, branch: pod.branch, baseBranch: 'main' };
   const config = {
     prUrl: pod.prUrl ?? '',
@@ -2423,14 +2466,20 @@ describe('PodManager', () => {
     }
 
     function containerGit(ctx: TestContext, alternate = bare, pushFails = false) {
-      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (_id, command) => {
-        if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
-          return { ...ok, stdout: alternate };
-        }
-        if (command.includes('--abbrev-ref')) return { ...ok, stdout: 'feature/transfer' };
-        if (pushFails && command.includes('push')) return { ...ok, exitCode: 1, stderr: 'refused' };
-        return ok;
-      });
+      const nativeProbe = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (id, command, options) => {
+          if (command[2]?.includes('autopod-validation-source-v1') && nativeProbe)
+            return nativeProbe(id, command, options);
+          if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
+            return { ...ok, stdout: alternate };
+          }
+          if (command.includes('--abbrev-ref')) return { ...ok, stdout: 'feature/transfer' };
+          if (pushFails && command.includes('push'))
+            return { ...ok, exitCode: 1, stderr: 'refused' };
+          return ok;
+        },
+      );
     }
 
     it.each([
@@ -2890,76 +2939,86 @@ describe('PodManager', () => {
           else finish();
           return undefined as never;
         });
-        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (_id, command) => {
-          const workspaceIndex = command.indexOf('/workspace');
-          const args = workspaceIndex === -1 ? [] : command.slice(workspaceIndex + 1);
-          if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
-            trace.push('container-head');
-            await options.gate?.promise;
-            if (options.failure === 'container-head') throw new Error('HEAD transport failure');
-            return {
-              ...ok,
-              stdout: options.containerHead ?? (options.sameHead ? host : container),
-              exitCode: options.failure === 'container-head-exit' ? 128 : 0,
-            };
-          }
-          if (args[0] === 'status') {
-            trace.push('container-status');
-            await options.gate?.promise;
-            return {
-              ...ok,
-              stdout: options.containerStatus ?? '',
-              exitCode: options.containerStatus === null ? 128 : 0,
-            };
-          }
-          if (args[0] === 'merge-base') {
-            trace.push('ancestry');
-            if (options.failure === 'ancestry') throw new Error('ancestry transport failure');
-            const first = args[2] === container;
-            const ancestor =
-              options.ancestry === 'host'
-                ? first
-                : options.ancestry === 'container'
-                  ? !first
-                  : false;
-            return { ...ok, exitCode: options.ancestry === 'unknown' ? 128 : ancestor ? 0 : 1 };
-          }
-          if (args[0] === 'reset' || args[0] === 'clean') {
-            const action = args[0];
-            trace.push(action);
-            if (options.failure === `${action}-transport`)
-              throw new Error(`${action} transport failure`);
-            return {
-              ...ok,
-              exitCode: options.failure === action ? 1 : 0,
-              stderr: 'controlled command failure',
-            };
-          }
-          if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
-            return {
-              ...ok,
-              stdout: options.missingObject
-                ? options.failure === 'mismatch'
-                  ? '/untrusted/repo.git'
-                  : bare
-                : '',
-            };
-          }
-          if (args[0] === 'push') {
-            trace.push('import');
-            if (options.failure === 'import') return { ...ok, exitCode: 1 };
-            objectPresent = true;
-          }
-          if (args[0] === 'fetch') {
-            trace.push('fetch');
-            return { ...ok, exitCode: options.failure === 'fetch' ? 1 : 0 };
-          }
-          if (args[0] === 'cat-file')
-            return { ...ok, exitCode: options.failure === 'verify' ? 1 : 0 };
-          if (command[0] === 'rm') trace.push('cleanup-container-bundle');
-          if (command[2]?.includes('STAGING=')) trace.push('sync');
-          return ok;
-        });
+        const sourceExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+          async (_id, command, execOptions) => {
+            // Compatibility faults below model the pre-sync probes. Native
+            // post-preparation source certification keeps the standard fake Git
+            // premise, separately exercised against real Git by delivery incidents.
+            if (command[2]?.includes('autopod-validation-source-v1')) {
+              if (!sourceExec) throw new Error('Missing checked-source observer fixture');
+              return sourceExec(_id, command, execOptions);
+            }
+            const workspaceIndex = command.indexOf('/workspace');
+            const args = workspaceIndex === -1 ? [] : command.slice(workspaceIndex + 1);
+            if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+              trace.push('container-head');
+              await options.gate?.promise;
+              if (options.failure === 'container-head') throw new Error('HEAD transport failure');
+              return {
+                ...ok,
+                stdout: options.containerHead ?? (options.sameHead ? host : container),
+                exitCode: options.failure === 'container-head-exit' ? 128 : 0,
+              };
+            }
+            if (args[0] === 'status') {
+              trace.push('container-status');
+              await options.gate?.promise;
+              return {
+                ...ok,
+                stdout: options.containerStatus ?? '',
+                exitCode: options.containerStatus === null ? 128 : 0,
+              };
+            }
+            if (args[0] === 'merge-base') {
+              trace.push('ancestry');
+              if (options.failure === 'ancestry') throw new Error('ancestry transport failure');
+              const first = args[2] === container;
+              const ancestor =
+                options.ancestry === 'host'
+                  ? first
+                  : options.ancestry === 'container'
+                    ? !first
+                    : false;
+              return { ...ok, exitCode: options.ancestry === 'unknown' ? 128 : ancestor ? 0 : 1 };
+            }
+            if (args[0] === 'reset' || args[0] === 'clean') {
+              const action = args[0];
+              trace.push(action);
+              if (options.failure === `${action}-transport`)
+                throw new Error(`${action} transport failure`);
+              return {
+                ...ok,
+                exitCode: options.failure === action ? 1 : 0,
+                stderr: 'controlled command failure',
+              };
+            }
+            if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
+              return {
+                ...ok,
+                stdout: options.missingObject
+                  ? options.failure === 'mismatch'
+                    ? '/untrusted/repo.git'
+                    : bare
+                  : '',
+              };
+            }
+            if (args[0] === 'push') {
+              trace.push('import');
+              if (options.failure === 'import') return { ...ok, exitCode: 1 };
+              objectPresent = true;
+            }
+            if (args[0] === 'fetch') {
+              trace.push('fetch');
+              return { ...ok, exitCode: options.failure === 'fetch' ? 1 : 0 };
+            }
+            if (args[0] === 'cat-file')
+              return { ...ok, exitCode: options.failure === 'verify' ? 1 : 0 };
+            if (command[0] === 'rm') trace.push('cleanup-container-bundle');
+            if (command[2]?.includes('STAGING=')) trace.push('sync');
+            return ok;
+          },
+        );
         vi.mocked(ctx.containerManager.writeFile).mockImplementation(async () => {
           trace.push('upload');
           if (options.failure === 'upload') throw new Error('bundle upload failure');
@@ -3007,7 +3066,10 @@ describe('PodManager', () => {
         expect(trace.indexOf('sync')).toBeGreaterThanOrEqual(0);
         expect(trace.indexOf('sync')).toBeLessThan(trace.indexOf('validate'));
         expect(trace).not.toContain('reset');
-        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(
+          manager.getSession(pod.id).status,
+          manager.getSession(pod.id).failureReason ?? undefined,
+        ).toBe('validated');
       });
     });
 
@@ -5205,7 +5267,7 @@ describe('PodManager', () => {
       '/home/autopod/.codex/auth.json',
       '{"token":"stale"}',
     );
-    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'running', worktreePath: '/tmp/fallback-worktree' });
     await manager.triggerValidation(pod.id);
     expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -8804,14 +8866,11 @@ describe('PodManager', () => {
           },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            containerId: 'approval-source',
-            worktreePath: '/tmp/wt',
-            filesChanged: 1,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          containerId: 'approval-source',
+          worktreePath: '/tmp/wt',
+          filesChanged: 1,
+        });
         return { ctx, manager, pod };
       }
 
@@ -8821,8 +8880,10 @@ describe('PodManager', () => {
         'no-change',
       ] as const)('keeps Git-ignored reports before %s publication and sandbox removal', async (output) => {
         const { ctx, manager, pod } = setup();
-        if (output === 'pr')
+        if (output === 'pr') {
           ctx.podRepo.update(pod.id, { options: { ...pod.options, output: 'pr' } });
+          setCheckedPodFixture(ctx, pod.id);
+        }
         if (output === 'no-change')
           vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
             filesChanged: 0,
@@ -8871,14 +8932,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Independent approval', options: pod.options },
           'user-1',
         );
-        ctx.podRepo.update(
-          other.id,
-          validatedPodUpdates(other.id, {
-            containerId: 'other-approval-source',
-            worktreePath: '/tmp/other-wt',
-            filesChanged: 1,
-          }),
-        );
+        setCheckedPodFixture(ctx, other.id, {
+          containerId: 'other-approval-source',
+          worktreePath: '/tmp/other-wt',
+          filesChanged: 1,
+        });
         let fail!: (error: Error) => void;
         const held = new Promise<void>((_, reject) => {
           fail = reject;
@@ -8911,7 +8969,8 @@ describe('PodManager', () => {
         await manager.approveSession(pod.id);
         expect(manager.getSession(pod.id).status).toBe('complete');
         expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
-        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
         expect(ctx.containerManager.kill).toHaveBeenCalledTimes(2);
       });
 
@@ -9008,10 +9067,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Retain closed PR' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, { containerId: 'closed-source', filesChanged: 1 }),
-        );
+        setCheckedPodFixture(ctx, pod.id, { containerId: 'closed-source', filesChanged: 1 });
         const status = seedPollDelivery(ctx, pod.id, planned);
         if (state === 'acknowledged') {
           const journal = ctx.podRepo.mergeJournal;
@@ -9242,15 +9298,12 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Wait on durable review' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/planned-merge',
-            containerId: 'planned-source',
-            filesChanged: 1,
-            ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/planned-merge',
+          containerId: 'planned-source',
+          filesChanged: 1,
+          ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
+        });
         vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
           merged: false,
           open: true,
@@ -9332,15 +9385,12 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Recover durable merge' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/durable-merge',
-            containerId: 'merge-source',
-            filesChanged: 2,
-            ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/durable-merge',
+          containerId: 'merge-source',
+          filesChanged: 2,
+          ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
+        });
         vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
           merged: false,
           open: true,
@@ -9464,15 +9514,12 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Fence prepared merge' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/source',
-          containerId: 'retained-source',
-          filesChanged: 2,
-          prUrl: 'https://github.com/org/repo/pull/42',
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/source',
+        containerId: 'retained-source',
+        filesChanged: 2,
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
       let mutationStarted = false;
       vi.mocked(ctx.prManager.mergePr).mockImplementation(async (config) => {
         ctx.db
@@ -9502,15 +9549,12 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Bind published source' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/source',
-          containerId: 'source-container',
-          filesChanged: 2,
-          ...(path === 'new' ? {} : { prUrl: 'https://github.com/org/repo/pull/42' }),
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/source',
+        containerId: 'source-container',
+        filesChanged: 2,
+        ...(path === 'new' ? {} : { prUrl: 'https://github.com/org/repo/pull/42' }),
+      });
       let publicationCount = 0;
       vi.mocked(ctx.worktreeManager.pushBranch).mockImplementation(
         async (worktree, branch, options) => {
@@ -9561,15 +9605,12 @@ describe('PodManager', () => {
         },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/source',
-          containerId: 'retained-source',
-          filesChanged: 2,
-        }),
-      );
-      vi.mocked(ctx.worktreeManager.mergeBranch).mockResolvedValueOnce(undefined);
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/source',
+        containerId: 'retained-source',
+        filesChanged: 2,
+      });
+      vi.mocked(ctx.worktreeManager.pushBranch).mockResolvedValueOnce(undefined);
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
         code: 'APPROVAL_DELIVERY_FAILED',
       });
@@ -9644,15 +9685,12 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Preserve unpublished source' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/unpublished-source',
-            containerId: 'retained-source',
-            filesChanged: 2,
-            prUrl: 'https://github.com/org/repo/pull/42',
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/unpublished-source',
+          containerId: 'retained-source',
+          filesChanged: 2,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        });
         const push = vi.mocked(ctx.worktreeManager.pushBranch);
         const prepareRebase = ctx.worktreeManager.prepareApprovalRebase;
         if (!prepareRebase) throw new Error('Missing candidate preparation');
@@ -9706,10 +9744,12 @@ describe('PodManager', () => {
           ciFailures: [],
           reviewComments: [],
         });
+        const readsBeforeIdle = vi.mocked(ctx.prManager.getPrStatus).mock.calls.length;
+        expect(readsBeforeIdle).toBeGreaterThan(0);
         const restarted = createPodManager(ctx.deps);
         await vi.advanceTimersByTimeAsync(120_000);
         expect(restarted.getSession(pod.id).status).toBe('validated');
-        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(1);
+        expect(ctx.prManager.getPrStatus).toHaveBeenCalledTimes(readsBeforeIdle);
         expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
         expect(completed).toEqual([]);
@@ -9788,6 +9828,7 @@ describe('PodManager', () => {
       expect(transitions).toEqual([]);
       expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
       ctx.podRepo.update(pod.id, { worktreePath: '/tmp/restored-approval' });
+      setCheckedPodFixture(ctx, pod.id);
       vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
         filesChanged: 2,
         linesAdded: 3,
@@ -9799,7 +9840,8 @@ describe('PodManager', () => {
         failureReason: null,
       });
       expect(completed).toEqual([pod.id]);
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledOnce();
       expect(ctx.prManager.createPr).toHaveBeenCalledTimes(output === 'pr' ? 1 : 0);
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
@@ -9898,7 +9940,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Actor ${testCase.actor.type}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
+        setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt' });
 
         await manager.approveSession(pod.id, { actor: testCase.actor });
 
@@ -9930,7 +9972,7 @@ describe('PodManager', () => {
       );
 
       // Move to validated state
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt' });
 
       await manager.approveSession(pod.id);
 
@@ -9947,7 +9989,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt' }));
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt' });
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -9960,7 +10002,7 @@ describe('PodManager', () => {
       expect(completedEvent.finalStatus).toBe('complete');
     });
 
-    it('readiness approval enforces manual reason rules and stores approval metadata', async () => {
+    it('readiness approval records reasons without waiving compromised-source custody', async () => {
       const cases: Array<{
         status: ReadinessStatus;
         updates?: Parameters<TestContext['podRepo']['update']>[1];
@@ -9979,10 +10021,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Approve ${testCase.status}` },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, { worktreePath: '/tmp/wt', ...testCase.updates }),
-        );
+        setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', ...testCase.updates });
         if (testCase.status === 'needs_review') {
           ctx.eventBus.emit({
             type: 'pod.firewall_denied',
@@ -10002,6 +10041,14 @@ describe('PodManager', () => {
         const events: unknown[] = [];
         ctx.eventBus.subscribe((event) => events.push(event));
         const reason = testCase.reasonRequired ? `Accept ${testCase.status}` : undefined;
+        if (testCase.status === 'risky') {
+          await expect(manager.approveSession(pod.id, { reason })).rejects.toMatchObject({
+            code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+          });
+          expect(manager.getSession(pod.id).status).toBe('validated');
+          expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+          continue;
+        }
         await manager.approveSession(pod.id, { reason });
 
         const approved = manager.getSession(pod.id).readinessReview?.approval;
@@ -10044,10 +10091,7 @@ describe('PodManager', () => {
       );
 
       for (const pod of [ready, needsReview, risky, waived]) {
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, { autoApprove: true, worktreePath: '/tmp/wt' }),
-        );
+        setCheckedPodFixture(ctx, pod.id, { autoApprove: true, worktreePath: '/tmp/wt' });
       }
       ctx.eventBus.emit({
         type: 'pod.firewall_denied',
@@ -10115,8 +10159,8 @@ describe('PodManager', () => {
         status: 'complete',
         readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
       });
-      ctx.podRepo.update(owner.id, {
-        ...validatedPodUpdates(owner.id, { worktreePath: '/tmp/wt' }),
+      setCheckedPodFixture(ctx, owner.id, {
+        ...{ worktreePath: '/tmp/wt' },
         prUrl: 'https://github.com/org/repo/pull/42',
         readinessReview: makeReadinessReview('ready'),
       });
@@ -10155,8 +10199,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
+      setCheckedPodFixture(ctx, pod.id, {
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -10254,8 +10297,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
+      setCheckedPodFixture(ctx, pod.id, {
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -10273,22 +10315,18 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(pod.id);
 
       // Branch is pushed first, then PR is created and merged. The push must target the
       // feature branch (pod.branch) — not the base branch — or it would force-push onto main.
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/wt',
-          targetBranch: pod.branch,
-        }),
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       expect(ctx.prManager.createPr).toHaveBeenCalled();
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
         expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
@@ -10306,11 +10344,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -10351,15 +10385,12 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Preserve delivery' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/delivery',
-          containerId: 'delivery-container',
-          filesChanged: 1,
-        }),
-      );
-      vi.mocked(ctx.worktreeManager.mergeBranch).mockRejectedValueOnce(
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        filesChanged: 1,
+      });
+      vi.mocked(ctx.worktreeManager.pushBranch).mockRejectedValueOnce(
         new Error('remote unavailable'),
       );
       const completed: string[] = [];
@@ -10381,7 +10412,8 @@ describe('PodManager', () => {
       await createPodManager(ctx.deps).approveSession(pod.id);
       expect(manager.getSession(pod.id)).toMatchObject({ status: 'complete', failureReason: null });
       expect(completed).toEqual([pod.id]);
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledTimes(2);
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
@@ -10459,17 +10491,14 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Fence normal delivery' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/delivery',
-          containerId: 'delivery-container',
-          filesChanged: 1,
-          prUrl: ['existing-push', 'rebase'].includes(step)
-            ? 'https://github.com/org/repo/pull/42'
-            : null,
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        filesChanged: 1,
+        prUrl: ['existing-push', 'rebase'].includes(step)
+          ? 'https://github.com/org/repo/pull/42'
+          : null,
+      });
       const replace = () => {
         ctx.podRepo.incrementLifecycleGeneration(pod.id);
         ctx.podRepo.update(pod.id, {
@@ -10479,11 +10508,11 @@ describe('PodManager', () => {
         });
       };
       if (step === 'push')
-        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
           replace();
         });
       if (step === 'failed-push')
-        vi.mocked(ctx.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+        vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
           replace();
           throw new Error('old push rejected');
         });
@@ -10542,14 +10571,11 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Review new delivery' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/delivery',
-          containerId: 'delivery-container',
-          filesChanged: 1,
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        filesChanged: 1,
+      });
       if (decision === 'unavailable')
         vi.mocked(ctx.prManager.getPrStatus).mockRejectedValue(new Error('status unavailable'));
       else
@@ -10583,14 +10609,11 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Reconcile merge receipt' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/delivery',
-          filesChanged: 1,
-          prUrl: 'https://github.com/org/repo/pull/42',
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/delivery',
+        filesChanged: 1,
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
       vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('connection lost after merge'));
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
         code: 'APPROVAL_DELIVERY_FAILED',
@@ -10607,15 +10630,12 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Preserve failed rebase' },
         'user-1',
       );
-      ctx.podRepo.update(
-        pod.id,
-        validatedPodUpdates(pod.id, {
-          worktreePath: '/tmp/delivery',
-          containerId: 'delivery-container',
-          filesChanged: 1,
-          prUrl: 'https://github.com/org/repo/pull/42',
-        }),
-      );
+      setCheckedPodFixture(ctx, pod.id, {
+        worktreePath: '/tmp/delivery',
+        containerId: 'delivery-container',
+        filesChanged: 1,
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
       const prepare = ctx.worktreeManager.prepareApprovalRebase;
       if (!prepare) throw new Error('Missing candidate preparation');
       vi.mocked(prepare).mockRejectedValue(new Error('git unavailable'));
@@ -10640,24 +10660,20 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(pod.id);
 
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/wt',
-          targetBranch: pod.branch,
-        }),
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
 
-    it('does not forward legacy GitHub PAT into mergeBranch on approval-time PR creation retry', async () => {
+    it('uses daemon auth for checked publication on approval-time PR creation retry', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_12345' });
       const manager = createPodManager(ctx.deps);
 
@@ -10665,20 +10681,19 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(pod.id);
 
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
         expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
-    it('does not forward legacy GitHub PAT into mergeBranch on approval-time fallback push', async () => {
+    it('does not forward legacy GitHub PAT into checked approval-time fallback push', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_67890' });
       ctx.deps.prManagerFactory = undefined;
       const manager = createPodManager(ctx.deps);
@@ -10687,17 +10702,16 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(pod.id);
 
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
         expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
     it('uses daemon Entra auth for ADO profiles on approval push', async () => {
@@ -10712,17 +10726,16 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1 });
 
       await manager.approveSession(pod.id);
 
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
         expect.objectContaining({ pat: 'daemon-ado-token' }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
     it('publishes a non-default PR base branch before approval retry creates the PR', async () => {
@@ -10740,12 +10753,7 @@ describe('PodManager', () => {
         },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, {
-        ...validatedPodUpdates(pod.id),
-        worktreePath: '/tmp/wt',
-        filesChanged: 1,
-        prUrl: null,
-      });
+      setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 1, prUrl: null });
 
       await manager.approveSession(pod.id);
 
@@ -10783,10 +10791,7 @@ describe('PodManager', () => {
       // Child must not be enqueued yet (waiting for parent)
       expect(ctx.enqueuedSessions).not.toContain(child.id);
 
-      ctx.podRepo.update(
-        parent.id,
-        validatedPodUpdates(parent.id, { branch: 'feature/parent', worktreePath: '/tmp/wt' }),
-      );
+      setCheckedPodFixture(ctx, parent.id, { branch: 'feature/parent', worktreePath: '/tmp/wt' });
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
@@ -10864,8 +10869,17 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).not.toContain(child.id);
       expect(manager.getSession(child.id).status).toBe('queued');
 
-      await manager.approveSession(parent.id, { reason: 'Force-approved parent is acceptable' });
-
+      await expect(
+        manager.approveSession(parent.id, { reason: 'Force-approved parent is acceptable' }),
+      ).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
+      expect(ctx.enqueuedSessions).not.toContain(child.id);
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      // A projection waiver is not committed-source proof. Model fresh passing
+      // source checks explicitly before testing the dependent-completion edge.
+      setCheckedPodFixture(ctx, parent.id, { validationWaiver: null, skipValidation: false });
+      await manager.approveSession(parent.id, {
+        reason: 'Fresh source checks now qualify delivery',
+      });
       expect(ctx.enqueuedSessions).toContain(child.id);
       expect(manager.getSession(child.id).baseBranch).toBe('release/2026-05');
     });
@@ -11001,11 +11015,7 @@ describe('PodManager', () => {
           'user-1',
         );
         // Cached zero — old bug would have taken the fast-path and dropped the branch.
-        ctx.podRepo.update(pod.id, {
-          ...validatedPodUpdates(pod.id),
-          worktreePath: '/tmp/wt',
-          filesChanged: 0,
-        });
+        setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 0 });
 
         (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
           filesChanged: 3,
@@ -11017,13 +11027,13 @@ describe('PodManager', () => {
 
         // Fresh diff stats must be persisted on disk.
         expect(manager.getSession(pod.id).filesChanged).toBe(3);
-        // Normal merge path runs — mergeBranch + createPr + mergePr.
-        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-          expect.objectContaining({
-            worktreePath: '/tmp/wt',
-            targetBranch: pod.branch,
-          }),
+        // Checked publication + createPr + mergePr, never post-review autocommit.
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+          '/tmp/wt',
+          pod.branch,
+          expect.objectContaining({ onPrepared: expect.any(Function) }),
         );
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
         expect(ctx.prManager.createPr).toHaveBeenCalled();
         expect(ctx.prManager.mergePr).toHaveBeenCalled();
       });
@@ -11072,11 +11082,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Do stuff' },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, {
-          ...validatedPodUpdates(pod.id),
-          worktreePath: '/tmp/wt',
-          filesChanged: 0,
-        });
+        setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 0 });
 
         (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockRejectedValue(
           new Error('git error'),
@@ -11085,8 +11091,9 @@ describe('PodManager', () => {
         await manager.approveSession(pod.id);
 
         // Fail-safe: when we can't determine diff, treat as "may have changes" and merge.
-        // Better to push an empty branch than to silently drop user work.
-        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalled();
+        // Push only the checked committed source; never silently drop user work.
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
         expect(manager.getSession(pod.id).status).toBe('complete');
       });
 
@@ -11100,14 +11107,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Preserve accumulated work' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/preserved-approval',
-            containerId: 'preserved-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/preserved-approval',
+          containerId: 'preserved-container',
+          filesChanged: 0,
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -11160,14 +11164,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Protect replacement generation' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/old-approval',
-            containerId: 'old-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/old-approval',
+          containerId: 'old-container',
+          filesChanged: 0,
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -11214,14 +11215,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Fence cleanup' },
           'user-1',
         ).id;
-        ctx.podRepo.update(
-          podId,
-          validatedPodUpdates(podId, {
-            worktreePath: '/tmp/old-approval',
-            containerId: 'old-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, podId, {
+          worktreePath: '/tmp/old-approval',
+          containerId: 'old-container',
+          filesChanged: 0,
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockImplementation(async () => {
           if (step === 'diff') await replace();
           return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
@@ -11248,14 +11246,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Keep decision' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/approval-decision',
-            containerId: 'decision-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/approval-decision',
+          containerId: 'decision-container',
+          filesChanged: 0,
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -11286,14 +11281,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Repair missing branch identity' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/unbound-approval',
-            containerId: 'retained-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/unbound-approval',
+          containerId: 'retained-container',
+          filesChanged: 0,
+        });
         ctx.db.prepare("UPDATE pods SET branch = '' WHERE id = ?").run(pod.id);
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
@@ -11329,14 +11321,11 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Fence reentrant status listener' },
           'user-1',
         );
-        ctx.podRepo.update(
-          pod.id,
-          validatedPodUpdates(pod.id, {
-            worktreePath: '/tmp/original-approval',
-            containerId: 'original-container',
-            filesChanged: 0,
-          }),
-        );
+        setCheckedPodFixture(ctx, pod.id, {
+          worktreePath: '/tmp/original-approval',
+          containerId: 'original-container',
+          filesChanged: 0,
+        });
         vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
           filesChanged: 0,
           linesAdded: 0,
@@ -11384,11 +11373,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Do stuff' },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, {
-          ...validatedPodUpdates(pod.id),
-          worktreePath: '/tmp/wt',
-          filesChanged: 0,
-        });
+        setCheckedPodFixture(ctx, pod.id, { worktreePath: '/tmp/wt', filesChanged: 0 });
 
         (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
           filesChanged: 0,
@@ -11566,7 +11551,11 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, { status: 'validated', containerId: 'ctr-1' });
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
+      });
 
       await manager.rejectSession(pod.id, 'Button color wrong');
 
@@ -11594,6 +11583,7 @@ describe('PodManager', () => {
         status: 'validated',
         validationAttempts: 2,
         containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
       });
 
       await manager.rejectSession(pod.id, 'Needs more work');
@@ -11616,6 +11606,7 @@ describe('PodManager', () => {
         status: 'failed',
         validationAttempts: 3,
         containerId: 'ctr-1',
+        worktreePath: '/tmp/rejected-source',
       });
 
       await manager.rejectSession(pod.id, 'Try a different approach');
@@ -12604,12 +12595,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', '0444', AGENT_ENV_PATH],
-        { timeout: 5_000 },
+        { timeout: 60_000 },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
         ['chmod', '0555', AGENT_SHIM_PATH],
-        { timeout: 5_000 },
+        { timeout: 60_000 },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'container-123',
@@ -12618,12 +12609,12 @@ describe('PodManager', () => {
           '-c',
           'install -d -o root -g root -m 0755 /run/autopod && install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
         ],
-        { timeout: 5_000, user: 'root' },
+        { timeout: 60_000, user: 'root' },
       );
       const repairCall = ctx.containerManager.execInContainer.mock.calls.find(
         ([, command, options]) => command[0] === 'sh' && options?.user === 'root',
       );
-      expect(repairCall?.[2]).toEqual({ timeout: 10_000, user: 'root' });
+      expect(repairCall?.[2]).toEqual({ timeout: 60_000, user: 'root' });
       expect(repairCall?.[1][2]).toContain(
         "chown -R autopod:autopod '/home/autopod/.claude' '/home/autopod/.autopod'",
       );
@@ -14856,7 +14847,11 @@ describe('PodManager', () => {
               { axis: 'tests_integration', status: 'queued', attempt: 0 },
             ],
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -14920,7 +14915,11 @@ describe('PodManager', () => {
             issues: [],
             model: 'reviewer',
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -15765,7 +15764,11 @@ describe('PodManager', () => {
             issues: [],
             model: 'reviewer',
           });
-          return makeValidationResult({ validationSuite: config.validationSuite });
+          return makeValidationResult({
+            podId: config.podId,
+            attempt: config.attempt,
+            validationSuite: config.validationSuite,
+          });
         },
       );
       const manager = createPodManager(ctx.deps);
@@ -16019,14 +16022,14 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      // Branch was pushed — must target the feature branch so `gh pr create --head` can
-      // reference it; the PR itself targets baseBranch separately via prManager.createPr.
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/wt',
-          targetBranch: pod.branch,
-        }),
+      // Publish only checked committed source to the feature branch. PR target
+      // selection is separate; no post-review auto-commit is permitted.
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/wt',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
 
       // PR was created
       expect(ctx.prManager.createPr).toHaveBeenCalledWith(
@@ -16121,32 +16124,34 @@ describe('PodManager', () => {
       vi.useFakeTimers();
       try {
         const ctx = createTestContext();
-        vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce({
-          podId: 'test',
-          attempt: 1,
-          timestamp: new Date().toISOString(),
-          smoke: {
-            status: 'pass',
-            build: { status: 'pass', output: '', duration: 100 },
-            health: {
+        vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+          validationReply({
+            podId: 'test',
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            smoke: {
               status: 'pass',
-              url: 'http://localhost:3000',
-              responseCode: 200,
-              duration: 50,
+              build: { status: 'pass', output: '', duration: 100 },
+              health: {
+                status: 'pass',
+                url: 'http://localhost:3000',
+                responseCode: 200,
+                duration: 50,
+              },
+              pages: [],
             },
-            pages: [],
-          },
-          taskReview: {
-            status: 'pass',
-            reasoning: 'Looks good',
-            issues: [],
-            model: 'gpt-5',
-            screenshots: [],
-            diff: '+done',
-          },
-          overall: 'pass',
-          duration: 5000,
-        });
+            taskReview: {
+              status: 'pass',
+              reasoning: 'Looks good',
+              issues: [],
+              model: 'gpt-5',
+              screenshots: [],
+              diff: '+done',
+            },
+            overall: 'pass',
+            duration: 5000,
+          }),
+        );
         const manager = createPodManager(ctx.deps);
 
         const pod = manager.createSession(
@@ -16200,6 +16205,7 @@ describe('PodManager', () => {
         );
         ctx.podRepo.update(pod.id, {
           status: 'running',
+          worktreePath: '/tmp/wt',
           containerId: 'ctr-1',
           validationAttempts: 0,
         });
@@ -16269,6 +16275,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 1,
       });
@@ -16379,6 +16386,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16419,6 +16427,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16462,6 +16471,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16480,7 +16490,9 @@ describe('PodManager', () => {
     it('retries review infrastructure failures without agent rework', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce(makeValidationResult());
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        validationReply(makeValidationResult()),
+      );
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -16506,7 +16518,9 @@ describe('PodManager', () => {
     it('moves to review_required after review infrastructure retries exhaust', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0, 0, 0];
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(makeReviewInfraFailure());
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(
+        validationReply(makeReviewInfraFailure()),
+      );
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -16534,8 +16548,8 @@ describe('PodManager', () => {
       const ctx = createTestContext();
       ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(validationInfrastructureFailureResult())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(validationInfrastructureFailureResult()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -16544,6 +16558,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16565,8 +16580,8 @@ describe('PodManager', () => {
         (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
       );
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(validationInfrastructureFailureResult())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(validationInfrastructureFailureResult()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -16575,6 +16590,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16599,8 +16615,8 @@ describe('PodManager', () => {
         vi.setSystemTime(Date.now() + delay - (wakes++ === 0 ? 1 : 0));
       });
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(validationInfrastructureFailureResult())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(validationInfrastructureFailureResult()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -16609,6 +16625,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16832,7 +16849,7 @@ describe('PodManager', () => {
         message: 'Execution outcome needs reconciliation',
         retryable: false,
       };
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(failure);
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(validationReply(failure));
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Verify retained outcome' },
@@ -16840,6 +16857,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16853,8 +16871,8 @@ describe('PodManager', () => {
     it('persistent validation infrastructure failure parks once', async () => {
       const ctx = createTestContext();
       ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
-        validationInfrastructureFailureResult(),
+      vi.mocked(ctx.validationEngine.validate).mockImplementation(
+        validationReply(validationInfrastructureFailureResult()),
       );
       const manager = createPodManager(ctx.deps);
 
@@ -16864,6 +16882,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -16991,6 +17010,7 @@ describe('PodManager', () => {
         status: 'running',
         containerId: 'ctr-1',
         validationAttempts: 0,
+        worktreePath: '/tmp/checked-source',
       });
 
       await manager.triggerValidation(pod.id);
@@ -17047,6 +17067,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -17100,6 +17121,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -17473,6 +17495,7 @@ describe('PodManager', () => {
         status: 'running',
         containerId: 'ctr-1',
         validationAttempts: 0,
+        worktreePath: '/tmp/checked-source',
       });
 
       await manager.triggerValidation(pod.id);
@@ -18004,7 +18027,11 @@ describe('PodManager', () => {
             model: 'reviewer',
             screenshots: [],
             diff: '+change',
-            reviewBatch: reviewBatch(batchId, `${attempt}`.repeat(40), currentSourceIds),
+            reviewBatch: reviewBatch(
+              batchId,
+              attempt === 2 ? 'a'.repeat(40) : `${attempt}`.repeat(40),
+              currentSourceIds,
+            ),
           },
         });
 
@@ -18030,7 +18057,7 @@ describe('PodManager', () => {
             screenshots: [],
             diff: '+change',
             reviewBatch: {
-              ...reviewBatch('deep-independent', '2'.repeat(40), []),
+              ...reviewBatch('deep-independent', 'a'.repeat(40), []),
               candidates: [],
               initialFindings: [],
               accepted: [],
@@ -18172,13 +18199,35 @@ describe('PodManager', () => {
         validationAttempts: 1,
       });
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(
-          makeCouncilReviewFailure(pod.id, 2, 'current-batch', newIssue, newId, true),
+        .mockImplementationOnce(
+          validationReply(
+            makeCouncilReviewFailure(
+              pod.id,
+              2,
+              'current-batch',
+              newIssue,
+              newId,
+              true,
+              'a'.repeat(40),
+            ),
+          ),
         )
-        .mockResolvedValueOnce(
-          makeCouncilReviewFailure(pod.id, 2, 'deep-batch', unrelatedIssue, unrelatedId, true),
+        .mockImplementationOnce(
+          validationReply(
+            makeCouncilReviewFailure(
+              pod.id,
+              2,
+              'deep-batch',
+              unrelatedIssue,
+              unrelatedId,
+              true,
+              'a'.repeat(40),
+            ),
+          ),
         )
-        .mockResolvedValueOnce(makeValidationResult({ podId: pod.id, attempt: 3 }));
+        .mockImplementationOnce(
+          validationReply(makeValidationResult({ podId: pod.id, attempt: 3 })),
+        );
       vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
         yield {
           type: 'complete',
@@ -18547,6 +18596,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -18610,8 +18660,8 @@ describe('PodManager', () => {
       linkProfileToProviderAccount(ctx.db, 'test-profile', 'anth-pro');
       ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(makeBuildFailure())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(makeBuildFailure()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
         yield {
           type: 'complete',
@@ -18660,6 +18710,7 @@ describe('PodManager', () => {
       });
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'target-container',
         runtime: 'codex',
         model: 'gpt-5.6-sol',
@@ -18934,11 +18985,15 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'killed',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 3,
       });
 
       await manager.triggerValidation(pod.id, { force: true });
+      expect(manager.getSession(pod.id).status).toBe('queued');
+      expect(ctx.enqueuedSessions).toContain(pod.id);
+      await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
@@ -18955,11 +19010,15 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'failed',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 3,
       });
 
       await manager.triggerValidation(pod.id, { force: true });
+      expect(manager.getSession(pod.id).status).toBe('queued');
+      expect(ctx.enqueuedSessions).toContain(pod.id);
+      await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
@@ -21145,6 +21204,13 @@ describe('PodManager', () => {
         'complete',
       ] as const) {
         ctx.podRepo.update(pod.id, { status });
+        if (status === 'validated')
+          seedCheckedValidationSource(
+            ctx.podRepo,
+            ctx.podRepo.getOrThrow(pod.id),
+            ctx.profileStore.get('test-profile'),
+            makeValidationResult({ podId: pod.id }),
+          );
       }
       return { manager, pod };
     }
@@ -21178,23 +21244,22 @@ describe('PodManager', () => {
       expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
     });
 
-    it('retry PR preserves an affected materialized sandbox branch without claiming validation', async () => {
+    it('retry PR preserves materialized source but refuses publication without immutable validation proof', async () => {
       const ctx = createTestContext();
       const { manager, pod } = await setupCompletePodForRetry(ctx);
       ctx.podRepo.update(pod.id, { filesChanged: 0, lastValidationResult: null });
 
-      await manager.retryCreatePr(pod.id);
-
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ targetBranch: pod.branch, maxDeletions: 0 }),
-      );
-      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
-        expect.objectContaining({ branch: pod.branch }),
-      );
+      await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+        code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      });
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).lastValidationResult).toBeNull();
+      expect(manager.getSession(pod.id).worktreePath).toBe('/tmp/worktree/abc');
     });
 
-    it('creates a PR from a validated pod after findings are resolved by operator override', async () => {
+    it('creates a PR from owned source with an immutable passing validation result', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
@@ -21204,7 +21269,14 @@ describe('PodManager', () => {
       ctx.podRepo.update(pod.id, {
         status: 'validated',
         worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
       });
+      seedCheckedValidationSource(
+        ctx.podRepo,
+        ctx.podRepo.getOrThrow(pod.id),
+        ctx.profileStore.get('test-profile'),
+        makeValidationResult({ podId: pod.id }),
+      );
 
       await manager.retryCreatePr(pod.id);
 
@@ -21217,11 +21289,11 @@ describe('PodManager', () => {
       });
     });
 
-    it('flags worktreeCompromised and emits event when mergeBranch hits the guard', async () => {
+    it('flags worktreeCompromised and emits event when committed publication hits the guard', async () => {
       const ctx = createTestContext();
       const { manager, pod } = await setupCompletePodForRetry(ctx);
 
-      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new DeletionGuardError(1730, 0),
       );
 
@@ -21251,7 +21323,7 @@ describe('PodManager', () => {
       const ctx = createTestContext();
       const { manager, pod } = await setupCompletePodForRetry(ctx);
 
-      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error('ssh: connection refused'),
       );
 
@@ -21264,18 +21336,25 @@ describe('PodManager', () => {
       expect(persisted.worktreeCompromised).toBe(false);
     });
 
-    it('passes maxDeletions: 0 so any staged deletion aborts the commit', async () => {
+    it('refuses dirty source instead of auto-committing staged deletions', async () => {
       const ctx = createTestContext();
       const { manager, pod } = await setupCompletePodForRetry(ctx);
 
-      await manager.retryCreatePr(pod.id);
-
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/worktree/abc',
-          maxDeletions: 0,
+      vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce((root, branch, options) =>
+        mockBranchPublication(root, branch, {
+          ...options,
+          onPrepared: (source) => options?.onPrepared?.({ ...source, worktreeClean: false }),
         }),
       );
+      await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+        code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      });
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+      expect(ctx.db.prepare('SELECT count(*) AS n FROM source_publication_intents').get()).toEqual({
+        n: 0,
+      });
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
 
     it('pushes the feature branch (not the base branch) so the PR can be opened against main', async () => {
@@ -21284,14 +21363,13 @@ describe('PodManager', () => {
 
       await manager.retryCreatePr(pod.id);
 
-      // Regression guard: mergeBranch verifies HEAD == targetBranch and pushes
-      // HEAD:refs/heads/<targetBranch>. Passing the base branch here would force-push the
-      // feature work onto main and fail the HEAD assertion.
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          targetBranch: pod.branch,
-        }),
+      // Committed publication must still target the feature ref, never main.
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/abc',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       expect(ctx.prManager.createPr).toHaveBeenCalledWith(
         expect.objectContaining({
           branch: pod.branch,
@@ -21300,19 +21378,15 @@ describe('PodManager', () => {
       );
     });
 
-    it('falls back to profile default branch when stored baseBranch equals feature branch', async () => {
+    it('refuses a changed base pointer after source certification rather than reusing stale proof', async () => {
       const ctx = createTestContext();
       const { manager, pod } = await setupCompletePodForRetry(ctx);
       ctx.podRepo.update(pod.id, { baseBranch: pod.branch });
-
-      await manager.retryCreatePr(pod.id);
-
-      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
-        expect.objectContaining({
-          branch: pod.branch,
-          baseBranch: 'main',
-        }),
-      );
+      await expect(manager.retryCreatePr(pod.id)).rejects.toMatchObject({
+        code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
   });
 
@@ -21624,16 +21698,21 @@ describe('PodManager', () => {
         branch: root.branch,
         baseBranch: 'main',
       });
-      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new Error('ssh: connection refused'),
-      );
+      const initialPublication = vi.mocked(ctx.worktreeManager.pushBranch).getMockImplementation();
+      if (!initialPublication) throw new Error('Missing initial publication adapter');
+      vi.mocked(ctx.worktreeManager.pushBranch)
+        .mockImplementationOnce(initialPublication)
+        .mockRejectedValueOnce(new Error('ssh: connection refused'));
       const events: unknown[] = [];
       ctx.eventBus.subscribe((event) => events.push(event));
 
       await manager.triggerValidation(fixPod.id);
 
       const refreshed = manager.getSession(fixPod.id);
-      expect(refreshed.status).toBe('awaiting_input');
+      expect(
+        refreshed.status,
+        JSON.stringify({ failureReason: refreshed.failureReason, error: refreshed.errorMessage }),
+      ).toBe('awaiting_input');
       expect(refreshed.mergeBlockReason).toBe(
         'Validated fix could not be pushed: ssh: connection refused',
       );
@@ -21985,7 +22064,7 @@ describe('PodManager', () => {
       // For misrouted fix pods that meant a stale PR could merge with no new
       // commits. Loud-fail: the rethrow must abort the validated transition.
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error('ssh: connection refused'),
       );
 
@@ -22022,7 +22101,7 @@ describe('PodManager', () => {
 
     it('parks as failed on DeletionGuardError instead of validating compromised work', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new DeletionGuardError(2000, 100),
       );
 
@@ -22468,21 +22547,23 @@ describe('PodManager', () => {
       });
       // Move into a state we can transition to `failed` from.
       ctx.podRepo.update(pod.id, { status: 'running' });
-      // Stash a validation result if requested. lastValidationResult is `unknown` so
-      // we shape it to match what pod-manager checks: `lastValidationResult.overall`.
+      // Explicit unit premise: this source really completed the requested checks.
+      // Composed delivery incidents exercise the real engine producer instead.
       if (overrides.validationOverall !== undefined) {
         ctx.podRepo.update(pod.id, {
-          lastValidationResult: {
+          lastValidationResult: makeValidationResult({
             podId: pod.id,
-            attempt: 1,
-            timestamp: new Date().toISOString(),
-            smoke: null,
-            taskReview: null,
             overall: overrides.validationOverall,
-            duration: 1000,
-          },
+          }),
         });
       }
+      if (overrides.validationOverall === 'pass')
+        seedCheckedValidationSource(
+          ctx.podRepo,
+          ctx.podRepo.getOrThrow(pod.id),
+          ctx.profileStore.get('test-profile'),
+          makeValidationResult({ podId: pod.id }),
+        );
       if (overrides.prUrl !== undefined) {
         ctx.podRepo.update(pod.id, { prUrl: overrides.prUrl });
       }
@@ -22683,13 +22764,12 @@ describe('PodManager', () => {
       const result = await manager.resumePod(pod.id);
 
       expect(result).toEqual({ action: 'retry-pr' });
-      expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          worktreePath: '/tmp/worktree/abc',
-          targetBranch: pod.branch,
-          maxDeletions: 0,
-        }),
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/abc',
+        pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
       expect(ctx.prManager.createPr).toHaveBeenCalledTimes(1);
 
       const refreshed = manager.getSession(pod.id);
@@ -22709,7 +22789,7 @@ describe('PodManager', () => {
         validationOverall: 'pass',
         prUrl: null,
       });
-      (ctx.worktreeManager.mergeBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error('ssh: connection refused'),
       );
 
@@ -23007,7 +23087,9 @@ describe('PodManager', () => {
     it('Path 2: retries review infrastructure failures during forced revalidation', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce(makeValidationResult());
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        validationReply(makeValidationResult()),
+      );
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'fail',
         prUrl: null,
@@ -24023,6 +24105,7 @@ describe('PodManager', () => {
       // Simulate that the initial agent run already completed and wrote agent_initial
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
         phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
@@ -24067,6 +24150,7 @@ describe('PodManager', () => {
 
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         validationAttempts: 0,
       });
@@ -24224,6 +24308,7 @@ describe('PodManager', () => {
       // Pre-set agent_initial so we can confirm it is preserved
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
       });
@@ -24265,6 +24350,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'running',
+        worktreePath: '/tmp/wt',
         containerId: 'ctr-1',
         phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
       });
@@ -24413,7 +24499,8 @@ describe('PodManager', () => {
       expect(ctx.validationEngine.validate).toHaveBeenCalledOnce();
       expect(manager.getSession(pod.id).lastValidationResult?.overall).toBe('pass');
       if (output === 'pr') {
-        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+        expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
         expect(ctx.prManager.createPr).toHaveBeenCalledOnce();
       } else {
         expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
@@ -24440,14 +24527,15 @@ describe('PodManager', () => {
         worktreePath: '/tmp/wt',
       });
       vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(validationInfrastructureFailureResult())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(validationInfrastructureFailureResult()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       let waited = false;
       vi.mocked(sleep).mockImplementation(async (delay) => {
         if (typeof delay === 'number' && delay > 9000) {
           waited = true;
           ctx.podRepo.update(pod.id, {
             status: 'running',
+            worktreePath: '/tmp/wt',
             containerId: 'replacement-container',
             failureReason: 'replacement-owned-reason',
           });
@@ -24497,6 +24585,7 @@ describe('PodManager', () => {
         const identity = await capture(config);
         ctx.podRepo.update(pod.id, {
           status: 'running',
+          worktreePath: '/tmp/wt',
           containerId: 'replacement-container',
           failureReason: 'replacement-owned-reason',
         });
@@ -24538,6 +24627,7 @@ describe('PodManager', () => {
           ctx.podRepo.incrementLifecycleGeneration(pod.id);
           ctx.podRepo.update(pod.id, {
             status: 'running',
+            worktreePath: '/tmp/wt',
             containerId: 'replacement-container',
             failureReason: 'replacement-owned-reason',
           });
@@ -24654,6 +24744,7 @@ describe('wake recovery — validationAttempts skip', () => {
     );
     ctx.podRepo.update(pod.id, {
       status: 'running',
+      worktreePath: '/tmp/wt',
       containerId: 'ctr-1',
       validationAttempts: 2,
       lastRecoveryTrigger: 'wake',
@@ -24702,6 +24793,7 @@ describe('wake recovery — validationAttempts skip', () => {
     );
     ctx.podRepo.update(pod.id, {
       status: 'running',
+      worktreePath: '/tmp/wt',
       containerId: 'ctr-1',
       validationAttempts: 1,
       // lastRecoveryTrigger intentionally null (default)
@@ -24723,6 +24815,7 @@ describe('wake recovery — validationAttempts skip', () => {
     );
     ctx.podRepo.update(pod.id, {
       status: 'running',
+      worktreePath: '/tmp/wt',
       containerId: 'ctr-1',
       validationAttempts: 1,
       lastRecoveryTrigger: 'restart',
@@ -25297,16 +25390,40 @@ describe('updateFromBase', () => {
       ledger.admit(ctx.podRepo.getOrThrow(pod.id), predecessor),
       predecessor,
     );
+    seedMockRemotePublication(ctx.worktreeManager, predecessor);
     ctx.podRepo.update(pod.id, { status: 'failed' });
     // Set the force allowance via updateFromBase (spy on triggerValidation to avoid running it)
     vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
     await manager.updateFromBase(pod.id);
 
+    // Model a genuinely changed, freshly checked source after rebase, not an
+    // unchanged ref that the publication ledger correctly reuses without IO.
+    const changedSource = async (_cwd: string, branch: string) => ({
+      branch,
+      commitSha: 'c'.repeat(40),
+      treeSha: 'd'.repeat(40),
+      worktreeClean: true,
+    });
+    vi.mocked(ctx.worktreeManager.inspectSource!).mockImplementation(changedSource);
+    vi.mocked(ctx.worktreeManager.inspectSourceAdoption!).mockImplementation(changedSource);
+    vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async (...args) => {
+      const receipt = await mockFixBranchPublication(...args);
+      seedMockRemotePublication(ctx.worktreeManager, receipt);
+      return receipt;
+    });
     // Advance pod to validated with a PR so approveSession runs the pushBranch path
     ctx.podRepo.update(pod.id, { status: 'running' });
     ctx.podRepo.update(pod.id, { status: 'validating' });
     ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
     ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+    const checked = ctx.podRepo.getOrThrow(pod.id);
+    seedCheckedValidationSource(
+      ctx.podRepo,
+      checked,
+      ctx.profileStore.get(checked.profileName),
+      checked.lastValidationResult!,
+      { head: 'c'.repeat(40), tree: 'd'.repeat(40) },
+    );
 
     await manager.approveSession(pod.id);
 
@@ -25317,7 +25434,7 @@ describe('updateFromBase', () => {
       expectedRemoteCommitSha: predecessor.commitSha,
     });
 
-    // A second approveSession (no update-from-base in between) must NOT use force
+    // Unchanged confirmed source is not pushed again on a second approval.
     vi.mocked(ctx.worktreeManager.pushBranch).mockClear();
     ctx.podRepo.update(pod.id, { status: 'complete' });
     ctx.podRepo.update(pod.id, { status: 'queued' });
@@ -25328,7 +25445,7 @@ describe('updateFromBase', () => {
 
     await manager.approveSession(pod.id);
 
-    expect(vi.mocked(ctx.worktreeManager.pushBranch).mock.calls[0]?.[2]?.force).toBeFalsy();
+    expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
   });
 
   it('validating pod returns queued_after_abort immediately', async () => {
@@ -25518,29 +25635,23 @@ describe('updateFromBase', () => {
       validationAttempts: 0,
     });
 
-    // First validation: plant the intent mid-run (the abort race), then succeed.
-    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
-      await manager.updateFromBase(pod.id);
-      return {
-        podId: pod.id,
-        attempt: 1,
-        timestamp: new Date().toISOString(),
-        smoke: {
-          status: 'pass' as const,
-          build: { status: 'pass' as const, output: 'ok', duration: 0 },
-          health: { status: 'pass' as const, url: '', responseCode: 200, duration: 0 },
-          pages: [],
-        },
-        taskReview: null,
-        overall: 'pass' as const,
-        duration: 0,
-      };
+    // Plant the intent AFTER the native completed result was recorded, not
+    // before engine return (which legitimately records a cancelled admission).
+    let update: Promise<unknown> | undefined;
+    let armed = true;
+    const unsubscribe = ctx.eventBus.subscribe((event) => {
+      if (armed && event.type === 'pod.validation_completed' && event.podId === pod.id) {
+        armed = false;
+        update = manager.updateFromBase(pod.id);
+      }
     });
 
     await manager.triggerValidation(pod.id);
-
+    await update;
+    unsubscribe();
+    expect(armed).toBe(false);
     expect(manager.getSession(pod.id).status).toBe('validated');
-    // The success path doesn't consume intents, so no rebase yet.
+    // The success path clears intents, so no rebase yet.
     expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
 
     // Simulate the pod re-entering validation (e.g., after rejection).
@@ -27186,7 +27297,7 @@ describe('validation attempt start compatibility', () => {
     ctx.podRepo.update(pod.id, {
       status: c.status ?? 'running',
       containerId: 'entry-container',
-      worktreePath: scanner ? '/tmp/validation-entry' : null,
+      worktreePath: '/tmp/validation-entry',
       validationAttempts: c.count ?? 2,
       lastRecoveryTrigger: c.marker ?? null,
       reworkCount: c.reworks ?? 0,
@@ -27793,16 +27904,19 @@ describe('validation inputs compatibility', () => {
     }
   });
 
-  it('keeps empty source inputs without a worktree and still consumes overrides', async () => {
+  it('holds missing review source without consuming queued overrides', async () => {
     const f = fixture({}, false);
     try {
       f.queue();
-      const config = await f.run();
-      expect(config).toMatchObject({ diff: '', commitLog: undefined, worktreePath: undefined });
-      expect(config.overrides?.[0]?.description).toBe('new decision');
+      await f.manager.triggerValidation(f.pod.id);
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.manager.getSession(f.pod.id).status).toBe('review_required');
+      expect(f.manager.getSession(f.pod.id).failureReason).toContain(
+        'Review source is unavailable',
+      );
       expect(f.ctx.worktreeManager.getDiff).not.toHaveBeenCalled();
       expect(f.ctx.worktreeManager.getCommitLog).not.toHaveBeenCalled();
-      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
     } finally {
       f.ctx.db.close();
     }
@@ -27879,7 +27993,7 @@ describe('validation inputs compatibility', () => {
         sastTimeout: null,
         hasWebUi: null,
       },
-      false,
+      true,
     );
     try {
       const config = await f.run();
@@ -27987,7 +28101,7 @@ describe('validation inputs compatibility', () => {
   });
 
   it('replaces queued override values without reordering existing finding IDs', async () => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       f.ctx.podRepo.update(f.pod.id, {
         validationOverrides: [
@@ -28011,7 +28125,7 @@ describe('validation inputs compatibility', () => {
   });
 
   it('does not write overrides when the queue is empty', async () => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       const update = vi.spyOn(f.ctx.podRepo, 'update');
       await f.run();
@@ -28047,8 +28161,17 @@ describe('validation inputs compatibility', () => {
       await f.manager.triggerValidation(f.pod.id);
       expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
       expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
-      expect(f.manager.getSession(f.pod.id).failureReason).toContain(fault.message);
-      expect(f.manager.getSession(f.pod.id).status).toBe('failed');
+      expect(f.manager.getSession(f.pod.id).failureReason).toContain(
+        ['diff', 'log', 'paths'].includes(stage)
+          ? 'Review source could not be read consistently'
+          : fault.message,
+      );
+      if (['diff', 'log', 'paths'].includes(stage)) {
+        expect(f.manager.getSession(f.pod.id).validationAttempts).toBe(0);
+      }
+      expect(f.manager.getSession(f.pod.id).status).toBe(
+        ['diff', 'log', 'paths'].includes(stage) ? 'review_required' : 'failed',
+      );
       expect(f.ctx.containerManager.stop).toHaveBeenCalled();
     } finally {
       f.ctx.db.close();
@@ -28059,7 +28182,7 @@ describe('validation inputs compatibility', () => {
     'reject write',
     'throw after write',
   ] as const)('keeps post-flush effects: %s', async (stage) => {
-    const f = fixture({}, false);
+    const f = fixture();
     try {
       f.queue();
       if (stage === 'reject write') {
@@ -28290,8 +28413,8 @@ describe('validation execution compatibility', () => {
       });
       f.ctx.deps.captureRetryIdentity = first;
       vi.mocked(f.ctx.validationEngine.validate)
-        .mockResolvedValueOnce(validationInfrastructureFailureResult())
-        .mockResolvedValueOnce(makeValidationResult());
+        .mockImplementationOnce(validationReply(validationInfrastructureFailureResult()))
+        .mockImplementationOnce(validationReply(makeValidationResult()));
       await f.run();
       expect(first).toHaveBeenCalledOnce();
       expect(second).toHaveBeenCalledOnce();
@@ -28374,8 +28497,8 @@ describe('validation execution compatibility', () => {
       vi.mocked(sleep).mockImplementation(async (delay) => {
         vi.setSystemTime(Date.now() + (typeof delay === 'number' ? delay : 0));
       });
-      vi.mocked(f.ctx.validationEngine.validate).mockResolvedValue(
-        validationInfrastructureFailureResult(),
+      vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+        validationReply(validationInfrastructureFailureResult()),
       );
       await f.run();
       expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
@@ -28510,9 +28633,9 @@ describe('validation evidence compatibility', () => {
       if (afterChecks) onSync();
       return receipt;
     });
-    vi.mocked(ctx.validationEngine.validate).mockImplementation(async () => {
+    vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
       afterChecks = true;
-      return result;
+      return { ...result, podId: config.podId, attempt: config.attempt };
     });
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
@@ -28715,7 +28838,7 @@ describe('validation evidence compatibility', () => {
     'verified',
     'unverified',
     'throws',
-  ] as const)('uses the %s sandbox post-check receipt for deletion guard', async (mode) => {
+  ] as const)('publishes only checked committed source with a %s sandbox post-check receipt', async (mode) => {
     const f = fixture('sandbox', 'pass');
     try {
       const checkpoint = vi.mocked(required(f.ctx.deps.sandboxWorkspaceCheckpoint));
@@ -28730,9 +28853,15 @@ describe('validation evidence compatibility', () => {
         return receipt;
       });
       await f.run();
-      expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ maxDeletions: mode === 'verified' ? 100 : 0 }),
+      expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        f.worktree,
+        f.pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
+      expect(
+        f.ctx.db.prepare('SELECT count(*) AS n FROM source_publication_receipts').get(),
+      ).toEqual({ n: 1 });
       expect(f.stored()?.overall).toBe('pass');
       if (mode === 'throws')
         expect(f.messages.some((m) => m.includes('continuing with degraded safeguards'))).toBe(
@@ -28757,8 +28886,11 @@ describe('validation evidence compatibility', () => {
       );
       await f.run();
       expect(f.messages).toContain('Collecting available fact evidence after degraded sync…');
-      expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ maxDeletions: 0 }),
+      expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(f.ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        f.worktree,
+        f.pod.branch,
+        expect.objectContaining({ onPrepared: expect.any(Function) }),
       );
       expect(f.stored()?.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeDefined();
     } finally {
@@ -29434,7 +29566,7 @@ describe('validation progress compatibility', () => {
   function fixture(entry: 'trigger' | 'revalidate', advisory = false) {
     const ctx = createTestContext();
     const result = makeValidationResult(advisory ? {} : ordinaryTestFailureResult());
-    vi.mocked(ctx.validationEngine.validate).mockResolvedValue(result);
+    vi.mocked(ctx.validationEngine.validate).mockImplementation(validationReply(result));
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
       {
@@ -31099,7 +31231,11 @@ describe('validation environment compatibility', () => {
       { profileName: 'test-profile', task: 'Validation environment compatibility' },
       'operator',
     );
-    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'env-container' });
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'env-container',
+      worktreePath: '/tmp/validation-env',
+    });
     const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
     const { resolveLaunch } = await import('../configuration/launch-resolver.js');
     const { services } = createTestConfiguration(ctx.db);

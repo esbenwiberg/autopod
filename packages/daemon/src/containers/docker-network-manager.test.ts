@@ -1,6 +1,7 @@
 import type { InjectedMcpServer, NetworkPolicy, PrivateRegistry } from '@autopod/shared';
 import pino from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import { DEFAULT_ALLOWED_HOSTS, DockerNetworkManager } from './docker-network-manager.js';
 
 const logger = pino({ level: 'silent' });
@@ -44,6 +45,15 @@ function makeRegistry(url: string, type: 'npm' | 'nuget' = 'nuget'): PrivateRegi
 describe('DockerNetworkManager', () => {
   let docker: ReturnType<typeof createMockDocker>;
   let manager: DockerNetworkManager;
+  const ownershipDbs: ReturnType<typeof createTestDb>[] = [];
+  const useDurableOwnership = () => {
+    const db = createTestDb();
+    ownershipDbs.push(db);
+    manager = new DockerNetworkManager({ docker: docker.instance, logger, managedDatabase: db });
+  };
+  afterEach(() => {
+    for (const db of ownershipDbs.splice(0)) db.close();
+  });
 
   beforeEach(() => {
     docker = createMockDocker();
@@ -499,6 +509,7 @@ describe('DockerNetworkManager', () => {
   });
 
   describe('ensureNetworkForPod()', () => {
+    beforeEach(useDurableOwnership);
     it('creates a per-pod bridge with ICC enabled when it does not exist', async () => {
       docker.mock._inspect.mockRejectedValueOnce(new Error('not found'));
       const name = await manager.ensureNetworkForPod('pod-abc');
@@ -552,7 +563,11 @@ describe('DockerNetworkManager', () => {
       // Route getNetwork by argument: inspect path uses the shared _inspect mock;
       // the prune step uses the removeFn.
       docker.mock.getNetwork.mockImplementation((id: string) => {
-        if (id === 'net2') return { remove: removeFn, inspect: vi.fn() };
+        if (id === 'net2')
+          return {
+            remove: removeFn,
+            inspect: vi.fn(async () => ({ Name: 'autopod-orphan', Containers: {} })),
+          };
         return { inspect: docker.mock._inspect };
       });
 
@@ -579,6 +594,7 @@ describe('DockerNetworkManager', () => {
   });
 
   describe('reconcileOrphanNetworks()', () => {
+    beforeEach(useDurableOwnership);
     it('removes networks whose pod ID is not in the active set', async () => {
       const removeFn = vi.fn().mockResolvedValue(undefined);
       docker.mock.listNetworks.mockResolvedValueOnce([
@@ -597,7 +613,10 @@ describe('DockerNetworkManager', () => {
       ]);
       docker.mock.getNetwork.mockImplementation((id: string) => ({
         remove: removeFn,
-        inspect: vi.fn(),
+        inspect: vi.fn(async () => ({
+          Name: `autopod-${id === 'net-b' ? 'bbb' : 'aaa'}`,
+          Containers: {},
+        })),
       }));
 
       const pruned = await manager.reconcileOrphanNetworks(new Set(['aaa']));
@@ -644,6 +663,7 @@ describe('DockerNetworkManager', () => {
       const removeFn = vi.fn().mockResolvedValue(undefined);
       const disconnectFn = vi.fn().mockResolvedValue(undefined);
       const inspectFn = vi.fn().mockResolvedValue({
+        Name: 'autopod-yappy-goat',
         Containers: { 'container-1': {}, 'container-2': {} },
       });
       docker.mock.listNetworks.mockResolvedValueOnce([
@@ -679,6 +699,7 @@ describe('DockerNetworkManager', () => {
         .mockRejectedValueOnce(new Error('container gone'))
         .mockResolvedValueOnce(undefined);
       const inspectFn = vi.fn().mockResolvedValue({
+        Name: 'autopod-bad',
         Containers: { 'container-1': {}, 'container-2': {} },
       });
       docker.mock.listNetworks.mockResolvedValueOnce([
@@ -701,7 +722,7 @@ describe('DockerNetworkManager', () => {
       expect(removeFn).toHaveBeenCalledTimes(1);
     });
 
-    it('falls back to listNetworks endpoints when inspect fails', async () => {
+    it('does not detach or remove from stale list data when live inspection fails', async () => {
       const removeFn = vi.fn().mockResolvedValue(undefined);
       const disconnectFn = vi.fn().mockResolvedValue(undefined);
       const inspectFn = vi.fn().mockRejectedValue(new Error('inspect blew up'));
@@ -720,12 +741,9 @@ describe('DockerNetworkManager', () => {
       });
 
       const pruned = await manager.reconcileOrphanNetworks(new Set());
-      expect(pruned).toBe(1);
-      expect(disconnectFn).toHaveBeenCalledWith({
-        Container: 'container-from-list',
-        Force: true,
-      });
-      expect(removeFn).toHaveBeenCalledTimes(1);
+      expect(pruned).toBe(0);
+      expect(disconnectFn).not.toHaveBeenCalled();
+      expect(removeFn).not.toHaveBeenCalled();
     });
 
     it('continues and returns partial count when a remove fails', async () => {
@@ -747,7 +765,10 @@ describe('DockerNetworkManager', () => {
       ]);
       docker.mock.getNetwork.mockImplementation((id: string) => ({
         remove: id === 'net-a' ? removeFail : removeOk,
-        inspect: vi.fn(),
+        inspect: vi.fn(async () => ({
+          Name: `autopod-${id === 'net-a' ? 'aaa' : 'bbb'}`,
+          Containers: {},
+        })),
       }));
 
       const pruned = await manager.reconcileOrphanNetworks(new Set());

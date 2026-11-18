@@ -40,6 +40,7 @@ import { RecoveryForkSelectionError } from '../pods/recovery-fork-rejection.js';
 import type { ProviderAccountHealthStore } from '../provider-accounts/provider-account-health.js';
 import type { ProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { IsolatedReviewer, type IsolatedReviewerOptions } from '../validation/isolated-reviewer.js';
+import { ReviewerBudgetRevisions } from '../validation/reviewer-budget-revisions.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
 import { assertLaunchAgentAccount, resolveLaunchAgentRoute } from './agent-route-resolution.js';
 import { assertAnalysisWorkspace } from './analysis-workspace.js';
@@ -248,6 +249,23 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     if (!options.pods.taskExecutions)
       configurationError('Whole-task accounting is unavailable', 'TASK_BUDGET_UNAVAILABLE', 503);
     return options.pods.taskExecutions.snapshot(id);
+  });
+  const reviewerBudget = new ReviewerBudgetRevisions(db, {
+    readPod: (id) => options.pods.getOrThrow(id),
+    readConfig: snapshots.get,
+    assertSettled(podId) {
+      if (!options.pods.taskExecutions || !options.pods.validationExecutions)
+        configurationError(
+          'Task execution accounting is unavailable',
+          'TASK_BUDGET_UNAVAILABLE',
+          503,
+        );
+      options.pods.taskExecutions.assertCanDelete(podId);
+      options.pods.validationExecutions.assertTaskSettled(podId);
+      const usage = options.pods.taskExecutions.snapshot(podId);
+      if (usage.budgetCheck?.status === 'unavailable')
+        configurationError(usage.budgetCheck.reason, 'REVIEWER_RECONCILIATION_REQUIRED', 409);
+    },
   });
   const reviewer = new IsolatedReviewer({
     ...options.reviewer,
@@ -563,6 +581,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
   const routes: ConfigurationRouteDependencies = {
     inputBundles,
     referencePreviews,
+    reviewerBudget,
     reviewerRuns: {
       list: (podId) => reviewerRuns.list(podId),
       reconcile: (podId, runId, actorId, note, usage) =>

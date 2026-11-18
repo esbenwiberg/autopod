@@ -6,13 +6,13 @@ describe('delivery PR commands', () => {
   it('publishes the feature branch before creating a PR and persists retry URL', async () => {
     const f = createDeliveryFixture();
     await f.pr().retryCreatePr('prepare');
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        targetBranch: 'branch',
-        maxDeletions: 0,
-        pat: 'synthetic-git-key',
-      }),
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledWith(
+      f.directory,
+      'branch',
+      expect.objectContaining({ pat: 'synthetic-git-key', onPrepared: expect.any(Function) }),
     );
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.podRepo.sourcePublications?.latestConfirmedForMerge?.(f.pod())).toBeTruthy();
     expect(f.provider.createPr).toHaveBeenCalledWith(
       expect.objectContaining({
         branch: 'branch',
@@ -21,12 +21,45 @@ describe('delivery PR commands', () => {
         validationResult: f.pod().lastValidationResult,
       }),
     );
-    expect(vi.mocked(f.worktreeManager.mergeBranch).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(vi.mocked(f.worktreeManager.pushBranch).mock.invocationCallOrder[0]).toBeLessThan(
       f.provider.createPr.mock.invocationCallOrder[0] ?? 0,
     );
     expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
     expect(f.pod().status).toBe('validated');
   });
+  it('supports completed-pod PR retry only with current immutable checked source', async () => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', { status: 'complete' });
+    await f.pr().retryCreatePr('prepare');
+    expect(f.pod().status).toBe('complete');
+    expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it('settles an original completed-pod push without certifying a changed failing result', async () => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', { status: 'complete' });
+    const push = vi.mocked(f.worktreeManager.pushBranch).getMockImplementation();
+    if (!push) throw new Error('Missing native publication fixture');
+    vi.mocked(f.worktreeManager.pushBranch).mockImplementationOnce(async (...args) => {
+      await push(...args);
+      f.podRepo.update('prepare', {
+        lastValidationResult: { ...f.pod().lastValidationResult!, overall: 'fail' },
+      });
+      throw new Error('Original push response lost');
+    });
+    await expect(f.pr().retryCreatePr('prepare')).rejects.toBeDefined();
+    f.worktreeManager.observeSourceBranch = vi.fn(async () => 'a'.repeat(40));
+    await expect(f.pr().retryCreatePr('prepare')).rejects.toMatchObject({
+      code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+    });
+    expect(f.podRepo.sourcePublications?.pending?.(f.pod())).toBeNull();
+    expect(f.pod().lastValidationResult?.overall).toBe('fail');
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+  });
+
   it('rejects active, existing-PR and missing-worktree retry admission before mutation', async () => {
     const f = createDeliveryFixture();
     const pr = f.pr();
@@ -42,7 +75,7 @@ describe('delivery PR commands', () => {
   it('preserves GitCredentialError identity and never creates a PR after the failed push', async () => {
     const f = createDeliveryFixture();
     const failure = new GitCredentialError('synthetic auth', 'ado', 'push', 'synthetic');
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(failure);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(failure);
     await expect(f.pr().retryCreatePr('prepare')).rejects.toBe(failure);
     expect(f.provider.createPr).not.toHaveBeenCalled();
   });
@@ -50,12 +83,12 @@ describe('delivery PR commands', () => {
     const f = createDeliveryFixture();
     const failure = new Error('synthetic push');
     f.prCaptured.handleDeletionGuardError = vi.fn(() => true);
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(failure);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(failure);
     await expect(f.pr().retryCreatePr('prepare')).rejects.toMatchObject({
       code: 'WORKTREE_COMPROMISED',
     });
     f.prCaptured.handleDeletionGuardError = vi.fn(() => false);
-    vi.mocked(f.worktreeManager.mergeBranch).mockRejectedValueOnce(failure);
+    vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(failure);
     await expect(f.pr().retryCreatePr('prepare')).rejects.toMatchObject({
       code: 'BRANCH_PUSH_FAILED',
       statusCode: 502,
@@ -77,6 +110,35 @@ describe('delivery PR commands', () => {
       f.pr().ensurePrBaseBranchOnOrigin(f.pod(), f.passContext().profile, 'release', 'test'),
     ).resolves.toBeUndefined();
   });
+  it.each([
+    'failed-checks',
+    'active-checks',
+  ] as const)('does not publish from a superseded or unsettled validation certificate (%s)', async (kind) => {
+    const f = createDeliveryFixture();
+    if (kind === 'failed-checks')
+      f.podRepo.update('prepare', {
+        lastValidationResult: { ...f.pod().lastValidationResult!, overall: 'fail' },
+      });
+    else {
+      const ledger = f.podRepo.taskRetries;
+      if (!ledger) throw new Error('Missing retry ledger');
+      const attempt = ledger.admit(
+        'prepare',
+        f.pod().lifecycleGeneration,
+        { source: null, contract: null, commands: null, environment: null, implementation: null },
+        'a'.repeat(64),
+        [],
+      );
+      ledger.start(attempt.id);
+    }
+    await expect(f.pr().retryCreatePr('prepare')).rejects.toMatchObject({
+      code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+    });
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+  });
+
   it('retains PR creation failure classification without persisting a fabricated URL', async () => {
     const f = createDeliveryFixture();
     f.provider.createPr.mockRejectedValueOnce(new Error('synthetic create'));

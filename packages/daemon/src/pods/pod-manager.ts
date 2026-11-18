@@ -467,7 +467,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logger,
   });
 
-  const { ensurePrBaseBranchOnOrigin, pushAndCreatePr, retryCreatePr } = createDeliveryPr({
+  const {
+    ensurePrBaseBranchOnOrigin,
+    pushAndCreatePr,
+    retryCreatePr,
+    reconcilePendingPublication,
+  } = createDeliveryPr({
     worktreeManager,
     logger,
     resolveGitCredential,
@@ -700,6 +705,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     completeFixPodAfterPush,
     emitActivityStatus,
     pushAndCreatePr,
+    reconcilePendingPublication,
     transition,
   });
 
@@ -1160,6 +1166,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }),
   });
   const { prepareApprovalDelivery } = createApprovalDeliveryPreparation({
+    resolveGitCredential,
     podRepo,
     assertApprovalCurrent,
     executionForPod,
@@ -1178,6 +1185,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
   });
   const { executeApprovalDelivery } = createApprovalDeliveryExecution({
+    eventBus,
+    maybeTriggerDependents,
     isGoal: (id) =>
       deps.launchConfiguration?.read(id)?.intent === 'goal' ||
       Boolean(deps.launchConfiguration?.goals?.get(id)),
@@ -1203,6 +1212,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   const approvalWorkflow = createApprovalWorkflow({
     podRepo,
+    assertExecutionTerminationVerified,
+    executionForPod,
+    worktreeManager,
+    resolveGitCredential,
     resolveApprovalReadiness,
     assertApprovalCurrent,
     logger,

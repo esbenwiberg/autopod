@@ -24,6 +24,7 @@ import {
   guardValidationContainer,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+import { observeValidationSource } from './validation-source-evidence.js';
 import {
   failedValidationPhases,
   hasPendingFactDecision,
@@ -623,6 +624,12 @@ export function createValidationTriggerWorkflow(
                 councilOwnership.assertCurrent,
               );
               councilOwnership.assertCurrent();
+              const reviewPod = councilOwnership.assertCurrent();
+              const reviewCm = containerManagerFactory.get(reviewPod.executionTarget);
+              const reviewSource = podRepo.validationSources
+                ? await observeValidationSource(reviewCm, reviewPod)
+                : null;
+              councilOwnership.assertCurrent();
               const reviewOnly = await validationEngine.validate(
                 withReviewerLaunchPreflight(reviewConfig, councilOwnership),
                 (phase) => {
@@ -705,6 +712,23 @@ export function createValidationTriggerWorkflow(
               };
               if (s2.validationOverrides && s2.validationOverrides.length > 0) {
                 hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
+              }
+              if (hoistedResult.overall === 'pass' && reviewSource && podRepo.validationSources) {
+                const afterReview = await observeValidationSource(
+                  reviewCm,
+                  councilOwnership.assertCurrent(),
+                );
+                councilOwnership.assertCurrent();
+                if (afterReview)
+                  podRepo.validationSources.adjudicate(
+                    councilOwnership.assertCurrent(),
+                    resolveEffectiveBoundProfile(reviewPod),
+                    reviewSource,
+                    afterReview,
+                    effectiveResult,
+                    reviewOnly,
+                    hoistedResult,
+                  );
               }
               // Persist the second opinion even when it remains blocking.
               podRepo.update(podId, { lastValidationResult: hoistedResult });

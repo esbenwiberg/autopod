@@ -2,6 +2,10 @@ import { AutopodError, type ExternalDeliveryReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { assertMergeTarget } from '../worktrees/merge-source-identity.js';
 
+export type ExternalDeliverySourceProof =
+  | { publicationId: string; validationId: null }
+  | { publicationId: null; validationId: string };
+
 export function createExternalDeliveryRepository(db: Database.Database) {
   const get = (podId: string): ExternalDeliveryReceipt | null => {
     const row = db
@@ -41,7 +45,11 @@ export function createExternalDeliveryRepository(db: Database.Database) {
           409,
         );
     },
-    record(receipt: ExternalDeliveryReceipt): void {
+    record(
+      receipt: ExternalDeliveryReceipt,
+      sourceProof: ExternalDeliverySourceProof,
+      assertSourceEvidence: () => void,
+    ): void {
       if (!db.inTransaction)
         throw new Error('External delivery must settle atomically with pod completion');
       const current = db
@@ -51,7 +59,7 @@ export function createExternalDeliveryRepository(db: Database.Database) {
         .get(receipt.podId) as Record<string, unknown> | undefined;
       if (
         !current ||
-        current.execution_target !== 'sandbox' ||
+        !['sandbox', 'local'].includes(String(current.execution_target)) ||
         current.status !== 'validated' ||
         current.lifecycle_generation !== receipt.generation ||
         current.container_id !== receipt.retainedSandboxId ||
@@ -73,6 +81,7 @@ export function createExternalDeliveryRepository(db: Database.Database) {
           409,
         );
       }
+      assertSourceEvidence();
       if (receipt.ancestry || receipt.mergedHeadSha) {
         const proof = receipt.ancestry;
         if (
@@ -107,6 +116,11 @@ export function createExternalDeliveryRepository(db: Database.Database) {
         receipt.generation,
         receipt.retainedSandboxId,
         JSON.stringify(receipt),
+      );
+      db.prepare('INSERT INTO external_delivery_source_evidence VALUES(?,?,?)').run(
+        receipt.id,
+        sourceProof.publicationId,
+        sourceProof.validationId,
       );
     },
   };

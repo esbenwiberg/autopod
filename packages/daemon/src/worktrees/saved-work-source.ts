@@ -58,8 +58,24 @@ export async function verifySavedSource(
   if ((await git(['rev-parse', `${source.commit}^{tree}`])).stdout.trim() !== source.tree)
     draftError('Saved tree differs from recorded proof.');
   // Read the actual commit header; revision traversal can honor legacy grafts.
-  const headers = (await git(['cat-file', '-p', source.commit])).stdout.split('\n\n', 1)[0] ?? '';
-  const parents = headers.split('\n').filter((line) => line.startsWith('parent '));
+  const raw = (await git(['cat-file', 'commit', source.commit])).stdout;
+  const separator = raw.indexOf('\n\n');
+  const headers = raw.slice(0, separator);
+  const lines = headers.split('\n');
+  const parents = lines.filter((line) => line.startsWith('parent '));
+  if (
+    source.kind === 'sandbox-checkpoint' &&
+    (separator < 0 ||
+      !source.parent ||
+      !source.parentTree ||
+      raw.slice(separator + 2).split('\n')[0] !== 'autopod sandbox checkpoint' ||
+      lines.filter((line) => /^author Autopod <autopod@localhost> [0-9]+ [+-][0-9]{4}$/.test(line))
+        .length !== 1 ||
+      lines.filter((line) =>
+        /^committer Autopod <autopod@localhost> [0-9]+ [+-][0-9]{4}$/.test(line),
+      ).length !== 1)
+  )
+    draftError('Saved checkpoint lacks the daemon-authored raw snapshot identity.');
   if (!headers.split('\n').includes(`tree ${source.tree}`))
     draftError('Actual commit object has a different saved tree.');
   if (source.parent && (parents.length !== 1 || parents[0] !== `parent ${source.parent}`))
