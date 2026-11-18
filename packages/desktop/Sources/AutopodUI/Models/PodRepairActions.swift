@@ -25,6 +25,7 @@ public struct PodRepairObservation: Sendable {
 public struct PodRepairActions: Sendable {
   public let scope: String
   public var loadReworkEligibility: @MainActor @Sendable (String) async throws -> ReworkEligibility = { _ in throw URLError(.unsupportedURL) }
+  public var inspectInfrastructure: @MainActor @Sendable (String) async throws -> RepairRetainedContext = { _ in throw URLError(.unsupportedURL) }
   public var submitRework: @MainActor @Sendable (String, ReworkRequest) async throws -> ReworkRequestReceipt = { _, _ in throw URLError(.unsupportedURL) }
   public var inspectRework: @MainActor @Sendable (String, String) async throws -> ReworkRequestReceipt = { _, _ in throw URLError(.unsupportedURL) }
   public var submit: @MainActor @Sendable (String, PodRepairKind, String?) async throws -> PodRepairReceipt
@@ -46,6 +47,9 @@ public struct PodRepairActions: Sendable {
   var retryReason = ""
   private(set) var eligibility: ReworkEligibility?
   private(set) var eligibilityLoading = false
+  private(set) var infrastructureContext: RepairRetainedContext?
+  private(set) var infrastructureInspectionError: String?
+  var infrastructureBlocked: Bool { ordinaryRecovery && eligibility?.code == "INFRASTRUCTURE_BLOCKED" }
   private(set) var authorizationMessage: String?
   private(set) var authorizationPending: TaskRetryAuthorizationRequest?
   private(set) var reworkDraft: ReworkRequest?
@@ -138,8 +142,26 @@ public struct PodRepairActions: Sendable {
   }
   private func loadEligibility(id: String, actions: PodRepairActions) async {
     eligibilityLoading = true; eligibility = nil; error = nil
+    infrastructureContext = nil; infrastructureInspectionError = nil
     defer { eligibilityLoading = false }
-    do { eligibility = try await actions.loadReworkEligibility(id) }
+    do {
+      let value = try await actions.loadReworkEligibility(id)
+      guard bind(actions), !Task.isCancelled else { return }
+      eligibility = value
+      if value.code == "INFRASTRUCTURE_BLOCKED" {
+        do {
+          let context = try await actions.inspectInfrastructure(id)
+          guard bind(actions), !Task.isCancelled else { return }
+          guard context.inspection?.generation == value.generation else {
+            infrastructureInspectionError = "The lifecycle changed or could not be identified. Inspect current recovery state before selecting a source."
+            return
+          }
+          infrastructureContext = context
+        } catch {
+          infrastructureInspectionError = "Recorded needs could not be loaded: \(error.localizedDescription). Use the read-only CLI inspection; ordinary recovery remains blocked."
+        }
+      }
+    }
     catch { self.error = "Recovery eligibility unavailable: \(error.localizedDescription). A compatible daemon is required." }
   }
   func authorize(id: String, actions: PodActions) async {

@@ -92,6 +92,26 @@ Read-only inspection includes separate `infrastructure.policies.checks` and
 block ordinary/checks-only continuation while one explicit repair can collect it.
 These observations do not qualify source/software, authorize a retry or admit work.
 
+## Desktop handoff
+
+When ordinary Rework, Revalidate or Resume reports `INFRASTRUCTURE_BLOCKED`, the
+repair sheet shows **Infrastructure recovery required**, the current generation's
+recorded owner/phase/needs and preservation observations. This is a durable report
+hold, not live infrastructure health. Refresh and token-budget changes do not
+repair it, and a successful worker segment that reported a blocker is not labelled
+a worker failure.
+
+**Copy read-only inspection command** supplies `ap recover-infrastructure POD
+--json` (using the installed `autopod` command). It only copies text; nothing is
+executed. Use the exact checks-only CLI selection below for fresh checks without
+coding. Software/resource selection and admission remain explicit CLI steps, not
+an automatic replacement performed by the sheet. The separately available
+**Review replacement environment and coding repair…** opens the existing
+conditional repair-continuation inspection/preview; opening it does not qualify
+an environment or admit a coding segment. Its typed prerequisites and all ordinary
+guards still apply. Unknown/stale report observations do not enable ordinary
+controls. No report is cleared and no original resource is deleted by this UI.
+
 ## Inspect, qualify, select
 
 ```sh

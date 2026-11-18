@@ -15,6 +15,7 @@ internal struct PodRepairSheet: View {
   @State private var goalBlocked = false
   @State private var confirmClose = false
   @State private var confirmRepeat = false
+  @State private var showingReplacement = false
   init(isPresented: Binding<Bool>, pod: Pod, kind: PodRepairKind, relatedPods: [Pod], actions: PodActions,
     configuration: LaunchConfigurationActions? = nil, onSelect: ((String) -> Void)? = nil, model: PodRepairModel? = nil) {
     self._isPresented = isPresented; self.pod = pod; self.relatedPods = relatedPods; self.actions = actions
@@ -75,6 +76,9 @@ internal struct PodRepairSheet: View {
       .onChange(of: pod.status) { _, _ in
         if model.ordinaryRecovery { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
       }
+      .sheet(isPresented: $showingReplacement) {
+        RepairContinuationSheet(podId: pod.id, actions: actions.repairContinuation)
+      }
       .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty || !model.guidance.isEmpty)
       .confirmationDialog("Leave this repair handoff?", isPresented: $confirmClose) {
         Button("Leave handoff", role: .destructive) { guard !model.busy, !budget.busy else { return }; isPresented = false }.disabled(model.busy || budget.busy); Button("Keep reviewing", role: .cancel) {}
@@ -121,7 +125,7 @@ internal struct PodRepairSheet: View {
           Text("Leave blank to auto-detect CI failures and PR review comments. Feedback may join an existing fix pod.").font(.caption).foregroundStyle(.secondary)
         }
         if model.kind == .rework && model.ordinaryRework && !observed.isWorkspace {
-          if snapshot?.intent != "goal" {
+          if snapshot?.intent != "goal" && !model.infrastructureBlocked {
             Text("Guidance for this continuation · optional").font(.headline)
             TextEditor(text: $model.guidance).frame(minHeight: 120).disabled(model.busy)
             .accessibilityIdentifier("repair-continuation-guidance")
@@ -129,7 +133,9 @@ internal struct PodRepairSheet: View {
           }
           if model.eligibilityLoading { ProgressView("Loading retry eligibility…") }
           else if let eligibility = model.eligibility {
-            Text(eligibility.reason).accessibilityIdentifier("repair-retry-eligibility")
+            if !model.infrastructureBlocked {
+              Text(eligibility.reason).accessibilityIdentifier("repair-retry-eligibility")
+            }
             if let failureId = eligibility.failureId {
               Text("Worker failure: \(failureId)").font(.caption).textSelection(.enabled)
             }
@@ -154,15 +160,20 @@ internal struct PodRepairSheet: View {
             }
           }
           if let message = model.authorizationMessage { Text(message) }
-          Button("Refresh retry eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
+          Button(model.infrastructureBlocked ? "Check recovery state" : "Refresh retry eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
             .disabled(model.busy || model.eligibilityLoading)
         }
-        if let block { Label(block, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+        if model.infrastructureBlocked {
+          InfrastructureRecoveryHandoff(podId: pod.id, context: model.infrastructureContext,
+            inspectionError: model.infrastructureInspectionError,
+            canReviewReplacement: actions.repairContinuation.available,
+            onReviewReplacement: { showingReplacement = true })
+        } else if let block { Label(block, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
         if model.ordinaryRecovery && model.kind != .rework {
           Button("Refresh recovery eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
             .disabled(model.busy || model.eligibilityLoading)
         }
-        if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace {
+        if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace, !model.infrastructureBlocked {
           TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, model: budget,
             continuationTitle: block == nil && model.canSubmit ? title : nil,
             onContinue: {
@@ -188,7 +199,8 @@ internal struct PodRepairSheet: View {
     }
   }
   private var explanation: String {
-    switch model.kind {
+    if model.infrastructureBlocked { return "Inspect the recorded needs and choose a supported fresh execution." }
+    return switch model.kind {
     case .manual: "A workspace for your repair."
     case .rework: observed.isWorkspace ? "Bring the workspace back." : "Let the agent rework this task."
     case .revalidate: "Validate the latest code without running an agent."
@@ -197,7 +209,8 @@ internal struct PodRepairSheet: View {
     }
   }
   private var effect: String {
-    switch model.kind {
+    if model.infrastructureBlocked { return "Original work and reports stay retained. Ordinary retry is unavailable; the infrastructure recovery handoff keeps source, execution and retry safeguards." }
+    return switch model.kind {
     case .manual: "You make the repair in an interactive workspace on the source branch. No autonomous agent starts. After successful push, completion revalidates a linked worker when it is failed or review required."
     case .rework: observed.isWorkspace ? "A new container attaches to the existing worktree. No autonomous agent starts." : "Keep the pod identity and existing task. An agent may run again and spend tokens. Execution safety and native Goal checks still apply."
     case .revalidate: "Run validation on the latest code. The request receipt is separate from the validation result."
@@ -208,7 +221,7 @@ internal struct PodRepairSheet: View {
   private var summary: some View {
     VStack(alignment: .leading, spacing: 18) {
       Text("HANDOFF SUMMARY").font(.caption2).tracking(1.2).foregroundStyle(.secondary)
-      Text(model.uncertain ? "Result unconfirmed" : model.receipt != nil ? "Request accepted" : "Ready for review").font(.caption).foregroundStyle(DesktopTheme.accent)
+      Text(model.uncertain ? "Result unconfirmed" : model.receipt != nil ? "Request accepted" : model.infrastructureBlocked ? "Infrastructure recovery required" : "Ready for review").font(.caption).foregroundStyle(DesktopTheme.accent)
       Text(title).font(.headline); Divider()
       Text(repository ?? "Repository unavailable").font(.callout)
       Text("Source \(observed.id)").font(.caption).foregroundStyle(.secondary)
@@ -219,7 +232,7 @@ internal struct PodRepairSheet: View {
   private var footer: some View {
     HStack {
       if model.busy { ProgressView().controlSize(.small) }
-      Text(model.uncertain ? "Check state before repeating" : model.receipt != nil ? "Receipt retained" : "Review the effect before continuing").font(.caption).foregroundStyle(.secondary)
+      Text(model.uncertain ? "Check state before repeating" : model.receipt != nil ? "Receipt retained" : model.infrastructureBlocked ? "Use the infrastructure recovery handoff" : "Review the effect before continuing").font(.caption).foregroundStyle(.secondary)
       Spacer()
       if model.uncertain || model.receipt != nil {
         if model.canReviewAnotherAttempt { Button("Review another attempt") { confirmRepeat = true }.disabled(model.busy) }

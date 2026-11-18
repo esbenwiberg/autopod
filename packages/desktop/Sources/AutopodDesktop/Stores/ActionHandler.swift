@@ -278,6 +278,10 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.repair.inspectInfrastructure = { [weak self] id in
+      guard let self else { throw DaemonError.networkError("Connection unavailable") }
+      return try await self.perform { try await self.api.getRepairRetainedContext(id) }
+    }
     result.repair.loadReworkEligibility = { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getReworkEligibility(id) }
