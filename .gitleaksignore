@@ -38,4 +38,32 @@ e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-
 e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:45
 e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:140
 e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:281
+
+# Historical synthetic fixtures rechecked for the full-history lane in PR #606.
+# Each exception pins one commit/path/rule/line, not a file, rule or value globally.
+# Secretlint's explicitly synthetic fakeKey (a noncanonical AKIA fixture).
+dd7dba6df57bc43adc703a8a2b9412ee9744569b:packages/daemon/src/security/detectors/secretlint-detector.test.ts:aws-access-token:36
+4dc8b4f9ca0f355882706a9160977b37a81d4a35:packages/daemon/src/security/detectors/secretlint-detector.test.ts:aws-access-token:10
+3c5bc04fbde139aaf82845ff76cf34a100c40616:packages/daemon/src/security/detectors/secretlint-detector.test.ts:aws-access-token:10
+# Mock fetch/readFile sanitization inputs (sk-test...) and org/private-skills toy PATs.
+2ff26f3f6c4f4bbdfe7efd550a421708f7591685:packages/daemon/src/pods/skill-resolver.test.ts:generic-api-key:375
+2ff26f3f6c4f4bbdfe7efd550a421708f7591685:packages/daemon/src/pods/section-resolver.test.ts:generic-api-key:279
+39ddc947f0b44602aeb3d8c752c0263d2608d620:packages/daemon/src/pods/section-resolver.test.ts:generic-api-key:216
+5bc2596a0a8646d996a25cc3f4b9331f8a8ffe8d:packages/daemon/src/pods/skill-resolver.test.ts:generic-api-key:130
+24474ea263759e2e6fa828839ca3d2b4975a5b45:packages/daemon/src/pods/skill-resolver.test.ts:generic-api-key:130
+74688d38f21e110d75c2438a35679bac7445ed90:packages/daemon/src/sessions/skill-resolver.test.ts:generic-api-key:146
+# The npmrc matcher uses base64 of the literal fixture text 'thisisatoken123456'.
+e75c1b58871d3ab8c3a66a7c997d7cdf36ccd395:packages/shared/src/sanitize/patterns.test.ts:generic-api-key:295
+# Loopback smoke fixtures use the literal dev-token, not a deployed/personal bearer.
+8d049d265ead73d759718a128a1019f3b15925de:scripts/smoke-test.sh:curl-auth-header:90
+8d049d265ead73d759718a128a1019f3b15925de:scripts/smoke-test.sh:curl-auth-header:103
+8d049d265ead73d759718a128a1019f3b15925de:scripts/docker-validate.sh:curl-auth-header:119
+8d049d265ead73d759718a128a1019f3b15925de:scripts/docker-validate.sh:curl-auth-header:131
+# Sanitizer positive-match/redaction tests: sequential AKIA, short Slack and test-account values.
+cb140f33a73f945944d484b33f2a00a841beb32c:packages/shared/src/sanitize/sanitize.test.ts:aws-access-token:33
+cb140f33a73f945944d484b33f2a00a841beb32c:packages/shared/src/sanitize/patterns.test.ts:aws-access-token:92
+0e195be81fde879d309517e53a4a12c71b78961d:packages/shared/src/sanitize/processor.test.ts:generic-api-key:48
+0e195be81fde879d309517e53a4a12c71b78961d:packages/shared/src/sanitize/processor.test.ts:generic-api-key:59
+d307d461dfb7967391b87bd9b358cd089e7e4363:packages/shared/src/sanitize/processor.test.ts:generic-api-key:48
+d307d461dfb7967391b87bd9b358cd089e7e4363:packages/shared/src/sanitize/processor.test.ts:generic-api-key:59
 e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:427

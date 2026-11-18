@@ -27,9 +27,12 @@ export function reworkRoutes(
   };
   const inspect = (podId: string): ReworkEligibility => {
     const pod = manager.getSession(podId);
+    const latest = repo?.workerRetries?.state(podId).latest;
     const base = {
       generation: pod.lifecycleGeneration,
-      failureId: repo?.workerRetries?.state(podId).latest?.id ?? null,
+      // A worker can finish successfully by reporting an execution blocker.
+      // Do not present that passing admission as a failed worker/retry identity.
+      failureId: latest?.endedAt && latest.outcome !== 'pass' ? latest.id : null,
     };
     try {
       if (repo) assertNoInfrastructureBlocker(repo, podId);

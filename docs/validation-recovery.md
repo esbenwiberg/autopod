@@ -92,6 +92,43 @@ replace the resource, reset counters or detach that source. Inspect the durable
 operation and current execution first. Passing source-bound checks/review still
 requires fresh human approval; automation cannot consume the earlier approval.
 
+## Incomplete validation processes
+
+Fatal allocation diagnostics now park Docker validation as
+`PROCESS_MEMORY_EXHAUSTED`, like the existing sandbox allocation hold, instead
+of sending incomplete checks back to a coding agent. A failed test command with
+Vitest's unhandled pool-error and unexpected-worker-exit diagnostics parks as
+`VALIDATION_RUNNER_CRASHED`. These are failed/incomplete validation, not evidence
+that code is innocent, that kernel OOM occurred, or that another execution is safe.
+Ordinary assertion failures retain coding-correction semantics; successful commands
+printing diagnostic fixtures are not reclassified. Existing source, termination,
+stage-retry and independent-review guards remain in force.
+
+New Docker workers use Docker init to reap orphan tool children. An existing
+container is not retrofitted by deployment: preserve it and select supported fresh
+execution after diagnosis rather than clearing a hold or manually deleting it.
+
+This repository's daemon test script defaults to a bounded 4 GiB Node old-space
+heap, propagated to forked test workers. It retains explicit `NODE_OPTIONS`
+(including smaller budgets), every test, the single-worker default and all exit
+statuses. This addresses Node 22's approximately 2 GiB default observed in the
+8 GiB self-hosting runner; it does not prove the absence of a code/test leak or
+make a failed run pass. Qualify container capacity separately. Frozen worker
+source/commands do not acquire this script change automatically.
+
+The opt-in reaping fixture exercises the real manager, 2,675 orphan tool processes
+and the original incident's six-second cleanup deadline, with an explicit cached
+Linux image containing `autopod`, Node and `setsid`:
+
+```sh
+AUTOPOD_DOCKER_REAPING_FIXTURE_IMAGE=sha256:... \
+AUTOPOD_DOCKER_REAPING_FIXTURE_SOCKET=/path/to/local/docker.sock \
+npx pnpm --filter @autopod/daemon exec vitest run src/containers/docker-worker-reaping.docker.test.ts
+```
+
+It creates only its own network-disabled, resource-bounded container and removes
+it in cleanup; it neither mounts host workspaces nor probes production resources.
+
 ## Diagnostics
 
 Worker feedback retains bounded log head **and tail**. The desktop lifts decisive

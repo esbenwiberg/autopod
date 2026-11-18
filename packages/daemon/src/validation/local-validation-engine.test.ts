@@ -3318,14 +3318,53 @@ human_review: []
   }) => {
     const engine = createLocalValidationEngine(sandboxMemoryContainer(signature));
     const result = await engine.validate(sandboxMemoryConfig(phase, 'local'));
-
     expect(result.infrastructureFailure).toMatchObject({
       phase,
       code: 'PROCESS_MEMORY_EXHAUSTED',
       retryable: false,
     });
+    expect(result.infrastructureFailure?.message).toContain('not proof of a container OOM');
     expect(result.overall).toBe('fail');
-    expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+    expect(result.reviewSkipKind).toBe('upstream-failed');
+  });
+
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('parks an incomplete Vitest worker on %s without inventing OOM', async (executionTarget) => {
+    const diagnostic =
+      '\u001b[31mError: [vitest-pool]: Worker forks emitted error.\u001b[39m\nCaused by: Error: Worker exited unexpectedly\n';
+    const engine = createLocalValidationEngine(sandboxMemoryContainer(diagnostic));
+    const result = await engine.validate(sandboxMemoryConfig('test', executionTarget));
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'VALIDATION_RUNNER_CRASHED',
+      retryable: false,
+    });
+    expect(result.test?.status).toBe('skip');
+    expect(result.overall).toBe('fail');
+  });
+
+  it.each([
+    { output: 'assertion failed: expected worker exited unexpectedly', exitCode: 1 },
+    { output: 'Error: [vitest-pool]: Worker forks emitted error.', exitCode: 1 },
+    {
+      output:
+        'Error: [vitest-pool]: Worker forks emitted error.\nCaused by: Error: Worker exited unexpectedly',
+      exitCode: 0,
+    },
+    {
+      output: 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory',
+      exitCode: 0,
+    },
+  ])('keeps successful diagnostic fixtures and ordinary failures honest: $exitCode $output', async ({
+    output,
+    exitCode,
+  }) => {
+    const engine = createLocalValidationEngine(sandboxMemoryContainer(output, exitCode));
+    const result = await engine.validate(sandboxMemoryConfig('test', 'local'));
+    expect(result.infrastructureFailure).toBeUndefined();
+    expect(result.test?.status).toBe(exitCode === 0 ? 'pass' : 'fail');
   });
 
   it.each([

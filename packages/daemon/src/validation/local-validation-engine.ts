@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { promisify, stripVTControlCharacters } from 'node:util';
 import type {
   AdvisoryBrowserQaResult,
   DeviationsAssessment,
@@ -1978,6 +1978,22 @@ function classifyCommandResourceFailure(
           retryable: false,
         };
   if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
+  // A test assertion and an incomplete test runner are different outcomes. Require
+  // Vitest's unhandled pool-error diagnostic, not arbitrary mentions of a worker exit.
+  const diagnostic = stripVTControlCharacters(output);
+  if (
+    phase === 'test' &&
+    /Error:\s*\[vitest-pool\]: Worker (?:forks|threads) emitted error\./.test(diagnostic) &&
+    /(?:Caused by: )?Error: Worker exited unexpectedly/.test(diagnostic)
+  ) {
+    return {
+      phase,
+      code: 'VALIDATION_RUNNER_CRASHED',
+      message:
+        'The Vitest worker exited without completing its tests. Preserve diagnostics and investigate the runner and test code before another execution; this does not establish OOM or authorize coding correction.',
+      retryable: false,
+    };
+  }
   return null;
 }
 

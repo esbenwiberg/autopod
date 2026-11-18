@@ -161,6 +161,54 @@ it('projects a current lifecycle infrastructure hold before unrelated Rework res
   }
 });
 
+it.each([
+  'pass',
+  'nonretryable',
+  null,
+] as const)('labels only a settled failing worker admission, not a blocker-reporting pass: %s', async (outcome) => {
+  const f = await fixture();
+  try {
+    const retries = f.repo.workerRetries;
+    if (!retries) throw new Error('Missing retry fixture');
+    const state = retries.state('rework-fixture');
+    vi.spyOn(retries, 'state').mockReturnValue({
+      ...state,
+      latest: {
+        id: 'latest-worker-run',
+        taskId: state.taskId,
+        podId: 'rework-fixture',
+        stage: 'worker',
+        identity: {
+          source: null,
+          contract: null,
+          commands: null,
+          environment: null,
+          implementation: null,
+        },
+        retryKind: null,
+        admittedAt: new Date().toISOString(),
+        notBefore: new Date().toISOString(),
+        startedAt: new Date().toISOString(),
+        endedAt: outcome ? new Date().toISOString() : null,
+        outcome,
+        measuredDurationMs: outcome ? 10 : null,
+      },
+    });
+    vi.spyOn(f.repo, 'hasInfrastructureBlocker').mockReturnValue(true);
+    const result = (
+      await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })
+    ).json();
+    expect(result).toMatchObject({
+      code: 'INFRASTRUCTURE_BLOCKED',
+      eligible: false,
+      failureId: outcome === 'nonretryable' ? 'latest-worker-run' : null,
+    });
+    expect(f.manager.triggerValidation).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
+});
+
 it('shows recorded grants and bounded cooldowns without consuming or dispatching', async () => {
   const f = await fixture();
   try {

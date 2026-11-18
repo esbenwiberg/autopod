@@ -78,7 +78,8 @@ describe('checkpointSandboxWorkspace', () => {
       await rm(checkpointPath, { force: true });
       await rm(`${checkpointPath}.meta`, { force: true });
     }
-    await rm(tmpRoot, { recursive: true, force: true });
+    // Bound transient Git/filesystem teardown contention, not the assertions.
+    await rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   async function rewrittenSource() {
