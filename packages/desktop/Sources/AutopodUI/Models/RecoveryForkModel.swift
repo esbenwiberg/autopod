@@ -104,8 +104,9 @@ import Observation
           catch { invalidJournal = true; throw error }
           operation = observed
         }
-        if state?.receipt != nil { preparationUncertain = false }
-        if state != nil { return }
+        // A successfully validated observation is authoritative even when no
+        // receipt was saved. Retrying preparation still cannot admit a worker.
+        if state != nil { preparationUncertain = false; return }
       }
       let value = try await actions.inspect(podId)
       guard bind(actions), !Task.isCancelled else { return }

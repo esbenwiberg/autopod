@@ -76,6 +76,30 @@ import Testing
     await model.create(actions)
     #expect(f.created.isEmpty && !model.canCreate)
   }
+  @Test func confirmedMissingPreparationReceiptAllowsAnExplicitPreparationRetryOnly() async throws {
+    let f = RecoveryForkFixture(); defer { f.clean() }
+    var actions = f.actions; actions.preparationAvailable = true
+    var attempts = 0
+    actions.prepared = { _ in try f.preparationState(nil) }
+    actions.prepare = { _, request in
+      attempts += 1
+      if attempts == 1 { throw URLError(.cannotConnectToHost) }
+      let packet = "Brief only. No worker was started."
+      return try f.decode(["version": 1, "podId": "original", "generation": request.expectedGeneration,
+        "actorId": "human", "createdAt": "2026-11-18T10:00:00Z", "coverage": "brief-only", "source": NSNull(),
+        "packet": packet, "packetHash": SHA256.hash(data: Data(packet.utf8)).map { String(format: "%02x", $0) }.joined(), "workerStarted": false])
+    }
+    let model = RecoveryForkModel(podId: "original", actions: actions)
+    await model.refresh(actions); await model.prepareHandoff(actions)
+    #expect(model.preparationUncertain && attempts == 1)
+    await model.prepareHandoff(actions)
+    #expect(attempts == 1)
+    await model.refresh(actions)
+    #expect(!model.preparationUncertain && model.preparedHandoff == nil)
+    await model.prepareHandoff(actions)
+    #expect(attempts == 2 && model.preparedHandoff?.workerStarted == false)
+    #expect(f.created.isEmpty && f.inspections == 0 && model.pending == nil)
+  }
   @Test(arguments: ["prepared", "replacement-failed", "queued", "unavailable"])
   func nativeFreshHandoffStatesRemainInspectableWithoutDispatch(state: String) async throws {
     let f = RecoveryForkFixture(); defer { f.clean() }
