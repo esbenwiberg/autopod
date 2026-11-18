@@ -31,6 +31,12 @@ import AutopodUI
       try await discover(first)
       try await discover("2026-07-01T00:00:00Z")
       #expect(f.store.pods.first?.recordedFailureReason == saved)
+      // Reconfiguration of the same source invalidates hydration, retaining data.
+      // Equal/older compact discovery now takes mergeRestPod, not mergeCompactPod.
+      f.store.configure(api: f.apiA)
+      try await discover(first)
+      try await discover("2026-07-01T00:00:00Z")
+      #expect(f.store.pods.first?.recordedFailureReason == saved)
       f.store.setError("residential-cod", summary: "socket error")
       #expect(f.store.pods.first?.recordedFailureReason == saved)
       try await discover(newer)

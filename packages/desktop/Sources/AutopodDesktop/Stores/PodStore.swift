@@ -172,7 +172,9 @@ public final class PodStore {
     var merged = incoming
     // Compact discovery has no full detail, even when it arrives through this path
     // after hydration was invalidated. Stale REST cannot revive an earlier reason.
-    if current.updatedAt > incoming.updatedAt || preserveCurrentStatus {
+    let compactCannotReplaceFull = incoming.failureDetail == nil
+      && incoming.updatedAt <= current.updatedAt
+    if compactCannotReplaceFull || current.updatedAt > incoming.updatedAt || preserveCurrentStatus {
       merged.failureDetail = current.currentFailureDetail
     }
     merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
