@@ -115,24 +115,29 @@ async function setup() {
   return { f, root, cp, request, ledger, host, subject, bytes, verify };
 }
 
+async function buildStartupHarness() {
+  const daemon = path.resolve(import.meta.dirname, '../..');
+  await mkdir(path.join(daemon, '.turbo'), { recursive: true });
+  const dir = await mkdtemp(path.join(daemon, '.turbo', 'continuation-crash-'));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const bundle = path.join(dir, 'writer.mjs');
+  await build({
+    entryPoints: [path.join(daemon, 'src/test-utils/continuation-crash-fixture.ts')],
+    outfile: bundle,
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'esm',
+    packages: 'external',
+  });
+  return bundle;
+}
+
 it.skipIf(process.platform === 'win32').each(['accepted', 'allocated', 'lost-handle', 'cancel'])(
   'recovers the committed continuation across SIGKILL: %s',
   async (mode) => {
     const { f, root, cp, request, ledger } = await setup();
-    const daemon = path.resolve(import.meta.dirname, '../..');
-    await mkdir(path.join(daemon, '.turbo'), { recursive: true });
-    const dir = await mkdtemp(path.join(daemon, '.turbo', 'continuation-crash-'));
-    onTestFinished(() => rm(dir, { recursive: true, force: true }));
-    const bundle = path.join(dir, 'writer.mjs');
-    await build({
-      entryPoints: [path.join(daemon, 'src/test-utils/continuation-crash-fixture.ts')],
-      outfile: bundle,
-      bundle: true,
-      platform: 'node',
-      target: 'node22',
-      format: 'esm',
-      packages: 'external',
-    });
+    const bundle = await buildStartupHarness();
     const payload = path.join(root, 'request.json');
     await writeFile(payload, JSON.stringify({ cp, request }));
     const writer = spawnSync(process.execPath, [bundle, f.db.name, payload, mode], {
@@ -254,6 +259,142 @@ it('rejects the wrong source, scope or review before accepting anything', async 
     cp.predecessor,
   );
   expect(f.db.prepare('SELECT count(*) FROM orchestration_continuations').pluck().get()).toBe(0);
+});
+
+it('another local recovery process defers while the first launch is unconfirmed', async () => {
+  const { f, cp, request, ledger, root } = await setup();
+  const bundle = await buildStartupHarness();
+  const payload = path.join(root, 'profile.json');
+  await writeFile(
+    payload,
+    JSON.stringify({ request: { profileSnapshot: request.profileSnapshot } }),
+  );
+  await ledger().acceptAndContinue(cp, request);
+  const entered = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const ensure = f.runtime.ensure.bind(f.runtime);
+  f.runtime.ensure = async (...args) => {
+    entered.resolve();
+    await resume.promise;
+    return ensure(...args);
+  };
+  const first = ledger().recover();
+  try {
+    await Promise.race([
+      entered.promise,
+      first.then(() => {
+        throw new Error('first recovery never reached allocation');
+      }),
+    ]);
+    const second = spawnSync(process.execPath, [bundle, f.db.name, payload, 'startup'], {
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    expect(second.error).toBeUndefined();
+    expect(second.status, second.stderr).toBe(0);
+    expect(JSON.parse(second.stdout)).toEqual({
+      blocked: [{ run: cp.run, key: request.startKey, stage: 'claim' }],
+    });
+  } finally {
+    resume.resolve();
+    await first;
+  }
+  expect(await first).toEqual({ blocked: [] });
+  expect(await ledger().recover()).toEqual({ blocked: [] });
+  expect(f.launches()).toBe(1);
+  expect(
+    f.db
+      .prepare(
+        'SELECT count(*),sum(reserved_requests),count(pod_id) FROM orchestration_continuations',
+      )
+      .raw()
+      .get(),
+  ).toEqual([1, 2, 1]);
+  expect(f.db.prepare('SELECT count(*) FROM managed_pods').pluck().get()).toBe(1);
+});
+
+it('cancel after allocation authorization retains uncertainty until a late ref and observed exit', async () => {
+  const { f, cp, request, ledger } = await setup();
+  await ledger().acceptAndContinue(cp, request);
+  const entered = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const ensure = f.runtime.ensure.bind(f.runtime);
+  f.runtime.ensure = async (id, spec) => {
+    // External effect happened, but neither checkpoint callback nor reply reached SQLite.
+    const result = await ensure(id, spec, () => {});
+    entered.resolve();
+    await resume.promise;
+    return result;
+  };
+  const stops: string[] = [];
+  let stopped = false;
+  f.runtime.stop = async (ref) => {
+    stops.push(ref);
+  }; // acknowledgement is not an exit observation
+  f.runtime.observe = async () => ({ state: stopped ? 'stopped' : 'unknown', consumedTokens: 0 });
+  const row = () => f.service().lookup('native.example', request.startKey);
+  const first = ledger().recover();
+  try {
+    await Promise.race([
+      entered.promise,
+      first.then(() => {
+        throw new Error('allocation never started');
+      }),
+    ]);
+    ledger().cancel(cp.run);
+    await f.service().enforceExpiry();
+    expect(row()).toMatchObject({
+      revoked: 1,
+      stop_requested: 1,
+      observed_exit: 0,
+      runtime_ref: null,
+      allocation_attempted: 1,
+    });
+    expect(await ledger().recover()).toEqual({ blocked: [] });
+    expect(stops).toEqual([]);
+  } finally {
+    resume.resolve();
+    await first;
+  }
+  expect(await first).toEqual({
+    blocked: [{ run: cp.run, key: request.startKey, stage: 'launch' }],
+  });
+  f.restart();
+  const id = row()?.pod_id;
+  expect(id).toEqual(expect.any(String));
+  expect(stops).toEqual([id]);
+  expect(row()).toMatchObject({ runtime_ref: id, observed_exit: 0 });
+  await f.service().enforceExpiry();
+  expect(row()?.observed_exit).toBe(0);
+  expect(stops).toEqual([id, id]);
+  stopped = true;
+  await f.service().enforceExpiry();
+  expect(row()).toMatchObject({ state: 'killed', observed_exit: 1 });
+  expect(await ledger().recover()).toEqual({ blocked: [] });
+  expect(f.launches()).toBe(1);
+  expect(
+    f.db
+      .prepare('SELECT count(*),sum(reserved_requests) FROM orchestration_continuations')
+      .raw()
+      .get(),
+  ).toEqual([1, 2]);
+});
+
+it('records killed rather than validating when cancellation commits during exit observation', async () => {
+  const { f, cp, request, ledger } = await setup();
+  const l = ledger();
+  await l.acceptAndContinue(cp, request);
+  expect(await l.recover()).toEqual({ blocked: [] });
+  f.runtime.observe = async () => {
+    l.cancel(cp.run);
+    return { state: 'stopped', consumedTokens: 2 };
+  };
+  await f.service().enforceExpiry();
+  expect(f.service().lookup('native.example', request.startKey)).toMatchObject({
+    observed_exit: 1,
+    revoked: 1,
+    state: 'killed',
+  });
 });
 
 it('fences cancellation during managed preflight before allocating or reserving a pod', async () => {

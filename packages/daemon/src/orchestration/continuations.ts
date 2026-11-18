@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { canonical, digest } from '../managed/canonical.js';
 import { validateManagedRequest } from '../managed/grants.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
+import { tryRecoveryClaim } from './local-recovery-claim.js';
 
 /** Host-only reference to pinned source and trusted combined-check evidence. Not a wire API. */
 export interface ContinuationCheckpoint {
@@ -169,10 +170,19 @@ export class OrchestrationContinuations {
         `SELECT c.* FROM orchestration_continuations c JOIN orchestration_runs r ON r.id=c.run_id WHERE r.canceled=0 AND c.pod_id IS NULL ORDER BY c.rowid`,
       )
       .all() as (Intent & { run_id: string })[];
-    const blocked: { run: string; key: string; stage: 'binding' | 'source' | 'launch' }[] = [];
+    type Stage = 'claim' | 'binding' | 'source' | 'launch';
+    const blocked: { run: string; key: string; stage: Stage }[] = [];
     for (const intent of pending) {
-      let stage: 'binding' | 'source' | 'launch' = 'binding';
+      let stage: Stage = 'claim';
+      let release: (() => void) | null = null;
       try {
+        release = tryRecoveryClaim(this.db, intent.run_id, intent.start_key);
+        if (!release) {
+          blocked.push({ run: intent.run_id, key: intent.start_key, stage });
+          continue;
+        }
+        if (this.prior(intent.run_id, intent.start_key)?.pod_id) continue;
+        stage = 'binding';
         const cp = JSON.parse(intent.checkpoint_json) as ContinuationCheckpoint;
         const req = validateManagedRequest(JSON.parse(intent.request_json));
         if (
@@ -210,6 +220,8 @@ export class OrchestrationContinuations {
         });
       } catch {
         blocked.push({ run: intent.run_id, key: intent.start_key, stage });
+      } finally {
+        release?.();
       }
     }
     return { blocked };

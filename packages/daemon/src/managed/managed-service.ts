@@ -62,6 +62,7 @@ export interface ManagedPodRow {
   revoked: number;
   stop_requested: number;
   observed_exit: number;
+  allocation_attempted: number;
   cleanup: string;
   grant_revision: number;
   grant_id: string;
@@ -215,8 +216,8 @@ export class ManagedPodService {
       };
       this.db
         .prepare(`INSERT INTO managed_pods (pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,
-        execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,request_json,handle_json,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,request_json,handle_json,created_at,allocation_attempted)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)`)
         .run(
           podId,
           installation,
@@ -251,37 +252,48 @@ export class ManagedPodService {
       const active = this.row(row.dispatcher_installation_id, row.pod_id);
       this.requireActive(active);
       await this.inputs?.prepare(active, request);
-      this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
-      const result = await this.runtime.ensure(
-        row.pod_id,
-        request,
-        (ref) => {
-          if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref))
-            throw new Error('invalid-runtime-reference');
+      // Commit the last cancellable boundary before the external allocation. A watcher
+      // seeing no runtime_ref after this point cannot infer that no resource exists.
+      this.db
+        .transaction(() => {
+          this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
           this.db
-            .prepare(
-              'UPDATE managed_pods SET runtime_ref=? WHERE pod_id=? AND (runtime_ref IS NULL OR runtime_ref=?)',
-            )
-            .run(ref, row.pod_id, ref);
-          if (this.row(row.dispatcher_installation_id, row.pod_id).runtime_ref !== ref)
-            throw new Error('runtime-binding-conflict');
-        },
-        fault,
-      );
+            .prepare('UPDATE managed_pods SET allocation_attempted=1 WHERE pod_id=?')
+            .run(row.pod_id);
+        })
+        .immediate();
+      const bindRef = (ref: string) => {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref))
+          throw new Error('invalid-runtime-reference');
+        this.db
+          .prepare(
+            'UPDATE managed_pods SET runtime_ref=? WHERE pod_id=? AND (runtime_ref IS NULL OR runtime_ref=?)',
+          )
+          .run(ref, row.pod_id, ref);
+        if (this.row(row.dispatcher_installation_id, row.pod_id).runtime_ref !== ref)
+          throw new Error('runtime-binding-conflict');
+      };
+      const result = await this.runtime.ensure(row.pod_id, request, bindRef, fault);
       const current = this.db
         .transaction(() => {
-          this.db
+          bindRef(result.runtimeRef); // retain a late identity even after cancellation
+          const started = this.db
             .prepare(
-              "UPDATE managed_pods SET runtime_ref=?,state='running' WHERE pod_id=? AND revoked=0",
+              "UPDATE managed_pods SET state='running' WHERE pod_id=? AND revoked=0 AND stop_requested=0 AND observed_exit=0",
             )
-            .run(result.runtimeRef, row.pod_id);
+            .run(row.pod_id);
           const observed = this.row(row.dispatcher_installation_id, row.pod_id);
-          this.onTransition?.(observed, 'started', 'running');
+          if (started.changes) this.onTransition?.(observed, 'started', 'running');
           return observed;
         })
         .immediate();
-      if (current.revoked || this.expired(current)) {
-        await this.runtime.stop(result.runtimeRef);
+      if (
+        current.revoked ||
+        current.stop_requested ||
+        current.observed_exit ||
+        this.expired(current)
+      ) {
+        if (!current.observed_exit) await this.runtime.stop(result.runtimeRef);
         throw new Error('grant-inactive');
       }
       if (fault === 'before-response') throw new Error('injected-before-response');
@@ -352,10 +364,15 @@ export class ManagedPodService {
           .run(observed.consumedTokens, row.pod_id);
         row.consumed_tokens = Math.max(row.consumed_tokens, observed.consumedTokens);
         if (observed.state === 'stopped') {
-          const state =
-            row.revoked || row.stop_requested || this.expired(row) ? 'killed' : 'validating';
           this.db
             .transaction(() => {
+              const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+              if (latest.observed_exit) return;
+              // Cancellation may have committed while observe() was in flight.
+              const state =
+                latest.revoked || latest.stop_requested || this.expired(latest)
+                  ? 'killed'
+                  : 'validating';
               if (observed.limitation) {
                 const stored = this.db
                   .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
@@ -371,14 +388,13 @@ export class ManagedPodService {
                   'UPDATE managed_pods SET observed_exit=1,state=?,exit_code=? WHERE pod_id=?',
                 )
                 .run(state, observed.exitCode ?? null, row.pod_id);
-              this.onTransition?.(row, 'runtime-stopped', state);
+              if (state === 'killed')
+                this.db
+                  .prepare('UPDATE managed_pods SET revoked=1, stop_requested=1 WHERE pod_id=?')
+                  .run(row.pod_id);
+              this.onTransition?.(latest, 'runtime-stopped', state);
             })
             .immediate();
-          if (state === 'killed') {
-            this.db
-              .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
-              .run(row.pod_id);
-          }
           // Do not retry a stop against an already removed runtime.
           continue;
         }
@@ -389,12 +405,12 @@ export class ManagedPodService {
             .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
             .run(row.pod_id);
           await this.runtime.stop(row.runtime_ref);
-        } else {
+        } else if (!row.allocation_attempted) {
           const terminal = this.db
             .transaction(() => {
               this.db
                 .prepare(
-                  "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed' WHERE pod_id=? AND runtime_ref IS NULL AND observed_exit=0",
+                  "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed' WHERE pod_id=? AND runtime_ref IS NULL AND observed_exit=0 AND allocation_attempted=0",
                 )
                 .run(row.pod_id);
               const current = this.row(row.dispatcher_installation_id, row.pod_id);
