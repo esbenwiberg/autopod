@@ -74,8 +74,11 @@ never generates a pass, waiver or AI-authored success narrative.
 
 Configured publication security scanning still runs on the independent selected
 tree before push. It uses full-tree scope because the saved bundle may not carry
-a usable base ref; blocked or incomplete scanning prevents publication. This is
-separate from task validation and does not change its check results or budgets.
+a usable base ref. The daemon gives this full-tree scan up to eight minutes; the
+ordinary push scan budget is unchanged. Confirmation can take several minutes
+and must still be valid when the push is admitted. Blocked or incomplete scans
+prevent publication. This is separate from task validation and does not change
+its check results or budgets.
 
 Preparation failures and expired initial confirmations record cancellation before
 any external admission. A human can explicitly cancel an interrupted or prepared

@@ -1844,10 +1844,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId: pod.id,
             workdir: worktree,
             profile: { securityScan: { ...policy, push: { ...policy.push, scope: 'full' } } },
+            // This scans the entire tree, not the normal push diff. The daemon
+            // owns this larger finite budget; callers cannot weaken scan policy.
+            budgetMs: 8 * 60_000,
           });
           if (scan.decision === 'block' || scan.scanIncomplete)
             throw new AutopodError(
-              'Saved-work publication security scan blocked or incomplete; nothing was pushed.',
+              scan.decision === 'block'
+                ? 'Saved-work publication security scan blocked; nothing was pushed.'
+                : 'Saved-work publication security scan did not complete within its required coverage; nothing was pushed.',
               'SECURITY_SCAN_BLOCKED',
               409,
             );

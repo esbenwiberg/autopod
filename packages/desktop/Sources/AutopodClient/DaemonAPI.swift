@@ -91,7 +91,8 @@ public actor DaemonAPI {
     try await request("POST", try savedWorkDraftPath(id) + "/prepare", body: encode(body), timeout: 180)
   }
   public func confirmSavedWorkDraft(_ id: String, body: SavedWorkDraftConfirm) async throws -> SavedWorkDraftOperation {
-    try await request("POST", try savedWorkDraftPath(id) + "/confirm", body: encode(body), timeout: 180)
+    // Allow the daemon's bounded full-tree scan plus provider round trips.
+    try await request("POST", try savedWorkDraftPath(id) + "/confirm", body: encode(body), timeout: 600)
   }
   public func observeSavedWorkDraft(_ id: String, requestId: String) async throws -> SavedWorkDraftOperation {
     guard requestId.range(of: #"^[a-zA-Z0-9-]{1,64}$"#, options: .regularExpression) != nil else { throw URLError(.badURL) }
