@@ -65,6 +65,8 @@ public struct DetailPanelView: View {
     public var qualityScores: [String: PodQualityScore]
     /// Callback invoked when a node is tapped in the Series tab's pipeline view.
     public var onSelectPod: ((String) -> Void)?
+    /// Local navigation only; omitted by standalone and embedded hosts.
+    public var onClose: (() -> Void)?
     /// Returns the cached event stream for any pod id — used by the Series tab's
     /// slide-in panel so it can show the activity feed for a sibling pod.
     public var eventsForPod: ((String) -> [AgentEvent])?
@@ -135,8 +137,10 @@ public struct DetailPanelView: View {
         onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
         selectedTab: Binding<DetailTab?> = .constant(nil),
         requestedTab: Binding<DetailTab?> = .constant(nil),
-        configurationActions: LaunchConfigurationActions? = nil
+        configurationActions: LaunchConfigurationActions? = nil,
+        onClose: (() -> Void)? = nil
     ) {
+        self.onClose = onClose
         self.configurationActions = configurationActions
         self.pod = pod; self.events = events; self.actions = actions
         self.seriesPods = seriesPods
@@ -569,6 +573,7 @@ public struct DetailPanelView: View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Pod actions").accessibilityLabel("Pod actions")
                     .accessibilityIdentifier("detail-pod-actions")
+                closeButton
             }
             Text(pod.desktopTitle).font(.system(size: 25, weight: .semibold)).tracking(-0.5)
                 .lineLimit(3).textSelection(.enabled)
@@ -593,6 +598,9 @@ public struct DetailPanelView: View {
 
     private var legacyDetailHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if onClose != nil {
+                HStack { Spacer(); closeButton }
+            }
             // Pick whichever fits horizontally — wide single row, else wrap
             // the action buttons onto a second (scrollable) row so they can't
             // squeeze the identity column to zero or push the header off
@@ -625,6 +633,18 @@ public struct DetailPanelView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder private var closeButton: some View {
+        if let onClose {
+            Button(action: onClose) {
+                Image(systemName: "xmark").frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Close pod details")
+            .accessibilityLabel("Close pod details")
+            .accessibilityIdentifier("detail-close")
+        }
     }
 
     private var podIdentity: some View {

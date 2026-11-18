@@ -182,6 +182,9 @@ public struct TerminalEmulatorView: NSViewRepresentable {
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+      // Mount/unmount can briefly produce an empty frame. Never resize the
+      // remote PTY to an invalid size while local navigation removes details.
+      guard newCols > 0, newRows > 0 else { return }
       onResize(newCols, newRows)
     }
 

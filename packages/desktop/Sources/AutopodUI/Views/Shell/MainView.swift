@@ -1,7 +1,7 @@
 import AutopodClient
 import SwiftUI
 
-/// Root view — three-column layout: Sidebar | Fleet/List | Detail
+/// Root view — Sidebar | Fleet/List, with optional fleet pod details.
 public struct MainView: View {
     public var pods: [Pod]
     public var managedPods: [ManagedPodSummary]
@@ -379,7 +379,7 @@ public struct MainView: View {
         var a = actions
         a.attachTerminal = { [onTerminalConnect] podId in
             let wasAlreadySelected = selectedSessionId == podId
-            selectedSessionId = podId
+            selectFleetPod(podId)
             if wasAlreadySelected {
                 detailNavigation.requestedTab = .terminal
             } else {
@@ -699,7 +699,7 @@ public struct MainView: View {
                 configurationToOpen = identity; sidebarSelection = .profilesWorkspace
             }
         })
-        .environment(\.desktopPodSelection, { selectedSessionId = $0 })
+        .environment(\.desktopPodSelection, selectFleetPod)
         .onChange(of: sidebarSelection) { _, selection in
             if redesign, case .series(let id) = selection {
                 selectedDesktopSeriesID = id
@@ -935,7 +935,8 @@ public struct MainView: View {
     }
 
     private func podNavigation(fleet: DesktopFleetPresentation, repositoryIndex: DesktopRepositoryIndex) -> some View {
-        NavigationSplitView {
+        DesktopPodNavigationLayout(isFleet: isFleetWorkspace,
+            showsDetails: selectedSession != nil && !detailNavigation.isDismissed) {
             SidebarView(
                 pods: pods,
                 selection: sidebarBinding,
@@ -949,7 +950,7 @@ public struct MainView: View {
                 managedPodCount: managedPods.count,
                 onShowSettings: onShowSettings
             )
-        } content: {
+        } fleet: {
             Group {
             if sidebarSelection == .village {
                 VillageView(
@@ -1008,7 +1009,7 @@ public struct MainView: View {
                 SeriesListView(
                     pods: pods,
                     selectedPodId: selectedSessionId,
-                    onSelectPod: { selectedSessionId = $0 },
+                    onSelectPod: selectFleetPod,
                     actions: wiredActions
                 )
                 .frame(minWidth: 500)
@@ -1106,7 +1107,7 @@ public struct MainView: View {
                             actions: wiredActions,
                             seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
                             qualityScores: qualityScores,
-                            onSelectPod: { selectedSessionId = $0 },
+                            onSelectPod: selectFleetPod,
                             eventsForPod: eventsForPod,
                             loadEventsForPod: loadEventsForPod,
                             relatedEventLoadStateForPod: relatedEventLoadStateForPod,
@@ -1135,7 +1136,8 @@ public struct MainView: View {
                             onLaunchSeriesFromPod: { seriesFromPod = $0 },
                             selectedTab: selectedTab,
                             requestedTab: requestedTab,
-                            configurationActions: configurationActions
+                            configurationActions: configurationActions,
+                            onClose: isFleetWorkspace ? { detailNavigation.close() } : nil
                         )
                     }
                     .id(pod.id)
@@ -1146,6 +1148,22 @@ public struct MainView: View {
             .navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 560 : 350, ideal: isDesktopSeriesWorkspace ? 1100 : 720, max: isDesktopSeriesWorkspace ? 1800 : 1400)
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    private var isFleetWorkspace: Bool {
+        switch sidebarSelection {
+        case .attention, .active, .running, .workspaces, .completed, .all, .profile:
+            return true
+        case .series, .seriesAll:
+            return !isDesktopSeriesWorkspace
+        default:
+            return false
+        }
+    }
+
+    private func selectFleetPod(_ id: String) {
+        detailNavigation.reveal()
+        selectedSessionId = id
     }
 
     // MARK: - Content toolbar
@@ -1371,8 +1389,8 @@ public struct MainView: View {
 
     private var viewModePicker: some View {
         Picker("", selection: $viewMode) {
-            Image(systemName: "rectangle.grid.2x2").tag(ViewMode.cards)
-            Image(systemName: "list.bullet").tag(ViewMode.list)
+            Image(systemName: "rectangle.grid.2x2").accessibilityLabel("Cards").tag(ViewMode.cards)
+            Image(systemName: "list.bullet").accessibilityLabel("List").tag(ViewMode.list)
         }
         .pickerStyle(.segmented)
         .frame(width: 80)
@@ -1402,7 +1420,7 @@ public struct MainView: View {
                     pods: seriesPods,
                     qualityScores: qualityScores,
                     selectedPodId: selectedSessionId,
-                    onSelectPod: { selectedSessionId = $0 }
+                    onSelectPod: selectFleetPod
                 )
                 .frame(minHeight: 180, maxHeight: 360)
             } label: {
@@ -1543,7 +1561,7 @@ public struct MainView: View {
                             isSelected: selectedSessionId == pod.id,
                             onSpawnFollowUp: { spawnFollowUpInitiator = $0 },
                             onLaunchSeriesFromPod: { seriesFromPod = $0 }, qualityScore: qualityScores[pod.id])
-                            .onTapGesture { selectedSessionId = pod.id }
+                            .onTapGesture { selectFleetPod(pod.id) }
                     }
                 }
             }
@@ -1568,7 +1586,7 @@ public struct MainView: View {
                         onLaunchSeriesFromPod: { seriesFromPod = $0 },
                         qualityScore: qualityScores[pod.id]
                     )
-                    .onTapGesture { selectedSessionId = pod.id }
+                    .onTapGesture { selectFleetPod(pod.id) }
                 }
             }
             .padding(16)
@@ -1579,10 +1597,15 @@ public struct MainView: View {
 
     private func sessionList(fleet: DesktopFleetPresentation) -> some View {
         let sessions = fleet.visible
-        return List(selection: $selectedSessionId) {
+        return List(selection: Binding(get: { selectedSessionId }, set: { id in
+            if let id { selectFleetPod(id) }
+        })) {
             ForEach(sessions) { pod in
                 SessionListRow(pod: pod)
                     .tag(pod.id)
+                    .simultaneousGesture(TapGesture().onEnded { selectFleetPod(pod.id) })
+                    .accessibilityIdentifier("fleet-list-\(pod.id)")
+                    .accessibilityAction { selectFleetPod(pod.id) }
             }
             browseArchiveFooter(visibleCount: sessions.count, scopedTotal: fleet.scopedTotal)
         }
@@ -1630,7 +1653,7 @@ public struct MainView: View {
             searchText = destination.query
             repositoryID = destination.repositoryID
             sidebarSelection = destination.sidebar
-            selectedSessionId = destination.session
+            selectFleetPod(destination.session)
             if let tab { detailNavigation.request(tab) }
         }
     }

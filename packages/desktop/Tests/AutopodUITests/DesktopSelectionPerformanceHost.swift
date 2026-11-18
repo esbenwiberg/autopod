@@ -15,20 +15,23 @@ import Testing
     private let defaults: UserDefaults
     private let suite = "desktop-selection-" + UUID().uuidString
 
-    init() throws {
+    init(width: Double = 1_800, redesign: Bool = true,
+         configure: (inout MainView) -> Void = { _ in }) throws {
         NSApplication.shared.finishLaunching()
         defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.set(true, forKey: "autopod.desktop.redesign")
+        defaults.set(redesign, forKey: "autopod.desktop.redesign")
         defaults.set("dark", forKey: "autopod.desktop.appearance")
         let state = inputs
-        let view = DesktopPerformanceFixtures.mainView(selection: Binding(
+        var main = DesktopPerformanceFixtures.mainView(selection: Binding(
             get: { state.selectedID }, set: { state.selectedID = $0 }))
+        configure(&main)
+        let view = main
             .defaultAppStorage(defaults)
             .transaction { $0.disablesAnimations = true }
-            .frame(width: 1_800, height: 1_050)
+            .frame(width: width, height: 1_050)
         hosting = NSHostingView(rootView: AnyView(view))
         hosting.sizingOptions = []
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_800, height: 1_050),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 1_050),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
@@ -45,6 +48,23 @@ import Testing
     }
 
     func layout() { window.layoutIfNeeded(); hosting.layoutSubtreeIfNeeded() }
+    func edit(_ placeholder: String, _ text: String) throws {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let field = try #require(descendants(hosting).compactMap { $0 as? NSTextField }
+            .first { $0.placeholderString == placeholder })
+        window.makeFirstResponder(field)
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    }
+    func key(_ code: UInt16, characters: String, modifiers: NSEvent.ModifierFlags = []) throws {
+        window.makeKeyAndOrderFront(nil)
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+        if modifiers.contains(.command) { _ = window.performKeyEquivalent(with: event) }
+        else { window.sendEvent(event) }
+    }
     func value(_ node: NSObject, _ key: String) -> Any? {
         let alternate = "is" + key.prefix(1).uppercased() + key.dropFirst()
         guard node.responds(to: NSSelectorFromString(key))

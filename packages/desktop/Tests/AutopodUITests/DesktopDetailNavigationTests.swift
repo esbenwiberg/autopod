@@ -16,20 +16,153 @@ import Testing
     var pod = DesktopPerformanceFixtures.pods[0]
     let navigation = DesktopDetailNavigation()
     let pipe = TerminalDataPipe()
+    var connects = 0
+    var disconnects = 0
+    var sizes: [(Int, Int)] = []
 }
 
 @MainActor private struct DetailNavigationFixtureView: View {
     let inputs: DetailNavigationInputs
     var body: some View {
-        DesktopDetailNavigationHost(navigation: inputs.navigation) { selected, requested in
-            DetailPanelView(pod: inputs.pod, events: [],
-                terminalState: "connected", terminalDataPipe: inputs.pipe,
-                selectedTab: selected, requestedTab: requested)
-        }.id(inputs.pod.id)
+        if !inputs.navigation.isDismissed {
+            DesktopDetailNavigationHost(navigation: inputs.navigation) { selected, requested in
+                DetailPanelView(pod: inputs.pod, events: [],
+                    terminalState: "connected", terminalDataPipe: inputs.pipe,
+                    onTerminalResize: { inputs.sizes.append(($0, $1)) },
+                    onTerminalConnect: { inputs.connects += 1 },
+                    onTerminalDisconnect: { inputs.disconnects += 1 },
+                    selectedTab: selected, requestedTab: requested,
+                    onClose: { inputs.navigation.close() })
+            }.id(inputs.pod.id)
+        }
     }
 }
 
 @Suite(.serialized) @MainActor struct DesktopDetailNavigationTests {
+    @Test func closeKeepsSelectionAndCardReopensSamePodWithTabRetained() async throws {
+        let host = try DesktopSelectionPerformanceHost(width: 1_100)
+        defer { host.close() }
+        try await host.scope("repository")
+        try await host.selectTab("work")
+        let frame = host.window.frame
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        #expect(host.inputs.selectedID == "perf-0000")
+        #expect(!host.contains("Select a pod"))
+        #expect(host.contains("fixture/repository-0"))
+        #expect(host.window.frame == frame)
+        #expect(host.press(try #require(host.find(label: "Fixture pod perf-0000"))))
+        try await host.wait { host.destination("work") }
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        // A passive selection/hydration change must not reveal dismissed details.
+        host.inputs.selectedID = "perf-0010"
+        host.layout()
+        #expect(host.find(id: "detail-close") == nil)
+        #expect(host.press(try #require(host.find(label: "Fixture pod perf-0010"))))
+        try await host.wait { host.inputs.selectedID == "perf-0010" && host.destination("work") }
+    }
+
+    @Test func listReopensSameAndAnotherPodWithoutChangingViewOrTab() async throws {
+        let host = try DesktopSelectionPerformanceHost(redesign: false)
+        defer { host.close() }
+        try await host.selectTab("work")
+        #expect(host.press(try #require(host.find(label: "List"))))
+        try await host.wait { host.find(id: "fleet-list-perf-0000") != nil }
+        for id in ["perf-0000", "perf-0001"] {
+            #expect(host.press(try #require(host.find(id: "detail-close"))))
+            try await host.wait { host.find(id: "detail-close") == nil }
+            #expect(host.press(try #require(host.find(id: "fleet-list-\(id)"))))
+            try await host.wait { host.inputs.selectedID == id && host.destination("work") }
+            #expect(host.find(id: "fleet-list-\(id)") != nil)
+        }
+    }
+
+    @Test func filtersAndRefreshDoNotReopenDismissedDetails() async throws {
+        var refreshes = 0
+        let host = try DesktopSelectionPerformanceHost { view in
+            view.onRefresh = { refreshes += 1 }
+        }
+        defer { host.close() }
+        try await host.scope("repository")
+        try await host.selectTab("work")
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        try host.edit("Search pods", "perf-0010")
+        try await host.wait { host.contains("1 pod · fixture/repository-0") }
+        try host.key(15, characters: "r", modifiers: .command)
+        try await host.wait { refreshes == 1 }
+        #expect(host.find(id: "detail-close") == nil)
+        #expect(host.press(try #require(host.find(label: "Fixture pod perf-0010"))))
+        try await host.wait { host.destination("work") }
+        #expect(host.contains("1 pod · fixture/repository-0"))
+    }
+
+    @Test func sortAndDensitySurviveCloseReopen() async throws {
+        let host = try DesktopSelectionPerformanceHost(width: 2_600, redesign: false)
+        defer { host.close() }
+        try await host.selectTab("work")
+        #expect(host.press(try #require(host.find(label: "Last Active"))))
+        #expect(host.press(try #require(host.find(label: "Compact"))))
+        func selected(_ label: String) -> Bool {
+            guard let node = host.find(label: label) else { return false }
+            return host.value(node, "accessibilitySelected") as? Bool == true
+                || host.value(node, "accessibilityValue") as? Int == 1
+        }
+        try await host.wait { selected("Last Active") && selected("Compact") }
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        #expect(selected("Last Active"))
+        #expect(selected("Compact"))
+        #expect(host.press(try #require(host.find(label: "Fixture pod perf-0000"))))
+        try await host.wait { host.destination("work") }
+        #expect(selected("Last Active"))
+        #expect(selected("Compact"))
+    }
+
+    @Test func commandPaletteIntentionallyRevealsDismissedDetails() async throws {
+        let host = try DesktopSelectionPerformanceHost()
+        defer { host.close() }
+        try await host.selectTab("work")
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        try host.key(40, characters: "k", modifiers: .command)
+        try await host.wait { host.contains("FLEET / QUICK ACTIONS") }
+        try host.edit("Type a command or search…", "perf-0001")
+        try host.key(36, characters: "\r")
+        try await host.wait { host.inputs.selectedID == "perf-0001" && host.destination("work") }
+    }
+
+    @Test func seriesWorkspaceIntentionallyRevealsDismissedDetails() async throws {
+        let host = try DesktopSelectionPerformanceHost { view in
+            view.pods[0].seriesId = "close-reopen-series"
+            view.pods[0].seriesName = "Close/reopen series"
+        }
+        defer { host.close() }
+        try await host.selectTab("work")
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await host.wait { host.find(id: "detail-close") == nil }
+        #expect(host.press(try #require(host.find(label: "Series"))))
+        try await host.wait { host.find(id: "desktop-series-close-reopen-series") != nil }
+        #expect(host.press(try #require(host.find(id: "desktop-series-close-reopen-series"))))
+        #expect(host.find(id: "detail-close") == nil, "Series owns a separate detail column")
+        #expect(host.press(try #require(host.find(label: "Summary"))))
+        try await host.wait { host.find(label: "perf-0000") != nil }
+        #expect(host.press(try #require(host.find(label: "perf-0000"))))
+        try await host.wait { host.inputs.selectedID == "perf-0000" && host.destination("overview") }
+    }
+
+    @Test func dismissalSurvivesPassiveSelectionAndTabUpdates() {
+        let navigation = DesktopDetailNavigation()
+        navigation.request(.work)
+        navigation.close()
+        navigation.request(.logs)
+        #expect(navigation.isDismissed)
+        #expect(navigation.selectedTab == .logs)
+        navigation.reveal()
+        #expect(!navigation.isDismissed)
+        #expect(navigation.selectedTab == .logs)
+    }
     @Test func duplicateIdentifierSelectsTheActionNotItsNoninteractiveLabel() throws {
         let host = try DesktopSelectionPerformanceHost()
         defer { host.close() }
@@ -99,6 +232,8 @@ import Testing
         try await host.selectTab("work")
         try edit("Search pods", "perf-0000")
         try await wait("fleet search") { host.contains("1 pod · fixture/repository-0") }
+        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        try await wait("dismissed detail") { host.find(id: "detail-close") == nil }
         host.press(try #require(host.find(label: "History")))
         // This is unmeasured workspace setup, not a cached selection transition.
         // Locate the native field used by edit(), without depending on SwiftUI's
@@ -175,6 +310,26 @@ import Testing
         try await host.wait { inputs.navigation.selectedTab == .work }
         #expect(terminal(host.hosting) === original)
         try host.press("detail-tab-terminal")
+        try await host.wait { inputs.navigation.selectedTab == .terminal }
+        try host.press("detail-close")
+        try await host.wait { terminal(host.hosting) == nil }
+        #expect(inputs.connects == 0)
+        #expect(inputs.disconnects == 0)
+        inputs.pipe.feed(Data("output while closed\r\n".utf8))
+        inputs.navigation.reveal()
+        try await host.wait { terminal(host.hosting) != nil }
+        let reopened = try #require(terminal(host.hosting))
+        let engine = reopened.terminalView.getTerminal()
+        try await host.wait {
+            (0..<engine.rows).contains { row in
+                engine.getLine(row: row)?.translateToString(trimRight: true)
+                    .contains("output while closed") == true
+            }
+        }
+        #expect(inputs.navigation.selectedTab == .terminal)
+        #expect(inputs.connects == 0)
+        #expect(inputs.disconnects == 0)
+        #expect(inputs.sizes.allSatisfy { $0.0 > 0 && $0.1 > 0 })
         inputs.pod = DesktopPerformanceFixtures.pods[1]
         try await host.wait { inputs.navigation.selectedTab == .overview }
         #expect(terminal(host.hosting) == nil)
