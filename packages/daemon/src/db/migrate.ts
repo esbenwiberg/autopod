@@ -60,11 +60,20 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
       .get();
     const table = (name: string) =>
       db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    // MAX(version) alone cannot prove that every preceding step was applied.
+    // schema_version.version is a primary key; the range count therefore proves
+    // the complete prefix up to this branch's last migration (or the current tip).
+    const expectedCount = Math.max(0, Math.min(currentVersion, 268) - 261);
+    const recordedCount = db
+      .prepare('SELECT count(*) FROM schema_version WHERE version BETWEEN 262 AND 268')
+      .pluck()
+      .get();
     if (
       retired ||
       !table('validation_phase_timings') ||
       !db.prepare('SELECT 1 FROM schema_version WHERE version=255').get() ||
-      (currentVersion < 262 && table('orchestration_runs'))
+      recordedCount !== expectedCount ||
+      Boolean(table('orchestration_runs')) !== expectedCount > 0
     ) {
       throw new Error(
         'Unpublished or mixed orchestration migration lineage; database retained unchanged',

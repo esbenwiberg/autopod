@@ -89,6 +89,48 @@ it('rehearses the released 255 upgrade on a restored online backup, never on the
   }
 });
 
+it('resumes a valid partially applied orchestration prefix', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'orch-prefix-'));
+  const db = createHistoricalDiskDatabase(path.join(root, 'partial.db'), [
+    { dir: MIGRATIONS_DIR, through: 264 },
+  ]);
+  try {
+    await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
+    expect(
+      db
+        .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
+        .pluck()
+        .all(),
+    ).toEqual([262, 263, 264, 265, 266, 267, 268]);
+    assertBackupIntegrity(db);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  'DELETE FROM schema_version WHERE version=262; DROP TABLE orchestration_runs',
+  'DELETE FROM schema_version WHERE version=263',
+  'DROP TABLE orchestration_runs',
+])('rejects a high version that masks missing orchestration history or its root table: %s', async (damage) => {
+  const root = mkdtempSync(path.join(tmpdir(), 'orch-incomplete-'));
+  const db = createHistoricalDiskDatabase(path.join(root, 'damaged.db'), [
+    { dir: MIGRATIONS_DIR, through: 268 },
+  ]);
+  try {
+    db.exec(damage);
+    const before = db.serialize();
+    await expect(runMigrationsWithBackups(db, MIGRATIONS_DIR, logger)).rejects.toThrow(
+      'orchestration migration lineage',
+    );
+    expect(db.serialize().equals(before)).toBe(true);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it.each([
   255,
   261,
