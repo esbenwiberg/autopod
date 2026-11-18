@@ -36,6 +36,9 @@ internal struct PodRepairSheet: View {
     return (model.observation?.related ?? relatedPods).first { $0.seriesId == observed.seriesId && $0.prUrl != nil }
   }
   private var block: String? {
+    if [.resume, .revalidate].contains(model.kind) && observed.isBudgetStopped {
+      return "This worker stopped during coding. Choose Continue coding after adjusting the task budget; retrying checks will not finish its work."
+    }
     if let reason = model.recoveryBlock { return reason }
     if observed.worktreeCompromised && model.kind != .prFix { return "Recover the compromised worktree before continuing." }
     if model.kind == .rework && goalBlocked { return "The native Goal must be achieved and stopped. Continue through the pod’s Goal controls." }
@@ -87,7 +90,11 @@ internal struct PodRepairSheet: View {
         Button("Review another attempt", role: .destructive) { model.reviewAnotherAttempt(); Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }; Button("Keep checking", role: .cancel) {}
       } message: { Text("The earlier action may already have been accepted. Another submission can duplicate work or PR feedback. Inspect observed state first.") }
   }
-  private var title: String { model.kind == .rework && observed.isWorkspace ? "Restart workspace" : model.kind.title }
+  private func actionTitle(_ kind: PodRepairKind) -> String {
+    if kind == .rework && observed.isBudgetStopped { return "Continue coding" }
+    return kind == .rework && observed.isWorkspace ? "Restart workspace" : kind.title
+  }
+  private var title: String { actionTitle(model.kind) }
   @ViewBuilder private var content: some View {
     @Bindable var model = model
     VStack(alignment: .leading, spacing: 20) {
@@ -103,7 +110,8 @@ internal struct PodRepairSheet: View {
       } else {
         if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace {
           HStack { ForEach([PodRepairKind.rework, .revalidate, .resume]) { kind in
-            Button(kind.title) { model.kind = kind }.buttonStyle(.bordered).tint(model.kind == kind ? DesktopTheme.accent : .secondary)
+            Button(actionTitle(kind)) { model.kind = kind }.buttonStyle(.bordered).tint(model.kind == kind ? DesktopTheme.accent : .secondary)
+              .disabled([.resume, .revalidate].contains(kind) && observed.isBudgetStopped)
               .accessibilityIdentifier("repair-kind-\(kind.rawValue)")
           } }.disabled(model.busy || budget.busy)
         }
@@ -179,7 +187,7 @@ internal struct PodRepairSheet: View {
             onContinue: {
               guard block == nil, !budget.busy, model.canSubmit else { return }
               await model.submit(id: pod.id, actions: actions.repair)
-            })
+            }, onSaved: { await model.refreshEligibility(id: pod.id, actions: actions.repair) })
             .disabled(model.busy)
         }
       }
@@ -202,9 +210,11 @@ internal struct PodRepairSheet: View {
     if model.infrastructureBlocked { return "Inspect the recorded needs and choose a supported fresh execution." }
     return switch model.kind {
     case .manual: "A workspace for your repair."
-    case .rework: observed.isWorkspace ? "Bring the workspace back." : "Let the agent rework this task."
+    case .rework: observed.isBudgetStopped
+      ? "Continue interrupted coding from the retained source and native session."
+      : observed.isWorkspace ? "Bring the workspace back." : "Let the agent rework this task."
     case .revalidate: "Validate the latest code without running an agent."
-    case .resume: "Continue through the cheapest recovery path."
+    case .resume: "Retry delivery or checks only. This does not resume coding."
     case .prFix: "Send the next repair a clear brief."
     }
   }
@@ -212,7 +222,9 @@ internal struct PodRepairSheet: View {
     if model.infrastructureBlocked { return "Original work and reports stay retained. Ordinary retry is unavailable; the infrastructure recovery handoff keeps source, execution and retry safeguards." }
     return switch model.kind {
     case .manual: "You make the repair in an interactive workspace on the source branch. No autonomous agent starts. After successful push, completion revalidates a linked worker when it is failed or review required."
-    case .rework: observed.isWorkspace ? "A new container attaches to the existing worktree. No autonomous agent starts." : "Keep the pod identity and existing task. An agent may run again and spend tokens. Execution safety and native Goal checks still apply."
+    case .rework: observed.isBudgetStopped
+      ? "Keep the original environment, worktree and session. After budget and retry approval, run one coding continuation, then fresh checks/review. No task usage or retry history is reset."
+      : observed.isWorkspace ? "A new container attaches to the existing worktree. No autonomous agent starts." : "Keep the pod identity and existing task. An agent may run again and spend tokens. Execution safety and native Goal checks still apply."
     case .revalidate: "Run validation on the latest code. The request receipt is separate from the validation result."
     case .resume: "Continue push and PR work when checks passed; otherwise use validation-only recovery. No agent rework."
     case .prFix: "Use the PR-owning branch. The daemon may create or reuse a fix pod; acceptance of feedback is separate from repair progress."

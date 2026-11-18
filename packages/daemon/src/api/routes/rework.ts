@@ -135,8 +135,8 @@ export function reworkRoutes(
         .then(() =>
           manager.triggerValidation(podId, {
             force: true,
-            onReworkQueued: (generation) =>
-              journal.queueForGeneration(podId, input.requestKey, generation),
+            onReworkQueued: (generation, mode) =>
+              journal.queueForGeneration(podId, input.requestKey, generation, mode),
           }),
         )
         .then(

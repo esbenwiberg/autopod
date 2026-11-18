@@ -3312,7 +3312,7 @@ human_review: []
     sandboxMemoryPhases.flatMap((phase) =>
       sandboxMemorySignatures.map((signature) => ({ phase, signature })),
     ),
-  )('parks incomplete Docker $phase on fatal allocation, not coding correction: $signature', async ({
+  )('classifies $phase fatal Docker memory output as infrastructure: $signature', async ({
     phase,
     signature,
   }) => {
@@ -3320,10 +3320,10 @@ human_review: []
     const result = await engine.validate(sandboxMemoryConfig(phase, 'local'));
     expect(result.infrastructureFailure).toMatchObject({
       phase,
-      code: 'VALIDATION_ALLOCATION_FAILED',
+      code: 'PROCESS_MEMORY_EXHAUSTED',
       retryable: false,
     });
-    expect(result.infrastructureFailure?.message).toContain('kernel OOM is not established');
+    expect(result.infrastructureFailure?.message).toContain('not proof of a container OOM');
     expect(result.overall).toBe('fail');
     expect(result.reviewSkipKind).toBe('upstream-failed');
   });

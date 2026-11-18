@@ -1,5 +1,4 @@
 import type {
-  AgentEvent,
   CreatePodRequest,
   EffectiveLaunchConfig,
   EscalationRequest,
@@ -10,6 +9,7 @@ import type {
   PodStatus,
   ProviderCredentials,
   ProviderFailoverTarget,
+  RuntimeEvent,
   SpawnFixResponse,
   UpdateFromBaseResponse,
 } from '@autopod/shared';
@@ -438,7 +438,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
 
     async consumeAgentEvents(
       podId: string,
-      events: AsyncIterable<AgentEvent>,
+      events: AsyncIterable<RuntimeEvent>,
       attempt = 0,
       lifecycle?: { generation: number; containerId: string | null; nativeGoal?: boolean },
     ): Promise<AgentRunOutcome> {
@@ -591,7 +591,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       options?: {
         force?: boolean;
         validationOnly?: boolean;
-        onReworkQueued?: (generation: number) => void;
+        onReworkQueued?: (generation: number, mode?: 'retained-budget') => void;
       },
     ): Promise<void> {
       return validationTriggerWorkflow.triggerValidation.call(

@@ -95,8 +95,8 @@ struct RecoveryHubSheet: View {
             .buttonStyle(.plain).foregroundStyle(DesktopTheme.accent).font(.callout.weight(.medium))
             .disabled(model.busy).accessibilityIdentifier("recovery-hub-back")
         } else { Text("Recovery").font(.headline) }
-        Text("\(pod.profileName) / \(pod.branch)").font(.caption).foregroundStyle(RecoveryPalette.secondary)
-          .lineLimit(1).truncationMode(.middle).help("\(pod.profileName) / \(pod.branch)")
+        Text("\(pod.profileLabel) / \(pod.branch)").font(.caption).foregroundStyle(RecoveryPalette.secondary)
+          .lineLimit(1).truncationMode(.middle).help("\(pod.profileLabel) / \(pod.branch)")
       }
       Spacer(minLength: 12)
       if route == .overview {

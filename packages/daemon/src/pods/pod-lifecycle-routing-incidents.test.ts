@@ -16,7 +16,7 @@ describe('review routing incidents', () => {
     {
       diagnostic:
         'FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory',
-      code: 'VALIDATION_ALLOCATION_FAILED',
+      code: 'PROCESS_MEMORY_EXHAUSTED',
     },
     {
       diagnostic:

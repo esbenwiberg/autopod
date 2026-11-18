@@ -23,7 +23,7 @@ public struct HistoryView: View {
         workerSessions.filter { [.failed, .killed, .reviewRequired].contains($0.status) }
     }
 
-    private var profileHistoryStats: [ProfileHistoryStat] {
+    var profileHistoryStats: [ProfileHistoryStat] {
         let profiles = Array(Set(workerSessions.map(\.profileName))).sorted()
         return profiles.map { profile in
             let s = workerSessions.filter { $0.profileName == profile }
@@ -41,7 +41,8 @@ public struct HistoryView: View {
                 return Double(withAttempts.reduce(0) { $0 + $1.current }) / Double(withAttempts.count)
             }()
             return ProfileHistoryStat(
-                name: profile,
+                id: profile,
+                name: s.first?.profileLabel ?? profile,
                 totalSessions: total,
                 completedCount: completed,
                 failedCount: failed,
@@ -238,7 +239,7 @@ public struct HistoryView: View {
                         HStack(spacing: 6) {
                             Text(pod.id)
                                 .font(.system(.caption, design: .monospaced).weight(.medium))
-                            Text(pod.profileName)
+                            Text(pod.profileLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -289,7 +290,8 @@ public struct HistoryView: View {
 
 // MARK: - Supporting types
 
-private struct ProfileHistoryStat: Identifiable {
+struct ProfileHistoryStat: Identifiable {
+    let id: String
     let name: String
     let totalSessions: Int
     let completedCount: Int
@@ -299,7 +301,6 @@ private struct ProfileHistoryStat: Identifiable {
     let totalCost: Double
     let avgValidationAttempts: Double
     let reworkRate: Double
-    var id: String { name }
 }
 
 // MARK: - Preview

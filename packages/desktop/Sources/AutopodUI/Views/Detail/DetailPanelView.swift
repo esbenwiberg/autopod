@@ -639,7 +639,7 @@ public struct DetailPanelView: View {
                 .onTapGesture { copyPodName() }
                 .help(didCopyName ? "Copied!" : "Click to copy name")
                 HStack(spacing: 6) {
-                    Text(pod.profileName)
+                    Text(pod.profileLabel)
                         .lineLimit(1)
                     Text("·")
                         .foregroundStyle(.quaternary)
@@ -771,11 +771,14 @@ public struct DetailPanelView: View {
     }
 
     private var reworkActionTitle: String {
-        shouldFixReviewFindings ? "Fix Review Findings" : "Rework"
+        if pod.isBudgetStopped { return "Continue coding" }
+        return shouldFixReviewFindings ? "Fix Review Findings" : "Rework"
     }
 
     private var reworkActionHelp: String {
-        shouldFixReviewFindings
+        pod.isBudgetStopped
+        ? "Review task budget and retry permission, then continue coding in the retained environment. This is not a checks-only retry."
+        : shouldFixReviewFindings
         ? "Re-run the agent with the failed review findings as feedback. Spends tokens."
         : "Re-run the agent from scratch with feedback. Spends tokens."
     }
@@ -1152,26 +1155,28 @@ public struct DetailPanelView: View {
                         ? "Pod has no worktree to restart from."
                         : "Spin up a fresh container against the same worktree. No agent runs, no tokens spent.")
                 } else {
-                    // Resume — token-free recovery. Promoted to primary because it's the
-                    // cheapest path: pushes/opens the PR if validation passed, otherwise
-                    // re-runs validation only. Disabled when the worktree is unrecoverable.
-                    Button {
-                        routeRepair(.resume)
-                    } label: {
-                        Label(pod.isFixDeliveryFailure ? "Retry Push" : "Resume",
-                              systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle" : "arrow.uturn.forward")
+                    if !pod.isBudgetStopped {
+                        // Resume — token-free recovery. Promoted to primary because it's the
+                        // cheapest path: pushes/opens the PR if validation passed, otherwise
+                        // re-runs validation only. Disabled when the worktree is unrecoverable.
+                        Button {
+                            routeRepair(.resume)
+                        } label: {
+                            Label(pod.isFixDeliveryFailure ? "Retry Push" : "Resume",
+                                  systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle" : "arrow.uturn.forward")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.blue)
+                        .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                        .help(pod.worktreeCompromised
+                            ? "Worktree is compromised — recover it before resuming."
+                            : !pod.hasWorktree
+                            ? "Pod has no worktree to resume from."
+                            : pod.isFixDeliveryFailure
+                            ? "Retry pushing the already-validated fix branch. No agent rework, no token spend."
+                            : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.blue)
-                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
-                    .help(pod.worktreeCompromised
-                        ? "Worktree is compromised — recover it before resuming."
-                        : !pod.hasWorktree
-                        ? "Pod has no worktree to resume from."
-                        : pod.isFixDeliveryFailure
-                        ? "Retry pushing the already-validated fix branch. No agent rework, no token spend."
-                        : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                     Button {
                         routeRepair(.rework)
                     } label: {

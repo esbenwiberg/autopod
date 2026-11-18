@@ -477,6 +477,33 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
   });
 
+  it('returns the captured profile name separately from its stable key on compact, full and detail APIs', async () => {
+    insertTestProfile(db, { name: 'profile-id' });
+    insertPod(db, { id: 'profile-label', status: 'running', completedAt: undefined });
+    db.prepare(
+      "UPDATE pods SET profile_name='profile-id', launch_config_digest='profile-label-digest' WHERE id='profile-label'",
+    ).run();
+    db.prepare(`INSERT INTO pod_launch_snapshots(pod_id,digest,payload,request_digest,created_at)
+      VALUES ('profile-label','profile-label-digest',?,'request',datetime('now'))`).run(
+      JSON.stringify({
+        profileId: 'profile-id',
+        revisions: [{ id: 'profile-id', kind: 'profile', name: 'Works Claude' }],
+      }),
+    );
+    for (const url of ['/pods?compact=true', '/pods', '/pods/profile-label']) {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      const pod = Array.isArray(body) ? body.find((item) => item.id === 'profile-label') : body;
+      expect(pod.profileName).toBe('profile-id');
+      expect(pod.profileDisplay).toEqual({
+        id: 'profile-id',
+        name: 'Works Claude',
+        state: 'deleted',
+      });
+    }
+  });
+
   it('uses the active captured phase and captured legacy repository; malformed milestone counts remain unavailable', async () => {
     insertPod(db, { id: 'phase-fleet', status: 'running', completedAt: undefined });
     db.prepare("UPDATE pods SET launch_config_digest='phase' WHERE id='phase-fleet'").run();

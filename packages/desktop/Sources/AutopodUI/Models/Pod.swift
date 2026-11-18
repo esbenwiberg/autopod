@@ -873,7 +873,10 @@ public struct Pod: Identifiable, Sendable {
     public var hasWorktree: Bool
     public var artifactCollectionPending: Bool
     public var branch: String
+    /// Compatibility identity key (UUID on composable daemons), not a presentation label.
     public var profileName: String
+    public var profileDisplay: PodProfileDisplayResponse? = nil
+    public var profileLabel: String { profileDisplay?.label ?? profileName }
     public var task: String
     public var model: String
     public var startedAt: Date

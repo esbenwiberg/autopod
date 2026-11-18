@@ -80,6 +80,7 @@ export interface TaskExecutionLedger
   hasSettledRun?(
     pod: Pick<Pod, 'id' | 'lifecycleGeneration' | 'containerId' | 'executionTarget'>,
     cycle: number,
+    failureCategory?: string,
   ): boolean;
   /** Prevent application deletion from erasing unresolved ownership anywhere in this task. */
   assertCanDelete(podId: string): void;
@@ -595,7 +596,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
           .get(podId),
       ),
-    hasSettledRun(pod, cycle) {
+    hasSettledRun(pod, cycle, failureCategory) {
       if (!isContainerReference(pod.containerId)) return false;
       const run = db
         .prepare(`SELECT ended_at AS endedAt, failure_category AS failureCategory,
@@ -608,7 +609,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       if (
         !run?.endedAt ||
         !run.binding ||
-        run.failureCategory === 'execution_termination_unverified'
+        run.failureCategory === 'execution_termination_unverified' ||
+        (failureCategory !== undefined && run.failureCategory !== failureCategory)
       )
         return false;
       try {

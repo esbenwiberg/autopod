@@ -22,6 +22,7 @@ import { createTestDb } from '../test-utils/mock-helpers.js';
 import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
 import {
   DockerContainerManager,
+  STREAMING_TERMINATION_TIMEOUT_MS,
   terminateStreamingProcessGroupScript,
 } from './docker-container-manager.js';
 
@@ -258,7 +259,6 @@ describe('DockerContainerManager', () => {
           Image: 'node:22-alpine',
           name: 'autopod-sess-abc',
           Cmd: ['sleep', 'infinity'],
-          HostConfig: expect.objectContaining({ Init: true }),
           WorkingDir: '/workspace',
         }),
       );
@@ -346,6 +346,15 @@ describe('DockerContainerManager', () => {
       expect(docker.pull).not.toHaveBeenCalled();
       expect(docker.createContainer).toHaveBeenCalledWith(
         expect.objectContaining({ Image: 'myregistry.azurecr.io/autopod/test-app:latest' }),
+      );
+    });
+
+    it('uses a real init to reap orphaned agent, tool and test children', async () => {
+      await manager.spawn(baseConfig);
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          HostConfig: expect.objectContaining({ Init: true, AutoRemove: false }),
+        }),
       );
     });
 
@@ -1528,7 +1537,7 @@ describe('DockerContainerManager', () => {
           expect(childPid).toBeGreaterThan(0);
 
           execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
-            timeout: 6_000,
+            timeout: STREAMING_TERMINATION_TIMEOUT_MS,
           });
 
           let childRunnable = true;
@@ -1548,7 +1557,7 @@ describe('DockerContainerManager', () => {
           rmSync(testDir, { recursive: true, force: true });
         }
       },
-      INTEGRATION_TEST_TIMEOUT_MS,
+      STREAMING_TERMINATION_TIMEOUT_MS + 5_000,
     );
 
     // Waits for the production TERM grace before KILL on real processes (about 2.5 s).
@@ -1608,7 +1617,7 @@ describe('DockerContainerManager', () => {
           expect(runnable(grandchildPid)).toBe(true);
 
           execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
-            timeout: 10_000,
+            timeout: STREAMING_TERMINATION_TIMEOUT_MS,
           });
 
           expect(runnable(leaderPid)).toBe(false);
@@ -1627,7 +1636,7 @@ describe('DockerContainerManager', () => {
           rmSync(testDir, { recursive: true, force: true });
         }
       },
-      INTEGRATION_TEST_TIMEOUT_MS,
+      STREAMING_TERMINATION_TIMEOUT_MS + 5_000,
     );
 
     it('drops late demux output after runtime force-closes output streams', async () => {

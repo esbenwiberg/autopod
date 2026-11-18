@@ -184,7 +184,8 @@ it('shows compact evidence omissions through the actual HTTP client and CLI comm
       JSON.stringify([
         {
           id: 'bounded-list',
-          profileName: 'test',
+          profileName: 'profile-uuid',
+          profileDisplay: { id: 'profile-uuid', name: 'Works Claude', state: 'active' },
           status: 'complete',
           title: 'Preserved work',
           startedAt: null,
@@ -208,6 +209,8 @@ it('shows compact evidence omissions through the actual HTTP client and CLI comm
     await program.parseAsync(['node', 'ap', 'ls', '--compact', '--limit', '10']);
     const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(output).toContain('Preserved work');
+    expect(output).toContain('Works Claude');
+    expect(output).not.toContain('profile-uuid');
     expect(output).toContain(
       'bounded-list: Evidence unavailable in this view: task_summary (size_limit)',
     );
@@ -234,6 +237,32 @@ describe('ls command', () => {
     program.exitOverride();
     mockClient = createMockClient();
     registerPodCommands(program, () => mockClient);
+  });
+
+  it('shows readable profiles in lists and status while keeping IDs available', async () => {
+    const baseline = await mockClient.getSession('abcd1234');
+    const pod = {
+      ...baseline,
+      profileName: 'profile-uuid',
+      profileDisplay: { id: 'profile-uuid', name: 'Works Claude', state: 'active' as const },
+    };
+    vi.mocked(mockClient.getSession).mockResolvedValue(pod);
+    vi.mocked(mockClient.listSessions).mockResolvedValue([pod]);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'ls']);
+      let output = log.mock.calls.flat().join('\n');
+      expect(output).toContain('Works Claude');
+      expect(output).not.toContain('profile-uuid');
+      log.mockClear();
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      output = log.mock.calls.flat().join('\n');
+      expect(output).toContain('Works Claude');
+      expect(output).toContain('Profile ID:');
+      expect(output).toContain('profile-uuid');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('ls since forwards a duration filter as an ISO timestamp', async () => {

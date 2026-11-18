@@ -1,6 +1,5 @@
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
-  AgentEvent,
   CreatePodRequest,
   DaemonConfig,
   EffectiveLaunchConfig,
@@ -14,6 +13,7 @@ import type {
   ProviderCredentials,
   ProviderFailoverTarget,
   PublicProviderCatalog,
+  RuntimeEvent,
   SpawnFixResponse,
   TaskRetryIdentity,
   UpdateFromBaseResponse,
@@ -252,7 +252,7 @@ export interface PodManager {
   resumeNativeGoal?(podId: string, revision: number): Promise<void>;
   consumeAgentEvents(
     podId: string,
-    events: AsyncIterable<AgentEvent>,
+    events: AsyncIterable<RuntimeEvent>,
     attempt?: number,
     lifecycle?: { generation: number; containerId: string | null; nativeGoal?: boolean },
   ): Promise<AgentRunOutcome>;
@@ -363,7 +363,7 @@ export interface PodManager {
     options?: {
       force?: boolean;
       validationOnly?: boolean;
-      onReworkQueued?: (generation: number) => void;
+      onReworkQueued?: (generation: number, mode?: 'retained-budget') => void;
     },
   ): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.

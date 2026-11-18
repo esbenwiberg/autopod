@@ -289,12 +289,12 @@ export class DockerContainerManager implements ContainerManager {
       ? alignMemoryToPageSize(config.memoryBytes)
       : undefined;
     const hostConfig: Record<string, unknown> = {
-      // Tool processes can outlive their exec parent. sleep is not a PID-1 reaper;
-      // without Docker init, reused workers accumulate zombies and /proc cleanup stalls.
-      Init: true,
       Binds: binds.length > 0 ? binds : undefined,
       PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
       AutoRemove: false,
+      // Reap orphaned agent/tool/test children across repeated execs. `sleep`
+      // alone as PID 1 leaves zombies behind and makes /proc tree scans grow.
+      Init: true,
       // Hard memory cap — prevents OOM kills from taking down the whole Docker VM.
       Memory: alignedMemory,
       // MemorySwap == Memory means the container's swap budget equals its RAM
@@ -1452,7 +1452,7 @@ interface DemuxWriterContext {
 }
 
 /** Ceiling for the in-container tree termination (two 2 s signal rounds plus /proc scans). */
-const STREAMING_TERMINATION_TIMEOUT_MS = 15_000;
+export const STREAMING_TERMINATION_TIMEOUT_MS = 15_000;
 /** Bounded re-inspection while Docker has not yet recorded a closed exec's exit. */
 const STREAMING_EXIT_INSPECT_RETRIES = 10;
 const STREAMING_EXIT_INSPECT_INTERVAL_MS = 250;

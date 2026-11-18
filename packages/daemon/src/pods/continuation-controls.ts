@@ -4,6 +4,11 @@ import { atomicPodChange } from '../db/unit-of-work.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  assertBudgetCodingNotInterrupted,
+  assertBudgetStopContinuation,
+  isBudgetStopped,
+} from './budget-stop.js';
 import type {
   ContinuationCaptured,
   ContinuationLiveDependencies,
@@ -151,6 +156,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
+    assertBudgetCodingNotInterrupted(pod);
     assertFailedValidationRecoverable(pod, podRepo.validationExecutions?.isSettled(pod));
     if (!pod.containerId)
       throw new AutopodError(
@@ -193,6 +199,13 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           409,
         );
     }
+    if (activeAgentRuns.has(podId))
+      throw new AutopodError(
+        'The worker is still settling or preserving source.',
+        'TASK_AGENT_RUN_ACTIVE',
+        409,
+      );
+    if (isBudgetStopped(pod)) assertBudgetStopContinuation(podRepo, pod);
     if (pod.options.agentMode === 'interactive') return {};
     const retries = podRepo.workerRetries;
     if (!retries?.state(podId).retryFailure) return {};
@@ -252,6 +265,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       return { action: 'collect-artifacts' };
     }
     const pod = podRepo.getOrThrow(podId);
+    assertBudgetCodingNotInterrupted(pod);
     if (validationResumeRuns.has(podId)) {
       logger.info({ podId }, 'Coalesced duplicate validation Resume');
       return { action: 'revalidate' };

@@ -1951,7 +1951,7 @@ function isPossiblyKilled(exitCode: number, output: string): boolean {
   return exitCode === 137 || /(^|\n)Killed\s*$/.test(output.slice(-200));
 }
 
-function hasFatalAllocationSignature(output: string): boolean {
+function hasFatalMemorySignature(output: string): boolean {
   return (
     /RangeError:\s*Array buffer allocation failed/i.test(output) ||
     /FATAL ERROR:.*JavaScript heap out of memory/i.test(output) ||
@@ -1967,7 +1967,16 @@ function classifyCommandResourceFailure(
   if (result.exitCode === 0) return null;
 
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  if (hasFatalAllocationSignature(output)) return allocationFailure(phase, executionTarget);
+  if (hasFatalMemorySignature(output))
+    return executionTarget === 'sandbox'
+      ? sandboxMemoryExhaustedFailure(phase)
+      : {
+          phase,
+          code: 'PROCESS_MEMORY_EXHAUSTED',
+          message:
+            'Validation process exhausted its memory or JavaScript heap. Qualify runner/process memory before retrying; a V8 heap limit is not proof of a container OOM. Repository rework is not automatically indicated.',
+          retryable: false,
+        };
   if (isPossiblyKilled(result.exitCode, output)) return killedProcessFailure(phase);
   // A test assertion and an incomplete test runner are different outcomes. Require
   // Vitest's unhandled pool-error diagnostic, not arbitrary mentions of a worker exit.
@@ -1986,20 +1995,6 @@ function classifyCommandResourceFailure(
     };
   }
   return null;
-}
-
-function allocationFailure(
-  phase: ValidationInfrastructureFailure['phase'],
-  executionTarget: ValidationEngineConfig['executionTarget'],
-): ValidationInfrastructureFailure {
-  if (executionTarget === 'sandbox') return sandboxMemoryExhaustedFailure(phase);
-  return {
-    phase,
-    code: 'VALIDATION_ALLOCATION_FAILED',
-    message:
-      'Validation did not complete because a process reported a fatal allocation error. Investigate heap limits, resource use and code/test behavior; a container or kernel OOM is not established. Automatic coding correction is not indicated.',
-    retryable: false,
-  };
 }
 
 function killedProcessFailure(
@@ -2080,10 +2075,12 @@ function classifyValidationInfrastructureFailure(
     };
   }
 
-  const message = error instanceof Error ? error.message : String(error);
-  const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
-  if (hasFatalAllocationSignature(`${message}\n${partial}`)) {
-    return allocationFailure(phase, executionTarget);
+  if (executionTarget === 'sandbox') {
+    const message = error instanceof Error ? error.message : String(error);
+    const partial = (error as { partialOutput?: string })?.partialOutput ?? '';
+    if (hasFatalMemorySignature(`${message}\n${partial}`)) {
+      return sandboxMemoryExhaustedFailure(phase);
+    }
   }
 
   if (!(error instanceof AutopodError) || !error.code.startsWith('AZURE_SANDBOX_')) return null;

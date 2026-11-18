@@ -152,6 +152,8 @@ public final class PodStore {
   ) -> Pod {
     guard var current else { return incoming }
     current.fleetArchivedAt = incoming.fleetArchivedAt
+    // Configuration availability can change without an execution updatedAt change.
+    current.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
     if !preferIncomingOnEqual
       && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
       if current.updatedAt == incoming.updatedAt, current.fleetDisplay == nil,
@@ -165,6 +167,7 @@ public final class PodStore {
     }
     var merged = incoming
     merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
+    merged.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
       copyDecision(from: current, to: &merged)
     }
@@ -197,6 +200,7 @@ public final class PodStore {
     // Fleet visibility is independent of the execution's updatedAt timestamp.
     var hydrated = hydrated
     hydrated.fleetArchivedAt = incoming.fleetArchivedAt
+    hydrated.profileDisplay = incoming.profileDisplay ?? hydrated.profileDisplay
     guard incoming.updatedAt > hydrated.updatedAt else {
       if incoming.updatedAt == hydrated.updatedAt, hydrated.fleetDisplay == nil,
          incoming.fleetDisplay != nil {
@@ -218,6 +222,7 @@ public final class PodStore {
     merged.hasWorktree = incoming.hasWorktree
     merged.branch = incoming.branch
     merged.profileName = incoming.profileName
+    merged.profileDisplay = incoming.profileDisplay ?? hydrated.profileDisplay
     merged.model = incoming.model
     merged.startedAt = incoming.startedAt
     merged.updatedAt = incoming.updatedAt

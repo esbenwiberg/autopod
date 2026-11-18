@@ -5,6 +5,7 @@ import type {
   OperatorActor,
   Pod,
   PodStatus,
+  RuntimeEvent,
   ScanFinding,
   ValidationOverride,
   ValidationResult,
@@ -217,7 +218,7 @@ export interface ValidationWorkflowCalls {
     options?: {
       force?: boolean;
       validationOnly?: boolean;
-      onReworkQueued?: (generation: number) => void;
+      onReworkQueued?: (generation: number, mode?: 'retained-budget') => void;
     },
   ): Promise<void>;
   assertCanRework(podId: string): { notBefore?: string; authorizationAvailable?: boolean };
@@ -227,7 +228,7 @@ export interface ValidationWorkflowCalls {
   ): Promise<void>;
   consumeAgentEvents(
     podId: string,
-    events: AsyncIterable<AgentEvent>,
+    events: AsyncIterable<RuntimeEvent>,
     attempt?: number,
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;

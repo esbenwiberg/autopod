@@ -8,7 +8,7 @@ import test from 'node:test';
 const daemon = JSON.parse(
   readFileSync(new URL('../packages/daemon/package.json', import.meta.url), 'utf8'),
 );
-const declarations = ['build', 'typecheck'];
+const boundedCommands = ['build', 'typecheck', 'test'];
 
 function probe(command, nodeOptions, exitCode = 0, worker = false) {
   const directory = mkdtempSync(join(tmpdir(), 'autopod-declaration-heap-'));
@@ -24,7 +24,7 @@ function probe(command, nodeOptions, exitCode = 0, worker = false) {
   try {
     // Exercise the actual package scripts; keep the expensive compiler separate.
     writeFileSync(
-      join(directory, 'tsup'),
+      join(directory, command === 'test' ? 'vitest' : 'tsup'),
       worker
         ? '#!/bin/sh\nexec "$FIXTURE_NODE" "$FIXTURE_WORKER"\n'
         : '#!/bin/sh\nprintf "%s\\n" "$NODE_OPTIONS" "$AUTOPOD_TYPECHECK" "$@"\nexit "$FIXTURE_EXIT"\n',
@@ -54,15 +54,19 @@ child.once('error', error => { console.error(error); process.exitCode = 1; });
   }
 }
 
-for (const command of declarations) {
+for (const command of boundedCommands) {
   const defaultHeapMiB = command === 'typecheck' ? 6144 : 4096;
   for (const supplied of [undefined, '']) {
-    test(`declaration ${command} defaults to a bounded ${defaultHeapMiB / 1024} GiB heap when NODE_OPTIONS is ${supplied === undefined ? 'absent' : 'empty'}`, () => {
+    test(`daemon ${command} defaults to a bounded ${defaultHeapMiB / 1024} GiB heap when NODE_OPTIONS is ${supplied === undefined ? 'absent' : 'empty'}`, () => {
       const result = probe(command, supplied);
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(result.stdout.split('\n').slice(0, -1), [
         `--max-old-space-size=${defaultHeapMiB}`,
-        ...(command === 'typecheck' ? ['1', '--dts-only', '--out-dir', '.turbo/typecheck'] : ['']),
+        ...(command === 'typecheck'
+          ? ['1', '--dts-only', '--out-dir', '.turbo/typecheck']
+          : command === 'test'
+            ? ['', 'run']
+            : ['']),
       ]);
     });
   }
@@ -72,18 +76,18 @@ for (const command of declarations) {
     '--enable-source-maps --max_old_space_size=3072',
     '--enable-source-maps',
   ]) {
-    test(`declaration ${command} preserves caller NODE_OPTIONS: ${supplied}`, () => {
+    test(`daemon ${command} preserves caller NODE_OPTIONS: ${supplied}`, () => {
       const result = probe(command, supplied);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stdout.split('\n')[0], supplied);
     });
   }
 
-  test(`declaration compiler failure remains a failed ${command}`, () => {
+  test(`command failure remains a failed ${command}`, () => {
     assert.equal(probe(command, undefined, 23).status, 23);
   });
 
-  test(`declaration ${command} passes its heap bound to a real Node worker`, () => {
+  test(`daemon ${command} passes its heap bound to a real Node worker`, () => {
     const result = probe(command, undefined, 0, true);
     assert.equal(result.status, 0, result.stderr);
     const limits = JSON.parse(result.stdout);
@@ -94,12 +98,12 @@ for (const command of declarations) {
   });
 }
 
-test('heap defaults are confined to daemon declarations and the qualified test runner', () => {
+test('heap defaults are confined to daemon build, typecheck and test, not runtime commands', () => {
   for (const [name, command] of Object.entries(daemon.scripts)) {
-    if (![...declarations, 'test'].includes(name))
-      assert.ok(!command.includes('max-old-space-size'), name);
+    if (!boundedCommands.includes(name)) assert.ok(!command.includes('max-old-space-size'), name);
   }
   const root = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(root.scripts.typecheck, 'turbo run typecheck');
   assert.equal(root.scripts.build, 'turbo run build');
+  assert.ok(!root.scripts.test.includes('max-old-space-size'));
 });

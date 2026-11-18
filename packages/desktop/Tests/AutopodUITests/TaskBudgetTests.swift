@@ -6,6 +6,34 @@ import Testing
 @testable import AutopodUI
 
 @Suite(.serialized) @MainActor struct TaskBudgetTests {
+  @Test func aCacheWeightedIncreaseDoesNotRequireExceedingRawRecordedUsage() async throws {
+    let fixture = TaskBudgetUIFixture()
+    fixture.countedTokens = 120
+    let model = TaskBudgetModel(podId: "repair", scope: fixture.actions.scope)
+    await model.refresh(fixture.actions)
+    #expect(model.snapshot?.totalRecordedTokens == 200)
+    #expect(model.snapshot?.tokensCountedForBudget == 120)
+    model.limit = "120"
+    #expect(!model.canSave)
+    model.limit = "150"
+    #expect(model.canSave)
+    #expect(await model.save(fixture.actions))
+    #expect(fixture.requests == [.init(tokenBudget: 150, expectedBudget: 100)])
+  }
+
+  @Test func hardBudgetStopRoutesCodingSeparatelyFromChecks() {
+    let stopped = Pod(id: "cap-stop", status: .failed, branch: "fix", profileName: "test",
+      task: "Continue saved work", model: "test", startedAt: .now,
+      errorSummary: "Token budget exceeded (1503606/1500000 tokens used).")
+    #expect(stopped.isBudgetStopped)
+    var unrelated = stopped
+    unrelated.errorSummary = "Test assertion failed"
+    #expect(!unrelated.isBudgetStopped)
+    unrelated.errorSummary = stopped.errorSummary
+    unrelated.status = .running
+    #expect(!unrelated.isBudgetStopped)
+  }
+
   @Test func onlyHigherSafeIntegerWithHeadroomCanBeSaved() async throws {
     let fixture = TaskBudgetUIFixture()
     let model = TaskBudgetModel(podId: "repair", scope: fixture.actions.scope)
@@ -222,6 +250,7 @@ import Testing
 @MainActor private final class TaskBudgetUIFixture {
   var presented = true
   var budget: Int? = 100
+  var countedTokens: Int?
   var requests: [TaskBudgetChangeRequest] = []
   var events: [String] = []
   var failure: (any Error)?
@@ -235,8 +264,9 @@ import Testing
         {"taskId":"task","executionId":"execution","rootPodId":"root","podCount":2,
         "agentRunCount":1,"failedRunCount":0,"transientFailureCount":0,"providerAttemptCount":1,
         "validationExecutionCount":0,"tokenBudget":\(budget.map(String.init) ?? "null"),
-        "budgetCheck":{"status":"\(budget.map { $0 <= 200 ? "exhausted" : "below_recorded_limit" } ?? "unlimited")","reason":"Recorded task usage includes cached input."},
+        "budgetCheck":{"status":"\(budget.map { $0 <= (countedTokens ?? 200) ? "exhausted" : "below_recorded_limit" } ?? "unlimited")","reason":"Recorded task usage includes cached input."},
         "recordedInputTokens":190,"recordedOutputTokens":10,"recordedTotalTokens":200,
+        "budgetCountedTokens":\(countedTokens.map(String.init) ?? "null"),
         "recordedCostUsd":1.28,"telemetry":"partial","diagnostics":[]}
         """.utf8))
   }

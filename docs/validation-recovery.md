@@ -95,7 +95,7 @@ requires fresh human approval; automation cannot consume the earlier approval.
 ## Incomplete validation processes
 
 Fatal allocation diagnostics now park Docker validation as
-`VALIDATION_ALLOCATION_FAILED`, like the existing sandbox allocation hold, instead
+`PROCESS_MEMORY_EXHAUSTED`, like the existing sandbox allocation hold, instead
 of sending incomplete checks back to a coding agent. A failed test command with
 Vitest's unhandled pool-error and unexpected-worker-exit diagnostics parks as
 `VALIDATION_RUNNER_CRASHED`. These are failed/incomplete validation, not evidence
@@ -117,7 +117,7 @@ make a failed run pass. Qualify container capacity separately. Frozen worker
 source/commands do not acquire this script change automatically.
 
 The opt-in reaping fixture exercises the real manager, 2,675 orphan tool processes
-and the unchanged six-second cleanup-test deadline, with an explicit cached
+and the original incident's six-second cleanup deadline, with an explicit cached
 Linux image containing `autopod`, Node and `setsid`:
 
 ```sh

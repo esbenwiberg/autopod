@@ -56,7 +56,14 @@ public struct SidebarView: View {
         }
         return activeSeries.count
     }
-    private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
+    private var profiles: [String] {
+        Array(Set(pods.map(\.profileName))).sorted {
+            profileLabel($0).localizedStandardCompare(profileLabel($1)) == .orderedAscending
+        }
+    }
+    private func profileLabel(_ identity: String) -> String {
+        pods.first(where: { $0.profileName == identity })?.profileLabel ?? identity
+    }
 
     @Environment(\.desktopRedesign) private var redesign
     public var body: some View {
@@ -207,7 +214,9 @@ public struct SidebarView: View {
                     if !profiles.isEmpty {
                         DisclosureGroup("Filter by profile") {
                             ForEach(profiles, id: \.self) { name in
-                                redesignedRow(.profile(name), "folder", name, pods.filter { $0.profileName == name }.count)
+                                redesignedRow(.profile(name), "folder", profileLabel(name), pods.filter { $0.profileName == name }.count)
+                                    .help("\(profileLabel(name)) · \(name)")
+                                    .accessibilityIdentifier("profile-filter-\(name)")
                             }
                         }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 12)
                     }
@@ -309,10 +318,15 @@ public struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
+    private func profileRowLabel(_ item: SidebarItem) -> String {
+        if case .profile(let identity) = item { return profileLabel(identity) }
+        return item.label
+    }
+
     private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
         Label {
             HStack {
-                Text(item.label)
+                Text(profileRowLabel(item))
                 Spacer()
                 if badge > 0 {
                     Text("\(badge)")

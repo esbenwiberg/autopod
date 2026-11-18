@@ -250,7 +250,10 @@ export interface Pod {
   }>;
 
   id: string;
+  /** Legacy identity key: UUID for composable pods, name for legacy pods. Not a display label. */
   profileName: string;
+  /** Read-only captured label and current availability; never launch authority. */
+  profileDisplay?: PodProfileDisplay;
   task: string;
   status: PodStatus;
   model: string;
@@ -704,6 +707,13 @@ export type PodRepositoryDisplay =
   | { kind: 'empty' }
   | { kind: 'unavailable' };
 
+/** Profile name at launch, stable identity, and current editability. Missing snapshots stay explicit. */
+export interface PodProfileDisplay {
+  id: string | null;
+  name: string | null;
+  state: 'active' | 'archived' | 'deleted' | 'unavailable' | 'legacy';
+}
+
 export interface PodFleetDisplay {
   repository: PodRepositoryDisplay;
   progress: Pod['progress'];
@@ -729,7 +739,9 @@ export interface CompactPod {
   title: string;
   taskExcerpt: string;
   taskSummary: string | null;
+  /** Legacy identity key; prefer profileDisplay for presentation. */
   profileName: string;
+  profileDisplay?: PodProfileDisplay;
   status: PodStatus;
   model: string;
   runtime: RuntimeType;

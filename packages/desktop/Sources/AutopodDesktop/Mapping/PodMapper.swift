@@ -128,6 +128,7 @@ public enum PodMapper {
       dependsOnPodIds: response.dependsOnPodIds ?? [],
       runningAt: response.runningAt.map { parseDate($0) }
     )
+    result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
@@ -570,6 +571,7 @@ public enum PodMapper {
       validationProgress.markStarted(.review)
       result.validationProgress = validationProgress
     }
+    result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
     return result
   }

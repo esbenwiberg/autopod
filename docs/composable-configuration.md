@@ -60,6 +60,22 @@ Full `LaunchRequest` JSON supports settings without dedicated flags, including e
 
 Before admission, the CLI saves the exact request in a private launch journal and prints its path. Retry a lost response with `ap run --config <saved-request.json>`. Retrying this file preserves the request ID and frozen digest. Do not edit a retry file to request different work. Previewing again deliberately reads current configuration and can report a stale digest.
 
+### Profile identity in pod responses
+
+Profile creation keeps a stable UUID and a separate readable name. Pod list (including compact),
+detail and retained-history responses add optional `profileDisplay: { id, name, state }` metadata.
+`name` is captured from the digest-bound launch revision, so a later rename does not rewrite
+history. `state` describes the current profile: `active`, `archived`, `deleted`, `unavailable`
+(missing or unusable snapshot), or `legacy` (name-keyed pod, with no composable ID).
+
+The compatibility field `profileName` remains the identity/filter key: a UUID for composed
+launches, a name for legacy pods. Do not use it as a new display label or replace persisted IDs
+with names. `profileDisplay` is read-only presentation, never authority to launch or recover a pod.
+Older daemons may omit it. `ap ls` and `ap status` display the captured name; status also prints
+the profile ID. Desktop profile filters keep stable keys, Profiles search accepts full or partial
+IDs as well as names, and active profiles can be opened directly from the pod overview.
+Archived/deleted profiles retain their captured names without offering an edit link.
+
 ## Follow-up work
 
 ```sh
