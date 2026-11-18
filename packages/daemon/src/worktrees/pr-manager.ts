@@ -44,6 +44,7 @@ import {
   type PrNarrativeResult,
   type PrTitleResult,
 } from './pr-description-generator.js';
+import { ghSavedDraft, githubSavedDraft } from './saved-work-draft-provider.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -303,6 +304,11 @@ export interface GhPrManagerConfig {
  * resolved by DaemonGitHubAuth and discards ambient token variables.
  */
 export class GhPrManager implements PrManager {
+  get savedDraft() {
+    return ghSavedDraft((args, cwd, beforePrepared) =>
+      this.execGh(args, { cwd: cwd || undefined, timeout: 30_000, beforePrepared }),
+    );
+  }
   private logger: Logger;
   private llmDeps?: ProfileLlmClientDeps;
   private githubAuth: DaemonGitHubAuth;
@@ -918,6 +924,18 @@ function parseGitHubCommentFeedbackId(feedbackId: string): number | null {
 }
 
 export class GitHubApiPrManager implements PrManager {
+  get savedDraft() {
+    return githubSavedDraft(async (url, init, beforeWrite) => {
+      await beforeWrite?.();
+      const response = await fetch(url, {
+        ...init,
+        headers: this.headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`Draft provider request failed (HTTP ${response.status})`);
+      return response.json();
+    });
+  }
   private pat: string;
   private logger: Logger;
   private llmDeps?: ProfileLlmClientDeps;

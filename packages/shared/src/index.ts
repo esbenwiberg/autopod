@@ -570,6 +570,7 @@ export type {
   SpawnConfig,
   StdioMcpServerConfig,
 } from './types/runtime.js';
+export type * from './types/saved-work-draft-pr.js';
 export type {
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,

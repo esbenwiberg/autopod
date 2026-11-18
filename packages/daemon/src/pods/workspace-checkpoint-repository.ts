@@ -9,6 +9,7 @@ import type {
 function hydrate(row: Record<string, unknown>): CheckpointRecord {
   return {
     podId: row.pod_id as string,
+    capturedAt: row.created_at as string,
     sequence: row.sequence as number,
     fingerprint: JSON.parse(row.fingerprint as string) as WorkspaceFingerprint,
     result: JSON.parse(row.result as string) as WorkspaceCheckpointResult,
@@ -21,15 +22,26 @@ function hydrate(row: Record<string, unknown>): CheckpointRecord {
 }
 export function createWorkspaceCheckpointRepository(db: Database.Database): CheckpointRecordStore {
   return {
+    async list(podId) {
+      return (
+        db
+          .prepare('SELECT * FROM workspace_checkpoints WHERE pod_id=? ORDER BY sequence DESC')
+          .all(podId) as Record<string, unknown>[]
+      ).map(hydrate);
+    },
     async save(record) {
-      db.prepare(`INSERT OR REPLACE INTO workspace_checkpoints
+      db.prepare(`INSERT INTO workspace_checkpoints
       (pod_id, sequence, fingerprint, result, verified_at, attempts, error) VALUES
-      (@podId,@sequence,@fingerprint,@result,@verifiedAt,@attempts,@error)`).run({
-        ...record,
-        fingerprint: JSON.stringify(record.fingerprint),
-        result: JSON.stringify(record.result),
-        error: record.error ? JSON.stringify(record.error) : null,
-      });
+      (@podId,@sequence,@fingerprint,@result,@verifiedAt,@attempts,@error)
+      ON CONFLICT(pod_id,sequence) DO UPDATE SET fingerprint=excluded.fingerprint,
+      result=excluded.result,verified_at=excluded.verified_at,attempts=excluded.attempts,error=excluded.error`).run(
+        {
+          ...record,
+          fingerprint: JSON.stringify(record.fingerprint),
+          result: JSON.stringify(record.result),
+          error: record.error ? JSON.stringify(record.error) : null,
+        },
+      );
     },
     async latest(podId) {
       const row = db

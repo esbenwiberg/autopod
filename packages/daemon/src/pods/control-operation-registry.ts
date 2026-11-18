@@ -26,6 +26,11 @@ export function createControlOperationRegistry(
         if (
           typeof value !== 'function' ||
           key === 'recoverStalledWorker' ||
+          key === 'prepareSavedWorkDraft' ||
+          key === 'confirmSavedWorkDraft' ||
+          key === 'observeSavedWorkDraft' ||
+          key === 'cancelSavedWorkDraft' ||
+          key === 'cancelSavedWorkDraftPreparation' ||
           key === 'previewRecoveryFork' ||
           key === 'createRecoveryFork' ||
           key === 'finalizeRetained' ||

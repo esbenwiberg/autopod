@@ -21,6 +21,8 @@ export interface CheckpointTelemetry {
 }
 
 export interface CheckpointRecord {
+  /** Host capture/import time, distinct from successful original-branch promotion. */
+  capturedAt?: string;
   podId: string;
   sequence: number;
   fingerprint: WorkspaceFingerprint;
@@ -31,6 +33,7 @@ export interface CheckpointRecord {
 }
 
 export interface CheckpointRecordStore {
+  list?(podId: string): Promise<CheckpointRecord[]>;
   save(record: CheckpointRecord): Promise<void>;
   latest(podId: string): Promise<CheckpointRecord | null>;
   latestVerified(podId: string): Promise<CheckpointRecord | null>;

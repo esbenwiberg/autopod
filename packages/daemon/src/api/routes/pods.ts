@@ -62,6 +62,7 @@ import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedFinalizationRoutes } from './retained-finalization.js';
 import { reworkRoutes } from './rework.js';
 import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
+import { savedWorkDraftRoutes } from './saved-work-draft-pr.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
 import { stalledWorkerRecoveryRoutes } from './stalled-worker-recovery.js';
 import { validationRecoveryRoutes } from './validation-recovery.js';
@@ -866,6 +867,7 @@ export function podRoutes(
   artifactChecksRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
+  savedWorkDraftRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);
   sandboxRecoveryRoutes(app, podManager);

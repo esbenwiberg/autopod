@@ -160,6 +160,19 @@ stopped; it never stops, wakes or deletes it. Historical Docker failures without
 maintained dispatch evidence remain blocked. See `docs/approval-rewrite-repair.md`
 for independent checkout selection, targeted retry permission and fresh approval.
 
+### Saved-work review-only draft publication
+
+`saved-work-draft-pr.ts` owns a distinct human inspect/prepare/confirm workflow.
+Its durable ledger binds actor/task/generation/repository/base, saved commit/tree
+and a new branch. A promotion-only divergent sandbox checkpoint requires complete
+imported proof reverified against local objects and its pod-owned quarantine ref.
+Never substitute `latestVerified` for the latest imported snapshot or claim host
+HEAD contains dirty sandbox work. Older source requires explicit selection.
+Independent preparation preserves originals; push uses an empty exact-ref lease.
+Uncertain effects reconcile positive exact evidence without replay. Keep the
+receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
+`docs/saved-work-draft-pr.md`; preserve the dedicated suites and Mac verification.
+
 ### Retention-safe task continuation
 
 `ap retained-continuation` explicitly selects independent source for ordinary

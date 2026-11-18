@@ -13,6 +13,10 @@ import {
   assertRecoveryForkResourceAvailable,
 } from './recovery-fork-repository.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
+import {
+  assertSavedDraftPathAvailable,
+  assertSavedDraftResourceAvailable,
+} from './saved-work-draft-repository.js';
 import { assertStalledRecoveryPathAvailable } from './stalled-worker-recovery-repository.js';
 
 export const finalizationHash = (value: unknown) =>
@@ -74,6 +78,7 @@ export function ownsRetainedFinalizationStop(
   );
 }
 export function assertFinalizationResourceAvailable(db: Database.Database, id: string) {
+  assertSavedDraftResourceAvailable(db, id);
   assertRecoveryForkResourceAvailable(db, id);
   if (db.prepare('SELECT 1 FROM retained_finalization_resources WHERE container_id=?').get(id))
     finalizationError(
@@ -112,6 +117,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertSavedDraftPathAvailable(db, location);
   assertArtifactChecksPathAvailable(db, location);
   assertRecoveryForkPathAvailable(db, location);
   assertStalledRecoveryPathAvailable(db, location);
