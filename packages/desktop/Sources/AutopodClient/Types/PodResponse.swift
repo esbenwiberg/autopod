@@ -67,6 +67,21 @@ public struct CompactPodPageResponse: Codable, Sendable {
   public let nextCursor: String?
 }
 
+public struct PodProfileDisplayResponse: Codable, Sendable, Equatable {
+  public let id: String?
+  public let name: String?
+  public let state: String
+  public init(id: String? = nil, name: String? = nil, state: String) {
+    self.id = id; self.name = name; self.state = state
+  }
+
+  public var label: String {
+    let name = name ?? "Unavailable profile"
+    return ["archived", "deleted"].contains(state) ? "\(name) (\(state))" : name
+  }
+  public var canOpen: Bool { state == "active" && id != nil }
+}
+
 public struct PodRepositoryDisplayResponse: Codable, Sendable {
   public let kind: String
   public let remote: String?
@@ -103,6 +118,7 @@ public struct CompactPodResponse: Codable, Sendable {
   public let title: String
   public let taskExcerpt: String?
   public let taskSummary: String?
+  public let profileDisplay: PodProfileDisplayResponse?
   public let profileName: String
   public let status: String
   public let model: String
@@ -183,6 +199,7 @@ public struct SessionResponse: Codable, Sendable {
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
   public let id: String
+  public let profileDisplay: PodProfileDisplayResponse?
   public let profileName: String
   public let task: String
   public let status: String
@@ -298,7 +315,7 @@ public struct SessionResponse: Codable, Sendable {
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
   private enum CodingKeys: String, CodingKey {
-    case id, profileName, task, status, model, runtime, executionTarget, branch
+    case id, profileName, profileDisplay, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt
     case completionPolicy, researchFindings

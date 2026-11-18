@@ -639,7 +639,7 @@ public struct DetailPanelView: View {
                 .onTapGesture { copyPodName() }
                 .help(didCopyName ? "Copied!" : "Click to copy name")
                 HStack(spacing: 6) {
-                    Text(pod.profileName)
+                    Text(pod.profileLabel)
                         .lineLimit(1)
                     Text("·")
                         .foregroundStyle(.quaternary)

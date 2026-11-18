@@ -19,6 +19,7 @@ import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
 import { formatDurationFromDates, formatStatus } from '../output/colors.js';
 import { withJsonOutput } from '../output/json.js';
+import { formatPodProfile } from '../output/pod-profile.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
@@ -38,7 +39,7 @@ import { registerSourceRecoveryCommand } from './source-recovery.js';
 
 const podColumns: ColumnDef<Pod>[] = [
   { header: 'ID', formatter: (s) => s.id.slice(0, 8), width: 10 },
-  { header: 'Profile', key: 'profileName', width: 16 },
+  { header: 'Profile', formatter: formatPodProfile, width: 24 },
   { header: 'Status', formatter: (s) => formatStatus(s.status), width: 18 },
   { header: 'Suite', formatter: (s) => s.options?.validationSuite ?? 'full', width: 16 },
   { header: 'Task', formatter: (s) => truncate(s.task, 40), width: 42 },
@@ -52,7 +53,7 @@ const podColumns: ColumnDef<Pod>[] = [
 
 const compactPodColumns: ColumnDef<CompactPod>[] = [
   { header: 'ID', formatter: (pod) => pod.id.slice(0, 8), width: 10 },
-  { header: 'Profile', key: 'profileName', width: 16 },
+  { header: 'Profile', formatter: formatPodProfile, width: 24 },
   { header: 'Status', formatter: (pod) => formatStatus(pod.status), width: 18 },
   { header: 'Title', formatter: (pod) => truncate(pod.title, 40), width: 42 },
   {
@@ -825,7 +826,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     withJsonOutput(opts, { ...pod, taskExecution }, (s) => {
       console.log(chalk.bold.cyan(`Pod ${s.id}`));
       console.log(chalk.dim('─'.repeat(50)));
-      console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
+      console.log(`${chalk.bold('Profile:')}      ${formatPodProfile(s)}`);
+      if (s.profileDisplay?.id)
+        console.log(`${chalk.bold('Profile ID:')}   ${s.profileDisplay.id}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
       if (s.status === 'paused' && s.pauseReason === 'budget')
         console.log(chalk.yellow(describeBudgetPause(s.id, s.taskExecution)));

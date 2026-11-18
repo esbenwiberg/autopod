@@ -397,6 +397,7 @@ export type {
   PodCostSegment,
   PodFleetDisplay,
   PodInfrastructureFailure,
+  PodProfileDisplay,
   PodQualityScore,
   PodRepositoryDisplay,
   PodStatus,

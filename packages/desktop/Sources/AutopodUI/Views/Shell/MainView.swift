@@ -419,6 +419,7 @@ public struct MainView: View {
                 || (pod.briefTitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || pod.task.localizedCaseInsensitiveContains(trimmed)
                 || pod.profileName.localizedCaseInsensitiveContains(trimmed)
+                || pod.profileLabel.localizedCaseInsensitiveContains(trimmed)
                 || (pod.seriesName?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
     }
@@ -549,6 +550,13 @@ public struct MainView: View {
     @State private var pendingWorkspaceAction: (() -> Void)?
     @State private var showWorkspaceDiscard = false
     @State private var configurationReset = UUID()
+
+    private var sidebarTitle: String {
+        if case .profile(let identity) = sidebarSelection {
+            return pods.first(where: { $0.profileName == identity })?.profileLabel ?? identity
+        }
+        return sidebarSelection.label
+    }
 
     private var sidebarBinding: Binding<SidebarItem> {
         Binding(
@@ -685,6 +693,12 @@ public struct MainView: View {
         }
         .environment(\.desktopRepositories, repositoryIndex.byPodID)
         .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
+        .environment(\.desktopOpenProfile, !redesign || configurationActions == nil ? nil : { identity in
+            requestWorkspace {
+                configurationReset = UUID(); configurationKind = .profile
+                configurationToOpen = identity; sidebarSelection = .profilesWorkspace
+            }
+        })
         .environment(\.desktopPodSelection, { selectedSessionId = $0 })
         .onChange(of: sidebarSelection) { _, selection in
             if redesign, case .series(let id) = selection {
@@ -1146,7 +1160,7 @@ public struct MainView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(sidebarSelection == .all ? "All pods" : sidebarSelection.label)
+                    Text(sidebarSelection == .all ? "All pods" : sidebarTitle)
                         .font(.system(size: 26, weight: .semibold)).tracking(-0.7)
                     Text("\(fleet.visible.count) \(fleet.visible.count == 1 ? "pod" : "pods") · \(repositoryIndex.repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
                         .font(.caption).foregroundStyle(.secondary)
@@ -1218,7 +1232,7 @@ public struct MainView: View {
 
     private func toolbarTitle(fleet: DesktopFleetPresentation) -> some View {
         HStack(spacing: 8) {
-            Text(sidebarSelection.label)
+            Text(sidebarTitle)
                 .font(.headline)
                 .lineLimit(1)
                 .fixedSize()
@@ -1708,7 +1722,7 @@ struct SessionListRow: View {
                         .clipShape(Capsule())
                     }
                 }
-                Text(pod.profileName)
+                Text(pod.profileLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

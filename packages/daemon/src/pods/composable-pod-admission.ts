@@ -130,6 +130,7 @@ export function admitComposablePod(input: {
       pods.insert({
         ...work,
         id,
+        // Compatibility column is a stable identity key, not the label. Read paths project profileDisplay.
         profileName: config.profileId,
         task: config.task,
         status: 'queued',

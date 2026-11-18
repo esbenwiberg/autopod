@@ -114,7 +114,9 @@ public struct DesktopHistoryWorkspace: View {
         }
         Picker("Profile", selection: $filter.profile) {
             Text("All profiles").tag("all")
-            ForEach(Array(Set(pods.map(\.profileName))).sorted(), id: \.self) { Text($0).tag($0) }
+            ForEach(Array(Set(pods.map(\.profileName))).sorted(), id: \.self) { identity in
+                Text(pods.first(where: { $0.profileName == identity })?.profileLabel ?? identity).tag(identity)
+            }
         }
         Picker("Outcome", selection: $filter.outcome) {
             Text("All outcomes").tag("all"); Text("Failed, stopped & review").tag("attention")
@@ -125,7 +127,7 @@ public struct DesktopHistoryWorkspace: View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(pod.desktopTitle).font(.callout.weight(.medium)).lineLimit(2)
-                Text("\(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder) · \(pod.profileName) · \(pod.id)")
+                Text("\(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder) · \(pod.profileLabel) · \(pod.id)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Text(pod.status.label).font(.caption2.weight(.medium)).foregroundStyle(pod.status.color)
@@ -154,7 +156,7 @@ public struct DesktopHistoryWorkspace: View {
                 PodLifecycleRail(pod: pod)
                 Text("Autopod lifecycle · \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label)").font(.caption2).foregroundStyle(.secondary)
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 16) {
-                    GridRow { fact("Profile", pod.profileName); fact("Recorded cost", String(format: "$%.2f", pod.costUsd)) }
+                    GridRow { fact("Profile", pod.profileLabel); fact("Recorded cost", String(format: "$%.2f", pod.costUsd)) }
                     GridRow { fact("Milestones", pod.desktopMilestoneToken ?? "Not recorded"); fact("Validation attempt", pod.attempts.map { "\($0.current) of \($0.max)" } ?? "Not recorded") }
                 }
                 fact("Branch", pod.branch)
@@ -187,7 +189,7 @@ public struct DesktopHistoryWorkspace: View {
                         let settled = group.filter { $0.status != .running && $0.status != .paused }
                         let attempts = group.compactMap(\.attempts)
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(name).font(.callout.weight(.semibold))
+                            Text(group.first?.profileLabel ?? name).font(.callout.weight(.semibold))
                             ViewThatFits(in: .horizontal) {
                                 HStack(spacing: 24) { profileFacts(group, settled: settled, attempts: attempts) }
                                 VStack(alignment: .leading, spacing: 12) { profileFacts(group, settled: settled, attempts: attempts) }

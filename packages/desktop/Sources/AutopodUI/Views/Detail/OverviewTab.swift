@@ -6,6 +6,7 @@ import SwiftUI
 /// Overview tab — pod metadata, escalation, plan progress, activity feed.
 struct OverviewTab: View {
     @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopOpenProfile) private var openProfile
     let pod: Pod
     let events: [AgentEvent]
     var actions: PodActions = .preview
@@ -223,12 +224,26 @@ struct OverviewTab: View {
         if let phase = pod.phase {
             return phase.description
         }
-        return "\(pod.profileName) on \(pod.branch)"
+        return "\(pod.profileLabel) on \(pod.branch)"
+    }
+
+    @ViewBuilder private var profileSnapshotTile: some View {
+        if redesign, let profile = pod.profileDisplay, profile.canOpen, let id = profile.id, let openProfile {
+            Button { openProfile(id) } label: {
+                snapshotTile(icon: "person.text.rectangle", label: "Profile", value: pod.profileLabel)
+            }
+            .buttonStyle(.plain)
+            .help("Open profile · \(id)")
+            .accessibilityIdentifier("pod-open-profile")
+        } else {
+            snapshotTile(icon: "person.text.rectangle", label: "Profile", value: pod.profileLabel)
+                .help(pod.profileDisplay.map { "Profile \($0.state) · \($0.id ?? pod.profileName)" } ?? pod.profileName)
+        }
     }
 
     private var overviewSnapshotGrid: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-            snapshotTile(icon: "person.text.rectangle", label: "Profile", value: pod.profileName)
+            profileSnapshotTile
             snapshotTile(icon: "arrow.triangle.branch", label: "Branch", value: pod.branch)
             snapshotTile(icon: "clock", label: "Duration", value: pod.duration)
             snapshotTile(icon: "dollarsign.circle", label: "Cost", value: String(format: "$%.3f", pod.costUsd))
@@ -714,7 +729,7 @@ struct OverviewTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 42, alignment: .leading)
-                Text(pod.profileName)
+                Text(pod.profileLabel)
                     .font(.system(.caption, design: .monospaced).weight(.medium))
                     .foregroundStyle(.primary)
                 if let version = pod.profileSnapshot?.version {
