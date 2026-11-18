@@ -70,14 +70,13 @@ export async function materializeCheckpointFixture(
   vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
     if (!args[1][2]?.includes('autopod-validation-source-v1')) return execute(...args);
     try {
-      const result = await exec(
-        '/usr/bin/git',
-        args[1].slice(args[1].indexOf('/usr/bin/git') + 3),
-        {
-          cwd: f.pod().worktreePath!,
-          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
-        },
-      );
+      const [program, ...argv] = args[1];
+      const workspace = f.pod().worktreePath;
+      const workspaceArg = argv.indexOf('/workspace', argv.indexOf('/usr/bin/git'));
+      if (!program || !workspace || workspaceArg < 0)
+        throw new Error('Missing source probe inputs');
+      argv[workspaceArg] = workspace;
+      const result = await exec(program, argv, { cwd: workspace });
       return { ...result, exitCode: 0 };
     } catch {
       return { stdout: '', stderr: 'Guest source unavailable', exitCode: 1 };

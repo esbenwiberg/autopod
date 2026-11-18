@@ -538,6 +538,15 @@ describe('checkpointSandboxWorkspace', () => {
         env: gitEnv,
       });
       expect(stdout.trim()).toBe(result.snapshotTree);
+      const tip = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: host })).stdout.trim();
+      expect(tip).toBe(result.snapshotCommit);
+      if (scenario.name === 'uncommitted' || scenario.name === 'mixed') {
+        expect(result.snapshotCommit).not.toBe(result.sourceHead);
+        expect(result.snapshotTree).not.toBe(result.sourceTree);
+      } else {
+        expect(result.snapshotCommit).toBe(result.sourceHead);
+        expect(result.snapshotTree).toBe(result.sourceTree);
+      }
     }
   }, 15_000);
 
@@ -585,6 +594,45 @@ describe('checkpointSandboxWorkspace', () => {
     });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
       'agent correction\n',
+    );
+  });
+
+  it('normalizes an owned legacy checkpoint only with unpublished source custody', async () => {
+    const f = await rewrittenSource();
+    const source = f.first.sourceHead;
+    await git(f.sandbox, ['reset', '--hard', source]);
+    await git(f.sandbox, ['clean', '-fd']);
+    await execFileAsync('git', ['commit', '--allow-empty', '-m', 'autopod sandbox checkpoint'], {
+      cwd: f.host,
+      env: {
+        ...gitEnv,
+        GIT_AUTHOR_NAME: 'Autopod',
+        GIT_AUTHOR_EMAIL: 'autopod@localhost',
+        GIT_COMMITTER_NAME: 'Autopod',
+        GIT_COMMITTER_EMAIL: 'autopod@localhost',
+      },
+    });
+    const head = async () =>
+      (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: f.host })).stdout.trim();
+    const legacy = await head();
+    await git(f.host, ['update-ref', `refs/autopod-quarantine/${f.args.podId}/99`, legacy]);
+
+    const denied = await checkpointSandboxWorkspace({ ...f.args, sequence: 2 });
+    expect(denied).toMatchObject({
+      materialized: false,
+      error: { code: 'LINEAGE_CONFLICT' },
+    });
+    expect(await head()).toBe(legacy);
+
+    const allowed = await checkpointSandboxWorkspace({
+      ...f.args,
+      sequence: 3,
+      unpublishedSourceBase: f.base,
+    });
+    expect(allowed).toMatchObject({ materialized: true, snapshotCommit: source });
+    expect(await head()).toBe(source);
+    await expect(resolveSandboxCheckpointSourceHead(f.host, f.args.podId, legacy)).resolves.toBe(
+      source,
     );
   });
 

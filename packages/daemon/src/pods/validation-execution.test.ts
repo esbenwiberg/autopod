@@ -548,6 +548,43 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
+  it('dispatches sandbox validation and certifies the same source as the review packet', async () => {
+    const f = fixture(true);
+    try {
+      f.config.reviewSource = { head: 'a'.repeat(40), tree: 'b'.repeat(40) };
+      const result = await f.run();
+      expect(result.overall).toBe('pass');
+      expect(f.engine).toHaveBeenCalledOnce();
+      expect(f.db().prepare('SELECT count(*) AS n FROM validation_source_results').get()).toEqual({
+        n: 1,
+      });
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each([
+    'unavailable',
+    'different',
+  ])('holds %s sandbox source before validation dispatch', async (scenario) => {
+    const f = fixture(true);
+    try {
+      f.config.reviewSource = { head: 'c'.repeat(40), tree: 'b'.repeat(40) };
+      if (scenario === 'unavailable')
+        vi.mocked(f.cm.execInContainer).mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+      await expect(f.run()).rejects.toMatchObject({
+        code: 'REVIEW_SOURCE_UNAVAILABLE',
+        message: expect.stringContaining(
+          scenario === 'unavailable' ? 'could not verify' : 'differs',
+        ),
+      });
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.admitted).not.toHaveBeenCalled();
+    } finally {
+      f.close();
+    }
+  });
+
   it('never certifies a packet-free result even when standalone engine checks pass', async () => {
     const f = fixture();
     try {
