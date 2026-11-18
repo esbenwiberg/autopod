@@ -2,6 +2,8 @@ import type {
   RecoveryForkInspection,
   RecoveryForkOperation,
   RecoveryForkPreview,
+  RecoveryHandoffPreparation,
+  RecoveryHandoffPreparationState,
 } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
@@ -85,6 +87,31 @@ async function fixture() {
     previewRecoveryFork: vi.fn(async () => preview),
     createRecoveryFork: vi.fn(async () => operation),
     getRecoveryFork: vi.fn(() => operation),
+    prepareRecoveryHandoff: vi.fn(
+      async (): Promise<RecoveryHandoffPreparation> => ({
+        version: 1,
+        podId: 'pod',
+        generation: 1,
+        actorId: 'operator-oid',
+        createdAt: '2026-11-18',
+        packet: '{}',
+        packetHash: 'a'.repeat(64),
+        source: null,
+        workerStarted: false,
+        coverage: 'brief-only',
+      }),
+    ),
+    getPreparedRecoveryHandoff: vi.fn(
+      async (): Promise<RecoveryHandoffPreparationState> => ({
+        version: 1,
+        podId: 'pod',
+        generation: 1,
+        available: true,
+        blockers: [],
+        context,
+        receipt: null,
+      }),
+    ),
   };
   recoveryForkRoutes(app, manager);
   await app.ready();
@@ -98,6 +125,8 @@ describe('recovery-fork human API', () => {
     ['POST', `${base}/preview`],
     ['POST', base],
     ['GET', `${base}/human-request`],
+    ['POST', `${base}/prepare-handoff`],
+    ['GET', `${base}/prepared-handoff`],
   ] as const)('%s %s rejects anonymous and pod tokens with no-store', async (method, url) => {
     const f = await fixture();
     for (const token of [undefined, 'pod-token']) {
@@ -111,6 +140,40 @@ describe('recovery-fork human API', () => {
       expect(result.headers['cache-control']).toBe('no-store');
     }
     for (const method of Object.values(f.manager)) expect(method).not.toHaveBeenCalled();
+  });
+  it('keeps preparation authenticated, strict and separate from execution and source inspection', async () => {
+    const f = await fixture();
+    const response = await f.app.inject({
+      method: 'POST',
+      url: `${base}/prepare-handoff`,
+      headers,
+      payload: { expectedGeneration: 1 },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(f.manager.prepareRecoveryHandoff).toHaveBeenCalledExactlyOnceWith(
+      'pod',
+      { expectedGeneration: 1, instructions: '' },
+      { type: 'human', userId: 'operator-oid' },
+    );
+    expect(f.manager.createRecoveryFork).not.toHaveBeenCalled();
+    expect(f.manager.inspectRecoveryFork).not.toHaveBeenCalled();
+    const observed = await f.app.inject({
+      method: 'GET',
+      url: `${base}/prepared-handoff`,
+      headers,
+    });
+    expect(observed.statusCode).toBe(200);
+    expect(observed.json()).toMatchObject({ receipt: null, generation: 1, available: true });
+    expect(f.manager.getPreparedRecoveryHandoff).toHaveBeenCalledExactlyOnceWith('pod');
+    const invalid = await f.app.inject({
+      method: 'POST',
+      url: `${base}/prepare-handoff`,
+      headers,
+      payload: { expectedGeneration: 1, execute: true },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(f.manager.prepareRecoveryHandoff).toHaveBeenCalledTimes(1);
   });
   it('keeps reads/preview separate and returns exact actor-bound operation observations', async () => {
     const f = await fixture();

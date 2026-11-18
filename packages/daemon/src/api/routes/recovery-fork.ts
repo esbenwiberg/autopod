@@ -1,4 +1,9 @@
-import { AutopodError, recoveryForkInputSchema, recoveryForkRequestSchema } from '@autopod/shared';
+import {
+  AutopodError,
+  recoveryForkInputSchema,
+  recoveryForkRequestSchema,
+  recoveryHandoffPreparationSchema,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PodManager } from '../../pods/pod-manager.js';
@@ -8,7 +13,12 @@ export function recoveryForkRoutes(
   app: FastifyInstance,
   manager: Pick<
     PodManager,
-    'inspectRecoveryFork' | 'previewRecoveryFork' | 'createRecoveryFork' | 'getRecoveryFork'
+    | 'inspectRecoveryFork'
+    | 'previewRecoveryFork'
+    | 'createRecoveryFork'
+    | 'getRecoveryFork'
+    | 'prepareRecoveryHandoff'
+    | 'getPreparedRecoveryHandoff'
   >,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) }).strict();
@@ -26,6 +36,25 @@ export function recoveryForkRoutes(
       throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
     z.object({}).strict().parse(request.query);
     return manager.inspectRecoveryFork(params.parse(request.params).podId);
+  });
+  app.post('/pods/:podId/recovery-fork/prepare-handoff', async (request) => {
+    if (!request.user?.oid?.trim())
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    z.object({}).strict().parse(request.query);
+    return manager.prepareRecoveryHandoff(
+      params.parse(request.params).podId,
+      recoveryHandoffPreparationSchema.parse(request.body),
+      {
+        type: 'human',
+        userId: request.user.oid,
+      },
+    );
+  });
+  app.get('/pods/:podId/recovery-fork/prepared-handoff', async (request) => {
+    if (!request.user?.oid?.trim())
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    z.object({}).strict().parse(request.query);
+    return manager.getPreparedRecoveryHandoff(params.parse(request.params).podId);
   });
   app.post('/pods/:podId/recovery-fork/preview', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');

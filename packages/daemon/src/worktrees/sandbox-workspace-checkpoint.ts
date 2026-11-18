@@ -166,6 +166,8 @@ export interface WorkspaceCheckpointResult {
   promoted: boolean;
   materialized: boolean;
   quarantineRef: string;
+  /** Daemon-owned independent Git object store; never a live worker checkout. */
+  objectStore?: string;
   /** Both old and new source remain retained in this pod's quarantine. */
   rewrittenFrom?: { checkpoint: string; sourceHead: string; base: string };
   error?: { phase: string; code: string; retryable: boolean; message: string };
@@ -495,6 +497,7 @@ export async function checkpointSandboxWorkspace(
           hostImported: true,
           lineageVerified: true,
           quarantineRef,
+          objectStore: bare,
           error: {
             phase: 'promotion',
             code: 'LINEAGE_CONFLICT',
@@ -534,6 +537,7 @@ export async function checkpointSandboxWorkspace(
             lineageVerified: true,
             promoted: false,
             quarantineRef,
+            objectStore: bare,
           };
         }
         return {
@@ -549,6 +553,7 @@ export async function checkpointSandboxWorkspace(
           promoted: true,
           materialized: true,
           quarantineRef,
+          objectStore: bare,
           ...(rewrittenFrom ? { rewrittenFrom } : {}),
         };
       } catch (err) {
@@ -567,6 +572,7 @@ export async function checkpointSandboxWorkspace(
           hostImported: true,
           lineageVerified: true,
           quarantineRef,
+          objectStore: bare,
           error: {
             phase: 'materialize',
             code: 'MATERIALIZATION_FAILED',

@@ -273,9 +273,9 @@ struct RecoveryHubSheet: View {
       VStack(alignment: .leading, spacing: 16) {
         RecoverySectionTitle(title: "Continue work", subtitle: "Choose the smallest next step. Opening an option checks eligibility; it does not start execution.")
         if !pod.isWorkspace {
-          if actions.recoveryFork.available {
-            option("Continue in a fresh pod", detail: "Carry a verified host checkpoint, visible history, failure context and your instructions. Keep the original and share task limits.", icon: "arrow.triangle.branch", destination: .freshPod)
-          }
+          option("Continue in a fresh pod", detail: actions.recoveryFork.available
+            ? "Prepare a saved-work handoff without execution, or separately review a fresh start. Keep the original and share task limits."
+            : "Fresh-pod recovery is unavailable on this connection. Open to inspect the missing prerequisites; no launch is enabled.", icon: "arrow.triangle.branch", destination: .freshPod)
           option("Retry checks or fix validation", detail: "Review the failed checks and current retry permission first.", icon: "checkmark.circle", destination: .checks)
           if actions.repairContinuation.available && [.failed, .reviewRequired, .validated].contains(pod.status) {
             option("Use a replacement environment", detail: "Review saved source and software changes. Coding starts only if the actual replacement qualifies.", icon: "wrench.and.screwdriver", destination: .repair)

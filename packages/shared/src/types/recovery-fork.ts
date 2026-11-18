@@ -9,7 +9,7 @@ export const recoveryForkInputSchema = z
     expectedGeneration: z.number().int().min(1),
     sourceHead: sha,
     executionProfileId: z.string().min(1).max(128),
-    instructions: z.string().trim().min(10).max(8000),
+    instructions: z.string().trim().max(8000).default(''),
     files: z
       .array(file)
       .max(100)
@@ -25,6 +25,34 @@ export const recoveryForkRequestSchema = recoveryForkInputSchema
   .strict();
 export type RecoveryForkInput = z.infer<typeof recoveryForkInputSchema>;
 export type RecoveryForkRequest = z.infer<typeof recoveryForkRequestSchema>;
+export const recoveryHandoffPreparationSchema = z
+  .object({
+    expectedGeneration: z.number().int().min(1),
+    instructions: z.string().trim().max(8000).default(''),
+  })
+  .strict();
+export interface RecoveryHandoffPreparation {
+  version: 1;
+  podId: string;
+  generation: number;
+  actorId: string;
+  createdAt: string;
+  coverage: 'brief-only' | 'inherited-checkpoint' | 'saved-checkpoint';
+  source: { podId: string; head: string; tree: string; bundleHash: string; savedAt: string } | null;
+  packet: string;
+  packetHash: string;
+  workerStarted: false;
+}
+export interface RecoveryHandoffPreparationState {
+  version: 1;
+  podId: string;
+  generation: number;
+  available: boolean;
+  blockers: string[];
+  context: RecoveryForkContext;
+  receipt: RecoveryHandoffPreparation | null;
+  operation?: RecoveryForkOperation | null;
+}
 export interface RecoveryForkFile {
   path: string;
   size: number;
@@ -40,6 +68,7 @@ export interface RecoveryForkSource {
   truncated: boolean;
   skippedEntries: number;
   caveats: string[];
+  savedCheckpointHash?: string;
 }
 export interface RecoveryForkContext {
   summary: string;
@@ -52,6 +81,27 @@ export interface RecoveryForkContext {
   }>;
   truncated: boolean;
   omissions: string[];
+  decisions?: string;
+  reports?: Array<{
+    source: string;
+    timestamp: string;
+    sha256: string;
+    text: string;
+    omissions: string;
+  }>;
+  attempts?: Array<{
+    podId: string;
+    capturedAt: string;
+    sourceHead: string;
+    packetHash: string;
+    summary: string;
+    failure: string;
+    messages: RecoveryForkContext['messages'];
+    omissions: string[];
+    operatorNote?: string;
+    decisions?: string;
+    reports?: RecoveryForkContext['reports'];
+  }>;
 }
 export interface RecoveryForkBudget {
   taskId: string;
@@ -95,6 +145,8 @@ export interface RecoveryForkPreview {
   budget: RecoveryForkBudget | null;
   execution: RecoveryForkExecution | null;
   input: RecoveryForkInput;
+  workerBrief?: string;
+  workerBriefHash?: string;
 }
 export interface RecoveryForkOperation {
   version: 1;
@@ -111,4 +163,6 @@ export interface RecoveryForkOperation {
   context: RecoveryForkContext;
   error: string | null;
   createdAt: string;
+  workerBrief?: string;
+  workerBriefHash?: string;
 }

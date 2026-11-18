@@ -263,6 +263,15 @@ public final class ActionHandler {
         let response = try await self.perform { try await self.api.getPod(id) }
         self.podStore.upsertSession(PodMapper.map(response)); self.podStore.selectedSessionId = id
       })
+    result.recoveryFork.preparationAvailable = true
+    result.recoveryFork.prepare = { [weak self] id, request in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.prepareRecoveryHandoff(id, body: request) }
+    }
+    result.recoveryFork.prepared = { [weak self] id in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.getPreparedRecoveryHandoff(id) }
+    }
     result.fileRecovery = FileRecoveryActions(scope: replyContextID.uuidString,
       isCurrent: { [weak self] in
         guard let self else { return false }; return self.podStore.isCurrent(self.ownership)

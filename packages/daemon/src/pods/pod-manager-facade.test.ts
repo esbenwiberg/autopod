@@ -36,7 +36,7 @@ function instance(disk = false) {
 describe('composed pod manager facade boundary', () => {
   it('adds no extra infrastructure construction effects and preserves actual shorthand function identities', () => {
     const f = instance();
-    expect(Object.keys(f.manager)).toHaveLength(123);
+    expect(Object.keys(f.manager)).toHaveLength(125);
     expect(f.manager.cancelSavedWorkDraftPreparation).toBeTypeOf('function');
     expect(f.manager.cancelSavedWorkDraft).toBeTypeOf('function');
     expect(f.manager.inspectSavedWorkDraft).toBeTypeOf('function');
@@ -49,6 +49,8 @@ describe('composed pod manager facade boundary', () => {
       'previewRecoveryFork',
       'createRecoveryFork',
       'getRecoveryFork',
+      'prepareRecoveryHandoff',
+      'getPreparedRecoveryHandoff',
     ] as const)
       expect(f.manager[key]).toBeTypeOf('function');
     expect(f.manager.inspectArtifactChecksRecovery).toBeTypeOf('function');
