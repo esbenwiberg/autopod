@@ -1,66 +1,91 @@
-name: Desktop
+name: Desktop UI diagnosis (PR 616)
 
-# Native validation is full/nightly coverage, not a routine PR gate.
+# This workflow lives on the diagnostic branch only. It is not a merge gate.
 on:
-  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  group: desktop-ui-pr616-diagnostics
   cancel-in-progress: false
 
 jobs:
-  test-and-build:
+  diagnose-ui:
     runs-on: macos-15
     timeout-minutes: 40
     defaults:
       run:
         shell: bash
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: 79ba556b733f7d0a6e38a1b5c3b86e3ab08213b8
+          persist-credentials: false
 
-      - name: Report toolchain versions
-        run: |
-          swift --version
-          xcodebuild -version
-
-      - name: Test Swift package
+      - name: Verify source and toolchain
         run: |
           mkdir -p .ci-results
-          ./scripts/test-desktop.sh 2>&1 | tee .ci-results/swift-tests.log
+          touch .ci-results/test-start
+          [[ "$(git rev-parse HEAD)" == 79ba556b733f7d0a6e38a1b5c3b86e3ab08213b8 ]]
+          { git rev-parse HEAD; sw_vers; swift --version; xcodebuild -version; } | tee .ci-results/toolchain.log
 
-      # Read packageManager from package.json; never let npx fetch a newer major.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Test village renderer contract
+      - name: Build the Swift test bundle and verify the UI inventory
+        timeout-minutes: 12
         run: |
-          "$PNPM_HOME/pnpm" install --frozen-lockfile --filter autopod
-          node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
-          "$PNPM_HOME/pnpm" village:check
+          swift test --package-path packages/desktop list 2>&1 | tee .ci-results/build-and-inventory.log
+          grep -m 1 '^AutopodUITests\.' .ci-results/build-and-inventory.log
 
-      - name: Build macOS app
-        run: >-
-          xcodebuild
-          -project packages/desktop/Autopod.xcodeproj
-          -scheme Autopod
-          -configuration Debug
-          -destination 'platform=macOS'
-          CODE_SIGNING_ALLOWED=NO
-          CODE_SIGNING_REQUIRED=NO
-          2>&1 | tee .ci-results/xcodebuild.log
+      - name: Run only AutopodUITests with diagnostics
+        timeout-minutes: 25
+        run: |
+          export NSUnbufferedIO=YES
+          evidence="$PWD/.ci-results"
+          (
+            sleep 180
+            for attempt in 1 2 3 4 5 6 7; do
+              {
+                printf '\n=== %s UTC ===\n' "$(date -u +%FT%T)"
+                ps -axo pid,ppid,etime,state,rss,comm | grep -E 'swift-test|AutopodDesktopPackageTests|xctest' || true
+              }
+              pid=$(pgrep -f '[A]utopodDesktopPackageTests.xctest/Contents/MacOS/AutopodDesktopPackageTests' | head -1 || true)
+              if [[ "$pid" =~ ^[0-9]+$ ]]; then
+                /usr/bin/sample "$pid" 3 10 -file "$evidence/ui-sample-$attempt.txt" || true
+              fi
+              sleep 180
+            done
+          ) >> "$evidence/process.log" 2>&1 &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true' EXIT
+          set +e
+          swift test --package-path packages/desktop --skip-build --no-parallel --filter '^AutopodUITests\.' 2>&1 | tee .ci-results/ui-tests.log
+          exit_codes=("${PIPESTATUS[@]}")
+          set -e
+          printf 'swift_test_exit=%s\ntee_exit=%s\n' "${exit_codes[0]}" "${exit_codes[1]}" | tee .ci-results/exit-status.txt
+          if [[ "${exit_codes[0]}" != 0 ]]; then exit "${exit_codes[0]}"; fi
+          [[ "${exit_codes[1]}" == 0 ]]
+          grep -Eq 'Test run with [1-9][0-9]* tests? .*passed' .ci-results/ui-tests.log
 
-      - name: Upload native validation logs
+      - name: Collect new crash reports for the test runner
+        if: always()
+        run: |
+          mkdir -p .ci-results/crashes
+          if [[ -f .ci-results/test-start ]]; then
+            for reports in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+              [[ -d "$reports" ]] || continue
+              find "$reports" -maxdepth 2 -type f -newer .ci-results/test-start \
+                \( -name 'AutopodDesktopPackageTests*.ips' -o -name 'AutopodDesktopPackageTests*.crash' \
+                   -o -name 'swift-test*.ips' -o -name 'swift-test*.crash' -o -name 'xctest*.ips' -o -name 'xctest*.crash' \) \
+                -exec cp -n {} .ci-results/crashes/ \; || true
+            done
+          fi
+          ls -l .ci-results/crashes | tee .ci-results/crash-inventory.txt
+
+      - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          name: pr616-ui-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-results/
-          retention-days: 14
+          retention-days: 7
