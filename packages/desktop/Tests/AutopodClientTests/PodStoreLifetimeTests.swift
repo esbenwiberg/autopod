@@ -90,8 +90,11 @@ struct PodStoreLifetimeTests {
         {"type":"pod.validation_phase_completed","timestamp":"2026-07-01T00:10:10Z","podId":"pod",
         "phase":"test","phaseStatus":"pass","testResult":{"status":"pass","duration":310000}}
         """.utf8))
-      let result = ValidationPhaseResult(from: completion)
-      f.store.markValidationPhaseCompleted("pod", phase: .test, result: result, eventId: 21)
+      guard case .validationPhaseCompleted(let podId, let phase, let result) = SystemEvent.parse(completion) else {
+        Issue.record("Expected a typed phase completion")
+        return
+      }
+      f.store.markValidationPhaseCompleted(podId, phase: phase, result: result, eventId: 21)
       #expect(f.store.pods.first?.validationProgress?.test.status == .passed)
       #expect(f.store.pods.first?.validationProgress?.test.duration == 310_000)
     }
