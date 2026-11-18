@@ -65,6 +65,43 @@ public enum PodMapper {
 
   // MARK: - API responses → Pod
 
+  private static func failureTitle(_ response: SessionResponse) -> String? {
+    guard let v = response.lastValidationResult, v.podId == response.id,
+          v.overall == "fail", let runningAt = response.runningAt,
+          parseDate(v.timestamp) >= parseDate(runningAt),
+          parseDate(v.timestamp) <= parseDate(response.updatedAt),
+          response.lastCommitAt.map { parseDate(v.timestamp) >= parseDate($0) } ?? true,
+          v.attempt == response.validationAttempts
+            || (v.infrastructureFailure != nil && v.attempt == response.validationAttempts + 1)
+    else { return nil }
+    let labels = [
+      "setup": "Setup", "lint": "Lint", "sast": "SAST", "build": "Build", "test": "Test",
+      "health": "Health", "pages": "Pages", "facts": "Facts", "review": "Review"
+    ]
+    if let failure = v.infrastructureFailure {
+      guard let phase = labels[failure.phase] else { return nil }
+      if failure.execution?.cause == "timeout" { return "\(phase) timed out" }
+      switch failure.code {
+      case "VALIDATION_RUNNER_CRASHED": return "\(phase) runner crashed"
+      case "PROCESS_MEMORY_EXHAUSTED", "SANDBOX_MEMORY_EXHAUSTED": return "\(phase) process memory exhausted"
+      case "PROCESS_KILLED": return "\(phase) process killed"
+      default: return "\(phase) infrastructure failed"
+      }
+    }
+    if v.reviewSkipKind == "review-timeout" { return "Review timed out" }
+    if v.reviewSkipKind == "review-failed" || v.taskReview?.reviewBatch?.infrastructureUnavailable == true {
+      return "Review infrastructure failed"
+    }
+    let phases: [(String, String?)] = [
+      ("Setup", v.setup?.status), ("Lint", v.lint?.status), ("SAST", v.sast?.status),
+      ("Build", v.smoke.build.status), ("Test", v.test?.status),
+      ("Health", v.smoke.health.status),
+      ("Pages", v.smoke.pages.contains { $0.status == "fail" } ? "fail" : nil),
+      ("Facts", v.factValidation?.status), ("Review", v.taskReview?.status)
+    ]
+    return phases.first { $0.1 == "fail" }.map { "\($0.0) failed" }
+  }
+
   public static func map(_ response: CompactPodResponse, baseURL: URL? = nil) -> Pod {
     let searchableTask = [response.taskSummary, response.taskExcerpt]
       .compactMap { $0 }
@@ -549,6 +586,10 @@ public enum PodMapper {
       runningAt: runningAt
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
+    result.failureDetail = FailureDetail(
+      podID: result.id, updatedAt: result.updatedAt, status: result.status,
+      reason: response.failureReason, validationTitle: failureTitle(response)
+    )
     result.skipValidation = response.skipValidation
     result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)

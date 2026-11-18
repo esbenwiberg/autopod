@@ -945,6 +945,8 @@ public struct Pod: Identifiable, Sendable {
     public var phase: PhaseProgress?
     public var latestActivity: String?
     public var errorSummary: String?
+    /// Full REST evidence only; fleet previews and socket activity are never saved reasons.
+    public var failureDetail: FailureDetail? = nil
     /// Recorded restart/wakeup hold, not a timer-based inference of process exit.
     public var executionRecoveryNote: String? = nil
     public var attempts: AttemptInfo?

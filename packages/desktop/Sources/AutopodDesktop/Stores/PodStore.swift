@@ -166,6 +166,11 @@ public final class PodStore {
       return current
     }
     var merged = incoming
+    // Compact discovery has no full detail, even when it arrives through this path
+    // after hydration was invalidated. Stale REST cannot revive an earlier reason.
+    if current.updatedAt > incoming.updatedAt || preserveCurrentStatus {
+      merged.failureDetail = current.currentFailureDetail
+    }
     merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
     merged.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
@@ -244,6 +249,7 @@ public final class PodStore {
     merged.hasWebUi = incoming.hasWebUi
     merged.latestActivity = incoming.latestActivity
     merged.errorSummary = incoming.errorSummary
+    merged.failureDetail = nil
     merged.briefTitle = incoming.briefTitle
     merged.seriesId = incoming.seriesId
     merged.seriesName = incoming.seriesName
@@ -386,6 +392,7 @@ public final class PodStore {
     let decisionRevision = decisionRevisions[id, default: 0]
     let response = try await api.getPod(id)
     guard epoch == configurationEpoch, accepting() else { throw CancellationError() }
+    guard response.id == id else { throw URLError(.badServerResponse) }
     let returned = PodMapper.map(response, baseURL: api.baseURL)
     var updated = returned
     if let index = pods.firstIndex(where: { $0.id == id }) {
@@ -404,7 +411,7 @@ public final class PodStore {
       recordInsertion(id)
       pods.append(updated)
     }
-    hydratedPodIds.insert(id)
+    if updated.currentFailureDetail != nil { hydratedPodIds.insert(id) }
     return SessionRead(returned: returned, current: updated)
   }
 
@@ -473,6 +480,7 @@ public final class PodStore {
 
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if pods[index].status != status { pods[index].failureDetail = nil }
     pods[index].status = status
     statusRevisions[podId, default: 0] += 1
   }
