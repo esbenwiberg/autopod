@@ -530,32 +530,25 @@ echo "$REVIEWER_CLI_OUT" | grep -q "REVIEWER_CLI_PREWARM_OK" || die "reviewer CL
 # ---- prewarm host browser cache (no swap yet) -----------------------------
 if [ "$PREWARM_PLAYWRIGHT" -eq 1 ]; then
   note "prewarming daemon Playwright Chromium on the VM"
+  # Azure Run Command enters as root. Drop privileges before entering the
+  # checkout; release code must not install host OS packages or write root logs.
   PREWARM_SCRIPT="
 set -eu
-NEW=$NEW
-run_and_tail() {
-  log=\"\$1\"
-  lines=\"\$2\"
-  shift 2
-  if ! \"\$@\" >\"\$log\" 2>&1; then
-    tail -n 80 \"\$log\" || true
-    exit 1
-  fi
-  tail -n \"\$lines\" \"\$log\" || true
-}
-cd \"\$NEW/packages/daemon\"
-[ -x ./node_modules/.bin/playwright ] || { echo PLAYWRIGHT_BIN_MISSING; exit 1; }
-echo '=== install Playwright Linux dependencies ==='
-run_and_tail /tmp/autopod-playwright-deps-$TARGET_SHA.log 24 ./node_modules/.bin/playwright install-deps chromium
-echo '=== install daemon Chromium into ewi cache ==='
-run_and_tail /tmp/autopod-playwright-browser-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW/packages/daemon && ./node_modules/.bin/playwright install chromium\"
-echo '=== launch-check daemon Chromium as ewi ==='
-sudo -u ewi -H bash -lc \"cd \$NEW/packages/daemon && node -e 'const { chromium } = require(\\\"playwright\\\"); const { existsSync } = require(\\\"fs\\\"); (async () => { const p = chromium.executablePath(); console.log(\\\"chromium=\\\" + p); if (!existsSync(p)) { throw new Error(\\\"missing Chromium executable\\\"); } const browser = await chromium.launch({ headless: true }); await browser.close(); })().catch((err) => { console.error(err && err.stack ? err.stack : err); process.exit(1); });'\"
+if ! /usr/bin/sudo -n -u ewi -H -- /usr/bin/setpriv --no-new-privs /bin/sh -eu -s -- '$NEW/packages/daemon' >/dev/null 2>&1 <<'BROWSER'
+cd \"\$1\"
+test -x ./node_modules/.bin/playwright
+PLAYWRIGHT_SKIP_BROWSER_GC=1 ./node_modules/.bin/playwright install chromium
+node -e 'const {chromium}=require(\"playwright\"); (async()=>{const browser=await chromium.launch({headless:true}); await browser.close()})().catch(()=>process.exit(1))'
+BROWSER
+then
+  echo PLAYWRIGHT_PREWARM_FAILED
+  exit 1
+fi
 echo PLAYWRIGHT_PREWARM_OK
 "
   PREWARM_OUT="$(remote "$PREWARM_SCRIPT")"
   echo "$PREWARM_OUT"
-  echo "$PREWARM_OUT" | grep -q "PLAYWRIGHT_PREWARM_OK" || die "Playwright prewarm failed — symlink untouched"
+  grep -qxF PLAYWRIGHT_PREWARM_OK <<<"$PREWARM_OUT" || die "browser install or launch failed as ewi; check provisioned Linux dependencies before staging again — symlink untouched"
 else
   note "skipping Playwright Chromium prewarm (--skip-playwright-prewarm)"
 fi

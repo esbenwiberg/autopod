@@ -91,6 +91,15 @@ case "$remote_script" in
     fi
     ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
+  *'PLAYWRIGHT_PREWARM_OK'*)
+    printf '%s\n' "$remote_script" >"$DEPLOY_TEST_BROWSER_SCRIPT"
+    # The production payload uses absolute binaries. Substitute only the
+    # expected privilege-drop prefix when exercising it in an unprivileged harness.
+    prefix='/usr/bin/sudo -n -u ewi -H -- /usr/bin/setpriv --no-new-privs /bin/sh'
+    [[ "$remote_script" == *"$prefix"* ]] || exit 1
+    remote_script="${remote_script/"$prefix"//bin/sh}"
+    # Run Command may return transport success for a nonzero guest exit.
+    sh -c "$remote_script" || true ;;
   *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
   *'FINAL_ACTIVE='*)
     if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
@@ -146,7 +155,8 @@ run_deploy() {
     DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
     DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
     DEPLOY_TEST_DATA_DIR="${DEPLOY_TEST_DATA_DIR-/data/autopod/data}" \
-    bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
+    DEPLOY_TEST_BROWSER_SCRIPT="$tmp/browser-script" \
+    bash "$script" --target cafebabe --yes ${DEPLOY_TEST_SKIP_BROWSER---skip-playwright-prewarm} "$@"
 }
 
 reset_fixture() {
@@ -310,6 +320,49 @@ grep -qF 'STAGED cafebabe' "$tmp/stage-only-out"
 [ ! -e "$tmp/restarted" ]
 [ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
 [ -e "$tmp/drain-removed" ]
+
+# Exercise the emitted install/launch payload, not a manufactured success
+# marker. A failed child printing the magic string must not pass Azure's gate.
+daemon="$tmp/releases/cafebabe/packages/daemon"
+mkdir -p "$daemon/node_modules/.bin"
+cat >"$daemon/node_modules/.bin/playwright" <<'EOF'
+#!/bin/sh
+[ "$*" = 'install chromium' ] && [ "$PLAYWRIGHT_SKIP_BROWSER_GC" = 1 ] || exit 1
+echo install >> "$PWD/browser-calls"
+echo PLAYWRIGHT_PREWARM_OK
+[ ! -f "$PWD/fail-install" ]
+EOF
+cat >"$tmp/bin/node" <<'EOF'
+#!/bin/sh
+case "$*" in *'chromium.launch({headless:true})'*'browser.close()'*) ;; *) exit 2;; esac
+echo launch >> "$PWD/browser-calls"
+echo PLAYWRIGHT_PREWARM_OK
+[ ! -f "$PWD/fail-launch" ]
+EOF
+chmod +x "$tmp/bin/node" "$daemon/node_modules/.bin/playwright"
+for mode in success install launch; do
+  reset_fixture
+  rm -f "$daemon"/{fail-install,fail-launch,browser-calls}
+  if [ "$mode" != success ]; then touch "$daemon/fail-$mode"; fi
+  if DEPLOY_TEST_SKIP_BROWSER='' run_deploy >"$tmp/browser-out" 2>&1; then
+    [ "$mode" = success ]
+    grep -qxF PLAYWRIGHT_PREWARM_OK "$tmp/browser-out"
+    [ -e "$tmp/restarted" ]
+    grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/browser-out"
+  else
+    [ "$mode" != success ]
+    grep -qxF PLAYWRIGHT_PREWARM_FAILED "$tmp/browser-out"
+    if grep -qF 'DEPLOYED deadbeef' "$tmp/browser-out"; then exit 1; fi
+    [ ! -e "$tmp/restarted" ]
+    [ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+  fi
+  grep -qxF install "$daemon/browser-calls"
+  expected=install
+  if [ "$mode" != install ]; then expected=$'install\nlaunch'; fi
+  [ "$(cat "$daemon/browser-calls")" = "$expected" ]
+done
+rm -f "$tmp/bin/node"
+echo 'Unprivileged browser readiness gate tests passed.'
 
 # The config loader evaluates tsup.config while its generated sibling exists.
 # That transient file must not mark a clean build dirty; actual source still must.
