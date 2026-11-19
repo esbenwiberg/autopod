@@ -32,14 +32,13 @@ export function savedGit(cwd: string, assertCurrent = () => {}) {
     return result;
   });
 }
-export async function verifySavedSource(
-  worktree: string,
-  repository: string,
-  source: SavedWorkSource,
-) {
-  assertCheckpointRepository(repository);
+async function savedRoot(worktree: string) {
   if ((await lstat(worktree)).isSymbolicLink()) draftError('Original source root is a symlink.');
-  const git = savedGit(await realpath(worktree));
+  return realpath(worktree);
+}
+async function verifySourceIdentity(worktree: string, repository: string, source: SavedWorkSource) {
+  assertCheckpointRepository(repository);
+  const git = savedGit(worktree);
   const remote = (await git(['remote', 'get-url', 'origin'])).stdout.trim();
   if (remote.replace(/\.git$/, '') !== repository.replace(/\.git$/, ''))
     draftError('Saved source repository differs from frozen repository.');
@@ -98,9 +97,6 @@ export async function verifySavedSource(
     (await git(['rev-parse', `${source.parent}^{tree}`])).stdout.trim() !== source.parentTree
   )
     draftError('Saved parent tree differs from recorded proof.');
-  // Traverse actual local objects. Never fetch missing/promisor objects or infer completeness.
-  await git(['rev-list', '--objects', '--missing=error', source.commit]);
-  await git(['fsck', '--strict', '--no-reflogs', '--no-dangling', source.commit]);
   if (/^160000 /m.test((await git(['ls-tree', '-r', source.commit])).stdout))
     draftError('Saved submodules require explicit recursive source custody.');
   const config = (await git(['config', '--null', '--list'])).stdout;
@@ -108,13 +104,28 @@ export async function verifySavedSource(
     draftError('Filters or partial source require explicit materialization policy.');
 }
 
-export async function checkpointSavedSource(
-  podId: string,
+async function verifyGraphs(worktree: string, roots: string[]) {
+  const git = savedGit(worktree);
+  // --quiet suppresses the object list, not the traversal or its exit status.
+  await git(['rev-list', '--objects', '--missing=error', '--quiet', ...roots]);
+  await git(['fsck', '--strict', '--no-reflogs', '--no-dangling', ...roots]);
+}
+
+export async function verifySavedSource(
   worktree: string,
   repository: string,
+  source: SavedWorkSource,
+) {
+  const root = await savedRoot(worktree);
+  await verifySourceIdentity(root, repository, source);
+  await verifyGraphs(root, [source.commit]);
+}
+
+function checkpointCandidate(
+  podId: string,
   record: CheckpointRecord,
   latestSequence: number,
-): Promise<SavedWorkSource> {
+): SavedWorkSource {
   const r = record.result;
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
   const committed = r.snapshotCommit === r.sourceHead;
@@ -144,15 +155,22 @@ export async function checkpointSavedSource(
     exclusions:
       'Only the recorded saved snapshot is included. Later sandbox edits and unsaved host/index work are excluded; the live sandbox was not read.',
   };
+  return source;
+}
+
+export async function checkpointSavedSource(
+  podId: string,
+  worktree: string,
+  repository: string,
+  record: CheckpointRecord,
+  latestSequence: number,
+) {
+  const source = checkpointCandidate(podId, record, latestSequence);
   await verifySavedSource(worktree, repository, source);
   return source;
 }
 
-export async function localSavedSource(
-  worktree: string,
-  repository: string,
-  branch: string,
-): Promise<SavedWorkSource> {
+async function localCandidate(worktree: string, branch: string): Promise<SavedWorkSource> {
   const identity = await inspectPreservationGit(savedGit(worktree), branch);
   const source: SavedWorkSource = {
     id: `local-${identity.head}`,
@@ -167,8 +185,56 @@ export async function localSavedSource(
     exclusions:
       'Committed host HEAD only. Dirty files, index changes, ignored files and any uncaptured sandbox work are excluded; capture freshness is unknown.',
   };
+  return source;
+}
+
+export async function localSavedSource(worktree: string, repository: string, branch: string) {
+  const source = await localCandidate(worktree, branch);
   await verifySavedSource(worktree, repository, source);
   return source;
+}
+
+/** Only share graph traversal within one inspection of one object store. Every ref
+ * and receipt still needs its own identity proof, even when multiple refs name one OID. */
+export async function inspectSavedWorkSources(
+  podId: string,
+  worktree: string,
+  repository: string,
+  branch: string,
+  records: CheckpointRecord[],
+) {
+  const root = await savedRoot(worktree);
+  const candidates: SavedWorkSource[] = [];
+  const blockers: string[] = [];
+  const latest = records[0]?.sequence ?? 0;
+  async function check(label: string, candidate: () => SavedWorkSource | Promise<SavedWorkSource>) {
+    try {
+      const source = await candidate();
+      await verifySourceIdentity(root, repository, source);
+      candidates.push(source);
+    } catch (error) {
+      blockers.push(
+        `${label} unavailable: ${error instanceof Error ? error.message : 'unverified source'}`,
+      );
+    }
+  }
+  for (const record of records) {
+    await check(`Snapshot ${record.sequence}`, () => checkpointCandidate(podId, record, latest));
+  }
+  await check('Host commit', () => localCandidate(root, branch));
+  const roots = [...new Set(candidates.map((s) => s.commit))];
+  if (roots.length) {
+    try {
+      await verifyGraphs(root, roots);
+    } catch (error) {
+      // Do not present any candidate as verified from a partial or failed batch.
+      blockers.push(
+        `Saved object verification failed: ${error instanceof Error ? error.message : 'unverified graph'}`,
+      );
+      return { sources: [], blockers };
+    }
+  }
+  return { sources: candidates, blockers };
 }
 
 /** New independent object store and checkout; no original refs, index or files change. */
