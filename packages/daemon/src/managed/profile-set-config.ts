@@ -37,6 +37,10 @@ const stageSchema = z
     ]),
     artifactPath: z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/),
     inputNames: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)).max(8),
+    caseDirectory: z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]{0,31}$/)
+      .optional(),
     sourceMode: z.enum(['none', 'commit', 'branch', 'draft-pr']),
     /** Reviewed command projection for an implementation stage. Presence requires an explicit
      * per-attempt on/off choice carrying this configuration's digest.
@@ -131,6 +135,27 @@ export function parseManagedProfileSetConfig(
     for (const stage of profiles) {
       const scope = stage.profileSnapshot.scope;
       const repository = scope.repositories[0];
+      if (
+        stage.caseDirectory &&
+        (stage.taskKind !== 'research' ||
+          stage.sourceMode !== 'none' ||
+          stage.artifactPath !== 'report.md' ||
+          stage.inputNames.length ||
+          stage.validation ||
+          parsed.catalogArtifacts ||
+          parsed.githubRead ||
+          parsed.source ||
+          parsed.mirror.dependencyCachePath ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(parsed.mirror.enrollmentId) ||
+          stage.profileSnapshot.route.executionTarget !== 'sandbox' ||
+          scope.identityBindings.length ||
+          scope.network.destinations.length ||
+          scope.allowedEffects.some((x) => x !== 'repository.read' && x !== 'artifact.write') ||
+          !('maxProviderRequests' in stage.profileSnapshot.budget) ||
+          stage.profileSnapshot.budget.maxDurationSeconds > 180 ||
+          stage.profileSnapshot.budget.maxProviderRequests !== 1)
+      )
+        throw new Error('invalid-case-report-profile');
       if (
         stage.profileSnapshot.route.runtime !== 'codex' ||
         !['local', 'sandbox'].includes(stage.profileSnapshot.route.executionTarget) ||
@@ -256,11 +281,13 @@ export function composeManagedProfileSet(
     db: Database.Database;
     databasePath: string;
     manager: ContainerManager | undefined;
+    ownsInstallation?: (installation: string) => boolean;
+    sandboxCheckpoints?: boolean;
     networkManager?: ManagedLocalNetwork;
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
   },
-): ManagedAcceptanceRuntime {
+): ManagedAcceptanceRuntime & Pick<ReturnType<typeof composeManagedRuntime>, 'withCheckpoint'> {
   const manager = dependencies.manager;
   if (
     !cli ||
@@ -269,6 +296,14 @@ export function composeManagedProfileSet(
   )
     throw new Error('managed-profile-set-cli-binding-required');
   const target = config.profiles[0]!.profileSnapshot.route.executionTarget;
+  const caseReports = config.profiles.some((s) => s.caseDirectory);
+  if (
+    caseReports &&
+    (!dependencies.sandboxCheckpoints ||
+      !dependencies.ownsInstallation ||
+      config.profiles.some((s) => !s.caseDirectory))
+  )
+    throw new Error('case-report-private-runtime-required');
   const network = dependencies.networkManager;
   if (target === 'local' && !network) throw new Error('managed-local-network-required');
   const store = createManagedArtifactStore(cli, dependencies.db);
@@ -316,11 +351,13 @@ export function composeManagedProfileSet(
   }
   const components = composeManagedRuntime({
     db: dependencies.db,
+    ownsInstallation: dependencies.ownsInstallation,
+    sandboxCheckpoints: dependencies.sandboxCheckpoints,
     store,
     enabled: true,
     source,
     runtimeCapabilities: [
-      'managed-agent-session-v1',
+      ...(caseReports ? [] : ['managed-agent-session-v1' as const]),
       ...(config.githubRead ? (['managed-github-read-v1'] as const) : []),
     ],
     stateRoot: path.join(path.dirname(path.resolve(dependencies.databasePath)), 'managed'),
@@ -352,14 +389,27 @@ export function composeManagedProfileSet(
         route,
         manager,
         image: config.image,
-        command: codexAgentCommand(
-          route,
-          config.mirror.enrollmentId,
-          stage.artifactPath,
-          stage.sourceMode !== 'none',
-          stage.inputNames,
-          githubRead?.repository,
-        ),
+        command: stage.caseDirectory
+          ? [
+              'python3',
+              '/opt/dispatcher/case_report.py',
+              '--repository',
+              `/repositories/${config.mirror.enrollmentId}`,
+              '--case',
+              stage.caseDirectory,
+              '--model',
+              route.model,
+              '--reasoning',
+              route.reasoning,
+            ]
+          : codexAgentCommand(
+              route,
+              config.mirror.enrollmentId,
+              stage.artifactPath,
+              stage.sourceMode !== 'none',
+              stage.inputNames,
+              githubRead?.repository,
+            ),
         ...(config.mirror.dependencyCachePath
           ? {
               dependencyCache: {
@@ -377,10 +427,10 @@ export function composeManagedProfileSet(
           async () => chatGptCredential(dependencies.providerAccounts, route.providerAccountId),
           fetch,
           undefined,
-          'agent',
+          stage.caseDirectory ? 'report' : 'agent',
         ),
         channel: new ContainerCodexChannel(manager, route, 0, {
-          mode: 'agent',
+          mode: stage.caseDirectory ? 'case-report' : 'agent',
           maximumDurationSeconds: budget.maxDurationSeconds,
           ...(githubRead ? { githubRead } : {}),
         }),
@@ -414,9 +464,10 @@ export function composeManagedProfileSet(
   });
   return {
     components,
+    withCheckpoint: components.withCheckpoint,
     config: { db: dependencies.db, store },
     bindings: cli.bindings,
-    resume: (profileIds) => components.resume(profileIds),
+    resume: (profileIds?: ReadonlySet<string>) => components.resume(profileIds),
     close: () => components.close(),
   };
 }

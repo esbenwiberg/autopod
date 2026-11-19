@@ -42,6 +42,7 @@ export default defineConfig({
     'src/index.ts',
     'src/managed.ts',
     'src/db/verify-backup-cli.ts',
+    'src/orchestration/enrollment-packet-cli.ts',
     'src/db/recover-merge-cli.ts',
     'src/db/recover-merged-fix-cli.ts',
     'src/db/reconcile-native-checkpoint-cli.ts',
@@ -64,6 +65,8 @@ export default defineConfig({
           'src/github/read-broker.ts',
           'src/issue-watcher/issue-watcher-service.ts',
           'src/managed/codex-wire.ts',
+          'src/orchestration/local-checkpoints.ts',
+          'src/orchestration/continuations.ts',
           'src/pods/admission-memory-briefing.ts',
           'src/pods/environment-qualification.ts',
           'src/pods/prerequisite-blocker.ts',
@@ -159,6 +162,7 @@ export default defineConfig({
     cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
     cpSync('src/managed/runtime/validation-supervisor.py', 'dist/runtime/validation-supervisor.py');
     cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
+    cpSync('src/managed/runtime/case_report.py', 'dist/runtime/case_report.py');
     cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
     cpSync('src/managed/runtime/codex_agent_worker.py', 'dist/runtime/codex_agent_worker.py');
     cpSync('src/managed/runtime/github_cli.py', 'dist/runtime/github_cli.py');

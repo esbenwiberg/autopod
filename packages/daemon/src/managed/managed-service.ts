@@ -26,6 +26,16 @@ export interface ManagedRuntimePort {
     checkpoint: (runtimeRef: string) => void,
     fault?: string,
   ): Promise<{ runtimeRef: string }>;
+  /** Opt-in: finish local staging, then call beforeAllocate synchronously at the external boundary. */
+  ensureAtBoundary?(
+    podId: string,
+    request: ManagedPodRequest,
+    checkpoint: (runtimeRef: string) => void,
+    fault: string | undefined,
+    beforeAllocate: () => void,
+  ): Promise<{ runtimeRef: string }>;
+  /** Inspect only the original runtime and attach to an already verified live execution. */
+  restoreCheckpoint?(podId: string, ref: string, specDigest: string): Promise<boolean>;
   observe(runtimeRef: string): Promise<{
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
@@ -62,6 +72,7 @@ export interface ManagedPodRow {
   revoked: number;
   stop_requested: number;
   observed_exit: number;
+  allocation_attempted: number;
   cleanup: string;
   grant_revision: number;
   grant_id: string;
@@ -69,6 +80,10 @@ export interface ManagedPodRow {
   exit_code: number | null;
   created_at: number;
 }
+
+// Several host-owned service instances may use the same daemon connection. While an
+// ensure is pending a pre-start observation cannot establish terminal worker exit.
+const localStarts = new WeakMap<Database.Database, Map<string, Promise<ManagedPodHandle>>>();
 
 /** A subordinate execution service: no legacy queue, series, fallback or user notification path. */
 export class ManagedPodService {
@@ -82,7 +97,7 @@ export class ManagedPodService {
   source?: ManagedSourceDelivery;
   validation?: ManagedValidationRunner;
   onTransition?: (row: ManagedPodRow, key: string, kind: ManagedPodEvent['kind']) => void;
-  private readonly starts = new Map<string, Promise<ManagedPodHandle>>();
+  private readonly starts: Map<string, Promise<ManagedPodHandle>>;
   constructor(
     readonly db: Database.Database,
     readonly admission: ManagedAdmission,
@@ -90,7 +105,11 @@ export class ManagedPodService {
     readonly now: () => number = () => Math.floor(Date.now() / 1000),
     readonly enabled = false,
     readonly runtimeCapabilities: readonly string[] = [],
-  ) {}
+    readonly ownsInstallation: (installation: string) => boolean = () => true,
+  ) {
+    this.starts = localStarts.get(db) ?? new Map();
+    localStarts.set(db, this.starts);
+  }
 
   health(): DriverHealth {
     return {
@@ -152,6 +171,7 @@ export class ManagedPodService {
     return request;
   }
   row(installation: string, podId: string): ManagedPodRow {
+    if (!this.ownsInstallation(installation)) throw new Error('managed-pod-not-found');
     const row = this.db
       .prepare('SELECT * FROM managed_pods WHERE pod_id=? AND dispatcher_installation_id=?')
       .get(podId, installation) as ManagedPodRow | undefined;
@@ -159,6 +179,7 @@ export class ManagedPodService {
     return row;
   }
   lookup(installation: string, startKey: string): ManagedPodRow | undefined {
+    if (!this.ownsInstallation(installation)) throw new Error('managed-pod-not-found');
     return this.db
       .prepare(
         'SELECT * FROM managed_pods WHERE dispatcher_installation_id=? AND managed_start_key=?',
@@ -173,7 +194,12 @@ export class ManagedPodService {
       throw new Error('managed-start-conflict');
     }
   }
-  async start(installation: string, raw: unknown, fault?: string): Promise<ManagedPodHandle> {
+  async start(
+    installation: string,
+    raw: unknown,
+    fault?: string,
+    assertOwnerActive?: () => void,
+  ): Promise<ManagedPodHandle> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(installation))
       throw new Error('invalid-service-identity');
     const request = validateManagedRequest(raw);
@@ -184,6 +210,9 @@ export class ManagedPodService {
     await this.preflight(request, installation);
     if (fault === 'before-reservation') throw new Error('injected-before-reservation');
     const reserve = this.db.transaction(() => {
+      // A native run can be canceled during async preflight. Its reservation must
+      // serialize with that fence. Ordinary managed callers have no parent fence.
+      assertOwnerActive?.();
       const existing = this.lookup(installation, request.startKey);
       if (existing) {
         this.assertBinding(existing, request);
@@ -207,8 +236,8 @@ export class ManagedPodService {
       };
       this.db
         .prepare(`INSERT INTO managed_pods (pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,
-        execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,request_json,handle_json,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,request_json,handle_json,created_at,allocation_attempted)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)`)
         .run(
           podId,
           installation,
@@ -242,37 +271,78 @@ export class ManagedPodService {
     const launch = async () => {
       const active = this.row(row.dispatcher_installation_id, row.pod_id);
       this.requireActive(active);
+      const nativeSandbox =
+        row.dispatcher_installation_id.startsWith('native.') &&
+        request.route.executionTarget === 'sandbox';
+      if (nativeSandbox && active.allocation_attempted) {
+        if (!(await this.restoreCheckpoint(active)))
+          throw new Error('managed-sandbox-create-uncertain');
+        return JSON.parse(active.handle_json) as ManagedPodHandle;
+      }
       await this.inputs?.prepare(active, request);
-      this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
-      const result = await this.runtime.ensure(
-        row.pod_id,
-        request,
-        (ref) => {
-          if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref))
-            throw new Error('invalid-runtime-reference');
-          this.db
-            .prepare(
-              'UPDATE managed_pods SET runtime_ref=? WHERE pod_id=? AND (runtime_ref IS NULL OR runtime_ref=?)',
-            )
-            .run(ref, row.pod_id, ref);
-          if (this.row(row.dispatcher_installation_id, row.pod_id).runtime_ref !== ref)
-            throw new Error('runtime-binding-conflict');
-        },
-        fault,
-      );
+      const beforeAllocate = () =>
+        this.db
+          .transaction(() => {
+            const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+            this.requireActive(latest);
+            // Native sandbox allocations may already be billable or only partially uploaded.
+            // Refuse any second ensure, even when the backend returned an identity.
+            if (nativeSandbox && latest.allocation_attempted)
+              throw new Error('managed-sandbox-create-uncertain');
+            this.db
+              .prepare('UPDATE managed_pods SET allocation_attempted=1 WHERE pod_id=?')
+              .run(row.pod_id);
+          })
+          .immediate();
+      const bindRef = (ref: string) => {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref))
+          throw new Error('invalid-runtime-reference');
+        this.db
+          .prepare(
+            'UPDATE managed_pods SET runtime_ref=? WHERE pod_id=? AND (runtime_ref IS NULL OR runtime_ref=?)',
+          )
+          .run(ref, row.pod_id, ref);
+        if (this.row(row.dispatcher_installation_id, row.pod_id).runtime_ref !== ref)
+          throw new Error('runtime-binding-conflict');
+      };
+      // Legacy ports don't expose their allocation boundary: mark conservatively before ensure.
+      const ensure = () => {
+        if (nativeSandbox && this.runtime.ensureAtBoundary)
+          return this.runtime.ensureAtBoundary(row.pod_id, request, bindRef, fault, beforeAllocate);
+        beforeAllocate();
+        return this.runtime.ensure(row.pod_id, request, bindRef, fault);
+      };
+      const result = await ensure();
       const current = this.db
         .transaction(() => {
-          this.db
+          bindRef(result.runtimeRef); // retain a late identity even after cancellation
+          const started = this.db
             .prepare(
-              "UPDATE managed_pods SET runtime_ref=?,state='running' WHERE pod_id=? AND revoked=0",
+              "UPDATE managed_pods SET state='running' WHERE pod_id=? AND revoked=0 AND stop_requested=0 AND observed_exit=0",
             )
-            .run(result.runtimeRef, row.pod_id);
+            .run(row.pod_id);
           const observed = this.row(row.dispatcher_installation_id, row.pod_id);
-          this.onTransition?.(observed, 'started', 'running');
+          if (started.changes) this.onTransition?.(observed, 'started', 'running');
           return observed;
         })
         .immediate();
-      if (current.revoked || this.expired(current)) {
+      if (
+        current.revoked ||
+        current.stop_requested ||
+        current.observed_exit ||
+        this.expired(current)
+      ) {
+        if (current.observed_exit) {
+          // A late ensure can contradict an older observation. Fence before stopping,
+          // so a failed stop remains visible to the watchdog instead of disappearing.
+          const fresh = await this.runtime.observe(result.runtimeRef).catch(() => null);
+          if (fresh?.state === 'stopped') throw new Error('grant-inactive');
+          this.db
+            .prepare(
+              "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=0,exit_code=NULL,state='killing' WHERE pod_id=? AND runtime_ref=?",
+            )
+            .run(row.pod_id, result.runtimeRef);
+        }
         await this.runtime.stop(result.runtimeRef);
         throw new Error('grant-inactive');
       }
@@ -308,6 +378,41 @@ export class ManagedPodService {
       this.starts.delete(row.pod_id);
     }
   }
+  async restoreCheckpoint(row: ManagedPodRow): Promise<boolean> {
+    const ref = row.runtime_ref;
+    if (
+      !this.enabled ||
+      !ref ||
+      !row.allocation_attempted ||
+      row.state !== 'queued' ||
+      !row.dispatcher_installation_id.startsWith('native.') ||
+      (JSON.parse(row.request_json) as ManagedPodRequest).route.executionTarget !== 'sandbox'
+    )
+      return false;
+    this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
+    if (!(await this.runtime.restoreCheckpoint?.(row.pod_id, ref, row.execution_spec_digest)))
+      return false;
+    return this.db
+      .transaction(() => {
+        const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+        this.requireActive(latest);
+        if (
+          latest.runtime_ref !== ref ||
+          latest.execution_spec_digest !== row.execution_spec_digest
+        )
+          throw new Error('runtime-binding-conflict');
+        if (latest.state === 'running') return true;
+        if (latest.state !== 'queued') return false;
+        this.db.prepare("UPDATE managed_pods SET state='running' WHERE pod_id=?").run(row.pod_id);
+        this.onTransition?.(
+          this.row(row.dispatcher_installation_id, row.pod_id),
+          'started',
+          'running',
+        );
+        return true;
+      })
+      .immediate();
+  }
   async reconcileStart(installation: string, raw: unknown): Promise<ManagedPodHandle | null> {
     const request = validateManagedRequest(raw);
     const row = this.lookup(installation, request.startKey);
@@ -337,17 +442,28 @@ export class ManagedPodService {
       .prepare('SELECT * FROM managed_pods WHERE observed_exit=0')
       .all() as ManagedPodRow[];
     for (const row of rows) {
-      if (row.runtime_ref) {
+      if (!this.ownsInstallation(row.dispatcher_installation_id)) continue;
+      if (row.runtime_ref && !this.starts.has(row.pod_id)) {
         const observed = await this.runtime.observe(row.runtime_ref);
         this.db
           .prepare('UPDATE managed_pods SET consumed_tokens=max(consumed_tokens,?) WHERE pod_id=?')
           .run(observed.consumedTokens, row.pod_id);
         row.consumed_tokens = Math.max(row.consumed_tokens, observed.consumedTokens);
         if (observed.state === 'stopped') {
-          const state =
-            row.revoked || row.stop_requested || this.expired(row) ? 'killed' : 'validating';
           this.db
             .transaction(() => {
+              const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+              if (
+                latest.observed_exit ||
+                this.starts.has(row.pod_id) ||
+                (row.state === 'queued' && latest.state === 'running')
+              )
+                return;
+              // Cancellation may have committed while observe() was in flight.
+              const state =
+                latest.revoked || latest.stop_requested || this.expired(latest)
+                  ? 'killed'
+                  : 'validating';
               if (observed.limitation) {
                 const stored = this.db
                   .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
@@ -363,14 +479,13 @@ export class ManagedPodService {
                   'UPDATE managed_pods SET observed_exit=1,state=?,exit_code=? WHERE pod_id=?',
                 )
                 .run(state, observed.exitCode ?? null, row.pod_id);
-              this.onTransition?.(row, 'runtime-stopped', state);
+              if (state === 'killed')
+                this.db
+                  .prepare('UPDATE managed_pods SET revoked=1, stop_requested=1 WHERE pod_id=?')
+                  .run(row.pod_id);
+              this.onTransition?.(latest, 'runtime-stopped', state);
             })
             .immediate();
-          if (state === 'killed') {
-            this.db
-              .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
-              .run(row.pod_id);
-          }
           // Do not retry a stop against an already removed runtime.
           continue;
         }
@@ -381,12 +496,12 @@ export class ManagedPodService {
             .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
             .run(row.pod_id);
           await this.runtime.stop(row.runtime_ref);
-        } else {
+        } else if (!row.allocation_attempted) {
           const terminal = this.db
             .transaction(() => {
               this.db
                 .prepare(
-                  "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed' WHERE pod_id=? AND runtime_ref IS NULL AND observed_exit=0",
+                  "UPDATE managed_pods SET revoked=1,stop_requested=1,observed_exit=1,state='killed' WHERE pod_id=? AND runtime_ref IS NULL AND observed_exit=0 AND allocation_attempted=0",
                 )
                 .run(row.pod_id);
               const current = this.row(row.dispatcher_installation_id, row.pod_id);

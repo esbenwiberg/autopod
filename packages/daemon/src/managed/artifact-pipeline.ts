@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ManagedPodRequest, ValidationEvidence } from '@autopod/shared';
 import type { ArtifactExports } from './artifact-exports.js';
 import { canonical } from './canonical.js';
+import { signalLocalRun } from './local-run-signals.js';
 import type { ManagedControls } from './managed-controls.js';
 import type { ManagedPodService } from './managed-service.js';
 
@@ -167,6 +168,7 @@ export class ManagedArtifactPipeline {
       this.service.db
         .prepare("UPDATE managed_pods SET state='review_required' WHERE pod_id=?")
         .run(podId);
+      signalLocalRun(this.service.db, installation);
       throw new Error(
         limitation === 'agent-runtime-failed'
           ? 'managed-agent-runtime-failed'
@@ -191,7 +193,9 @@ export class ManagedArtifactPipeline {
                 WHERE managed_results.pod_id=managed_pods.pod_id AND json_each.value='validation-incomplete')))))`,
       )
       .all() as { pod_id: string; dispatcher_installation_id: string }[];
-    for (const row of rows)
+    for (const row of rows) {
+      if (!this.service.ownsInstallation(row.dispatcher_installation_id)) continue;
       await this.finish(row.dispatcher_installation_id, row.pod_id).catch(() => {});
+    }
   }
 }

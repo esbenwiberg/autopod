@@ -178,7 +178,9 @@ export function createMigratedTestDb(): Database.Database {
       }
       continue;
     }
-    if (/--\s*@execute-whole/i.test(sql)) {
+    // Like the production runner, let SQLite parse ordinary scripts (including
+    // semicolons inside comments and triggers). Split only marked repair SQL.
+    if (!/--\s*@allow-duplicate-columns/i.test(sql)) {
       db.exec(sql);
       continue;
     }

@@ -15,12 +15,35 @@ if worker_root.is_symlink() or worker_root.stat().st_uid!=0 or worker_root.stat(
 worker=worker_root/'codex_worker.py'
 if worker.is_symlink() or (worker.exists() and worker.read_text()!=sys.argv[4]):raise RuntimeError('immutable-worker')
 worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
+if len(sys.argv)>8 and sys.argv[8]:
+ case=worker_root/'case_report.py'
+ if case.is_symlink() or (case.exists() and case.read_text()!=sys.argv[8]):raise RuntimeError('immutable-case-worker')
+ case.write_text(sys.argv[8]);os.chmod(case,0o555)
 if len(sys.argv)>5 and sys.argv[5]:
  gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
 if len(sys.argv)>7 and sys.argv[7]:
  public=worker_root/'public-read';public.write_text(sys.argv[7]);os.chmod(public,0o555);(root/'public-enabled').touch()
 (root/'channel-closed').unlink(missing_ok=True)
-with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3],sys.argv[6]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
+with open(os.devnull,'wb') as sink: subprocess.Popen(['python3','-I',str(file),str(root),'4187',sys.argv[3],sys.argv[6]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
+`;
+// Run only trusted verifier code. The only value sent to loopback is a fresh nonce;
+// HTTPConnection pins the address (no proxy or redirects). Return no listener-controlled data.
+const VERIFY_HEALTH = `import hmac,http.client,os,pathlib,stat,sys
+try:
+ root=pathlib.Path(sys.argv[1]);directory=root.lstat()
+ if not stat.S_ISDIR(directory.st_mode) or directory.st_uid!=os.geteuid() or directory.st_mode & 0o077:sys.exit(1)
+ with os.fdopen(os.open(root/'channel-health.key',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb') as f:
+  item=os.fstat(f.fileno())
+  if not stat.S_ISREG(item.st_mode) or item.st_uid!=os.geteuid() or item.st_mode & 0o077:sys.exit(1)
+  key=f.read(33)
+ if len(key)!=32:sys.exit(1)
+ nonce=os.urandom(32).hex()
+ conn=http.client.HTTPConnection('127.0.0.1',4187,timeout=1)
+ conn.request('GET','/health',headers={'X-Dispatcher-Challenge':nonce})
+ response=conn.getresponse()
+ if response.status!=204 or not hmac.compare_digest(hmac.new(key,nonce.encode('ascii'),'sha256').hexdigest(),response.getheader('X-Dispatcher-Proof','')):sys.exit(1)
+ print('verified')
+except Exception:sys.exit(1)
 `;
 const READ = `import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]);prefix=sys.argv[2];p=root/(prefix+'request.json');response=root/(prefix+'response.json')
@@ -99,7 +122,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     route: Route,
     private readonly maximumTokens: number,
     private readonly options: {
-      mode?: 'report' | 'agent';
+      mode?: 'report' | 'agent' | 'case-report';
       publicRead?: boolean;
       maximumDurationSeconds?: number;
       githubRead?: { alias: string; bindingDigest: string };
@@ -317,30 +340,43 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       if (result.exitCode !== 0) throw new Error('managed-codex-channel-unavailable');
       return result.stdout;
     };
-    const capability = await this.execControl(binding.runtimeRef, ['codex', 'exec', '--help'], {
-      user: 'root',
-    });
-    if (
-      capability.exitCode !== 0 ||
-      !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
-    )
-      throw new Error('managed-codex-cli-incompatible');
-    await exec(
-      INSTALL,
-      this.source,
-      String(this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180),
-      this.worker,
-      this.githubCli,
-      String(this.maximumRequestBytes),
-      this.publicCli,
-    );
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const ready = await exec(
-        "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:4187/health',timeout=1).status)",
-      ).catch(() => '');
-      if (ready.trim() === '204') break;
-      if (attempt === 29) throw new Error('managed-codex-channel-not-ready');
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    if (binding.existingOnly) {
+      const proof = await this.execControl(
+        binding.runtimeRef,
+        ['python3', '-I', '-c', VERIFY_HEALTH, binding.stateRoot],
+        { user: 'root' },
+      ).catch(() => null);
+      if (proof?.exitCode !== 0 || proof.stdout.trim() !== 'verified')
+        throw new Error('managed-codex-channel-not-ready');
+    } else {
+      const capability = await this.execControl(binding.runtimeRef, ['codex', 'exec', '--help'], {
+        user: 'root',
+      });
+      if (
+        capability.exitCode !== 0 ||
+        !['--output-last-message', '--sandbox'].every((flag) => capability.stdout.includes(flag))
+      )
+        throw new Error('managed-codex-cli-incompatible');
+      await exec(
+        INSTALL,
+        this.source,
+        String(this.options.mode === 'agent' ? (this.options.maximumDurationSeconds ?? 3600) : 180),
+        this.worker,
+        this.githubCli,
+        String(this.maximumRequestBytes),
+        this.publicCli,
+        ...(this.options.mode === 'case-report'
+          ? [readFileSync(new URL('./runtime/case_report.py', import.meta.url), 'utf8')]
+          : []),
+      );
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const ready = await exec(
+          "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:4187/health',timeout=1).status)",
+        ).catch(() => '');
+        if (ready.trim() === '204') break;
+        if (attempt === 29) throw new Error('managed-codex-channel-not-ready');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
     }
     let stopped = false;
     let activeProvider = false;

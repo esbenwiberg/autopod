@@ -73,27 +73,34 @@ export interface ManagedPodApiDeps {
   /** Derived from the authenticated service principal; request bodies cannot supply it. */
   authenticate: (request: FastifyRequest) => Promise<string | null>;
 }
-export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps): void {
-  const controls = new ManagedControls(deps.service);
+export function registerManagedWatchdog(
+  app: FastifyInstance,
+  deps: Pick<ManagedPodApiDeps, 'service' | 'finishOutputs'>,
+): void {
   let timer: ReturnType<typeof setInterval> | undefined;
-  let ticking = false;
+  let ticking: Promise<void> | undefined;
   app.addHook('onReady', async () => {
     timer = setInterval(() => {
       if (ticking) return;
-      ticking = true;
-      void deps.service
+      ticking = deps.service
         .enforceExpiry()
         .then(() => deps.finishOutputs?.())
         .catch(() => app.log.error('managed-watchdog-failed'))
         .finally(() => {
-          ticking = false;
+          ticking = undefined;
         });
     }, 1000);
     timer.unref();
   });
   app.addHook('onClose', async () => {
     if (timer) clearInterval(timer);
+    await ticking;
   });
+}
+
+export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps): void {
+  const controls = new ManagedControls(deps.service);
+  registerManagedWatchdog(app, deps);
   app.get('/managed/health', async (request, reply) => {
     if (!(await deps.authenticate(request)))
       return reply.code(401).send({ code: 'managed-auth-required' });

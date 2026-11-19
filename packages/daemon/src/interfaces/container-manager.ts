@@ -247,7 +247,10 @@ export interface ContainerManager {
     excludes?: string[],
     options?: DirectoryExtractionOptions,
   ): Promise<void>;
-  getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'>;
+  getStatus(
+    containerId: string,
+    mode?: 'managed-exit',
+  ): Promise<'running' | 'stopped' | 'deleted' | 'unknown'>;
   execInContainer(
     containerId: string,
     command: string[],

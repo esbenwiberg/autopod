@@ -74,6 +74,58 @@ it('expiry survives service restart and is enforced without Dispatcher', async (
     f.close();
   }
 });
+it.each([
+  false,
+  true,
+])('a checkpointed allocation cannot outlive cancellation (stale terminal evidence: %s)', async (stale) => {
+  const f = fixture();
+  let release!: () => void, bound!: (id: string) => void;
+  const barrier = new Promise<void>((r) => {
+    release = r;
+  });
+  const idReady = new Promise<string>((r) => {
+    bound = r;
+  });
+  let running = false;
+  const port = {
+    ...f.runtime,
+    async ensure(id: string, _req: typeof f.request, checkpoint: (ref: string) => void) {
+      checkpoint(id);
+      bound(id);
+      await barrier;
+      running = true;
+      return { runtimeRef: id };
+    },
+    async observe() {
+      return { state: running ? ('running' as const) : ('stopped' as const), consumedTokens: 0 };
+    },
+    async stop() {
+      running = false;
+    },
+  };
+  try {
+    const owner = f.service(port),
+      watchdog = f.service(port);
+    const start = owner.start('installation-one', f.request);
+    const id = await idReady;
+    f.db.prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?').run(id);
+    await watchdog.enforceExpiry();
+    expect(watchdog.row('installation-one', id).observed_exit).toBe(0);
+    if (stale)
+      f.db.prepare("UPDATE managed_pods SET observed_exit=1,state='killed' WHERE pod_id=?").run(id);
+    release();
+    await expect(start).rejects.toThrow('grant-inactive');
+    expect(running).toBe(false);
+    await watchdog.enforceExpiry();
+    expect(watchdog.row('installation-one', id)).toMatchObject({
+      observed_exit: 1,
+      state: 'killed',
+    });
+  } finally {
+    release();
+    f.close();
+  }
+});
 it('expiry closes a reservation that failed before runtime allocation', async () => {
   const f = fixture();
   try {
