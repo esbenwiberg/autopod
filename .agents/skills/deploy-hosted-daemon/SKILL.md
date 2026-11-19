@@ -59,9 +59,10 @@ bounded retry window is a deployment failure.
   bundle** (newlines flattened), never source, never a comment — comments are
   stripped by the bundler, so a naive source grep lies. Pick a string that only
   exists after the change.
-- **Browser readiness is part of deploy.** The script installs Playwright Linux
-  dependencies, installs daemon Chromium into the `ewi` service user's cache,
-  and launch-checks it before swapping. Do not use `--skip-playwright-prewarm`
+- **Browser readiness is part of deploy.** Provision Playwright Linux
+  dependencies **only as a separate host provisioning operation**, not from a
+  release during deploy. The deploy installs daemon Chromium into the `ewi`
+  service user's cache and launch-checks it as that user before swapping. Do not use `--skip-playwright-prewarm`
   unless this is an emergency deploy where browser validation is explicitly
   allowed to be degraded.
 - **Daemon browser prewarm is paired with app-local prewarm.** Required facts of
