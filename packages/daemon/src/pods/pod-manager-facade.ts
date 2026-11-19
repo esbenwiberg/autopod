@@ -263,6 +263,22 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         selection,
       );
     },
+    getApprovalRewriteAbandonment(podId: string) {
+      return (
+        captured.sandboxRecovery?.rewriteAbandonment ??
+        recoveryError('Rewrite abandonment unavailable')
+      ).inspect(podId);
+    },
+    abandonApprovalRewrite(
+      podId: string,
+      input: import('@autopod/shared').ApprovalRewriteAbandonmentRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.sandboxRecovery?.rewriteAbandonment ??
+        recoveryError('Rewrite abandonment unavailable')
+      ).submit(podId, input, actor);
+    },
     getSandboxRecovery(podId: string) {
       return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).inspect(
         podId,

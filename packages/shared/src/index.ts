@@ -242,6 +242,7 @@ export type {
   UnknownModelSample,
   ValidationStage,
 } from './types/analytics.js';
+export type { ApprovalRewriteAbandonmentRequest } from './types/approval-rewrite-abandonment.js';
 export type { ArtifactChecksRecoveryRequest } from './types/artifact-checks-recovery.js';
 export type {
   AppRole,

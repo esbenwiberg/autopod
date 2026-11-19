@@ -104,8 +104,18 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
         {
           name: 'container',
           run: async () => {
-            if (pod.containerId)
-              await containerManagerFactory.get(pod.executionTarget).kill(pod.containerId);
+            if (!pod.containerId) return;
+            const cm = containerManagerFactory.get(pod.executionTarget);
+            // Explicit rewrite cleanup already confirmed every selected sandbox absent.
+            // Its capability does not authorize a second DELETE on an unknown outcome.
+            if (podRepo.rewriteAbandonments?.forPod(podId)) {
+              podRepo.approvalRewrites?.assertDeletable(podId);
+              if ((await cm.getStatus(pod.containerId)) !== 'deleted')
+                throw deletionOwnershipError();
+              assertOwnership();
+              return;
+            }
+            await cm.kill(pod.containerId);
           },
         },
         { name: 'network', run: () => destroyPodNetwork(podId, true) },

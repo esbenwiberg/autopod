@@ -3,6 +3,10 @@ import path from 'node:path';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
+import {
+  assertNoRewriteAbandonment,
+  ownsRewriteAbandonment,
+} from './approval-rewrite-abandonment-repository.js';
 import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 
 export const rewriteHash = (value: unknown) =>
@@ -312,10 +316,11 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
     retainedSandboxIds,
     retains: (id: string) => retainedSandboxIds().includes(id),
     assertReleasable(id: string) {
-      if (retainedSandboxIds().includes(id))
+      if (!ownsRewriteAbandonment(db, { containerId: id }) && retainedSandboxIds().includes(id))
         rewriteError('Original pre-rebase resource remains held for report/source recovery.');
     },
     assertDeletable(podId: string) {
+      if (ownsRewriteAbandonment(db, { podId })) return;
       if (
         db
           .prepare(`SELECT 1 FROM approval_source_rewrites r WHERE pod_id=?
@@ -325,6 +330,7 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
         rewriteError('The original rewrite evidence remains retained.');
     },
     admit(id: string, pod: Pod, binding: ApprovalRewriteBinding) {
+      assertNoRewriteAbandonment(db, pod.id);
       db.transaction(() => {
         const receipt = db
           .prepare('SELECT receipt FROM source_publication_receipts WHERE intent_id=?')
@@ -382,6 +388,7 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
       }).immediate();
     },
     assertDelivery(pod: Pod, allowPrepared = false) {
+      assertNoRewriteAbandonment(db, pod.id);
       const row = latest(pod);
       if (!row) return null;
       if (

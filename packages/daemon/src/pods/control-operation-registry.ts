@@ -48,6 +48,7 @@ export function createControlOperationRegistry(
           key === 'checkRetainedCandidate' ||
           key === 'reconcileCheckpointOutcome' ||
           key === 'recoverSandbox' ||
+          key === 'abandonApprovalRewrite' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||
           key === 'readRecoveryFile' ||
