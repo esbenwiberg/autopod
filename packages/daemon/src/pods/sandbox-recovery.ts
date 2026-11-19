@@ -13,6 +13,8 @@ import {
   type RecoveryFileSource,
   recoveryFileError,
 } from '../interfaces/recovery-files.js';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
+import { createApprovalRewriteAbandonment } from './approval-rewrite-abandonment.js';
 import { createFileRecovery, fileRecoveryHash } from './file-recovery.js';
 import type { PodRepository } from './pod-repository.js';
 import { assertValidationMutationSettled } from './validation-recovery-policy.js';
@@ -23,6 +25,7 @@ export function createSandboxRecovery(deps: {
   isIdle(podId: string): boolean;
   isGoal(podId: string): boolean;
   deleteSession(podId: string): Promise<void>;
+  worktreeManager?: Pick<WorktreeManager, 'cleanup'>;
 }) {
   const journal = deps.podRepo.sandboxWakeups;
   const ledger = journal?.recovery;
@@ -510,5 +513,9 @@ export function createSandboxRecovery(deps: {
     getPod: (id) => deps.podRepo.getOrThrow(id),
     original: originalFiles,
   });
-  return { inspect, submit, assertAvailable, files };
+  const rewriteAbandonment =
+    deps.worktreeManager && deps.podRepo.rewriteAbandonments
+      ? createApprovalRewriteAbandonment({ ...deps, worktreeManager: deps.worktreeManager })
+      : undefined;
+  return { inspect, submit, assertAvailable, files, rewriteAbandonment };
 }

@@ -728,6 +728,19 @@ export class AutopodClient {
       `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}${buildOnlyEnvironmentKeys ? `&buildOnlyEnvironmentKeys=${encodeURIComponent(buildOnlyEnvironmentKeys.join(','))}` : ''}`,
     );
   }
+  async getRewriteAbandonment(id: string): Promise<unknown> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/approval-rewrite-abandonment`);
+  }
+  async abandonRewrite(
+    id: string,
+    input: import('@autopod/shared').ApprovalRewriteAbandonmentRequest,
+  ): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/pods/${encodeURIComponent(id)}/approval-rewrite-abandonment`,
+      input,
+    );
+  }
   async getRewriteRepairs(id: string): Promise<unknown> {
     return this.request('GET', `/pods/${id}/approval-rewrite-repair`);
   }

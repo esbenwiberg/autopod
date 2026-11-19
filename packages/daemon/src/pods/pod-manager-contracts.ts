@@ -507,6 +507,12 @@ export interface PodManager {
   readRecoveryFile: ReturnType<
     typeof import('./sandbox-recovery.js').createSandboxRecovery
   >['files']['read'];
+  getApprovalRewriteAbandonment: ReturnType<
+    typeof import('./approval-rewrite-abandonment.js').createApprovalRewriteAbandonment
+  >['inspect'];
+  abandonApprovalRewrite: ReturnType<
+    typeof import('./approval-rewrite-abandonment.js').createApprovalRewriteAbandonment
+  >['submit'];
   getSandboxRecovery: ReturnType<
     typeof import('./sandbox-recovery.js').createSandboxRecovery
   >['inspect'];

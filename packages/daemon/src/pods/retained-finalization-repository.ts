@@ -4,6 +4,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { AutopodError, type Pod, type RetainedFinalizationReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertRewriteAbandonmentPathAvailable } from './approval-rewrite-abandonment-repository.js';
 import {
   assertArtifactChecksAvailable,
   assertArtifactChecksPathAvailable,
@@ -117,6 +118,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertRewriteAbandonmentPathAvailable(db, location);
   assertSavedDraftPathAvailable(db, location);
   assertArtifactChecksPathAvailable(db, location);
   assertRecoveryForkPathAvailable(db, location);

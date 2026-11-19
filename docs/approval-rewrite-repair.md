@@ -175,8 +175,11 @@ Do not downgrade to a binary unaware of repair selection or Docker dispatch
 handling: even an older retention-aware binary may not enforce the new target's
 execution evidence. This is a roll-forward-only operational boundary, not a claim
 that the existing schema version enforces safe binary downgrade. Roll forward with preserved database, sources,
-resources and reports. No hold release or historical-resource deletion protocol
-is provided, even after completion. They can continue consuming storage/capacity.
+resources and reports. Repair itself never releases historical resources, even
+after completion, so they can continue consuming storage/capacity. A separate,
+explicitly destructive [sandbox rewrite abandonment](approval-rewrite-abandonment.md)
+protocol can discard a qualified idle unrepaired rewrite with human data-loss
+consent; it does not settle checks or authorize delivery.
 
 Regression tests use actual temporary Git repositories, SQLite lifecycle facts
 and the real manager checks-only path with mocked provider/validation engines.

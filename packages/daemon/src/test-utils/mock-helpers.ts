@@ -22,6 +22,7 @@ import {
   detachLegacyScheduledProfile,
   detachLegacyWatchedProfile,
 } from '../db/detach-legacy-profile.js';
+import { registerRetainedPathFunctions } from '../db/retained-path-functions.js';
 import type {
   ContainerManager,
   RuntimeRegistry,
@@ -139,6 +140,7 @@ export function createTestDb(): Database.Database {
     }
   }
   const db = new Database(Buffer.from(testDbTemplate));
+  registerRetainedPathFunctions(db);
   // Foreign-key enforcement belongs to the connection, not the serialized image.
   db.pragma('foreign_keys = ON');
   return db;
@@ -147,6 +149,7 @@ export function createTestDb(): Database.Database {
 /** Uncached migration path, also used to verify template/schema equivalence. */
 export function createMigratedTestDb(): Database.Database {
   const db = new Database(':memory:');
+  registerRetainedPathFunctions(db);
   db.pragma('foreign_keys = ON');
 
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');

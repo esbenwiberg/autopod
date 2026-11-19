@@ -9,6 +9,7 @@ import {
   detachLegacyScheduledProfile,
   detachLegacyWatchedProfile,
 } from './detach-legacy-profile.js';
+import { registerRetainedPathFunctions } from './retained-path-functions.js';
 
 /** Destructive cutovers require a verified pre-migration online backup. */
 const CUTOVER_MIGRATIONS: Record<number, string> = {
@@ -145,6 +146,7 @@ export async function runMigrationsWithBackups(
 }
 
 function applyMigrations(db: Database.Database, plan: MigrationPlan, logger: Logger): void {
+  registerRetainedPathFunctions(db);
   const { files, currentVersion, sqlByFile } = plan;
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
