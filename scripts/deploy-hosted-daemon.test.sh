@@ -3,6 +3,7 @@
 set -euo pipefail
 
 script="$(cd "$(dirname "$0")" && pwd)/deploy-hosted-daemon.sh"
+python3 "$(dirname "$script")/test-inspection-env.py"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home/.autopod"

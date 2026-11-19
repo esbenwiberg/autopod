@@ -48,6 +48,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Exercise real systemd inspection bindings on disposable runner
+        run: sudo /usr/bin/python3 -I scripts/test-inspection-env.py --systemd
+
       - name: PR test gate
         run: pnpm test:pr
 
