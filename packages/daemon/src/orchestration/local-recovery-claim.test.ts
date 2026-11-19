@@ -1,16 +1,17 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+
 import { expect, it } from 'vitest';
 import { digest } from '../managed/canonical.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { tryRecoveryClaim } from './local-recovery-claim.js';
 
 it('a colliding allocation cannot mask a report wake, but both still exclude other hosts', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'claim-slots-')),
     file = path.join(root, 'test.db');
-  const db = new Database(file),
-    peer = new Database(file);
+  const db = openTestDiskDatabase(file),
+    peer = openTestDiskDatabase(file);
   const run = 'run',
     plan = '@controller-turn';
   const slot = digest([run, plan]).slice(-2);

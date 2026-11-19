@@ -17,7 +17,7 @@ function createTestDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   for (const file of MIGRATION_FILES) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
-    if (/--\s*@execute-whole/i.test(sql)) {
+    if (!/--\s*@allow-duplicate-columns/i.test(sql)) {
       db.exec(sql);
       continue;
     }
