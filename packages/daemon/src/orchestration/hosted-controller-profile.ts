@@ -9,6 +9,31 @@ import {
 } from '../provider-accounts/provider-account-health.js';
 import { refreshAndPersistProviderAccountMaxCredentials } from '../providers/credential-persistence.js';
 
+// Never forward provider-controlled text to diagnostics. These are hints about
+// an error response, not verdicts on credentials or permissions.
+function providerHint(err: unknown) {
+  if (!(err instanceof Anthropic.APIError)) return undefined;
+  const msg = err.message.toLowerCase();
+  if (msg.includes('claude code') && /only|cannot|not (?:valid|allowed)|restricted/.test(msg))
+    return 'client-restricted';
+  if (/oauth.{0,60}not supported|does not support.{0,60}oauth/.test(msg))
+    return 'oauth-unsupported';
+  if (/expired|revoked/.test(msg)) return 'credential-expiry-or-revocation';
+  if (/credit balance|billing/.test(msg)) return 'billing';
+  if (/model.{0,100}(?:not found|not available|does not exist|not supported)/.test(msg))
+    return 'model-unavailable';
+  return [
+    'authentication_error',
+    'permission_error',
+    'rate_limit_error',
+    'not_found_error',
+    'invalid_request_error',
+    'overloaded_error',
+    'api_error',
+    'billing_error',
+  ].find((v) => v === err.type);
+}
+
 export interface MainProfilePin {
   profileName: string;
   profileId: string;
@@ -148,6 +173,7 @@ export function bindHostedControllerProfile(
             reason,
             phase: attempt.phase,
             httpStatus: status,
+            providerHint: status && status >= 400 ? providerHint(err) : undefined,
             wakeDigest:
               wakeDigest && /^sha256:[a-f0-9]{64}$/.test(wakeDigest) ? wakeDigest : undefined,
           },

@@ -8,7 +8,7 @@ import {
   operatorBasePolicy,
   parseOperatorEnrollment,
 } from './operator-enrollment.js';
-import { registerOperatorRuns } from './operator-runs.js';
+import { operatorRunId, registerOperatorRuns } from './operator-runs.js';
 
 it('commissions a confined v2 inspection only through the bound owner and preserves its single kickoff across restart', async () => {
   const {
@@ -48,6 +48,7 @@ it('commissions a confined v2 inspection only through the bound owner and preser
     { ...raw, checks, review, authorities },
     { ...raw, version: 1 },
     { ...raw, slot: 'accept' },
+    { ...raw, slot: 'inspection-02' },
   ])
     expect(() => parseOperatorEnrollment(JSON.stringify(invalid))).toThrow(
       'invalid-operator-enrollment',
@@ -88,6 +89,15 @@ it('commissions a confined v2 inspection only through the bound owner and preser
       cli: { ...cli, bindings: [{ ...operator, audience: 'another-api' }] },
     }),
   ).toThrow('inspection-preflight-binding-mismatch');
+  const next = { ...e, slot: 'inspection-2' };
+  expect(() => composeOperatorEnrollment(next, deps)).toThrow(
+    'inspection-preflight-binding-mismatch',
+  );
+  const second = composeOperatorEnrollment(
+    { ...next, expectedRun: operatorRunId(operator, next.slot) },
+    deps,
+  );
+  expect(second.slots[0]?.checkpoint.run).not.toEqual(run);
   const build = () => {
     const config = composeOperatorEnrollment(e, deps);
     const app = Fastify();

@@ -152,7 +152,15 @@ it.each([
     if (mode === 'null-block')
       return Response.json({ content: [null], usage: { input_tokens: 1, output_tokens: 1 } });
     return new Response(
-      mode === 'broken-json' ? 'invalid ' + secret : JSON.stringify({ error: { message: secret } }),
+      mode === 'broken-json'
+        ? 'invalid ' + secret
+        : JSON.stringify({
+            type: 'error',
+            error: {
+              type: mode === 'limited' ? 'rate_limit_error' : secret,
+              message: mode === 'forbidden' ? 'Only valid for Claude Code. ' + secret : secret,
+            },
+          }),
       { status, headers: { 'content-type': 'application/json', 'x-request-id': secret } },
     );
   });
@@ -192,6 +200,8 @@ it.each([
     wakeDigest: row.wake_digest,
     ...(status ? { httpStatus: status } : {}),
   });
+  if (mode === 'forbidden') expect(JSON.parse(lines[0]!).providerHint).toBe('client-restricted');
+  if (mode === 'limited') expect(JSON.parse(lines[0]!).providerHint).toBe('rate_limit_error');
   if (status === null) expect(JSON.parse(lines[0]!)).not.toHaveProperty('httpStatus');
   expect(lines.join('')).not.toMatch(/PRIVATE_|fixture-not-real|Bearer |request-id/);
   expect(

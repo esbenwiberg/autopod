@@ -82,9 +82,12 @@ export function parseOperatorEnrollment(raw: string | undefined) {
   }
 }
 export const operatorDraftSchema = schema.omit({ authorities: true, checks: true, review: true });
+// A fresh, separately commissioned task needs a new run identity, never a reset
+// of an old slot's reservations. Only the daemon can enroll these names.
+const inspectionSlot = /^inspection(?:-[1-9][0-9]{0,7})?$/;
 const ownerInspectionSchema = operatorDraftSchema.extend({
   version: z.literal(2),
-  slot: z.literal('inspection'),
+  slot: z.string().regex(inspectionSlot),
   expectedRun: z.string().regex(/^[a-f0-9]{64}$/),
   expectedBasePolicy: hash,
 });
@@ -186,7 +189,7 @@ export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig
   )
     throw new Error('inspection-profile-scope');
   if (
-    draft.slot !== 'inspection' ||
+    !inspectionSlot.test(draft.slot) ||
     draft.budget.requests > 18 ||
     draft.budget.active > 6 ||
     Object.keys(draft.recipes).join(',') !== 'inspect' ||
