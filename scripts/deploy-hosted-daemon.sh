@@ -9,7 +9,7 @@
 #
 # This script automates the deploy dance (preflight → build new release on the
 # VM → prewarm Playwright → verify the built bundle → atomic symlink swap →
-# post-verify → print rollback → prune). See the `deploy-hosted-daemon` skill
+# post-verify → prune → print rollback). See the `deploy-hosted-daemon` skill
 # for the runbook and judgment that wraps it.
 #
 # Usage:
@@ -32,12 +32,12 @@
 #   --stage-only         Build and prewarm without activation, restart or release pruning.
 #   --verify-release     Require exact clean build identity before releasing maintenance.
 #                        A failed post-swap check retains the existing expiring drain.
-#   --verify-string STR  Extra gate: grep the flattened built bundle for STR
+#   --verify-string STR  Extra gate: find literal STR on one built output line
 #                        before swapping (catches "built the wrong thing").
 #   --skip-playwright-prewarm
 #                        Emergency escape hatch: do not install/launch-check the
 #                        daemon Playwright Chromium browser before swapping.
-#   --rollback <sha>     Repoint current -> releases/<sha> + restart. Nothing else.
+#   --rollback <sha>     Repoint current -> releases/<sha>, restart, check health.
 #
 # Gotchas baked in (learned the hard way):
 #   - VM run-command shell is `sh`, not bash: no pipefail, build runs via
@@ -47,8 +47,8 @@
 #   - Runtime data must live in DATA_DIR (systemd drop-in 10-data-dir.conf,
 #     /data/autopod/data), never <release>/packages/daemon/.autopod-data —
 #     pruning deletes releases. Preflight refuses to deploy without it.
-#   - Verification greps the BUILT bundle (newlines flattened), never source and
-#     never a comment — comments get stripped by the bundler.
+#   - Verification searches built .js and .py files, not the source tree.
+#     Choose a single-line marker that survives bundling.
 #   - Host browser validation needs both OS libraries and an `ewi`-owned
 #     Playwright browser cache. Deploys prewarm and launch-check daemon Chromium
 #     before swapping so browser validation cannot come up half-ready.
@@ -156,7 +156,9 @@ wait_for_local_health || echo HEALTH_FAIL
   echo "$out"
   echo "$out" | grep -q MISSING_RELEASE && die "release $ROLLBACK_SHA not on VM"
   echo "$out" | grep -q HEALTH_FAIL && die "local /health failed post-rollback"
-  curl -sS --max-time 10 "$HEALTH_URL" >/dev/null && note "external HTTPS health OK" || die "external health FAILED post-rollback"
+  HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL")" || die "external health request failed post-rollback"
+  [ "$HTTP_CODE" = 200 ] || die "external health returned $HTTP_CODE post-rollback"
+  note "external HTTPS health 200 OK"
   note "rollback done"
   exit 0
 fi
