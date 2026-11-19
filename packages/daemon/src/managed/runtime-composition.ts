@@ -24,6 +24,8 @@ export interface ManagedWorkerProviderChannel {
     podId: string;
     runtimeRef: string;
     stateRoot: string;
+    /** Recover only the host side of an existing live channel; never install or spawn. */
+    existingOnly?: true;
     invoke: (
       key: string,
       prompt: string,
@@ -143,7 +145,13 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     const source = { ...enrolled[0]!, path: cp.mirror, baseRevision: cp.commit };
     return new ManagedWorkspaces(config.db, workspaces.root, [source]).prepare(podId, request);
   };
-  const attach = async (index: number, podId: string, ref: string, root: string) => {
+  const attach = async (
+    index: number,
+    podId: string,
+    ref: string,
+    root: string,
+    existingOnly?: true,
+  ) => {
     if (closed) throw new Error('managed-composition-closed');
     if (channels.has(podId)) return;
     const existing = pending.get(podId);
@@ -164,6 +172,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         podId,
         runtimeRef: ref,
         stateRoot: root,
+        ...(existingOnly ? { existingOnly } : {}),
         invoke: (key, prompt, maximumTokens) =>
           gateways[index]!.invoke(
             row.dispatcher_installation_id,
@@ -266,7 +275,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
           workingDir: request.outputs.artifacts.mode === 'none' ? '/tmp' : '/output',
         };
       },
-      attachProviderChannel: (podId, ref, root) => attach(index, podId, ref, root),
+      attachProviderChannel: (podId, ref, root, _request, existingOnly) =>
+        attach(index, podId, ref, root, existingOnly),
       ...(binding.channel.send
         ? {
             sendMessage: (ref: string, message: FollowUpEnvelope, key: string) => {
@@ -379,11 +389,22 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       for (const row of rows) {
         if (!components.service.ownsInstallation(row.dispatcher_installation_id)) continue;
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
-        // A bound Azure ID is not evidence that the checkpoint upload was verified
-        // or a worker started. Preserve ambiguous queued allocations for inspection.
-        if (config.sandboxCheckpoints && row.state === 'queued') continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         if (profileIds && !profileIds.has(request.profileSnapshot.profileId)) continue;
+        if (config.sandboxCheckpoints && row.state === 'queued') {
+          // An ID alone cannot authorize replay or attachment.
+          try {
+            await components.service.restoreCheckpoint(row);
+          } catch {
+            // Leave the reservation untouched. Record the failure once, without channel output.
+            config.db
+              .prepare(`INSERT INTO managed_results(pod_id, limitations_json) VALUES (@podId, json_array(@code))
+                ON CONFLICT(pod_id) DO UPDATE SET limitations_json=json_insert(limitations_json, '$[#]', @code)
+                WHERE NOT EXISTS (SELECT 1 FROM json_each(limitations_json) WHERE value=@code)`)
+              .run({ podId: row.pod_id, code: 'managed-checkpoint-reattach-failed' });
+          }
+          continue;
+        }
         const index = bindings.findIndex(
           (binding) =>
             canonical(binding.route) === canonical(request.route) &&

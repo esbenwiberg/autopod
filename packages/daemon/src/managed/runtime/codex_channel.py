@@ -5,6 +5,7 @@ response. The worker cannot access this root-owned spool or refresh its quota le
 """
 import fcntl
 import hashlib
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -50,6 +51,7 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
         return
     deadline = time.monotonic() + lifetime
     serial = threading.Lock()
+    health_key = os.urandom(32)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -70,7 +72,15 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
 
         def do_GET(self):
             if self.path == '/health':
-                self.reply(204)
+                challenge = self.headers.get('X-Dispatcher-Challenge')
+                if challenge is None:
+                    self.reply(204)
+                elif re.fullmatch(r'[0-9a-f]{64}', challenge):
+                    self.send_response(204)
+                    self.send_header('X-Dispatcher-Proof', hmac.new(health_key, challenge.encode('ascii'), 'sha256').hexdigest())
+                    self.end_headers()
+                else:
+                    self.reply(400)
                 return
             if self.path != '/followups':
                 self.reply(404)
@@ -219,6 +229,10 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 self.reply(400)
 
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    # Only the helper holding both the launch spool lock and the listening socket
+    # publishes a verifier key. Neither the worker nor the host needs to receive it.
+    with os.fdopen(os.open(root / 'channel-health.key', os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600), 'wb') as stream:
+        stream.write(health_key)
     server.daemon_threads = True
     server.timeout = 0.2
     atomic(root / 'channel-ready.json', {'port': server.server_port})

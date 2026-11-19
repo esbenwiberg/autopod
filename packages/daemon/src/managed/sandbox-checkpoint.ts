@@ -138,6 +138,7 @@ export async function allocateSandboxCheckpoint(
   manager: ContainerManager,
   config: ContainerSpawnConfig,
   cp: { repository: string; commit: string },
+  beforeAllocate?: () => void,
 ) {
   const volumes = config.volumes ?? [],
     root = '/repositories/' + cp.repository;
@@ -150,6 +151,7 @@ export async function allocateSandboxCheckpoint(
   )
     throw new Error('sandbox-checkpoint-scope');
   return withSandboxProjection(inputs[0]!.host, cp.commit, async (dir, manifest) => {
+    beforeAllocate?.();
     const id = await manager.ensureManagedContainer!({
       ...config,
       volumes: volumes.map((v) => (v === inputs[0] ? { ...v, host: dir } : v)),

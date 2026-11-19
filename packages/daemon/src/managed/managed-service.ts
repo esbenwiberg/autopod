@@ -26,6 +26,16 @@ export interface ManagedRuntimePort {
     checkpoint: (runtimeRef: string) => void,
     fault?: string,
   ): Promise<{ runtimeRef: string }>;
+  /** Opt-in: finish local staging, then call beforeAllocate synchronously at the external boundary. */
+  ensureAtBoundary?(
+    podId: string,
+    request: ManagedPodRequest,
+    checkpoint: (runtimeRef: string) => void,
+    fault: string | undefined,
+    beforeAllocate: () => void,
+  ): Promise<{ runtimeRef: string }>;
+  /** Inspect only the original runtime and attach to an already verified live execution. */
+  restoreCheckpoint?(podId: string, ref: string, specDigest: string): Promise<boolean>;
   observe(runtimeRef: string): Promise<{
     state: 'running' | 'stopped' | 'unknown';
     consumedTokens: number;
@@ -261,26 +271,29 @@ export class ManagedPodService {
     const launch = async () => {
       const active = this.row(row.dispatcher_installation_id, row.pod_id);
       this.requireActive(active);
+      const nativeSandbox =
+        row.dispatcher_installation_id.startsWith('native.') &&
+        request.route.executionTarget === 'sandbox';
+      if (nativeSandbox && active.allocation_attempted) {
+        if (!(await this.restoreCheckpoint(active)))
+          throw new Error('managed-sandbox-create-uncertain');
+        return JSON.parse(active.handle_json) as ManagedPodHandle;
+      }
       await this.inputs?.prepare(active, request);
-      // Commit the last cancellable boundary before the external allocation. A watcher
-      // seeing no runtime_ref after this point cannot infer that no resource exists.
-      this.db
-        .transaction(() => {
-          const latest = this.row(row.dispatcher_installation_id, row.pod_id);
-          this.requireActive(latest);
-          // Native sandbox allocations may already be billable or only partially uploaded.
-          // Refuse any second ensure, even when the backend returned an identity.
-          if (
-            latest.dispatcher_installation_id.startsWith('native.') &&
-            request.route.executionTarget === 'sandbox' &&
-            latest.allocation_attempted
-          )
-            throw new Error('managed-sandbox-create-uncertain');
-          this.db
-            .prepare('UPDATE managed_pods SET allocation_attempted=1 WHERE pod_id=?')
-            .run(row.pod_id);
-        })
-        .immediate();
+      const beforeAllocate = () =>
+        this.db
+          .transaction(() => {
+            const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+            this.requireActive(latest);
+            // Native sandbox allocations may already be billable or only partially uploaded.
+            // Refuse any second ensure, even when the backend returned an identity.
+            if (nativeSandbox && latest.allocation_attempted)
+              throw new Error('managed-sandbox-create-uncertain');
+            this.db
+              .prepare('UPDATE managed_pods SET allocation_attempted=1 WHERE pod_id=?')
+              .run(row.pod_id);
+          })
+          .immediate();
       const bindRef = (ref: string) => {
         if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref))
           throw new Error('invalid-runtime-reference');
@@ -292,7 +305,14 @@ export class ManagedPodService {
         if (this.row(row.dispatcher_installation_id, row.pod_id).runtime_ref !== ref)
           throw new Error('runtime-binding-conflict');
       };
-      const result = await this.runtime.ensure(row.pod_id, request, bindRef, fault);
+      // Legacy ports don't expose their allocation boundary: mark conservatively before ensure.
+      const ensure = () => {
+        if (nativeSandbox && this.runtime.ensureAtBoundary)
+          return this.runtime.ensureAtBoundary(row.pod_id, request, bindRef, fault, beforeAllocate);
+        beforeAllocate();
+        return this.runtime.ensure(row.pod_id, request, bindRef, fault);
+      };
+      const result = await ensure();
       const current = this.db
         .transaction(() => {
           bindRef(result.runtimeRef); // retain a late identity even after cancellation
@@ -358,6 +378,41 @@ export class ManagedPodService {
       this.starts.delete(row.pod_id);
     }
   }
+  async restoreCheckpoint(row: ManagedPodRow): Promise<boolean> {
+    const ref = row.runtime_ref;
+    if (
+      !this.enabled ||
+      !ref ||
+      !row.allocation_attempted ||
+      row.state !== 'queued' ||
+      !row.dispatcher_installation_id.startsWith('native.') ||
+      (JSON.parse(row.request_json) as ManagedPodRequest).route.executionTarget !== 'sandbox'
+    )
+      return false;
+    this.requireActive(this.row(row.dispatcher_installation_id, row.pod_id));
+    if (!(await this.runtime.restoreCheckpoint?.(row.pod_id, ref, row.execution_spec_digest)))
+      return false;
+    return this.db
+      .transaction(() => {
+        const latest = this.row(row.dispatcher_installation_id, row.pod_id);
+        this.requireActive(latest);
+        if (
+          latest.runtime_ref !== ref ||
+          latest.execution_spec_digest !== row.execution_spec_digest
+        )
+          throw new Error('runtime-binding-conflict');
+        if (latest.state === 'running') return true;
+        if (latest.state !== 'queued') return false;
+        this.db.prepare("UPDATE managed_pods SET state='running' WHERE pod_id=?").run(row.pod_id);
+        this.onTransition?.(
+          this.row(row.dispatcher_installation_id, row.pod_id),
+          'started',
+          'running',
+        );
+        return true;
+      })
+      .immediate();
+  }
   async reconcileStart(installation: string, raw: unknown): Promise<ManagedPodHandle | null> {
     const request = validateManagedRequest(raw);
     const row = this.lookup(installation, request.startKey);
@@ -367,12 +422,6 @@ export class ManagedPodService {
     // Recovering their identity must not re-admit or restart the expired grant.
     if (row.observed_exit || (row.runtime_ref && row.state !== 'queued'))
       return JSON.parse(row.handle_json) as ManagedPodHandle;
-    if (
-      installation.startsWith('native.') &&
-      request.route.executionTarget === 'sandbox' &&
-      row.allocation_attempted
-    )
-      throw new Error('managed-sandbox-create-uncertain');
     return this.start(installation, request);
   }
   expired(row: ManagedPodRow): boolean {

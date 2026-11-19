@@ -6,7 +6,12 @@ import type { ResultWake } from './run-waves.js';
 
 // Local frozen exports only. Never resolve a path, URL or artifact ID from worker text.
 const maxArchiveBytes = 1024 * 1024;
-export async function controllerFindings(db: Database.Database, run: string, wake: ResultWake) {
+export async function controllerFindings(
+  db: Database.Database,
+  run: string,
+  wake: ResultWake,
+  cases?: ReadonlyMap<string, { executionSpecDigest: string }>,
+) {
   const lookup = db.prepare(`SELECT p.dispatcher_attempt_id,p.execution_spec_digest,
     CASE WHEN length(CAST(a.manifest_json AS BLOB))<=65536 THEN a.manifest_json END AS manifest,
     CASE WHEN length(CAST(a.receipt_json AS BLOB))<=4096 THEN a.receipt_json END AS receipt,
@@ -39,6 +44,8 @@ export async function controllerFindings(db: Database.Database, run: string, wak
         }
       | undefined;
     if (!row?.receipt) throw new Error('controller-artifact-binding');
+    if (cases && cases.get(child.start_key)?.executionSpecDigest !== row.execution_spec_digest)
+      throw new Error('controller-case-binding');
     if (!row.manifest || !row.bundle) {
       findings.push({ status: 'too-large' });
       continue;

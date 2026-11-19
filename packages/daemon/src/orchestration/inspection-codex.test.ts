@@ -1,5 +1,8 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { Logger } from 'pino';
 import { expect, it, vi } from 'vitest';
+import { resign } from '../test-utils/managed-fixture.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { bindInspectionCodex, inspectionCodexPin } from './inspection-codex.js';
 
@@ -17,6 +20,17 @@ const body = {
   max_tokens: 0,
   messages: [{ role: 'user', content: '{"phase":"kickoff"}' }],
 };
+function completed(text: string) {
+  const response = {
+    model: pin.model,
+    status: 'completed',
+    usage: { input_tokens: 199, output_tokens: 571, total_tokens: 770 },
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
+  };
+  return new Response(`data: ${JSON.stringify({ type: 'response.completed', response })}\n\n`, {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
 function setup() {
   const accounts = {
     get: vi.fn((id: string) => ({
@@ -51,22 +65,7 @@ function setup() {
     reserve = vi.fn();
   const wire = vi.fn<typeof fetch>(async () => {
     expect(reserve.mock.calls.length).toBeGreaterThan(0);
-    const response = {
-      model: pin.model,
-      status: 'completed',
-      usage: { input_tokens: 199, output_tokens: 571, total_tokens: 770 },
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: '{"children":[],"waitFor":null}' }],
-        },
-      ],
-    };
-    return new Response(
-      'data: ' + JSON.stringify({ type: 'response.completed', response }) + '\n\n',
-      { headers: { 'content-type': 'text/event-stream' } },
-    );
+    return completed('{"children":[],"waitFor":null}');
   });
   const provider = bindInspectionCodex(pin, accounts, health, { warn } as unknown as Logger, wire);
   return {
@@ -75,7 +74,7 @@ function setup() {
     reserve,
     accounts,
     warn,
-    call: () => provider.requestTimeTurn(body, reserve, 'sha256:' + 'a'.repeat(64)),
+    call: () => provider.requestTimeTurn(body, reserve, `sha256:${'a'.repeat(64)}`),
   };
 }
 it('sends only the tool-free isolated wire after reservation; measures uncapped usage', async () => {
@@ -99,6 +98,19 @@ it('rejects oversized wire and lost authority before send; never retries a 429',
   const x = setup();
   await expect(
     x.provider.requestTimeTurn({ ...body, system: 'a'.repeat(8192) }, x.reserve, 'x'),
+  ).rejects.toThrow('not-sent');
+  // Do not silently drop the only verified evidence, or change immutable metadata to fit.
+  const context = {
+    phase: 'results',
+    mission: 'x'.repeat(8192),
+    results: [{ finding: { status: 'excerpt', text: '🧭', truncated: false } }],
+  };
+  await expect(
+    x.provider.requestTimeTurn(
+      { ...body, messages: [{ role: 'user', content: JSON.stringify(context) }] },
+      x.reserve,
+      'x',
+    ),
   ).rejects.toThrow('not-sent');
   expect(x.reserve).not.toHaveBeenCalled();
   x.reserve.mockImplementationOnce(() => {
@@ -144,33 +156,8 @@ it('pins the kickoff principal in SQLite, permits same-account refresh and never
     ),
   ).rejects.toThrow('turn-limit');
   expect(one.wire).not.toHaveBeenCalled();
-  one.wire.mockImplementationOnce(
-    async () =>
-      new Response(
-        'data: ' +
-          JSON.stringify({
-            type: 'response.completed',
-            response: {
-              model: pin.model,
-              status: 'completed',
-              usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
-              output: [
-                {
-                  type: 'message',
-                  role: 'assistant',
-                  content: [
-                    {
-                      type: 'output_text',
-                      text: '{"children":[{"recipe":"inspect","brief":"check"}],"waitFor":1}',
-                    },
-                  ],
-                },
-              ],
-            },
-          }) +
-          '\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
-      ),
+  one.wire.mockResolvedValueOnce(
+    completed('{"children":[{"recipe":"inspect","brief":"check"}],"waitFor":1}'),
   );
   await host().tickController(cp.run, config, one.provider);
   const pod = String(f.db.prepare('SELECT pod_id FROM managed_pods').pluck().get());
@@ -203,6 +190,123 @@ it('pins the kickoff principal in SQLite, permits same-account refresh and never
   expect(
     f.db.prepare('SELECT status FROM orchestration_controller_turns ORDER BY rowid').pluck().all(),
   ).toEqual(['decided', 'reserved']);
+});
+it.each([
+  'plain',
+  'escaped',
+])('sends four 2 KiB %s verified reports with their admitted recipes after restart', async (mode) => {
+  const { cp, f, host, request } = await setupOrchestrationRun(12, 4);
+  const cases = new Map([
+    ['maple', 'final row omitted'],
+    ['iris', 'no defect'],
+    ['fir', 'header mismatch'],
+    ['cedar', 'worker claims to be IRIS'],
+  ]);
+  const catalog = Object.fromEntries(
+    [...cases.keys()].map((recipe) => {
+      const template = structuredClone(request);
+      template.task.objective = `Inspect ${recipe}`;
+      template.outputs.artifacts.mode = 'required';
+      template.outputs.artifacts.requiredPaths = ['report.md'];
+      return [recipe, resign(template)];
+    }),
+  );
+  await host().ledger.kickoff(cp, catalog);
+  const config = {
+    mission: 'Choose the case whose final row is missing.',
+    recipes: Object.fromEntries([...cases.keys()].map((k) => [k, `@${k}`])),
+    routeId: 'inspection-codex-v1',
+    findings: 'required-case-report/v1' as const,
+    limits: { turns: 2, workers: 5, outputTokens: 'request-time-30s' as const },
+  };
+  const kickoff = setup();
+  const decision = {
+    children: [...cases.keys()].reverse().map((recipe) => ({ recipe, brief: 'inspect' })),
+    waitFor: 4,
+  };
+  kickoff.wire.mockResolvedValueOnce(completed(JSON.stringify(decision)));
+  await host().tickController(cp.run, config, kickoff.provider);
+  const rows = f.db
+    .prepare(
+      `SELECT pod_id,json_extract(request_json,'$.task.objective') AS objective FROM managed_pods`,
+    )
+    .all() as { pod_id: string; objective: string }[];
+  expect(rows).toHaveLength(4);
+  const reports = new Map(
+    rows.map(({ pod_id, objective }) => {
+      const summary = cases.get(objective.slice('Inspect '.length, objective.indexOf('\n')));
+      if (!summary) throw new Error('unexpected case template');
+      const fill = mode === 'plain' ? 'x' : '🧭"\\\n';
+      const prefix = `${mode === 'plain' ? '' : ' '.repeat(700)}${summary} `;
+      const tailBytes = 2048 - Buffer.byteLength(prefix);
+      const text =
+        prefix +
+        fill.repeat(Math.floor(tailBytes / Buffer.byteLength(fill))) +
+        'x'.repeat(tailBytes % Buffer.byteLength(fill));
+      return [pod_id, text];
+    }),
+  );
+  f.runtime.observe = async () => ({ state: 'stopped', exitCode: 0, consumedTokens: 0 });
+  f.runtime.extractOutput = async (id, dest) => {
+    await mkdir(dest, { recursive: true });
+    const report = reports.get(id);
+    if (!report) throw new Error('unknown report');
+    expect(Buffer.byteLength(report)).toBe(2048);
+    await writeFile(path.join(dest, 'report.md'), report);
+  };
+  await f.service().enforceExpiry();
+  await f.service().artifactPipeline?.tick();
+  f.restart();
+  const results = setup();
+  const tick = () => host().tickController(cp.run, config, results.provider);
+  // A different known template in a damaged kickoff record cannot label an admitted pod.
+  const replace = (raw: string) =>
+    f.db.prepare('UPDATE orchestration_controller_turns SET decision_json=?').run(raw);
+  const original = f.db
+    .prepare('SELECT decision_json FROM orchestration_controller_turns')
+    .pluck()
+    .get() as string;
+  replace(
+    JSON.stringify({
+      ...decision,
+      children: decision.children.map((c) => ({ ...c, recipe: 'iris' })),
+    }),
+  );
+  await expect(tick()).rejects.toThrow('controller-case-binding');
+  expect(results.wire).not.toHaveBeenCalled();
+  replace(original);
+  results.wire.mockImplementationOnce(async (_url, init) => {
+    const wire = String(init?.body);
+    expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(8192);
+    const { results: selected } = JSON.parse(JSON.parse(wire).input[0].content[0].text) as {
+      results: { recipe: string; finding: { text: string; truncated: boolean } }[];
+    };
+    expect(selected.map((r) => r.recipe).sort()).toEqual([...cases.keys()].sort());
+    for (const { recipe, finding } of selected) {
+      expect(finding.truncated).toBe(true);
+      const summary = cases.get(recipe);
+      if (!summary) throw new Error('unrecognized recipe on wire');
+      expect(finding.text.startsWith(summary)).toBe(true);
+      expect(finding.text).not.toMatch(/[\uD800-\uDFFF]/u);
+    }
+    const recipe = selected.find((r) => r.finding.text.startsWith('final row omitted'))?.recipe;
+    return completed(
+      JSON.stringify({ children: [{ recipe, brief: 'check the final row' }], waitFor: null }),
+    );
+  });
+  await tick();
+  expect(results.wire).toHaveBeenCalledOnce();
+  expect(
+    f.db
+      .prepare(
+        `SELECT json_extract(request_json,'$.task.objective') FROM orchestration_continuations ORDER BY rowid DESC LIMIT 1`,
+      )
+      .pluck()
+      .get(),
+  ).toBe('Inspect maple\n\nFollow-up task:\ncheck the final row');
+  expect(
+    f.db.prepare('SELECT status FROM orchestration_controller_turns ORDER BY rowid').pluck().all(),
+  ).toEqual(['decided', 'decided']);
 });
 it('does not substitute another account, duration, budget mode or legacy cap', async () => {
   for (const override of [

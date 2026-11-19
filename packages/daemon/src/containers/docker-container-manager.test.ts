@@ -800,12 +800,13 @@ describe('DockerContainerManager', () => {
 
     it('does not report a created container as exited', async () => {
       container.inspect.mockResolvedValue({ State: { Running: false, Status: 'created' } });
-      expect(await manager.getStatus('abc123')).toBe('unknown');
+      expect(await manager.getStatus('abc123')).toBe('stopped');
+      expect(await manager.getStatus('abc123', 'managed-exit')).toBe('unknown');
     });
     it('returns "stopped" after exit', async () => {
       container.inspect.mockResolvedValue({ State: { Running: false, Status: 'exited' } });
-
       expect(await manager.getStatus('abc123')).toBe('stopped');
+      expect(await manager.getStatus('abc123', 'managed-exit')).toBe('stopped');
     });
 
     it('returns "unknown" when inspect throws', async () => {

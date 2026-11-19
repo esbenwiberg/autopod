@@ -32,6 +32,51 @@ const prompt = z
   })
   .strict();
 
+const maxWireBytes = 8192;
+interface InspectionContext {
+  phase: string;
+  results?: { finding?: { status: string; text?: string; truncated?: boolean } }[];
+}
+
+/** Fit only report excerpts. Keep metadata intact and measure the normalized transport
+ * envelope, including JSON escaping of both the context and the input_text field. */
+function boundedWire(body: string, ctx: InspectionContext) {
+  if (Buffer.byteLength(body) <= maxWireBytes) return body;
+  if (ctx.phase !== 'results') throw new Error('controller-request-limit');
+  const excerpts = ctx.results?.flatMap(({ finding }) =>
+    finding?.status === 'excerpt' && finding.text?.trim()
+      ? [
+          {
+            finding,
+            points: Array.from(finding.text.trimStart()),
+            original: finding.text,
+            wasTruncated: finding.truncated,
+          },
+        ]
+      : [],
+  );
+  if (!excerpts?.length) throw new Error('controller-request-limit');
+  const envelope = JSON.parse(body);
+  let low = 1;
+  let high = Math.max(...excerpts.map((e) => e.points.length));
+  let fit: string | undefined;
+  while (low <= high) {
+    const n = Math.floor((low + high) / 2);
+    for (const { finding, points, original, wasTruncated } of excerpts) {
+      finding.text = points.slice(0, n).join('');
+      finding.truncated = finding.text !== original || wasTruncated;
+    }
+    envelope.input[0].content[0].text = JSON.stringify(ctx);
+    const candidate = JSON.stringify(envelope);
+    if (Buffer.byteLength(candidate) <= maxWireBytes) {
+      fit = candidate;
+      low = n + 1;
+    } else high = n - 1;
+  }
+  if (!fit) throw new Error('controller-request-limit');
+  return fit;
+}
+
 // No profile lookup, env credentials, or provider calls during daemon composition.
 export function bindInspectionCodex(
   pin: Pin,
@@ -59,7 +104,7 @@ export function bindInspectionCodex(
       wakeDigest: string,
     ) {
       const b = prompt.parse(body),
-        ctx = JSON.parse(b.messages[0].content);
+        ctx = JSON.parse(b.messages[0].content) as InspectionContext;
       if (!['kickoff', 'results'].includes(ctx.phase)) throw new Error('controller-request-shape');
       const deadline = performance.now() + p.timeoutMs;
       const signal = AbortSignal.timeout(p.timeoutMs);
@@ -82,17 +127,17 @@ export function bindInspectionCodex(
             sent >= 2 ||
             init?.redirect !== 'error' ||
             init.signal !== signal ||
-            typeof init.body !== 'string' ||
-            Buffer.byteLength(init.body) > 8192
+            typeof init.body !== 'string'
           )
             throw new Error('controller-request-limit');
+          const outbound = boundedWire(init.body, ctx);
           validate();
           checkTime();
           reserve(principalDigest);
           charged = true;
           sent++;
           checkTime();
-          return wire(url, init);
+          return wire(url, { ...init, body: outbound });
         },
       );
       try {

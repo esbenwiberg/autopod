@@ -971,7 +971,10 @@ export class DockerContainerManager implements ContainerManager {
     };
   }
 
-  async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
+  async getStatus(
+    containerId: string,
+    mode?: 'managed-exit',
+  ): Promise<'running' | 'stopped' | 'unknown'> {
     try {
       const container = this.docker.getContainer(containerId);
       const info = await boundedDockerCall(container.inspect(), {
@@ -980,11 +983,11 @@ export class DockerContainerManager implements ContainerManager {
         logger: this.logger,
         containerId,
       });
-      return info.State.Running
-        ? 'running'
-        : ['exited', 'dead'].includes(info.State.Status)
-          ? 'stopped'
-          : 'unknown';
+      if (info.State.Running) return 'running';
+      // A never-started container is stopped for fleet status but not proof of worker exit.
+      return mode === 'managed-exit' && !['exited', 'dead'].includes(info.State.Status)
+        ? 'unknown'
+        : 'stopped';
     } catch {
       // Includes DockerCallTimeoutError — a wedged daemon looks the same as
       // "container gone" for status-polling purposes; both yield 'unknown'.
