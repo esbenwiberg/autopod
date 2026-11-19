@@ -43,7 +43,11 @@ export async function checkInspectionDraft(
   )
     throw new Error('inspection-bundle-mismatch');
   await withVerifiedCheckpointMirror(tmpdir(), draft.source, bundle, (mirror) =>
-    sandboxTreeEntries(mirror, draft.source.commit),
+    sandboxTreeEntries(
+      mirror,
+      draft.source.commit,
+      profiles.profiles.flatMap((stage) => (stage.caseDirectory ? [stage.caseDirectory] : [])),
+    ),
   );
   const run = operatorRunId(enrolledOperator(draft, cli, profiles), draft.slot);
   return {

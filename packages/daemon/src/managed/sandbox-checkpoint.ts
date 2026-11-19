@@ -3,17 +3,21 @@ import { constants } from 'node:fs';
 import { mkdir, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
-import { managedGit } from './source-git.js';
+import { managedGit, managedGitBytes } from './source-git.js';
 
 // Validate the committed tree without checking out files. Shared by offline
 // preflight, daemon import and the final projection from the worker workspace.
-export async function sandboxTreeEntries(repo: string, commit: string) {
+export async function sandboxTreeEntries(
+  repo: string,
+  commit: string,
+  cases: readonly string[] = [],
+) {
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('sandbox-checkpoint-commit');
   const listing = await managedGit(repo, ['ls-tree', '-r', '-l', '-z', commit]);
   const entries = listing.split('\0').filter(Boolean);
   if (!entries.length || entries.length > 64) throw new Error('sandbox-checkpoint-size');
   let total = 0;
-  return entries.map((entry) => {
+  const files = entries.map((entry) => {
     const match =
       /^100644 blob ([0-9a-f]{40}) +([0-9]+)\t([A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*)$/.exec(
         entry,
@@ -31,6 +35,33 @@ export async function sandboxTreeEntries(repo: string, commit: string) {
       throw new Error('sandbox-checkpoint-size');
     return { name: match[3]!, oid: match[1]!, size };
   });
+  for (const dir of cases) {
+    const selected = files.filter((f) => f.name.startsWith(dir + '/'));
+    if (
+      !selected.length ||
+      selected.length > 16 ||
+      selected.reduce((sum, f) => sum + f.size, 0) > 16384 ||
+      selected.some((f) => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/.test(f.name.slice(dir.length + 1)))
+    )
+      throw new Error('inspection-case-files-invalid');
+    const data: Record<string, string> = Object.create(null);
+    for (const f of selected) {
+      const b = await managedGitBytes(repo, ['cat-file', 'blob', f.oid]);
+      if (b.length !== f.size || b.includes(0)) throw new Error('inspection-case-text-invalid');
+      try {
+        data[f.name.slice(dir.length + 1)] = new TextDecoder('utf-8', {
+          fatal: true,
+          ignoreBOM: true,
+        }).decode(b);
+      } catch {
+        throw new Error('inspection-case-text-invalid');
+      }
+    }
+    // Match the compact UTF-8 input passed to the bounded report wrapper.
+    if (Buffer.byteLength(JSON.stringify({ case: dir, files: data })) > 96 * 1024)
+      throw new Error('inspection-case-text-invalid');
+  }
+  return files;
 }
 
 // Do not upload checkout extras; verify the actual worker bytes against the tree.

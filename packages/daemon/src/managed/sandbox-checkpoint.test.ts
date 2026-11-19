@@ -43,6 +43,18 @@ async function seed() {
   await writeFile(path.join(repo, 'untracked'), 'do not upload');
   return { repo, git, commit, root };
 }
+it.each([
+  Buffer.from([0x61, 0, 0x62]),
+  Buffer.from([0xff]),
+])('rejects a non-text case blob before commissioning', async (b) => {
+  const s = await seed();
+  await writeFile(path.join(s.repo, 'MAPLE/input.txt'), b);
+  s.git('add', 'MAPLE');
+  s.git('commit', '-qm', 'invalid case');
+  await expect(sandboxTreeEntries(s.repo, s.git('rev-parse', 'HEAD'), ['MAPLE'])).rejects.toThrow(
+    'case-text-invalid',
+  );
+});
 it('projects only pinned regular blobs; local changes and unsupported links fail before an upload', async () => {
   const s = await seed();
   await withSandboxProjection(s.repo, s.commit, async (dir, manifest) => {

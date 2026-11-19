@@ -94,7 +94,7 @@ const { provider } = offlineController((payload) => {
 const result = await host.tickController(
   'example',
   {
-    findings: 'report.md',
+    findings: 'required-case-report/v1',
     mission: 'Investigate reported issues',
     routeId: 'offline',
     recipes: { inspect: 'worker-0' },

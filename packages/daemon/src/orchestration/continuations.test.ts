@@ -62,7 +62,7 @@ it.each([
         mission: 'Verify the returned findings',
         routeId: 'offline',
         recipes: { inspect: '@inspect' },
-        findings: 'report.md',
+        findings: mode === 'startup catch-up' ? 'report.md' : 'required-case-report/v1',
       },
       provider,
     );
@@ -76,6 +76,22 @@ it.each([
   try {
     expect(() => attach()).toThrow('already-attached');
     expect(await loop.settled()).toEqual({ blocked: [] });
+    if (mode === 'startup catch-up')
+      expect(
+        f.db
+          .prepare('SELECT controller_policy_digest FROM orchestration_runs WHERE id=?')
+          .pluck()
+          .get(cp.run),
+      ).toEqual(
+        digest({
+          version: 1,
+          findings: 'report.md/v1',
+          mission: 'Verify the returned findings',
+          route: 'offline',
+          model: provider.model,
+          recipes: [['inspect', request.executionSpecDigest]],
+        }),
+      );
     const original = await runtime.live();
     expect(new Set(original.values()).size).toBe(6);
     const ids = [...original.keys()];
@@ -313,6 +329,34 @@ it('serves a paid queued worker even if the later controller reply is permanentl
   expect(calls()).toBe(2);
   expect(f.launches()).toBe(2);
 });
+it('refuses a reportless result before the results turn is reserved, including on reattach', async () => {
+  const { cp, f, request, host } = await setup(6, 1);
+  await host().ledger.kickoff(cp, { inspect: request });
+  const { calls, provider } = offlineController(() =>
+    JSON.stringify({ children: [{ recipe: 'inspect', brief: 'check' }], waitFor: 1 }),
+  );
+  const tick = () =>
+    host().tickController(
+      cp.run,
+      {
+        mission: 'inspect',
+        routeId: 'offline',
+        recipes: { inspect: '@inspect' },
+        findings: 'required-case-report/v1',
+      },
+      provider,
+    );
+  await tick();
+  const pod = String(f.db.prepare('SELECT pod_id FROM managed_pods').pluck().get());
+  await f.service().runtime.stop(pod);
+  f.db.prepare('UPDATE managed_pods SET revoked=1 WHERE pod_id=?').run(pod);
+  await f.service().enforceExpiry();
+  for (let n = 0; n < 2; n++)
+    await expect(tick()).rejects.toThrow('controller-verified-reports-required');
+  expect(calls()).toBe(1);
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_controller_turns').pluck().get()).toBe(1);
+  expect(f.launches()).toBe(1);
+});
 async function controllerFixture(limit: number, reply: (payload: string) => string) {
   const { f, request, cp, host, ledger } = await setup(limit, 6);
   const l = ledger();
@@ -417,7 +461,7 @@ it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
       host().tickController(
         cp.run,
         {
-          findings: 'report.md',
+          findings: 'required-case-report/v1',
           mission: 'Investigate reported issues',
           routeId: 'offline',
           recipes: { inspect: 'worker-0' },
@@ -439,6 +483,27 @@ it.skipIf(process.platform === 'win32').each(['mid-wave', 'before-ack'])(
       5,
     );
     replace(bundle);
+    // The prefix is valid: only the LAST selected exit is missing its report.
+    const lastSelected = f.db
+      .prepare('select pod_id from orchestration_child_outcomes order by sequence limit 1 offset 2')
+      .pluck()
+      .get() as string;
+    expect(lastSelected).not.toBe(pod);
+    const originalArtifact = f.db
+      .prepare('select artifact_id from orchestration_child_outcomes where pod_id=?')
+      .pluck()
+      .get(lastSelected);
+    f.db
+      .prepare('update orchestration_child_outcomes set artifact_id=NULL where pod_id=?')
+      .run(lastSelected);
+    await expect(tick()).rejects.toThrow('controller-verified-reports-required');
+    expect(calls()).toBe(0);
+    expect(f.db.prepare('select count(*) from orchestration_controller_turns').pluck().get()).toBe(
+      0,
+    );
+    f.db
+      .prepare('update orchestration_child_outcomes set artifact_id=? where pod_id=?')
+      .run(originalArtifact, lastSelected);
     // The result cursor is not an artifact capability: swapping in a sibling's real
     // export must not disclose that sibling's bytes, even in the same installation.
     const [original, sibling] = f.db

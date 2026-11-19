@@ -162,6 +162,7 @@ export default defineConfig({
     cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
     cpSync('src/managed/runtime/validation-supervisor.py', 'dist/runtime/validation-supervisor.py');
     cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
+    cpSync('src/managed/runtime/case_report.py', 'dist/runtime/case_report.py');
     cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
     cpSync('src/managed/runtime/codex_agent_worker.py', 'dist/runtime/codex_agent_worker.py');
     cpSync('src/managed/runtime/github_cli.py', 'dist/runtime/github_cli.py');

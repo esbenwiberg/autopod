@@ -182,12 +182,23 @@ export function confinedCatalog(e: Draft, profiles: ManagedProfileSetConfig) {
 // Validate immutable confinement on recovery as well as first install. Live
 // expiry is enforced by worker preflight on first kickoff and by the provider.
 export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig, now: number) {
+  const cases = profiles.profiles.some((s) => s.caseDirectory);
+  const names = profiles.profiles.map((s) => s.caseDirectory?.toLowerCase());
+  if (
+    cases &&
+    (!inspectionCodexPin.safeParse(draft.main).success ||
+      profiles.profiles.length > 6 ||
+      names.some((x) => !x) ||
+      new Set(names).size !== names.length ||
+      canonical([...Object.keys(draft.recipes)].sort()) !== canonical([...names].sort()))
+  )
+    throw new Error('inspection-case-binding');
   if (
     profiles.catalogArtifacts ||
     profiles.source ||
     profiles.githubRead ||
     profiles.mirror.dependencyCachePath ||
-    profiles.profiles.length !== 1 ||
+    (!cases && profiles.profiles.length !== 1) ||
     profiles.profiles[0]?.profileSnapshot.route.executionTarget !== 'sandbox'
   )
     throw new Error('inspection-profile-scope');
@@ -195,7 +206,7 @@ export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig
     !inspectionSlot.test(draft.slot) ||
     draft.budget.requests > 18 ||
     draft.budget.active > 6 ||
-    Object.keys(draft.recipes).join(',') !== 'inspect' ||
+    (!cases && Object.keys(draft.recipes).join(',') !== 'inspect') ||
     (!inspectionCodexPin.safeParse(draft.main).success &&
       canonical(draft.main) !==
         canonical({
@@ -210,35 +221,39 @@ export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig
   )
     throw new Error('inspection-run-scope');
   const catalog = confinedCatalog(draft, profiles);
-  const req = catalog.inspect;
-  if (!req) throw new Error('inspection-recipe-required');
-  const snap = profiles.profiles[0].profileSnapshot;
-  if (
-    canonical(snap.scope) !== canonical(req.effectiveGrant.scope) ||
-    snap.route.runtime !== 'codex' ||
-    req.outputs.artifacts.limits.maxFiles !== 1 ||
-    req.outputs.artifacts.limits.maxTotalBytes > 16384
-  )
-    throw new Error('inspection-report-scope');
-  if (
-    !('maxProviderRequests' in snap.budget) ||
-    snap.budget.maxProviderRequests > 2 ||
-    !('maxProviderRequests' in req.effectiveGrant.budget) ||
-    req.effectiveGrant.budget.maxProviderRequests > 2
-  )
-    throw new Error('inspection-worker-budget');
-  admitManagedRequest(
-    req,
-    {
-      targets: ['sandbox'],
-      profiles: new Map([[snap.snapshotDigest, snap]]),
-      enrollmentCeiling: snap.scope,
-      identityCeiling: snap.scope,
-      backendCeiling: snap.scope,
-      enforcement: REQUIRED_ENFORCEMENT,
-    },
-    now,
-  );
+  for (const stage of profiles.profiles) {
+    const req = catalog[stage.caseDirectory?.toLowerCase() ?? 'inspect'];
+    if (!req) throw new Error('inspection-recipe-required');
+    const snap = stage.profileSnapshot;
+    if (req.profileSnapshot.snapshotDigest !== snap.snapshotDigest)
+      throw new Error('inspection-case-binding');
+    if (
+      canonical(snap.scope) !== canonical(req.effectiveGrant.scope) ||
+      snap.route.runtime !== 'codex' ||
+      req.outputs.artifacts.limits.maxFiles !== 1 ||
+      req.outputs.artifacts.limits.maxTotalBytes > 16384
+    )
+      throw new Error('inspection-report-scope');
+    if (
+      !('maxProviderRequests' in snap.budget) ||
+      snap.budget.maxProviderRequests > 2 ||
+      !('maxProviderRequests' in req.effectiveGrant.budget) ||
+      req.effectiveGrant.budget.maxProviderRequests > 2
+    )
+      throw new Error('inspection-worker-budget');
+    admitManagedRequest(
+      req,
+      {
+        targets: ['sandbox'],
+        profiles: new Map([[snap.snapshotDigest, snap]]),
+        enrollmentCeiling: snap.scope,
+        identityCeiling: snap.scope,
+        backendCeiling: snap.scope,
+        enforcement: REQUIRED_ENFORCEMENT,
+      },
+      now,
+    );
+  }
   return catalog;
 }
 
@@ -271,6 +286,8 @@ export function composeOperatorEnrollment(
   const run = operatorRunId(operator, e.slot);
   if (e.version === 2 && !deps.isolatedArtifacts)
     throw new Error('inspection-private-storage-required');
+  const cases = profiles.profiles.some((stage) => stage.caseDirectory);
+  if (cases && e.version !== 2) throw new Error('inspection-case-owner-required');
   const catalog = e.version === 2 ? inspectionPolicy(e, profiles, 0) : confinedCatalog(e, profiles);
   const base = operatorBasePolicy(e, profiles, deps.isolatedArtifacts);
   if (e.version === 2 && (run !== e.expectedRun || base !== e.expectedBasePolicy))
@@ -311,6 +328,7 @@ export function composeOperatorEnrollment(
     path.join(path.dirname(path.resolve(deps.databasePath)), 'managed', 'checkpoints'),
     runtime,
     e.version === 2 ? checkpoint.evidenceDigest : undefined,
+    profiles.profiles.flatMap((stage) => (stage.caseDirectory ? [stage.caseDirectory] : [])),
   );
   const codex = 'kind' in e.main;
   const provider = 'kind' in e.main ? deps.bindCodex?.(e.main) : deps.bind(e.main);
@@ -431,7 +449,7 @@ export function composeOperatorEnrollment(
         policy: {
           mission: e.mission,
           routeId: codex ? 'inspection-codex-v1' : 'hosted-main',
-          findings: 'report.md',
+          findings: cases ? 'required-case-report/v1' : 'report.md',
           recipes: Object.fromEntries(Object.keys(catalog).map((k) => [k, '@' + k])),
           limits: {
             turns: e.budget.turns,

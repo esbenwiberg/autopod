@@ -85,6 +85,14 @@ export async function managedGit(
   credential?: ManagedGitCredential,
   trustedDirectories: readonly string[] = [],
 ): Promise<string> {
+  return (await managedGitBytes(cwd, args, credential, trustedDirectories)).toString('utf8').trim();
+}
+export async function managedGitBytes(
+  cwd: string,
+  args: string[],
+  credential?: ManagedGitCredential,
+  trustedDirectories: readonly string[] = [],
+): Promise<Buffer> {
   const configRoot = await mkdtemp(path.join(tmpdir(), 'autopod-managed-git-config-'));
   const configPath = path.join(configRoot, 'config');
   try {
@@ -94,6 +102,7 @@ export async function managedGit(
     });
     const result = await exec('git', [...managedGitArguments(cwd, trustedDirectories), ...args], {
       cwd,
+      encoding: 'buffer',
       maxBuffer: MAX_CANDIDATE_BYTES,
       timeout: 60000,
       env: {
@@ -114,7 +123,7 @@ export async function managedGit(
           : {}),
       },
     });
-    return result.stdout.trim();
+    return result.stdout;
   } catch {
     throw new Error('managed-git-operation-failed');
   } finally {

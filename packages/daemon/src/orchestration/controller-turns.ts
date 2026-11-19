@@ -28,7 +28,7 @@ export interface ControllerConfig {
   /** Lifetime limits, pinned into policy. A restart never resets either count. */
   limits?: { turns: number; workers: number; outputTokens: number | 'request-time-30s' };
   /** Host opt-in for this model route. Omit to keep worker-authored text private. */
-  findings?: 'report.md';
+  findings?: 'report.md' | 'required-case-report/v1';
   routeId: string;
   recipes: Readonly<Record<string, string>>;
 }
@@ -63,7 +63,8 @@ export async function tickController(
     const mission = z.string().trim().min(1).max(4096).parse(config.mission);
     const route = name.parse(config.routeId);
     const model = provider.model;
-    const includeReports = config.findings === 'report.md';
+    const requireReports = config.findings === 'required-case-report/v1';
+    const includeReports = requireReports || config.findings === 'report.md';
     const recipes = new Map<string, ManagedPodRequest>();
     const entries = Object.entries(config.recipes);
     if (!entries.length || entries.length > 16) throw new Error('controller-recipe-limit');
@@ -118,7 +119,7 @@ export async function tickController(
     const policy = digest({
       ...(limits ? { limits } : {}),
       version: 1,
-      ...(includeReports ? { findings: 'report.md/v1' } : {}),
+      ...(includeReports ? { findings: requireReports ? config.findings : 'report.md/v1' } : {}),
       mission,
       route,
       model,
@@ -154,6 +155,21 @@ export async function tickController(
         .get(run, wake.key);
       const findings =
         includeReports && !priorTurn ? await controllerFindings(db, run, wake) : undefined;
+      if (
+        requireReports &&
+        !priorTurn &&
+        wake.key !== '@kickoff' &&
+        (!findings?.length ||
+          findings.length !== wake.results.length ||
+          findings.some(
+            (f, i) =>
+              f.status !== 'excerpt' ||
+              !f.text?.trim() ||
+              wake.results[i]?.state !== 'complete' ||
+              wake.results[i]?.exit_code !== 0,
+          ))
+      )
+        throw new Error('controller-verified-reports-required');
       function makeBody() {
         // No runtime tokens, operator credentials, managed specs, arbitrary artifact reads or tools.
         const context = {

@@ -15,6 +15,10 @@ if worker_root.is_symlink() or worker_root.stat().st_uid!=0 or worker_root.stat(
 worker=worker_root/'codex_worker.py'
 if worker.is_symlink() or (worker.exists() and worker.read_text()!=sys.argv[4]):raise RuntimeError('immutable-worker')
 worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
+if len(sys.argv)>8 and sys.argv[8]:
+ case=worker_root/'case_report.py'
+ if case.is_symlink() or (case.exists() and case.read_text()!=sys.argv[8]):raise RuntimeError('immutable-case-worker')
+ case.write_text(sys.argv[8]);os.chmod(case,0o555)
 if len(sys.argv)>5 and sys.argv[5]:
  gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
 if len(sys.argv)>7 and sys.argv[7]:
@@ -99,7 +103,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     route: Route,
     private readonly maximumTokens: number,
     private readonly options: {
-      mode?: 'report' | 'agent';
+      mode?: 'report' | 'agent' | 'case-report';
       publicRead?: boolean;
       maximumDurationSeconds?: number;
       githubRead?: { alias: string; bindingDigest: string };
@@ -333,6 +337,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       this.githubCli,
       String(this.maximumRequestBytes),
       this.publicCli,
+      ...(this.options.mode === 'case-report'
+        ? [readFileSync(new URL('./runtime/case_report.py', import.meta.url), 'utf8')]
+        : []),
     );
     for (let attempt = 0; attempt < 30; attempt++) {
       const ready = await exec(

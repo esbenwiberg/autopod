@@ -59,6 +59,7 @@ export class LocalCheckpointHost {
     compose: ComposeLocal | ScopedExecutor,
     // Configured report-only seed, not a passed check/review attestation.
     private readonly ownerInspectionDigest?: string,
+    private readonly caseDirectories: readonly string[] = [],
   ) {
     this.ledger = new OrchestrationContinuations(db, async (cp, use) => {
       const { evidenceDigest, ...subject } = cp;
@@ -164,7 +165,7 @@ export class LocalCheckpointHost {
       bundle,
       async (mirror) => {
         if (verify) return verify(subject, mirror);
-        await sandboxTreeEntries(mirror, subject.commit);
+        await sandboxTreeEntries(mirror, subject.commit, this.caseDirectories);
         return undefined;
       },
     );
