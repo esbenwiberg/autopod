@@ -30,6 +30,7 @@ import {
 const exec = promisify(execFile);
 export async function materializeCheckpointFixture(
   f: Awaited<ReturnType<typeof retainedCheckpointFixture>>,
+  { legacyNoop = false } = {},
 ) {
   const source = f.pod().worktreePath!;
   await mkdir(source, { recursive: true });
@@ -88,6 +89,21 @@ export async function materializeCheckpointFixture(
   vi.mocked(f.ctx.deps.sandboxWorkspaceCheckpoint!).mockImplementation(async (args) => {
     const guest = await mkdtemp(path.join(f.root, 'guest-'));
     await git(f.root, 'clone', '--no-local', '--branch', f.pod().branch, args.worktreePath, guest);
+    // Modern clean captures keep HEAD. Seed the historical empty child only for
+    // reconciliation; the real bundle import must establish this pod's custody.
+    if (legacyNoop)
+      await exec('git', ['commit', '--allow-empty', '-m', 'autopod sandbox checkpoint'], {
+        cwd: guest,
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_AUTHOR_NAME: 'Autopod',
+          GIT_COMMITTER_NAME: 'Autopod',
+          GIT_AUTHOR_EMAIL: 'autopod@localhost',
+          GIT_COMMITTER_EMAIL: 'autopod@localhost',
+        },
+      });
     const cm = createMockContainerManager();
     cm.execInContainer = vi.fn(async (_id, command) => {
       const [program, ...argv] = command;
@@ -189,7 +205,7 @@ export async function blockedCheckpointOutcomeFixture(
 ) {
   vi.stubEnv('DATA_DIR', f.root);
   f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts + 1 });
-  await materializeCheckpointFixture(f);
+  await materializeCheckpointFixture(f, { legacyNoop: true });
   vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) =>
     createFailingValidationResult(config.podId, config.attempt),
   );
