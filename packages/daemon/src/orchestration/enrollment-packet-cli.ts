@@ -39,6 +39,7 @@ async function main() {
     !dir ||
     extra.length ||
     !(
+      mode === 'owner' ||
       mode === 'preflight' ||
       mode === 'packet' ||
       mode === 'statement' ||
@@ -50,7 +51,7 @@ async function main() {
       : role !== undefined)
   )
     throw new Error(
-      'usage: enrollment-packet-cli {preflight|packet|statement|receipt|assemble} DIRECTORY [checks|independentReview]',
+      'usage: enrollment-packet-cli {owner|preflight|packet|statement|receipt|assemble} DIRECTORY [checks|independentReview]',
     );
   const json = async (name: string) => JSON.parse((await read(dir, name)).toString());
   const checked = await checkInspectionDraft(
@@ -59,6 +60,7 @@ async function main() {
     String(await read(dir, 'cli.json')),
     await read(dir, 'inspection.bundle', MAX_CANDIDATE_BYTES),
   );
+  if (mode === 'owner') return { ...checked.draft, version: 2 };
   if (mode === 'preflight')
     return {
       status: 'unsigned',

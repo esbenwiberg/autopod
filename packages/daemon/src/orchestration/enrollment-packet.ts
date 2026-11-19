@@ -1,8 +1,7 @@
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
-import { canonical, sha256 } from '../managed/canonical.js';
+import { sha256 } from '../managed/canonical.js';
 import { parseManagedCliConfig } from '../managed/cli-config.js';
-import { admitManagedRequest, REQUIRED_ENFORCEMENT } from '../managed/grants.js';
 import { parseManagedProfileSetConfig } from '../managed/profile-set-config.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import {
@@ -14,8 +13,8 @@ import {
 } from './combined-attestation.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import {
-  confinedCatalog,
   enrolledOperator,
+  inspectionPolicy,
   operatorBasePolicy,
   operatorDraftSchema,
   operatorSeedInput,
@@ -34,64 +33,8 @@ export async function checkInspectionDraft(
   const draft = operatorDraftSchema.parse(raw);
   const profiles = parseManagedProfileSetConfig(profileRaw),
     cli = parseManagedCliConfig(cliRaw, false);
-  if (
-    !cli ||
-    !profiles ||
-    profiles.catalogArtifacts ||
-    profiles.source ||
-    profiles.githubRead ||
-    profiles.mirror.dependencyCachePath ||
-    profiles.profiles.length !== 1 ||
-    profiles.profiles[0]?.profileSnapshot.route.executionTarget !== 'sandbox'
-  )
-    throw new Error('inspection-profile-scope');
-  if (
-    draft.slot !== 'inspection' ||
-    draft.budget.requests > 18 ||
-    draft.budget.active > 6 ||
-    Object.keys(draft.recipes).join(',') !== 'inspect' ||
-    canonical(draft.main) !==
-      canonical({
-        profileName: 'repofit',
-        profileId: 'profile-f3ec3b28e6369a8879e2a1da',
-        profileRevision: 2,
-        aiId: 'ai-2aa5da9e201c0adf52150c71',
-        aiRevision: 8,
-        accountId: 'anth-pro',
-        model: 'claude-sonnet-5-5',
-      })
-  )
-    throw new Error('inspection-run-scope');
-  const catalog = confinedCatalog(draft, profiles);
-  const req = catalog.inspect;
-  if (!req) throw new Error('inspection-recipe-required');
-  const snap = profiles.profiles[0].profileSnapshot;
-  if (
-    canonical(snap.scope) !== canonical(req.effectiveGrant.scope) ||
-    snap.route.runtime !== 'codex' ||
-    req.outputs.artifacts.limits.maxFiles !== 1 ||
-    req.outputs.artifacts.limits.maxTotalBytes > 16384
-  )
-    throw new Error('inspection-report-scope');
-  if (
-    !('maxProviderRequests' in snap.budget) ||
-    snap.budget.maxProviderRequests > 2 ||
-    !('maxProviderRequests' in req.effectiveGrant.budget) ||
-    req.effectiveGrant.budget.maxProviderRequests > 2
-  )
-    throw new Error('inspection-worker-budget');
-  admitManagedRequest(
-    req,
-    {
-      targets: ['sandbox'],
-      profiles: new Map([[snap.snapshotDigest, snap]]),
-      enrollmentCeiling: snap.scope,
-      identityCeiling: snap.scope,
-      backendCeiling: snap.scope,
-      enforcement: REQUIRED_ENFORCEMENT,
-    },
-    Math.floor(Date.now() / 1000),
-  );
+  if (!profiles || !cli) throw new Error('inspection-profile-scope');
+  inspectionPolicy(draft, profiles, Math.floor(Date.now() / 1000));
   if (
     !bundle.length ||
     bundle.length > MAX_CANDIDATE_BYTES ||

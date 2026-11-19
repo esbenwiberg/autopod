@@ -6,7 +6,11 @@ import { z } from 'zod';
 import type { ManagedAcceptanceRuntime } from '../managed/acceptance-config.js';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedCliConfig } from '../managed/cli-config.js';
-import { validateManagedRequest } from '../managed/grants.js';
+import {
+  admitManagedRequest,
+  REQUIRED_ENFORCEMENT,
+  validateManagedRequest,
+} from '../managed/grants.js';
 import {
   type ManagedProfileSetConfig,
   profileSetRequestPolicy,
@@ -72,14 +76,19 @@ export function parseOperatorEnrollment(raw: string | undefined) {
   if (raw === undefined) return undefined;
   try {
     if (Buffer.byteLength(raw) > 256 * 1024) throw new Error();
-    return schema.parse(JSON.parse(raw));
+    return enrollmentSchema.parse(JSON.parse(raw));
   } catch {
     throw new Error('invalid-operator-enrollment');
   }
 }
 export const operatorDraftSchema = schema.omit({ authorities: true, checks: true, review: true });
-type Draft = z.infer<typeof operatorDraftSchema>;
-type Envelope = z.infer<typeof schema>;
+const ownerInspectionSchema = operatorDraftSchema.extend({
+  version: z.literal(2),
+  slot: z.literal('inspection'),
+});
+const enrollmentSchema = z.discriminatedUnion('version', [schema, ownerInspectionSchema]);
+type Draft = Omit<z.infer<typeof operatorDraftSchema>, 'version'>;
+type Envelope = z.infer<typeof enrollmentSchema>;
 type Runtime = ManagedAcceptanceRuntime & {
   withCheckpoint<T>(
     cp: Readonly<ContinuationCheckpoint>,
@@ -162,6 +171,68 @@ export function confinedCatalog(e: Draft, profiles: ManagedProfileSetConfig) {
   return catalog;
 }
 
+// Validate immutable confinement on recovery as well as first install. Live
+// expiry is enforced by worker preflight on first kickoff and by the provider.
+export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig, now: number) {
+  if (
+    profiles.catalogArtifacts ||
+    profiles.source ||
+    profiles.githubRead ||
+    profiles.mirror.dependencyCachePath ||
+    profiles.profiles.length !== 1 ||
+    profiles.profiles[0]?.profileSnapshot.route.executionTarget !== 'sandbox'
+  )
+    throw new Error('inspection-profile-scope');
+  if (
+    draft.slot !== 'inspection' ||
+    draft.budget.requests > 18 ||
+    draft.budget.active > 6 ||
+    Object.keys(draft.recipes).join(',') !== 'inspect' ||
+    canonical(draft.main) !==
+      canonical({
+        profileName: 'repofit',
+        profileId: 'profile-f3ec3b28e6369a8879e2a1da',
+        profileRevision: 2,
+        aiId: 'ai-2aa5da9e201c0adf52150c71',
+        aiRevision: 8,
+        accountId: 'anth-pro',
+        model: 'claude-sonnet-5-5',
+      })
+  )
+    throw new Error('inspection-run-scope');
+  const catalog = confinedCatalog(draft, profiles);
+  const req = catalog.inspect;
+  if (!req) throw new Error('inspection-recipe-required');
+  const snap = profiles.profiles[0].profileSnapshot;
+  if (
+    canonical(snap.scope) !== canonical(req.effectiveGrant.scope) ||
+    snap.route.runtime !== 'codex' ||
+    req.outputs.artifacts.limits.maxFiles !== 1 ||
+    req.outputs.artifacts.limits.maxTotalBytes > 16384
+  )
+    throw new Error('inspection-report-scope');
+  if (
+    !('maxProviderRequests' in snap.budget) ||
+    snap.budget.maxProviderRequests > 2 ||
+    !('maxProviderRequests' in req.effectiveGrant.budget) ||
+    req.effectiveGrant.budget.maxProviderRequests > 2
+  )
+    throw new Error('inspection-worker-budget');
+  admitManagedRequest(
+    req,
+    {
+      targets: ['sandbox'],
+      profiles: new Map([[snap.snapshotDigest, snap]]),
+      enrollmentCeiling: snap.scope,
+      identityCeiling: snap.scope,
+      backendCeiling: snap.scope,
+      enforcement: REQUIRED_ENFORCEMENT,
+    },
+    now,
+  );
+  return catalog;
+}
+
 export function composeOperatorEnrollment(
   e: Envelope,
   deps: {
@@ -188,15 +259,16 @@ export function composeOperatorEnrollment(
     throw new Error('operator-local-profile-set-required');
   const operator = enrolledOperator(e, cli, profiles);
   const run = operatorRunId(operator, e.slot);
-  const host = new LocalCheckpointHost(
-    db,
-    path.join(path.dirname(path.resolve(deps.databasePath)), 'managed', 'checkpoints'),
-    runtime,
-  );
-  const catalog = confinedCatalog(e, profiles);
-  if (e.authorities.basePolicyDigest !== operatorBasePolicy(e, profiles, deps.isolatedArtifacts))
+  if (e.version === 2 && !deps.isolatedArtifacts)
+    throw new Error('inspection-private-storage-required');
+  const catalog = e.version === 2 ? inspectionPolicy(e, profiles, 0) : confinedCatalog(e, profiles);
+  const base = operatorBasePolicy(e, profiles, deps.isolatedArtifacts);
+  if (e.version === 1 && e.authorities.basePolicyDigest !== base)
     throw new Error('operator-policy-mismatch');
-  const policyDigest = combinedPolicyDigest(e.authorities);
+  const policyDigest =
+    e.version === 1
+      ? combinedPolicyDigest(e.authorities)
+      : digest(['authenticated-inspection/v2', base]);
   const subject = {
     run,
     repository: profiles.mirror.enrollmentId,
@@ -206,19 +278,28 @@ export function composeOperatorEnrollment(
     tree: e.source.tree,
   };
   const input = operatorSeedInput(subject, e.source.bundleDigest);
-  const verification = {
-    subjectDigest: digest(subject),
-    checks: verifyGateReceipt(e.authorities, 'checks', input, e.checks),
-    independentReview: verifyGateReceipt(e.authorities, 'independentReview', input, e.review),
-  };
+  const verification =
+    e.version === 1
+      ? {
+          subjectDigest: digest(subject),
+          checks: verifyGateReceipt(e.authorities, 'checks', input, e.checks),
+          independentReview: verifyGateReceipt(e.authorities, 'independentReview', input, e.review),
+        }
+      : undefined;
   const manifest = canonical({
     version: 1,
-    origin: 'operator-enrollment/v1',
+    origin: verification ? 'operator-enrollment/v1' : 'owner-inspection/v2',
     subject,
     bundleDigest: e.source.bundleDigest,
-    verification,
+    ...(verification ? { verification } : {}),
   });
   const checkpoint = { ...subject, evidenceDigest: sha256(manifest) };
+  const host = new LocalCheckpointHost(
+    db,
+    path.join(path.dirname(path.resolve(deps.databasePath)), 'managed', 'checkpoints'),
+    runtime,
+    e.version === 2 ? checkpoint.evidenceDigest : undefined,
+  );
   const provider = deps.bind(e.main);
   const prepare = async () => {
     assertOperatorRecovery(db, run);
@@ -272,10 +353,15 @@ export function composeOperatorEnrollment(
       }
       if (sha256(bytes) !== e.source.bundleDigest) throw new Error('operator-seed-damaged');
       if (prior) throw new Error('operator-custody-missing');
-      const retained = await host.retain(subject, bytes, async () => verification, {
-        requests: e.budget.requests,
-        active: e.budget.active,
-      });
+      const retained = await host.retain(
+        subject,
+        bytes,
+        verification ? async () => verification : null,
+        {
+          requests: e.budget.requests,
+          active: e.budget.active,
+        },
+      );
       if (retained.evidenceDigest !== checkpoint.evidenceDigest)
         throw new Error('operator-custody-changed');
     }

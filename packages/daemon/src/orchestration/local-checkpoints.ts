@@ -56,6 +56,8 @@ export class LocalCheckpointHost {
     private readonly db: Database.Database,
     private readonly scratch: string,
     compose: ComposeLocal | ScopedExecutor,
+    // Configured report-only seed, not a passed check/review attestation.
+    private readonly ownerInspectionDigest?: string,
   ) {
     this.ledger = new OrchestrationContinuations(db, async (cp, use) => {
       const { evidenceDigest, ...subject } = cp;
@@ -69,6 +71,7 @@ export class LocalCheckpointHost {
       if (sha256(row.manifest) !== evidenceDigest) throw new Error('checkpoint-custody-integrity');
       const manifest = JSON.parse(row.manifest) as {
         version: number;
+        origin?: string;
         subject: Subject;
         bundleDigest: string;
         verification: Verification;
@@ -79,7 +82,13 @@ export class LocalCheckpointHost {
         manifest.bundleDigest !== sha256(row.bundle)
       )
         throw new Error('checkpoint-custody-integrity');
-      requirePass(subject, manifest.verification);
+      if (this.ownerInspectionDigest || manifest.origin === 'owner-inspection/v2') {
+        if (
+          manifest.origin !== 'owner-inspection/v2' ||
+          evidenceDigest !== this.ownerInspectionDigest
+        )
+          throw new Error('inspection-checkpoint-not-enrolled');
+      } else requirePass(subject, manifest.verification);
       return withVerifiedCheckpointMirror(this.scratch, subject, row.bundle, (mirror) =>
         typeof compose === 'function'
           ? use(compose(cp, mirror))
@@ -132,7 +141,7 @@ export class LocalCheckpointHost {
   async retain(
     input: Subject,
     bytes: Buffer,
-    verify: Verify,
+    verify: Verify | null,
     operatorSeed?: { requests: number; active: number },
   ): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
@@ -146,21 +155,30 @@ export class LocalCheckpointHost {
         )
         .get(subject.run, subject.repository, subject.policyDigest, subject.predecessor);
     if (!operatorSeed && !current()) throw new Error('checkpoint-run-mismatch');
+    if (!verify && (!operatorSeed || !this.ownerInspectionDigest))
+      throw new Error('inspection-checkpoint-not-enrolled');
     const verification = await withVerifiedCheckpointMirror(
       this.scratch,
       subject,
       bundle,
-      (mirror) => verify(subject, mirror),
+      async (mirror) => (verify ? verify(subject, mirror) : undefined),
     );
-    requirePass(subject, verification);
+    if (verify) {
+      if (!verification) throw new Error('checkpoint-verification-required');
+      requirePass(subject, verification);
+    }
     const manifest = canonical({
       version: 1,
-      ...(operatorSeed ? { origin: 'operator-enrollment/v1' } : {}),
+      ...(operatorSeed
+        ? { origin: verify ? 'operator-enrollment/v1' : 'owner-inspection/v2' }
+        : {}),
       subject,
       bundleDigest: sha256(bundle),
-      verification,
+      ...(verification ? { verification } : {}),
     });
     const evidenceDigest = sha256(manifest);
+    if (!verify && evidenceDigest !== this.ownerInspectionDigest)
+      throw new Error('inspection-checkpoint-not-enrolled');
     this.db
       .transaction(() => {
         if (operatorSeed)

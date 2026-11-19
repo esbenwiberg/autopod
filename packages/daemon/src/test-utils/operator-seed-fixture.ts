@@ -128,6 +128,6 @@ export async function operatorSeedFixture(
       ...sign(authorities),
     }),
   );
-  if (!enrollment) throw new Error('invalid fixture');
+  if (enrollment?.version !== 1) throw new Error('invalid signed fixture');
   return { enrollment, cli, profiles, f, root, run, sign, source, operator };
 }
