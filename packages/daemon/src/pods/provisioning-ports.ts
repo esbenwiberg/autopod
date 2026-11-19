@@ -73,6 +73,7 @@ export interface ProvisioningLiveDependencies {
   memoryRepo?: import('./memory-repository.js').MemoryRepository;
   getSecret: (ref: string) => string | undefined;
   sessionTokenIssuer?: PodTokenIssuer;
+  provisionParentSession?: (podId: string) => Promise<string | undefined>;
   actionEngine?: {
     getAvailableActions: (
       policy: import('@autopod/shared').ActionPolicy,

@@ -848,6 +848,9 @@ const configuration = createHostConfigurationComponents({
   admissionReady: configurationAdmissionReady,
 });
 await configuration.recover();
+let parentManaged:
+  | import('./orchestration/parent-managed-launch.js').ParentManagedLaunch
+  | undefined;
 
 podManager = createPodManager({
   launchConfiguration: configuration.launchConfiguration,
@@ -885,6 +888,7 @@ podManager = createPodManager({
   },
   pendingRequestsByPod,
   sessionTokenIssuer,
+  provisionParentSession: (podId) => parentManaged?.provision(podId) ?? Promise.resolve(undefined),
   memoryRepo,
   memoryUsageRepo,
   beforeContainerCleanup: (podId) => preCleanupMemoryExtraction(podId),
@@ -979,7 +983,10 @@ const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, l
 // Pod bridge for MCP escalation
 const podBridge = createSessionBridge({
   referencePreviews: configuration.routes.referencePreviews,
-  scopedTools: configuration.scopedTools.get,
+  scopedTools: (podId) => ({
+    ...configuration.scopedTools.get(podId),
+    ...parentManaged?.tools(podId),
+  }),
   podManager,
   podRepo,
   eventBus,
@@ -1261,9 +1268,16 @@ if (!operatorRuns) {
   assertOperatorRecovery(db, null);
 }
 if (!operatorRuns || separateRuntime) await managedRuntime?.resume();
+if (operatorRuns?.slots.some((s) => s.parent)) {
+  const { ParentManagedLaunch } = await import('./orchestration/parent-managed-launch.js');
+  parentManaged = new ParentManagedLaunch(operatorRuns, sessionTokenIssuer, (id) =>
+    podRepo.getOrThrow(id),
+  );
+}
 
 // Server
 const app = await createServer({
+  parentManaged,
   configuration: configuration.routes,
   pim: configuration.scopedTools.pimRoutes,
   authModule,

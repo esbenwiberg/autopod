@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 export interface PodTokenIssuer {
+  generateAttempt?(podId: string, attempt: string, ttlSeconds?: number): string;
+  verifyAttempt?(token: string): { podId: string; attempt: string } | null;
   /** Generate a short-lived token scoped to a pod ID. */
   generate(podId: string, ttlSeconds?: number): string;
   /** Verify a token and return the pod ID it was issued for, or null if invalid/expired. */
@@ -29,7 +31,23 @@ export function createPodTokenIssuer(
   // Derive a purpose-specific key: HMAC(masterKey, "pod-tokens")
   const signingKey = createHmac('sha256', masterKey).update('pod-tokens').digest();
 
-  return {
+  const issuer: PodTokenIssuer = {
+    generateAttempt(podId, attempt, ttlSeconds = DEFAULT_TTL_SECONDS) {
+      if (!/^[a-zA-Z0-9-]{1,64}$/.test(attempt)) throw new Error('Invalid runtime attempt');
+      const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
+      const epoch = currentEpoch(podId);
+      if (epoch !== null && !/^[a-zA-Z0-9-]{1,64}$/.test(epoch))
+        throw new Error('Invalid pod credential epoch');
+      const payload = `${podId}.${expires}.${epoch ?? ''}.${attempt}`;
+      return toBase64Url(
+        `${payload}.${createHmac('sha256', signingKey).update(payload).digest('hex')}`,
+      );
+    },
+    verifyAttempt(token) {
+      if (!issuer.verify(token)) return null;
+      const parts = fromBase64Url(token).split('.');
+      return parts.length === 5 ? { podId: parts[0]!, attempt: parts[3]! } : null;
+    },
     generate(podId: string, ttlSeconds = DEFAULT_TTL_SECONDS): string {
       const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
       const epoch = currentEpoch(podId);
@@ -49,12 +67,12 @@ export function createPodTokenIssuer(
       }
 
       const parts = decoded.split('.');
-      if (parts.length !== 3 && parts.length !== 4) return null;
+      if (![3, 4, 5].includes(parts.length)) return null;
 
       const [podId, expiresStr] = parts;
       const providedSig = parts.at(-1);
       if (!podId || !expiresStr || !providedSig) return null;
-      const epoch = parts.length === 4 ? parts[2] : null;
+      const epoch = parts.length >= 4 ? (parts[2] || null) : null;
 
       // Check expiry
       const expires = Number(expiresStr);
@@ -83,6 +101,7 @@ export function createPodTokenIssuer(
       return podId;
     },
   };
+  return issuer;
 }
 
 function toBase64Url(str: string): string {

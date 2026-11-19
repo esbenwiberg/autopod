@@ -555,6 +555,33 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   }
 
   const scoped = bridge.getScopedTools?.(podId);
+  if (scoped?.managedChildRequest && scoped.managedFamily) {
+    const request = scoped.managedChildRequest;
+    const family = scoped.managedFamily;
+    server.registerTool(
+      'managed_child_request',
+      {
+        description:
+          'Commission one bounded worker from an operator-selected recipe. Reuse requestKey after a lost reply. A reservation is not proof of worker completion.',
+        inputSchema: z
+          .object({
+            requestKey: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+            recipe: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
+            brief: z.string().trim().min(1).max(2048),
+          })
+          .strict(),
+      },
+      async (input) => ({
+        content: [{ type: 'text' as const, text: JSON.stringify(await request(input)) }],
+      }),
+    );
+    server.tool(
+      'managed_family',
+      'Read this parent’s retained managed worker history.',
+      {},
+      async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(await family()) }] }),
+    );
+  }
   if (scoped?.deploymentPrepare && scoped.deploymentStatus) {
     const prepare = scoped.deploymentPrepare;
     const status = scoped.deploymentStatus;

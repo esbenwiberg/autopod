@@ -32,7 +32,8 @@ import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createTestContext, logger } from './mock-helpers.js';
 
-export function createProvisioningFixture(disk = false) {
+export function createProvisioningFixture(disk = false, initialPod = true) {
+  let selectedPodId = 'prepare';
   const ctx = createTestContext();
   const directory = mkdtempSync(join(tmpdir(), 'provisioning-'));
   const filename = join(directory, 'state.db');
@@ -68,22 +69,23 @@ export function createProvisioningFixture(disk = false) {
   const validationRepo = createValidationRepository(db);
   const repo = createProviderAttemptRepository(db);
   const effects: string[] = [];
-  podRepo.insert({
-    id: 'prepare',
-    profileName: 'test-profile',
-    task: 'Original task',
-    status: 'queued',
-    runtime: 'claude',
-    model: 'claude-sonnet-4-6',
-    executionTarget: 'local',
-    branch: 'branch',
-    userId: 'operator',
-    maxValidationAttempts: 3,
-    skipValidation: false,
-    outputMode: 'pr',
-    providerAccountIdSnapshot: 'account',
-    providerIdSnapshot: 'anthropic',
-  });
+  if (initialPod)
+    podRepo.insert({
+      id: 'prepare',
+      profileName: 'test-profile',
+      task: 'Original task',
+      status: 'queued',
+      runtime: 'claude',
+      model: 'claude-sonnet-4-6',
+      executionTarget: 'local',
+      branch: 'branch',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+      providerAccountIdSnapshot: 'account',
+      providerIdSnapshot: 'anthropic',
+    });
   const deps = {
     ...ctx.deps,
     podRepo,
@@ -178,10 +180,10 @@ export function createProvisioningFixture(disk = false) {
     stagedReferenceArchivePaths: new Set(),
   };
   const input = (): ProvisioningInput => ({
-    podId: 'prepare',
-    pod: podRepo.getOrThrow('prepare'),
-    launchConfig: deps.launchConfiguration?.read('prepare') ?? null,
-    lifecycleGeneration: podRepo.getOrThrow('prepare').lifecycleGeneration,
+    podId: selectedPodId,
+    pod: podRepo.getOrThrow(selectedPodId),
+    launchConfig: deps.launchConfiguration?.read(selectedPodId) ?? null,
+    lifecycleGeneration: podRepo.getOrThrow(selectedPodId).lifecycleGeneration,
     run,
   });
   let workspacePromise:
@@ -243,7 +245,10 @@ export function createProvisioningFixture(disk = false) {
     sandbox,
     cm: ctx.containerManager,
     worktreeManager: ctx.worktreeManager,
-    pod: () => podRepo.getOrThrow('prepare'),
+    pod: () => podRepo.getOrThrow(selectedPodId),
+    selectPod: (id: string) => {
+      selectedPodId = id;
+    },
     input,
     workspace,
     container,

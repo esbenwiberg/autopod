@@ -26,6 +26,26 @@ describe('PodTokenIssuer', () => {
     expect(result).toBe('test-pod-123');
   });
 
+  it('authenticates runtime attempts without upgrading ordinary tokens and signs their epoch', () => {
+    let epoch: string | null = null;
+    const issuer = createPodTokenIssuer(keyPath, () => epoch);
+    const token = issuer.generateAttempt!('parent-pod', 'attempt-one');
+    expect(issuer.verify(token)).toBe('parent-pod');
+    expect(issuer.verifyAttempt!(token)).toEqual({ podId: 'parent-pod', attempt: 'attempt-one' });
+    expect(issuer.verifyAttempt!(issuer.generate('parent-pod'))).toBeNull();
+    const tampered = Buffer.from(
+      Buffer.from(token, 'base64url').toString().replace('attempt-one', 'attempt-two'),
+    ).toString('base64url');
+    expect(issuer.verifyAttempt!(tampered)).toBeNull();
+    epoch = '-';
+    expect(issuer.verifyAttempt!(token)).toBeNull();
+    expect(issuer.verifyAttempt!(issuer.generateAttempt!('parent-pod', 'attempt-two')))?.toEqual({
+      podId: 'parent-pod',
+      attempt: 'attempt-two',
+    });
+    expect(issuer.verify(issuer.generate('parent-pod'))).toBe('parent-pod');
+  });
+
   it('rejects expired tokens', () => {
     const issuer = createPodTokenIssuer(keyPath);
     // Generate with negative TTL (already expired)

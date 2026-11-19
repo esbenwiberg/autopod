@@ -28,6 +28,7 @@ import type { MainProfilePin } from './hosted-controller-profile.js';
 import { type bindInspectionCodex, inspectionCodexPin } from './inspection-codex.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 import { type OperatorRunsConfig, operatorRunId } from './operator-runs.js';
+import { parentLaunchPolicySchema } from './parent-managed-launch.js';
 
 const id = z.string().min(1).max(160),
   alias = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -36,6 +37,7 @@ const id = z.string().min(1).max(160),
 const schema = z
   .object({
     version: z.literal(1),
+    parent: parentLaunchPolicySchema.optional(),
     slot: alias,
     objectId: id,
     mission: z.string().trim().min(1).max(4096),
@@ -89,6 +91,7 @@ export const operatorDraftSchema = schema
 // of an old slot's reservations. Only the daemon can enroll these names.
 const inspectionSlot = /^inspection(?:-[1-9][0-9]{0,7})?$/;
 const ownerInspectionSchema = operatorDraftSchema.extend({
+  parent: z.never().optional(),
   version: z.literal(2),
   slot: z.string().regex(inspectionSlot),
   expectedRun: z.string().regex(/^[a-f0-9]{64}$/),
@@ -112,7 +115,7 @@ export function operatorSeedInput(
   return digest(['autopod.operator-seed.v1', subject, bundleDigest]);
 }
 export function operatorBasePolicy(
-  e: Pick<Envelope, 'main' | 'mission' | 'budget' | 'recipes' | 'source'>,
+  e: Pick<Envelope, 'main' | 'mission' | 'budget' | 'recipes' | 'source' | 'parent'>,
   profiles: ManagedProfileSetConfig,
   isolatedArtifacts = false,
 ) {
@@ -125,6 +128,7 @@ export function operatorBasePolicy(
     e.source.bundleDigest,
     profiles,
     ...(isolatedArtifacts ? ['local-operator-artifacts/v1'] : []),
+    ...(e.parent ? [['parent-managed/v1', e.parent]] : []),
   ]);
 }
 /** Refuse to orphan a commissioned run or silently reattach its workers to a different
@@ -331,8 +335,12 @@ export function composeOperatorEnrollment(
     profiles.profiles.flatMap((stage) => (stage.caseDirectory ? [stage.caseDirectory] : [])),
   );
   const codex = 'kind' in e.main;
-  const provider = 'kind' in e.main ? deps.bindCodex?.(e.main) : deps.bind(e.main);
-  if (!provider) throw new Error('inspection-codex-binding-required');
+  const provider = e.parent
+    ? undefined
+    : 'kind' in e.main
+      ? deps.bindCodex?.(e.main)
+      : deps.bind(e.main);
+  if (!provider && !e.parent) throw new Error('inspection-codex-binding-required');
   const prepare = async () => {
     assertOperatorRecovery(db, run);
     const prior = db
@@ -446,6 +454,7 @@ export function composeOperatorEnrollment(
         checkpoint,
         catalog,
         provider,
+        ...(e.parent ? { parent: e.parent } : {}),
         policy: {
           mission: e.mission,
           routeId: codex ? 'inspection-codex-v1' : 'hosted-main',

@@ -160,6 +160,7 @@ export interface PodManagerDependencies {
   /** Used to generate a pod-scoped Bearer token injected into the container so it can
    * authenticate calls to the /mcp/:podId endpoint. Optional for backwards compat. */
   sessionTokenIssuer?: PodTokenIssuer;
+  provisionParentSession?: (podId: string) => Promise<string | undefined>;
   /** Resolve environment variable or secret by name (e.g. AZURE_GRAPH_TOKEN). */
   getSecret: (ref: string) => string | undefined;
   /** Optional ACR manifest preflight for sandbox warm images. */

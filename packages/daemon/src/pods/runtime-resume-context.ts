@@ -21,6 +21,7 @@ interface RuntimeResumeContextDependencies {
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
   };
   sessionTokenIssuer?: { generate(podId: string): string };
+  provisionParentSession?: (podId: string) => Promise<string | undefined>;
 }
 
 interface RuntimeResumeContextCaptured {
@@ -73,7 +74,8 @@ export function createRuntimeResumeContext(
     const material = launch ? await executionCredentialsFor(launch)?.agent(launch) : undefined;
     const profile = material ? { ...frozenProfile, ...material } : frozenProfile;
     const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
-    const mcpSessionToken = deps.sessionTokenIssuer?.generate(pod.id);
+    const mcpSessionToken =
+      (await deps.provisionParentSession?.(pod.id)) ?? deps.sessionTokenIssuer?.generate(pod.id);
     const escalationHeaders = mcpSessionToken
       ? { Authorization: `Bearer ${mcpSessionToken}` }
       : undefined;

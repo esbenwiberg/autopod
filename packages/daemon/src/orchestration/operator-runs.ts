@@ -9,7 +9,9 @@ import { type ManagedUserBinding, managedUserAuthenticator } from '../managed/us
 import type { ContinuationCheckpoint } from './continuations.js';
 import type { ControllerConfig, ControllerProvider } from './controller-turns.js';
 import type { LocalCheckpointHost } from './local-checkpoints.js';
+import { attachLocalController } from './local-controller-loop.js';
 import { tryOperatorDaemonOwner } from './local-recovery-claim.js';
+import type { parentLaunchPolicySchema } from './parent-managed-launch.js';
 
 // One configured slot is one run lifetime. No caller-supplied grant, source, profile,
 // mission, run owner or budget. Rebinding the operator creates a DIFFERENT run ID.
@@ -22,7 +24,8 @@ export interface OperatorRunSlot {
   checkpoint: ContinuationCheckpoint;
   catalog: Readonly<Record<string, ManagedPodRequest>>;
   policy: ControllerConfig;
-  provider: ControllerProvider;
+  provider?: ControllerProvider;
+  parent?: z.infer<typeof parentLaunchPolicySchema>;
 }
 export interface OperatorRunsConfig {
   /** Called with exclusive operator ownership, before any scheduler is attached. */
@@ -73,10 +76,12 @@ export function registerOperatorRuns(
   );
   const loops = new Map<string, ReturnType<LocalCheckpointHost['watchController']>>();
   const pending = new Map<string, Promise<void>>();
+  const parents: ReturnType<typeof attachLocalController>[] = [];
   let closed = false;
   const canceled = (run: string) =>
     db.prepare('SELECT canceled FROM orchestration_runs WHERE id=?').pluck().get(run);
   async function start(slot: OperatorRunSlot) {
+    if (slot.parent || !slot.provider) throw new Error('parent-runtime-required');
     const run = slot.checkpoint.run;
     if (closed || canceled(run) !== 0) throw new Error('operator-run-inactive');
     if (loops.has(run)) return;
@@ -101,6 +106,7 @@ export function registerOperatorRuns(
     closed = true;
     await Promise.allSettled(pending.values());
     await Promise.all([...loops.values()].map((l) => l.close()));
+    await Promise.all(parents.map((l) => l.close()));
     releaseOwner?.();
     releaseOwner = undefined;
   };
@@ -115,10 +121,16 @@ export function registerOperatorRuns(
       await config.prepare?.();
       // Check every enrollment before waking any run. A boot with a stale catalog
       // must not charge a different slot and then fail halfway through startup.
-      const active = [...slots].filter(([run]) => kicked(run) && canceled(run) === 0);
+      const active = [...slots].filter(
+        ([run, slot]) => !slot.parent && kicked(run) && canceled(run) === 0,
+      );
       for (const [, slot] of active) await host.ledger.kickoff(slot.checkpoint, slot.catalog);
       for (const [run, slot] of active)
-        loops.set(run, host.watchController(run, slot.policy, slot.provider));
+        if (slot.provider) loops.set(run, host.watchController(run, slot.policy, slot.provider));
+      for (const [run, slot] of slots) {
+        if (slot.parent)
+          parents.push(attachLocalController(db, run, () => host.ledger.recover(run)));
+      }
     } catch (error) {
       await drain();
       throw error;

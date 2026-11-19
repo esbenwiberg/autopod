@@ -62,6 +62,7 @@ export function fixture(): ManagedFixture {
     '185_managed_runtime_exit_code.sql',
     '206_managed_validations.sql',
     '264_managed_allocation_attempted.sql',
+    '271_parent_managed_runs.sql',
   ]) {
     db.exec(readFileSync(new URL(`../db/migrations/${migration}`, import.meta.url), 'utf8'));
   }
