@@ -1504,6 +1504,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.rewriteAbandonments?.assertAvailable(podId);
     podRepo.savedWorkDrafts?.assertAvailable(podId);
     podRepo.artifactChecks?.assertAvailable(podId);
     podRepo.recoveryForks?.assertOriginalAvailable(podId);
@@ -1876,6 +1877,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       deps.launchConfiguration?.read(id)?.intent === 'goal' ||
       Boolean(deps.launchConfiguration?.goals?.get(id)),
     deleteSession: workspaceDeletion.deleteSession,
+    worktreeManager,
   });
   const stalledWorkerRecovery: ReturnType<typeof createStalledWorkerRecovery> | undefined =
     podRepo.stalledRecoveries

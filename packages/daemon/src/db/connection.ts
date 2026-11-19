@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import type { Logger } from 'pino';
+import { registerRetainedPathFunctions } from './retained-path-functions.js';
 
 export function createDatabase(
   dbPath: string,
@@ -7,6 +8,7 @@ export function createDatabase(
   options: { fileMustExist?: boolean } = {},
 ): Database.Database {
   const db = new Database(dbPath, options);
+  registerRetainedPathFunctions(db);
 
   // Performance pragmas
   db.pragma('journal_mode = WAL');

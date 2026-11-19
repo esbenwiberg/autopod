@@ -25,6 +25,7 @@ import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { followLogs } from '../utils/log-follow.js';
+import { registerRewriteAbandonmentCommand } from './approval-rewrite-abandonment.js';
 import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
 import { registerArtifactChecksRecoveryCommand } from './artifact-checks-recovery.js';
 import { budgetContinuedMessage, registerBudgetCommand } from './budget.js';
@@ -159,6 +160,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerInfrastructureRecoveryCommand(program, getClient);
   registerArtifactChecksRecoveryCommand(program, getClient);
   registerApprovalRewriteRepairCommand(program, getClient);
+  registerRewriteAbandonmentCommand(program, getClient);
   registerRetainedFinalizationCommand(program, getClient);
   program
     .command('execution-provenance <id>')

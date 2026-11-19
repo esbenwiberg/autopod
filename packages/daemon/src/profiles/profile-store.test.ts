@@ -1,41 +1,9 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { ProfileExistsError, ProfileNotFoundError } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPodRepository } from '../pods/pod-repository.js';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProfileStore, type ProfileStore } from './profile-store.js';
-
-const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
-
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-  const files = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
-  for (const file of files) {
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    if (!/--\s*@allow-duplicate-columns/i.test(sql)) {
-      db.exec(sql);
-      continue;
-    }
-    const statements = sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const stmt of statements) {
-      try {
-        db.exec(`${stmt};`);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '';
-        if (!msg.includes('duplicate column name')) throw err;
-      }
-    }
-  }
-  return db;
-}
 
 const validInput = {
   name: 'my-app',

@@ -37,9 +37,14 @@ import {
   createSandboxWakeupJournal,
   type SandboxWakeupJournal,
 } from '../containers/sandbox-wakeup-journal.js';
+import { registerRetainedPathFunctions } from '../db/retained-path-functions.js';
 import { createUnitOfWork, type UnitOfWork } from '../db/unit-of-work.js';
 import { InputBundleStore } from '../inputs/input-bundle-store.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
+import {
+  createRewriteAbandonmentRepository,
+  type RewriteAbandonmentRepository,
+} from './approval-rewrite-abandonment-repository.js';
 import {
   type ApprovalSourceRewriteRepository,
   createApprovalSourceRewriteRepository,
@@ -358,6 +363,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
   approvalRewrites?: ApprovalSourceRewriteRepository;
+  rewriteAbandonments?: RewriteAbandonmentRepository;
   sourcePublications?: SourcePublicationLedger;
   validationSources?: ValidationSourceEvidence;
   externalDeliveries?: ExternalDeliveryRepository;
@@ -796,6 +802,7 @@ function rowToCostSource(row: Record<string, unknown>): PodCostSource {
 }
 
 export function createPodRepository(db: Database.Database): PodRepository {
+  registerRetainedPathFunctions(db);
   const inputBundles = new InputBundleStore(db);
   const completionJournal = createCompletionJournal(db);
   const externalDeliveries = createExternalDeliveryRepository(db);
@@ -931,6 +938,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ),
     deliveryLedger: createDeliveryLedger(db),
     approvalRewrites: createApprovalSourceRewriteRepository(db),
+    rewriteAbandonments: createRewriteAbandonmentRepository(db),
     sourcePublications: createSourcePublicationLedger(db),
     validationSources: createValidationSourceEvidence(db),
     externalDeliveries,

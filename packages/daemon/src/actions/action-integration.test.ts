@@ -1,9 +1,7 @@
-import fs from 'node:fs';
 import http from 'node:http';
-import path from 'node:path';
 import { executeAction, PendingRequests, type PodBridge } from '@autopod/escalation-mcp';
 import type { ActionPolicy } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import pino from 'pino';
 /**
  * Action Control Plane — Integration Test
@@ -13,6 +11,7 @@ import pino from 'pino';
  * Only the external HTTP calls are tested via the generic HTTP handler with a mock server.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createActionEngine } from './action-engine.js';
 import { createActionRegistry } from './action-registry.js';
 import { createActionAuditRepository } from './audit-repository.js';
@@ -21,35 +20,7 @@ const logger = pino({ level: 'silent' });
 
 // ─── Test DB ────────────────────────────────────────────────────
 
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-
-  const migrationsDir = path.join(import.meta.dirname, '..', 'db', 'migrations');
-  const files = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
-  for (const file of files) {
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    if (!/--\s*@allow-duplicate-columns/i.test(sql)) {
-      db.exec(sql);
-      continue;
-    }
-    const statements = sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const stmt of statements) {
-      try {
-        db.exec(`${stmt};`);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '';
-        if (!msg.includes('duplicate column name')) throw err;
-      }
-    }
-  }
-
+function seedActionPod(db: Database.Database): void {
   // Insert a test pod (needed for FK constraint on action_audit)
   db.exec(`
     INSERT INTO profiles (name, repo_url, default_branch, template, build_command, start_command,
@@ -62,8 +33,6 @@ function createTestDb(): Database.Database {
     INSERT INTO pods (id, profile_name, task, status, model, runtime, execution_target, user_id, branch)
     VALUES ('sess-integration', 'test-profile', 'test task', 'running', 'opus', 'claude', 'local', 'test-user', 'feature/test');
   `);
-
-  return db;
 }
 
 // ─── Mock HTTP server ───────────────────────────────────────────
@@ -90,6 +59,7 @@ describe('Action Control Plane Integration', () => {
 
   beforeEach(() => {
     db = createTestDb();
+    seedActionPod(db);
   });
 
   afterEach(() => {

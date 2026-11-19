@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
+import { assertNoRewriteAbandonment } from './approval-rewrite-abandonment-repository.js';
 import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import {
   assertArtifactChecksAvailable,
@@ -46,6 +47,7 @@ export function assertPublicationMutationAllowed(db: Database.Database, podId: s
     );
 }
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  createApprovalSourceRewriteRepository(db).assertReleasable(containerId);
   for (const row of db.prepare('SELECT id FROM pods WHERE container_id=?').all(containerId) as {
     id: string;
   }[])
@@ -82,6 +84,7 @@ export function assertSourceAvailable(
   owner = sourceOwnerScope(db).getStore(),
   initialInsert = false,
 ): void {
+  assertNoRewriteAbandonment(db, podId);
   assertSavedDraftAvailable(db, podId);
   assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
@@ -126,6 +129,7 @@ function assertSourceDeliveryEligibility(
   initialInsert = false,
   approvalEntry = false,
 ): void {
+  assertNoRewriteAbandonment(db, podId);
   assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
   if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);

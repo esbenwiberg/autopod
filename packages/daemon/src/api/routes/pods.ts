@@ -56,6 +56,7 @@ import type { SafetyEventsRepository } from '../../safety/safety-events-reposito
 import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+import { approvalRewriteAbandonmentRoutes } from './approval-rewrite-abandonment.js';
 import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
 import { recoveryForkRoutes } from './recovery-fork.js';
@@ -873,6 +874,7 @@ export function podRoutes(
   recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);
   sandboxRecoveryRoutes(app, podManager);
+  approvalRewriteAbandonmentRoutes(app, podManager);
 
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
   app.get('/pods/:podId/task-execution', async (request) => {

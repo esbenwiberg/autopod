@@ -48,7 +48,7 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = openTestDiskDatabase(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 269 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 270 });
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_operations').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_preparation_cancellations').all()).toEqual(
       [],

@@ -26,6 +26,7 @@ export async function rewriteRepairFixture(
   target: 'sandbox' | 'local' = 'sandbox',
   published = true,
   bound = true,
+  unverified = false,
 ) {
   const f = await retainedCheckpointFixture();
   const containerId = target === 'local' ? 'd'.repeat(64) : f.containerId;
@@ -130,7 +131,14 @@ export async function rewriteRepairFixture(
   if (bound && !dispatchId) throw new Error('Missing maintained fixture dispatch');
   const result = {
     ...f.result,
-    infrastructureFailure: undefined,
+    infrastructureFailure: unverified
+      ? {
+          phase: 'test' as const,
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'Fixture exec termination is unknown',
+          retryable: false,
+        }
+      : undefined,
     ...(dispatchId ? { executionDispatchId: dispatchId } : {}),
   };
   ledger.recordResult(result);
