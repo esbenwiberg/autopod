@@ -48,7 +48,14 @@ export function bindHostedControllerProfile(
   };
   if (ordered) validate(); // One-shot preflight; ordinary controls must survive a revoked route.
   let sent = 0;
-  const beforeSend = new AsyncLocalStorage<() => void>();
+  type Attempt = {
+    reserve: () => void;
+    reserved: boolean;
+    phase?: 'kickoff' | 'results';
+    signal?: AbortSignal | null;
+    status?: number;
+  };
+  const beforeSend = new AsyncLocalStorage<Attempt>();
   // A placeholder SDK emits the normal controller request. Resolve auth on its one permitted
   // wire path, after ledger reservation. No SDK env endpoint, failover, redirects or tools.
   const client = new Anthropic({
@@ -56,6 +63,7 @@ export function bindHostedControllerProfile(
     authToken: null,
     baseURL: 'https://api.anthropic.com',
     maxRetries: 0,
+    logLevel: 'off', // Never let SDK debug output include provider payloads.
     fetch: async (url, init) => {
       validate();
       const body = String(init?.body);
@@ -89,11 +97,14 @@ export function bindHostedControllerProfile(
         throw new Error('controller-request-limit');
       validate();
       init?.signal?.throwIfAborted();
-      const reserve = beforeSend.getStore();
-      if (!reserve) throw new Error('controller-send-outside-turn');
-      reserve();
+      const attempt = beforeSend.getStore();
+      if (!attempt || attempt.reserved) throw new Error('controller-send-outside-turn');
+      attempt.phase = ctx.phase;
+      attempt.signal = init?.signal;
+      attempt.reserve();
+      attempt.reserved = true;
       sent++;
-      return fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         redirect: 'error',
         signal: init?.signal,
@@ -105,13 +116,46 @@ export function bindHostedControllerProfile(
         },
         body: outbound,
       });
+      attempt.status = response.status;
+      return response;
     },
   });
   return {
     client,
     model,
-    atControllerSend: <T>(reserve: () => void, send: () => Promise<T>) =>
-      beforeSend.run(reserve, send),
+    atControllerSend: async <T>(
+      reserve: () => void,
+      send: () => Promise<T>,
+      wakeDigest?: string,
+    ) => {
+      const attempt: Attempt = { reserve, reserved: false };
+      try {
+        return await beforeSend.run(attempt, send);
+      } catch (err) {
+        if (!attempt.reserved) throw err;
+        const status = attempt.status;
+        const reason =
+          status !== undefined && status >= 300 && status <= 599
+            ? `controller-provider-http-${status}`
+            : attempt.signal?.aborted
+              ? 'controller-provider-aborted'
+              : status === undefined
+                ? 'controller-provider-no-response'
+                : 'controller-provider-response-unreadable';
+        // Only locally derived fields. No error object/cause, request or response headers/body.
+        logger.warn(
+          {
+            reason,
+            phase: attempt.phase,
+            httpStatus: status,
+            wakeDigest:
+              wakeDigest && /^sha256:[a-f0-9]{64}$/.test(wakeDigest) ? wakeDigest : undefined,
+          },
+          'Hosted controller request failed after reservation',
+        );
+        throw new Error(reason);
+      }
+    },
     preflightControllerRequest: (body: unknown) => {
       validate();
       if (Buffer.byteLength(JSON.stringify(body)) > 8192)

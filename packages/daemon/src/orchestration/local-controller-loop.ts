@@ -40,7 +40,13 @@ export function attachLocalController(db: Database.Database, run: string, pass: 
       return {
         planning: failure ? 'blocked' : active ? 'active' : 'idle',
         ...(failure
-          ? { reason: /^controller-[a-z-]{1,64}$/.test(reason) ? reason : 'controller-pass-failed' }
+          ? {
+              reason: /^(?:controller-[a-z-]{1,64}|controller-provider-http-[3-5][0-9]{2})$/.test(
+                reason,
+              )
+                ? reason
+                : 'controller-pass-failed',
+            }
           : {}),
         blocked: outcome.blocked,
       };

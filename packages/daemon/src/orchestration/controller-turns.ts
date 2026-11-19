@@ -240,14 +240,32 @@ export async function tickController(
             'INSERT INTO orchestration_controller_turns(run_id,wait_key,wake_digest,checkpoint_json) VALUES(?,?,?,?)',
           ).run(run, wake.key, wakeDigest, row.checkpoint_json);
         });
-        const send = async () =>
-          provider.client.messages.create(body, {
+        const send = async () => {
+          const message = await provider.client.messages.create(body, {
             maxRetries: 0,
             timeout: 30000,
             signal: AbortSignal.timeout(30000),
           });
+          // An HTTP success is not necessarily a Messages envelope. Do not
+          // invent usage or turn a broken envelope into a durable decision.
+          if (
+            !Array.isArray(message?.content) ||
+            message.content.some(
+              (block) =>
+                !block ||
+                typeof block.type !== 'string' ||
+                (block.type === 'text' && typeof block.text !== 'string'),
+            ) ||
+            !Number.isSafeInteger(message.usage?.input_tokens) ||
+            message.usage.input_tokens < 0 ||
+            !Number.isSafeInteger(message.usage?.output_tokens) ||
+            message.usage.output_tokens < 0
+          )
+            throw new Error('controller-provider-response-unreadable');
+          return message;
+        };
         const response = provider.atControllerSend
-          ? await provider.atControllerSend(() => reserve.immediate(), send)
+          ? await provider.atControllerSend(() => reserve.immediate(), send, wakeDigest)
           : await (async () => {
               reserve.immediate();
               return send();

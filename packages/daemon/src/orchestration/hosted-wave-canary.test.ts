@@ -103,6 +103,105 @@ it.each([
   owner.ledger.cancel(cp.run);
   expect(f.db.prepare('SELECT canceled FROM orchestration_runs').pluck().get()).toBe(1);
 });
+// Offline SDK over a fully stubbed wire. Real SQLite reservations and wake replay.
+it.each([
+  ['forbidden', 403, 'controller-provider-http-403'],
+  ['limited', 429, 'controller-provider-http-429'],
+  ['upstream', 503, 'controller-provider-http-503'],
+  ['lost', null, 'controller-provider-no-response'],
+  ['abort', null, 'controller-provider-aborted'],
+  ['null-block', 200, 'controller-provider-response-unreadable'],
+  ['broken-json', 200, 'controller-provider-response-unreadable'],
+  ['no-envelope', 200, 'controller-provider-response-unreadable'],
+] as const)('records safe evidence for %s without replaying an uncertain send', async (mode, status, reason) => {
+  const s = stores(),
+    lines: string[] = [];
+  const log = pino(
+    { level: 'warn' },
+    {
+      write: (line: string) => {
+        lines.push(line);
+      },
+    },
+  );
+  const provider = bindCanaryProfile(
+    s.config as unknown as ConfigurationStore,
+    s.accounts as unknown as ProviderAccountStore,
+    s.health as unknown as ProviderAccountHealthStore,
+    log,
+  );
+  const { f, cp, request, host } = await setupOrchestrationRun(6, 1);
+  const owner = host();
+  await owner.ledger.kickoff(cp, { inspect: request });
+  const secret = 'PRIVATE_response_canary';
+  const aborter = new AbortController();
+  const timeout =
+    mode === 'abort'
+      ? vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(aborter.signal)
+      : undefined;
+  const wire = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    if (mode === 'abort') {
+      const signal = init?.signal;
+      if (!signal) throw new Error('expected forwarded signal');
+      return new Promise<Response>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error(secret)), { once: true });
+        aborter.abort();
+      });
+    }
+    if (status === null) throw new Error(secret);
+    if (mode === 'null-block')
+      return Response.json({ content: [null], usage: { input_tokens: 1, output_tokens: 1 } });
+    return new Response(
+      mode === 'broken-json' ? 'invalid ' + secret : JSON.stringify({ error: { message: secret } }),
+      { status, headers: { 'content-type': 'application/json', 'x-request-id': secret } },
+    );
+  });
+  vi.stubGlobal('fetch', wire);
+  const policy = {
+    mission: 'PRIVATE_request_canary',
+    routeId: 'offline',
+    recipes: { inspect: '@inspect' },
+  };
+  const loop = owner.watchController(cp.run, policy, provider);
+  try {
+    await expect(loop.settled()).rejects.toThrow(reason);
+    expect(loop.status()).toMatchObject({ planning: 'blocked', reason });
+  } finally {
+    timeout?.mockRestore();
+    await loop.close();
+  }
+  await expect(owner.tickController(cp.run, policy, provider)).rejects.toThrow(
+    'controller-request-uncertain',
+  );
+  const row = f.db
+    .prepare(
+      'select status,wake_digest,decision_json,input_tokens,output_tokens from orchestration_controller_turns where run_id=?',
+    )
+    .get(cp.run) as { wake_digest: string };
+  expect(row).toMatchObject({
+    status: 'reserved',
+    decision_json: null,
+    input_tokens: null,
+    output_tokens: null,
+  });
+  expect(wire).toHaveBeenCalledTimes(1);
+  expect(lines).toHaveLength(1);
+  expect(JSON.parse(lines[0]!)).toMatchObject({
+    reason,
+    phase: 'kickoff',
+    wakeDigest: row.wake_digest,
+    ...(status ? { httpStatus: status } : {}),
+  });
+  if (status === null) expect(JSON.parse(lines[0]!)).not.toHaveProperty('httpStatus');
+  expect(lines.join('')).not.toMatch(/PRIVATE_|fixture-not-real|Bearer |request-id/);
+  expect(
+    f.db
+      .prepare('select count(*) from orchestration_continuations where run_id=?')
+      .pluck()
+      .get(cp.run),
+  ).toBe(0);
+});
+
 it('rejects an oversized result and reserves at the last boundary for an exact 8 KiB result', async () => {
   const s = stores(),
     p = s.bind(),

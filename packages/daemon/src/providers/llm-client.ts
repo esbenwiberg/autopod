@@ -53,7 +53,11 @@ export function resolveAnthropicModelId(model: string): string {
 export interface ProfileLlmClient {
   /** Synchronous, no I/O or credentials: reject an inadmissible wire body before charging. */
   preflightControllerRequest?: (body: unknown) => void;
-  atControllerSend?<T>(reserve: () => void, send: () => Promise<T>): Promise<T>;
+  atControllerSend?<T>(
+    reserve: () => void,
+    send: () => Promise<T>,
+    wakeDigest?: string,
+  ): Promise<T>;
   client: Anthropic;
   /** Resolved Anthropic model id (alias expanded). */
   model: string;
