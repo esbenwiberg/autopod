@@ -6,8 +6,8 @@ import pino from 'pino';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { mcpHandler } from '../api/mcp-handler.js';
 import { authPlugin } from '../api/plugins/auth.js';
-import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
+import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { resolveLaunchExecutionSettings } from '../configuration/launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
@@ -20,7 +20,7 @@ import { createTestConfiguration } from '../test-utils/configuration-helpers.js'
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
-import type { OperatorRunsConfig } from './operator-runs.js';
+import { type OperatorRunsConfig, operatorRunId, registerOperatorRuns } from './operator-runs.js';
 import { ParentManagedLaunch } from './parent-managed-launch.js';
 
 const logger = pino({ level: 'silent' });
@@ -46,9 +46,19 @@ const auth = {
   },
 };
 
-async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = false) {
+async function fixture(
+  requests = 2,
+  active = 1,
+  workers = 2,
+  runtimeRequest = false,
+  loseAllocation = false,
+) {
   // Real SQLite migrations, admission, source custody and parent provisioning; external execution is fake.
-  const source = await setupOrchestrationRun(requests, active);
+  const source = await setupOrchestrationRun(
+    requests,
+    active,
+    operatorRunId(operator, 'parent-fixture'),
+  );
   const p = createProvisioningFixture(true, false);
   onTestFinished(() => p.close());
   const original = { id: 'prepare' };
@@ -67,12 +77,30 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
     },
   };
   const preview = await resolveLaunch(launchRequest, services, 'operator');
+  let boundaryCalls = 0;
+  const stages: string[] = [];
   const host = () =>
-    new LocalCheckpointHost(
-      p.db,
-      path.join(p.directory, 'scratch'),
-      () => new ManagedPodService(p.db, source.f.admission, source.f.runtime, () => 100, true),
-    );
+    new LocalCheckpointHost(p.db, path.join(p.directory, 'scratch'), () => {
+      const service = new ManagedPodService(
+        p.db,
+        source.f.admission,
+        {
+          ...source.f.runtime,
+          ensure: async (...args) => {
+            boundaryCalls++;
+            if (loseAllocation) throw new Error('synthetic-external-allocation-reply-lost');
+            return source.f.runtime.ensure(...args);
+          },
+        },
+        () => 100,
+        true,
+      );
+      service.onTransition = () => {
+        const view = owner.family(original.id);
+        stages.push((view.children[0] as { status: string }).status);
+      };
+      return service;
+    });
   host().ledger.open(
     source.cp.run,
     source.cp.repository,
@@ -144,6 +172,7 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
   });
   let token = '';
   expect(source.f.launches()).toBe(0);
+  let scheduler: ReturnType<typeof registerOperatorRuns>;
   let app = build();
   function build() {
     const app = Fastify();
@@ -152,6 +181,11 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
       reply.raw.setTimeout = () => reply.raw;
     });
     authPlugin(app, auth, issuer);
+    scheduler = registerOperatorRuns(
+      app,
+      { ...config(), lifetimeOwner: { owns: () => true } },
+      auth,
+    );
     const bridge = createSessionBridge({
       podManager: p.manager(),
       podRepo: p.deps.podRepo,
@@ -187,6 +221,7 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
       payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
     });
     if (response.statusCode === 500) throw new Error(response.body);
+    await scheduler.settled(source.cp.run);
     if (response.statusCode !== 200)
       return { rejected: true, status: response.statusCode, body: response.body };
     const data = response.body.split('\n').find((line) => line.startsWith('data: '));
@@ -218,6 +253,8 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
       createPodRepository(p.db).getOrThrow(id),
     );
     app = build();
+    await app.ready();
+    await scheduler.settled(source.cp.run);
   };
   const runtimeToken = (servers: import('@autopod/shared').McpServerConfig[]) => {
     const mcp = servers.find((s) => s.name === 'escalation');
@@ -260,10 +297,19 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
     source,
     call,
     family,
+    operatorStart: () =>
+      app.inject({
+        method: 'POST',
+        url: '/orchestration/runs/parent-fixture/start',
+        headers: { authorization: 'Bearer operator' },
+        payload: {},
+      }),
     token,
     issuer,
     restart,
     host,
+    stages,
+    boundaryCalls: () => boundaryCalls,
     owner: () => owner,
     setPolicy: (enabled: boolean) => {
       owner = new ParentManagedLaunch(
@@ -285,6 +331,8 @@ async function fixture(requests = 2, active = 1, workers = 2, runtimeRequest = f
 it('production processPod dispatches a fake parent runtime whose model turn uses its own provisioned scoped ingress', async () => {
   const f = await fixture(2, 1, 1, true);
   expect(f.source.f.launches()).toBe(1);
+  expect(f.stages).toEqual(['reserved', 'started']);
+  expect(f.p.pod().status).toBe('failed'); // fake parent runtime has exited; no display-only process
   expect(f.remaining()).toBe(0);
   expect(f.reservations()).toBe(1);
   expect((await f.family()).json().children[0]).toMatchObject({
@@ -292,6 +340,9 @@ it('production processPod dispatches a fake parent runtime whose model turn uses
     status: 'started',
     parentAttempt: f.issuer.verifyAttempt!(f.token)?.attempt,
   });
+  const history = (await f.family()).json();
+  await f.restart();
+  expect((await f.family()).json()).toEqual(history);
 });
 
 it('a real launched parent commissions through provisioned MCP ingress; lost replies and restart retain one debit and actual managed identity', async () => {
@@ -353,6 +404,7 @@ it('a real launched parent commissions through provisioned MCP ingress; lost rep
 it('rejects humans, unrelated pods, stale attempts, absent policy, unknown recipes and over-budget requests without allocations', async () => {
   const f = await fixture(3, 2, 3);
   const request = { requestKey: 'one', recipe: 'inspect', brief: 'Bounded report' };
+  expect((await f.operatorStart()).statusCode).toBe(409);
   for (const credential of [
     'operator',
     f.issuer.generate('unrelated'),
@@ -390,4 +442,32 @@ it('rejects a second reservation at parent capacity without spending or allocati
   expect(f.remaining()).toBe(6);
   expect(f.reservations()).toBe(1);
   expect(f.source.f.launches()).toBe(1);
+});
+
+it('retains an uncertain allocation across restart without another external attempt, refund or slot reuse', async () => {
+  const f = await fixture(8, 1, 4, false, true);
+  const request = { requestKey: 'uncertain', recipe: 'inspect', brief: 'Bounded report' };
+  expect((await f.call(request)).rejected).toBe(false);
+  const before = (await f.family()).json();
+  expect(before.children[0]).toMatchObject({ requestKey: 'uncertain', status: 'unknown' });
+  expect(before.children[0].child).toMatch(/^managed-/);
+  expect(f.stages).toEqual(['reserved']);
+  await f.restart();
+  expect((await f.call(request)).rejected).toBe(false);
+  expect((await f.call({ ...request, requestKey: 'another' })).rejected).toBe(true);
+  expect((await f.family()).json()).toEqual(before);
+  expect(f.remaining()).toBe(6);
+  expect(f.reservations()).toBe(1);
+  expect(f.boundaryCalls()).toBe(1);
+});
+
+it('enforces the frozen lifetime worker count even when active capacity and request budget remain', async () => {
+  const f = await fixture(8, 2, 1);
+  const request = { requestKey: 'one', recipe: 'inspect', brief: 'Bounded report' };
+  const replies = await Promise.all([f.call(request), f.call(request)]);
+  expect(replies.every((r) => !r.rejected)).toBe(true);
+  expect((await f.call({ ...request, requestKey: 'two' })).rejected).toBe(true);
+  expect(f.remaining()).toBe(6);
+  expect(f.reservations()).toBe(1);
+  expect(f.boundaryCalls()).toBe(1);
 });

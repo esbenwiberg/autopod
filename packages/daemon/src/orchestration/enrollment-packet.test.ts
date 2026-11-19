@@ -84,3 +84,43 @@ it('checks the real Git bundle and composes independently signed test receipts o
   expect(resume).toHaveBeenCalledTimes(1);
   expect(provider.calls()).toBe(0);
 });
+
+it('preflights a distinct parent draft and binds evaluator signatures to its future launch', async () => {
+  const { enrollment, cli, profiles, source } = await operatorSeedFixture(
+    `example.invalid/parent-worker@sha256:${'b'.repeat(64)}`,
+    true,
+    'sandbox',
+  );
+  const draft = Object.fromEntries(
+    Object.entries(enrollment).filter(
+      ([key]) => !['authorities', 'checks', 'review'].includes(key),
+    ),
+  );
+  const parent = {
+    requestId: '5ecff8d3-de82-48cb-961a-dc06dc506533',
+    launchDigest: 'a'.repeat(64),
+  };
+  const preflight = (selection = parent) =>
+    checkInspectionDraft(
+      { ...draft, slot: 'new-parent', parent: selection },
+      JSON.stringify(profiles),
+      JSON.stringify(cli),
+      readBundle,
+    );
+  const readBundle = await readFile(source.bundlePath);
+  const checked = await preflight();
+  const checks = fixtureSigner('checks', 'parent-checker', digest('checks'));
+  const review = fixtureSigner('independentReview', 'parent-reviewer', digest('review'));
+  const pins = { checks: checks.authority, independentReview: review.authority };
+  const packet = signingPacket(checked, pins);
+  const receipt = (role: 'checks' | 'independentReview') => ({
+    inputDigest: packet.inputDigest,
+    status: 'passed' as const,
+    evidenceDigest: digest(role),
+  });
+  const c = checks.attest(receipt('checks')),
+    r = review.attest(receipt('independentReview'));
+  expect(assembleInspection(packet, c, r)?.parent).toEqual(parent);
+  const changed = signingPacket(await preflight({ ...parent, launchDigest: 'b'.repeat(64) }), pins);
+  expect(() => assembleInspection(changed, c, r)).toThrow('checks-required');
+});

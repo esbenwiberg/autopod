@@ -20,6 +20,8 @@ these receipts or edit the daemon enrollment.
    Preview it without launching, and retain its exact launch digest. Select restricted
    egress, read-only GitHub rules, no PIM or deployment, and approval completion.
    Provider, environment and repository provisioning remain ordinary launch components.
+   Use `ap run --config parent-launch.json --request-id <UUID> --preview --json`;
+   retain the same file and its preview digest for `expectedDigest` when launching.
 2. Add this optional field to the new version 1 enrollment draft before generating its
    checks/review receipts:
 
@@ -35,11 +37,19 @@ these receipts or edit the daemon enrollment.
    The enrollment's host-controller `main` pin remains in the signed envelope but is
    not invoked for a parent slot; the actual parent model/account comes from its
    independently frozen normal launch.
+   Use the existing `enrollment-packet-cli` `preflight`, `packet`, evaluator
+   `statement`/`receipt`, and `assemble` modes with a separate packet directory.
+   Its fixed source filename remains `inspection.bundle` for compatibility; it
+   contains the new enrollment's bundle, never an existing worker. `owner` mode
+   refuses parent drafts: parent authority requires version 1 countersignatures.
 3. Enroll through the existing daemon-owned operator configuration procedure, then
    launch the exact preview as the enrolled operator. This implementation does not
    change production configuration or restart the hosted daemon. The selected request
    must still be a future launch when this composition is installed. An existing
    parent binding can be recovered, but another pod cannot take over its run.
+   The reviewed envelope is `AUTOPOD_OPERATOR_ENROLLMENT`; use a separately
+   partitioned `AUTOPOD_OPERATOR_PROFILE_SET` and the existing managed CLI owner
+   bindings. Setting these is operator deployment work, outside this PR's execution.
 4. Parent provisioning records the pod/run/policy and a fresh runtime attempt bound
    to its actual container and lifecycle generation. Only its injected, signed
    attempt credential supplies authority at the existing `/mcp/:podId` boundary.

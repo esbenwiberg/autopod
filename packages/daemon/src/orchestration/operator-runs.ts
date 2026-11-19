@@ -60,7 +60,12 @@ export function registerOperatorRuns(
     const { provider, ...data } = input;
     const s = { ...structuredClone(data), provider };
     const run = operatorRunId(s.operator, s.slot);
-    if (!approvedAlias.test(s.slot) || s.checkpoint.run !== run || slots.has(run))
+    if (
+      !approvedAlias.test(s.slot) ||
+      s.checkpoint.run !== run ||
+      slots.has(run) ||
+      (!s.parent && !s.provider)
+    )
       throw new Error('invalid-operator-slot');
     // The authentication adapter returns an opaque actor, rather than the shared installation.
     const actor = digest(['operator/v1', s.operator]).slice(7);
@@ -76,12 +81,13 @@ export function registerOperatorRuns(
   );
   const loops = new Map<string, ReturnType<LocalCheckpointHost['watchController']>>();
   const pending = new Map<string, Promise<void>>();
-  const parents: ReturnType<typeof attachLocalController>[] = [];
+  const parents = new Map<string, ReturnType<typeof attachLocalController>>();
   let closed = false;
   const canceled = (run: string) =>
     db.prepare('SELECT canceled FROM orchestration_runs WHERE id=?').pluck().get(run);
   async function start(slot: OperatorRunSlot) {
-    if (slot.parent || !slot.provider) throw new Error('parent-runtime-required');
+    const provider = slot.provider;
+    if (slot.parent || !provider) throw new Error('parent-runtime-required');
     const run = slot.checkpoint.run;
     if (closed || canceled(run) !== 0) throw new Error('operator-run-inactive');
     if (loops.has(run)) return;
@@ -90,7 +96,7 @@ export function registerOperatorRuns(
     const task = (async () => {
       await host.ledger.kickoff(slot.checkpoint, slot.catalog);
       if (closed || canceled(run) !== 0) throw new Error('operator-run-inactive');
-      loops.set(run, host.watchController(run, slot.policy, slot.provider));
+      loops.set(run, host.watchController(run, slot.policy, provider));
     })();
     pending.set(run, task);
     try {
@@ -106,7 +112,7 @@ export function registerOperatorRuns(
     closed = true;
     await Promise.allSettled(pending.values());
     await Promise.all([...loops.values()].map((l) => l.close()));
-    await Promise.all(parents.map((l) => l.close()));
+    await Promise.all([...parents.values()].map((l) => l.close()));
     releaseOwner?.();
     releaseOwner = undefined;
   };
@@ -129,7 +135,10 @@ export function registerOperatorRuns(
         if (slot.provider) loops.set(run, host.watchController(run, slot.policy, slot.provider));
       for (const [run, slot] of slots) {
         if (slot.parent)
-          parents.push(attachLocalController(db, run, () => host.ledger.recover(run)));
+          parents.set(
+            run,
+            attachLocalController(db, run, () => host.ledger.recover(run)),
+          );
       }
     } catch (error) {
       await drain();
@@ -200,5 +209,5 @@ export function registerOperatorRuns(
       },
     });
   }
-  return { settled: (run: string) => loops.get(run)?.settled() };
+  return { settled: (run: string) => (loops.get(run) ?? parents.get(run))?.settled() };
 }

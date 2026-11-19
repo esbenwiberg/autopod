@@ -35,13 +35,14 @@ interface Binding {
 
 /** Trusted daemon composition. No user-token or pod-ID input can establish runtime authority. */
 export class ParentManagedLaunch {
-  private readonly scope = new AsyncLocalStorage<{ podId: string; attempt: string }>();
+  private readonly scope = new AsyncLocalStorage<{ podId: string; attempt: string } | undefined>();
   private readonly slots: OperatorRunSlot[];
   constructor(
     private readonly config: OperatorRunsConfig,
     private readonly issuer: PodTokenIssuer,
     private readonly pod: (id: string) => Pod,
   ) {
+    if (!config.host.usesDatabase(config.db)) throw new Error('parent-owner-database-mismatch');
     this.slots = config.slots
       .filter((s) => s.parent)
       .map((s) => ({
@@ -150,8 +151,7 @@ export class ParentManagedLaunch {
   async withIngress(podId: string, token: string | undefined, run: () => Promise<void>) {
     const session = token && this.issuer.verifyAttempt?.(token);
     // Ordinary pods retain their existing ingress. Parent actions themselves require this scope.
-    if (!session || session.podId !== podId) return run();
-    return this.scope.run(session, run);
+    return this.scope.run(session && session.podId === podId ? session : undefined, run);
   }
   private active(podId: string) {
     const session = this.scope.getStore();
@@ -164,6 +164,12 @@ export class ParentManagedLaunch {
     )
       throw new Error('parent-session-required');
     const pod = this.pod(podId);
+    const slot = this.slot(binding);
+    const run = this.db
+      .prepare(
+        'SELECT 1 FROM orchestration_runs WHERE id=? AND canceled=0 AND policy_digest=? AND repository=?',
+      )
+      .get(binding.run_id, slot.checkpoint.policyDigest, slot.checkpoint.repository);
     const current = this.db
       .prepare(
         'SELECT 1 FROM parent_managed_sessions WHERE attempt=? AND run_id=? AND generation=? AND container_id=?',
@@ -171,11 +177,12 @@ export class ParentManagedLaunch {
       .get(session.attempt, binding.run_id, pod.lifecycleGeneration, pod.containerId ?? null);
     if (
       !current ||
+      !run ||
       pod.status !== 'running' ||
-      pod.launchConfigDigest !== this.slot(binding).parent?.launchDigest
+      pod.launchConfigDigest !== slot.parent?.launchDigest
     )
       throw new Error('parent-session-stale');
-    return { binding, slot: this.slot(binding) };
+    return { binding, slot };
   }
   tools(podId: string): ScopedPodTools | undefined {
     if (!this.binding(podId)) return undefined;
@@ -268,13 +275,15 @@ export class ParentManagedLaunch {
       children: this.db
         .prepare(`
       SELECT q.request_key AS requestKey,q.parent_attempt AS parentAttempt,p.pod_id AS child,
-      CASE WHEN p.observed_exit=1 THEN 'exited'
+      CASE WHEN p.pod_id IS NULL AND c.pod_id IS NOT NULL THEN 'unknown'
+        WHEN p.observed_exit=1 THEN 'exited'
         WHEN p.state='running' AND coalesce(p.last_runtime_observation,'running')<>'unknown' THEN 'started'
         WHEN p.allocation_attempted=1 THEN 'unknown' ELSE 'reserved' END AS status
       FROM orchestration_continuations c JOIN parent_managed_requests q ON q.run_id=c.run_id AND q.start_key=c.start_key LEFT JOIN managed_pods p
         ON p.dispatcher_installation_id='native.'||c.run_id AND p.managed_start_key=c.start_key
         AND p.execution_spec_digest=json_extract(c.request_json,'$.executionSpecDigest')
         AND p.dispatcher_attempt_id=c.attempt_id
+        AND (c.pod_id IS NULL OR c.pod_id=p.pod_id)
       WHERE c.run_id=? ORDER BY c.rowid`)
         .all(binding.run_id),
     };

@@ -70,6 +70,7 @@ export default defineConfig({
           'src/orchestration/parent-managed-launch.ts',
           'src/orchestration/operator-runs.ts',
           'src/orchestration/operator-enrollment.ts',
+          'src/orchestration/enrollment-packet.ts',
           'src/pods/admission-memory-briefing.ts',
           'src/pods/environment-qualification.ts',
           'src/pods/prerequisite-blocker.ts',
