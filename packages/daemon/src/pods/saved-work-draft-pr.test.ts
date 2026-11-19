@@ -300,6 +300,111 @@ describe('saved-work exact human draft publication', () => {
     expect(cm.execInContainer).toHaveBeenCalledTimes(1); // only explicit fixture capture, no action wake/export
   });
 
+  it.each([
+    { refs: 24, failOneRoot: false },
+    { refs: 4, failOneRoot: true },
+  ])('verifies distinct graph roots (refs=$refs, failOneRoot=$failOneRoot)', async ({
+    refs,
+    failOneRoot,
+  }) => {
+    const f = await fixture(true);
+    const parent = await f.git(f.source, 'rev-parse', 'HEAD');
+    await f.git(f.source, 'commit', '--allow-empty', '-m', 'second commit');
+    const head = await f.git(f.source, 'rev-parse', 'HEAD');
+    const tree = await f.git(f.source, 'rev-parse', 'HEAD^{tree}');
+    for (let sequence = 1; sequence <= refs; sequence++) {
+      const commit = sequence % 2 ? parent : head;
+      const quarantineRef = `refs/autopod-quarantine/${f.id}/${sequence}-committed`;
+      // A stale ref must not inherit another receipt’s verified identity.
+      await f.git(f.source, 'update-ref', quarantineRef, sequence === 1 ? head : commit);
+      await f.podRepo.savedWorkspaceCheckpoints!.save({
+        podId: f.id,
+        sequence,
+        fingerprint: { head: commit, tree, dirty: false },
+        result: {
+          sequence,
+          quarantineRef,
+          sourceHead: commit,
+          snapshotCommit: commit,
+          sourceTree: tree,
+          snapshotTree: tree,
+          transferVerified: true,
+          bundleVerified: true,
+          hostImported: true,
+          lineageVerified: true,
+          promoted: true,
+          materialized: false,
+        },
+        verifiedAt: null,
+        attempts: 1,
+      });
+    }
+    const bin = path.join(f.root, 'bin');
+    const log = path.join(f.root, 'git-log');
+    const realGit = (await exec('/bin/sh', ['-c', 'command -v git'])).stdout.trim();
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, 'git'),
+      `#!/bin/sh
+args="$*"
+case " $args " in
+  *" fsck "*) echo "\${args#*fsck }" >> "$GRAPH_LOG.fsck"; case " $args " in *" $BAD_ROOT "*) exit 1;; esac;;
+  *" rev-list "*) echo "\${args#*rev-list }" >> "$GRAPH_LOG.rev-list";;
+esac
+exec "$REAL_GIT" "$@"
+`,
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', bin + path.delimiter + process.env.PATH);
+    vi.stubEnv('GRAPH_LOG', log);
+    vi.stubEnv('BAD_ROOT', failOneRoot ? parent : 'none');
+    vi.stubEnv('REAL_GIT', realGit);
+    try {
+      const initial = await f.controller().inspect(f.id, actor);
+      expect(initial.sources.some((s) => s.id === 'checkpoint-1')).toBe(false);
+      expect(initial.blockers.join()).toContain('Snapshot 1 unavailable');
+      if (failOneRoot) {
+        expect(initial.sources.map((s) => s.id).sort()).toEqual(
+          ['checkpoint-2', 'checkpoint-4', `local-${head}`].sort(),
+        );
+        expect(initial.blockers.join()).toContain('checkpoint-3: Saved object verification failed');
+      } else {
+        expect(initial.sources).toHaveLength(refs); // all non-stale receipts plus host HEAD
+        expect(initial.blockers).toHaveLength(1);
+      }
+      for (const [command, flags] of [
+        ['fsck', ['--strict', '--no-reflogs', '--no-dangling']],
+        ['rev-list', ['--objects', '--missing=error', '--quiet']],
+      ] as const) {
+        const calls = (await readFile(`${log}.${command}`, 'utf8')).trim().split('\n');
+        expect(calls).toHaveLength(failOneRoot ? 3 : 1);
+        if (failOneRoot) {
+          // Neither failure nor success of the union proves either individual graph.
+          const singletons = calls
+            .slice(1)
+            .map((call) => call.split(' ').sort().join(' '))
+            .sort();
+          expect(singletons).toEqual(
+            [head, parent].map((root) => [...flags, root].sort().join(' ')).sort(),
+          );
+        }
+        expect(calls[0]?.split(' ').sort()).toEqual([...flags, parent, head].sort());
+      }
+      expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('offers no source when the quiet traversal encounters a missing blob', async () => {
+    const f = await fixture();
+    const blob = await f.git(f.source, 'rev-parse', 'HEAD:file.txt');
+    await rm(path.join(f.source, '.git/objects', blob.slice(0, 2), blob.slice(2)));
+    const preview = await f.controller().inspect(f.id, actor);
+    expect(preview.sources).toEqual([]);
+    expect(preview.blockers.join()).toMatch(/Saved object verification failed:.*rev-list/s);
+  });
+
   it('requires explicit older-source selection and rejects partial/stale checkpoint proof', async () => {
     const f = await fixture(true);
     const head = await f.git(f.source, 'rev-parse', 'HEAD');

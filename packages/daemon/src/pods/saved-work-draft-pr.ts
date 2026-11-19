@@ -16,7 +16,7 @@ import type { PrManager, SavedDraftTarget } from '../interfaces/pr-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { draftMarker, verifyDraftObservation } from '../worktrees/saved-work-draft-provider.js';
 import {
-  checkpointSavedSource,
+  inspectSavedWorkSources,
   localSavedSource,
   prepareSavedSource,
   savedGit,
@@ -159,26 +159,15 @@ export function createSavedWorkDraftPr(deps: {
       const p = policy(pod);
       await savedGit(p.worktree)(['check-ref-format', `refs/heads/${baseBranch}`]);
       const records = (await pods.savedWorkspaceCheckpoints?.list?.(podId)) ?? [];
-      const latestSequence = records[0]?.sequence ?? 0;
-      for (const record of records) {
-        try {
-          sources.push(
-            await checkpointSavedSource(podId, p.worktree, repository, record, latestSequence),
-          );
-        } catch (error) {
-          blockers.push(
-            `Snapshot ${record.sequence} unavailable: ${error instanceof Error ? error.message : 'unverified proof'}`,
-          );
-        }
-      }
-      // Local HEAD is an explicitly selected host-only alternative, never a substitute for sandbox bytes.
-      try {
-        sources.push(await localSavedSource(p.worktree, repository, pod.branch));
-      } catch (error) {
-        blockers.push(
-          `Host commit unavailable: ${error instanceof Error ? error.message : 'unverified source'}`,
-        );
-      }
+      const inspection = await inspectSavedWorkSources(
+        podId,
+        p.worktree,
+        repository,
+        pod.branch,
+        records,
+      );
+      sources.push(...inspection.sources);
+      blockers.push(...inspection.blockers);
       if (!sources.length)
         blockers.push(
           'No verified saved source. Capture source through an existing safe mechanism; this action never wakes or exports a sandbox.',
