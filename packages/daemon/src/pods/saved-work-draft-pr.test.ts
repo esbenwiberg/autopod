@@ -300,16 +300,23 @@ describe('saved-work exact human draft publication', () => {
     expect(cm.execInContainer).toHaveBeenCalledTimes(1); // only explicit fixture capture, no action wake/export
   });
 
-  it('strictly verifies the union of checkpoint roots once per inspection', async () => {
+  it.each([
+    { refs: 24, failOneRoot: false },
+    { refs: 4, failOneRoot: true },
+  ])('verifies distinct graph roots (refs=$refs, failOneRoot=$failOneRoot)', async ({
+    refs,
+    failOneRoot,
+  }) => {
     const f = await fixture(true);
     const parent = await f.git(f.source, 'rev-parse', 'HEAD');
     await f.git(f.source, 'commit', '--allow-empty', '-m', 'second commit');
     const head = await f.git(f.source, 'rev-parse', 'HEAD');
     const tree = await f.git(f.source, 'rev-parse', 'HEAD^{tree}');
-    for (let sequence = 1; sequence <= 24; sequence++) {
+    for (let sequence = 1; sequence <= refs; sequence++) {
       const commit = sequence % 2 ? parent : head;
       const quarantineRef = `refs/autopod-quarantine/${f.id}/${sequence}-committed`;
-      await f.git(f.source, 'update-ref', quarantineRef, commit);
+      // A stale ref must not inherit another receipt’s verified identity.
+      await f.git(f.source, 'update-ref', quarantineRef, sequence === 1 ? head : commit);
       await f.podRepo.savedWorkspaceCheckpoints!.save({
         podId: f.id,
         sequence,
@@ -341,7 +348,7 @@ describe('saved-work exact human draft publication', () => {
       `#!/bin/sh
 args="$*"
 case " $args " in
-  *" fsck "*) echo "\${args#*fsck }" >> "$GRAPH_LOG.fsck"; test ! -f "$GRAPH_LOG.fail" || exit 1;;
+  *" fsck "*) echo "\${args#*fsck }" >> "$GRAPH_LOG.fsck"; case " $args " in *" $BAD_ROOT "*) exit 1;; esac;;
   *" rev-list "*) echo "\${args#*rev-list }" >> "$GRAPH_LOG.rev-list";;
 esac
 exec "$REAL_GIT" "$@"
@@ -350,29 +357,39 @@ exec "$REAL_GIT" "$@"
     );
     vi.stubEnv('PATH', bin + path.delimiter + process.env.PATH);
     vi.stubEnv('GRAPH_LOG', log);
+    vi.stubEnv('BAD_ROOT', failOneRoot ? parent : 'none');
     vi.stubEnv('REAL_GIT', realGit);
     try {
-      const inspect = () => f.controller().inspect(f.id, actor);
-      const initial = await inspect();
-      expect(initial.sources).toHaveLength(25); // 24 independent receipts + host HEAD
-      expect(initial.blockers).toEqual([]);
+      const initial = await f.controller().inspect(f.id, actor);
+      expect(initial.sources.some((s) => s.id === 'checkpoint-1')).toBe(false);
+      expect(initial.blockers.join()).toContain('Snapshot 1 unavailable');
+      if (failOneRoot) {
+        expect(initial.sources.map((s) => s.id).sort()).toEqual(
+          ['checkpoint-2', 'checkpoint-4', `local-${head}`].sort(),
+        );
+        expect(initial.blockers.join()).toContain('checkpoint-3: Saved object verification failed');
+      } else {
+        expect(initial.sources).toHaveLength(refs); // all non-stale receipts plus host HEAD
+        expect(initial.blockers).toHaveLength(1);
+      }
       for (const [command, flags] of [
         ['fsck', ['--strict', '--no-reflogs', '--no-dangling']],
         ['rev-list', ['--objects', '--missing=error', '--quiet']],
       ] as const) {
         const calls = (await readFile(`${log}.${command}`, 'utf8')).trim().split('\n');
-        expect(calls).toHaveLength(1);
+        expect(calls).toHaveLength(failOneRoot ? 3 : 1);
+        if (failOneRoot) {
+          // Neither failure nor success of the union proves either individual graph.
+          const singletons = calls
+            .slice(1)
+            .map((call) => call.split(' ').sort().join(' '))
+            .sort();
+          expect(singletons).toEqual(
+            [head, parent].map((root) => [...flags, root].sort().join(' ')).sort(),
+          );
+        }
         expect(calls[0]?.split(' ').sort()).toEqual([...flags, parent, head].sort());
       }
-      await f.git(f.source, 'update-ref', `refs/autopod-quarantine/${f.id}/1-committed`, head);
-      const changed = await inspect();
-      expect(changed.sources).toHaveLength(24);
-      expect(changed.sources.some((s) => s.id === 'checkpoint-1')).toBe(false);
-      expect(changed.blockers.join()).toContain('Snapshot 1 unavailable');
-      await writeFile(`${log}.fail`, '');
-      const failed = await inspect();
-      expect(failed.sources).toEqual([]);
-      expect(failed.blockers.join()).toContain('Saved object verification failed');
       expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();

@@ -227,11 +227,29 @@ export async function inspectSavedWorkSources(
     try {
       await verifyGraphs(root, roots);
     } catch (error) {
-      // Do not present any candidate as verified from a partial or failed batch.
-      blockers.push(
-        `Saved object verification failed: ${error instanceof Error ? error.message : 'unverified graph'}`,
-      );
-      return { sources: [], blockers };
+      // A failed union proves nothing about its constituents. On the exceptional
+      // path give each distinct OID its original checks/time limits, not each ref.
+      // A single-root batch already has a definitive failure; don't repeat it.
+      const failures = new Map<string, unknown>();
+      if (roots.length === 1) failures.set(roots[0]!, error);
+      else {
+        for (const commit of roots) {
+          try {
+            await verifyGraphs(root, [commit]);
+          } catch (failure) {
+            failures.set(commit, failure);
+          }
+        }
+      }
+      const sources = candidates.filter((source) => {
+        if (!failures.has(source.commit)) return true;
+        const failure = failures.get(source.commit);
+        blockers.push(
+          `${source.id}: Saved object verification failed: ${failure instanceof Error ? failure.message : 'unverified graph'}`,
+        );
+        return false;
+      });
+      return { sources, blockers };
     }
   }
   return { sources: candidates, blockers };
