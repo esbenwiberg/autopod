@@ -47,7 +47,7 @@ case "$*" in
     fi
     ;;
   *'/health'*)
-    if [[ "$*" == *'%{http_code}'* ]]; then echo 200; exit 0; fi
+    if [[ "$*" == *'%{http_code}'* ]]; then echo "${DEPLOY_TEST_EXTERNAL_CODE:-200}"; exit 0; fi
     python3 - <<'PYRELEASE'
 import json,os
 mode=os.environ.get('DEPLOY_TEST_RELEASE_MODE','valid')
@@ -100,6 +100,7 @@ case "$remote_script" in
     remote_script="${remote_script/"$prefix"//bin/sh}"
     # Run Command may return transport success for a nonzero guest exit.
     sh -c "$remote_script" || true ;;
+  *'MISSING_RELEASE'*) sh -c "$remote_script" ;;
   *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
   *'FINAL_ACTIVE='*)
     if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
@@ -163,6 +164,21 @@ reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
   rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
 }
+
+# The release switch and restart can succeed while the proxy serves an error.
+for code in 503 302 200; do
+  reset_fixture
+  if DEPLOY_TEST_EXTERNAL_CODE="$code" run_deploy --rollback cafebabe >"$tmp/rollback-out" 2>&1; then
+    [ "$code" = 200 ] || { echo "rollback accepted HTTP $code" >&2; exit 1; }
+    grep -qxF '==> rollback done' "$tmp/rollback-out"
+  else
+    [ "$code" != 200 ]
+    grep -qF "external health returned $code post-rollback" "$tmp/rollback-out"
+    if grep -qF 'rollback done' "$tmp/rollback-out"; then exit 1; fi
+  fi
+  [ -e "$tmp/restarted" ]
+  [ "$(readlink "$tmp/current")" = "$tmp/releases/cafebabe" ]
+done
 
 # A newer deployed descendant must not be replaced by an older requested target,
 # even when --force was supplied. Refuse before build, maintenance or restart.

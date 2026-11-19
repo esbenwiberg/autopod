@@ -23,16 +23,19 @@ run it, which mode, and how to bail safely.
 ```bash
 scripts/deploy-hosted-daemon.sh                 # deploy origin/main HEAD
 scripts/deploy-hosted-daemon.sh --target <sha>  # deploy a specific commit
-scripts/deploy-hosted-daemon.sh --rollback <sha># repoint + restart, nothing else
+scripts/deploy-hosted-daemon.sh --rollback <sha>  # repoint, restart, check health
 ```
 
-It runs the full dance: preflight → build new release on the VM → verify the
-built bundle → prewarm and launch-check daemon Playwright Chromium → atomic
-symlink swap → restart → post-verify (local + external health) → print rollback
-→ prune old releases (keeps current + previous-live + the 2 newest others;
-`--keep N` changes that "2"). It refuses to swap unless the build completed, host
-browser validation is ready, and health is green, so a failed run leaves
-`current` untouched.
+A normal deploy builds the release, prewarms and launch-checks Chromium, and
+checks any requested verification string **before** switching `current`. Failure
+at those steps leaves the live release untouched.
+
+The script then switches `current`, restarts the daemon, and checks local and
+external health. If a post-swap health check fails, **the new release stays
+selected**. There is no automatic rollback: use `--rollback <previous-sha>`
+to switch back. On success, the script prunes old releases (keeping current,
+previous-live and the `--keep N` newest others; default 2), then prints the
+rollback command.
 
 Local post-restart health is retried for up to roughly one minute. A busy host
 can take longer than a fixed sleep to bind port 3100; only exhaustion of the
@@ -55,10 +58,10 @@ bounded retry window is a deployment failure.
   (box drifted far from main, or built off a branch), overlay can't compute a safe
   file set — the script forces `--full`. Good. Let it.
 - **Verify the right thing.** When you're deploying a *specific* fix, pass
-  `--verify-string '<a code string from the change>'`. It greps the **built
-  bundle** (newlines flattened), never source, never a comment — comments are
-  stripped by the bundler, so a naive source grep lies. Pick a string that only
-  exists after the change.
+  `--verify-string '<a code string from the change>'`. Use a literal that appears on **one line** in a
+  generated `.js` or `.py` file under `packages/daemon/dist` and is unique to
+  the change. The script searches built files line by line; it does not flatten
+  newlines or search source maps.
 - **Browser readiness is part of deploy.** Provision Playwright Linux
   dependencies **only as a separate host provisioning operation**, not from a
   release during deploy. The deploy installs daemon Chromium into the `ewi`
@@ -91,7 +94,7 @@ bounded retry window is a deployment failure.
 
 ## Rollback discipline
 
-Every successful run prints the exact rollback command (`--rollback <prev-sha>`).
+Every successful full or overlay deployment prints the exact rollback command (`--rollback <prev-sha>`).
 If anything looks off after deploy — external health not 200, journal errors,
 behavior regressed — roll back first, diagnose second. The old release is still
 on the box (pruning always protects both current and previous-live, on top of the
