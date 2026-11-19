@@ -42,6 +42,7 @@ export default defineConfig({
     'src/index.ts',
     'src/managed.ts',
     'src/db/verify-backup-cli.ts',
+    'src/orchestration/enrollment-packet-cli.ts',
     'src/db/recover-merge-cli.ts',
     'src/db/recover-merged-fix-cli.ts',
     'src/db/reconcile-native-checkpoint-cli.ts',

@@ -80,7 +80,7 @@ export class LocalCheckpointHost {
       )
         throw new Error('checkpoint-custody-integrity');
       requirePass(subject, manifest.verification);
-      return this.withMirror(subject, row.bundle, (mirror) =>
+      return withVerifiedCheckpointMirror(this.scratch, subject, row.bundle, (mirror) =>
         typeof compose === 'function'
           ? use(compose(cp, mirror))
           : compose.withCheckpoint(cp, mirror, use),
@@ -146,8 +146,11 @@ export class LocalCheckpointHost {
         )
         .get(subject.run, subject.repository, subject.policyDigest, subject.predecessor);
     if (!operatorSeed && !current()) throw new Error('checkpoint-run-mismatch');
-    const verification = await this.withMirror(subject, bundle, (mirror) =>
-      verify(subject, mirror),
+    const verification = await withVerifiedCheckpointMirror(
+      this.scratch,
+      subject,
+      bundle,
+      (mirror) => verify(subject, mirror),
     );
     requirePass(subject, verification);
     const manifest = canonical({
@@ -183,45 +186,47 @@ export class LocalCheckpointHost {
       .immediate();
     return { ...subject, evidenceDigest };
   }
-  private async withMirror<T>(
-    subject: Readonly<Subject>,
-    bundle: Buffer,
-    use: (mirror: string) => Promise<T>,
-  ): Promise<T> {
-    const { commit, tree, predecessor } = subject;
+}
+
+export async function withVerifiedCheckpointMirror<T>(
+  scratch: string,
+  subject: Readonly<Pick<Subject, 'predecessor' | 'commit' | 'tree'>>,
+  bundle: Buffer,
+  use: (mirror: string) => Promise<T>,
+): Promise<T> {
+  const { commit, tree, predecessor } = subject;
+  if (
+    ![commit, tree, predecessor].every((id) => oid.test(id) && id.length === commit.length) ||
+    predecessor === commit
+  )
+    throw new Error('checkpoint-oid-binding');
+  await mkdir(scratch, { recursive: true, mode: 0o700 });
+  const dir = await mkdtemp(path.join(scratch, 'restore-'));
+  try {
+    const file = path.join(dir, 'source.bundle');
+    const mirror = path.join(dir, 'mirror.git');
+    await writeFile(file, bundle, { flag: 'wx', mode: 0o600 });
+    await managedGit(dir, [
+      'init',
+      '--bare',
+      '-b',
+      'main',
+      `--object-format=${commit.length === 40 ? 'sha1' : 'sha256'}`,
+      mirror,
+    ]);
+    // Import objects only. Never install bundle-supplied refs, remotes, or Git config.
+    const heads = await managedGit(mirror, ['bundle', 'unbundle', file]);
     if (
-      ![commit, tree, predecessor].every((id) => oid.test(id) && id.length === commit.length) ||
-      predecessor === commit
+      !heads.split('\n').includes(`${commit} HEAD`) ||
+      (await managedGit(mirror, ['rev-parse', `${commit}^{commit}`])) !== commit ||
+      (await managedGit(mirror, ['rev-parse', `${commit}^{tree}`])) !== tree
     )
-      throw new Error('checkpoint-oid-binding');
-    await mkdir(this.scratch, { recursive: true, mode: 0o700 });
-    const dir = await mkdtemp(path.join(this.scratch, 'restore-'));
-    try {
-      const file = path.join(dir, 'source.bundle');
-      const mirror = path.join(dir, 'mirror.git');
-      await writeFile(file, bundle, { flag: 'wx', mode: 0o600 });
-      await managedGit(dir, [
-        'init',
-        '--bare',
-        '-b',
-        'main',
-        `--object-format=${commit.length === 40 ? 'sha1' : 'sha256'}`,
-        mirror,
-      ]);
-      // Import objects only. Never install bundle-supplied refs, remotes, or Git config.
-      const heads = await managedGit(mirror, ['bundle', 'unbundle', file]);
-      if (
-        !heads.split('\n').includes(`${commit} HEAD`) ||
-        (await managedGit(mirror, ['rev-parse', `${commit}^{commit}`])) !== commit ||
-        (await managedGit(mirror, ['rev-parse', `${commit}^{tree}`])) !== tree
-      )
-        throw new Error('checkpoint-source-mismatch');
-      await managedGit(mirror, ['merge-base', '--is-ancestor', predecessor, commit]);
-      await managedGit(mirror, ['fsck', '--strict', '--no-reflogs', commit]);
-      await managedGit(mirror, ['update-ref', 'refs/heads/main', commit]);
-      return await use(mirror);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+      throw new Error('checkpoint-source-mismatch');
+    await managedGit(mirror, ['merge-base', '--is-ancestor', predecessor, commit]);
+    await managedGit(mirror, ['fsck', '--strict', '--no-reflogs', commit]);
+    await managedGit(mirror, ['update-ref', 'refs/heads/main', commit]);
+    return await use(mirror);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }

@@ -77,6 +77,8 @@ export function parseOperatorEnrollment(raw: string | undefined) {
     throw new Error('invalid-operator-enrollment');
   }
 }
+export const operatorDraftSchema = schema.omit({ authorities: true, checks: true, review: true });
+type Draft = z.infer<typeof operatorDraftSchema>;
 type Envelope = z.infer<typeof schema>;
 type Runtime = ManagedAcceptanceRuntime & {
   withCheckpoint<T>(
@@ -119,7 +121,7 @@ export function assertOperatorRecovery(db: Database.Database, run: string | null
   if (missing) throw new Error('operator-enrollment-required-for-recovery');
 }
 export function enrolledOperator(
-  e: Envelope,
+  e: Pick<Draft, 'objectId'>,
   cli: ManagedCliConfig,
   profiles: ManagedProfileSetConfig,
 ) {
@@ -128,6 +130,36 @@ export function enrolledOperator(
   );
   if (owners.length !== 1 || !owners[0]) throw new Error('operator-binding-required');
   return owners[0];
+}
+
+export function confinedCatalog(e: Draft, profiles: ManagedProfileSetConfig) {
+  const target = profiles.profiles[0]?.profileSnapshot.route.executionTarget;
+  const catalog = Object.fromEntries(
+    Object.entries(e.recipes).map(([k, v]) => [k, validateManagedRequest(v)]),
+  );
+  if (!Object.keys(catalog).length || Object.keys(catalog).length > 16)
+    throw new Error('invalid-operator-catalog');
+  for (const r of Object.values(catalog)) {
+    profileSetRequestPolicy(profiles)(r);
+    const scope = r.effectiveGrant.scope;
+    if (
+      r.route.executionTarget !== target ||
+      r.route.runtime !== 'codex' ||
+      r.outputs.source.mode !== 'none' ||
+      r.outputs.artifacts.mode !== 'required' ||
+      canonical(r.outputs.artifacts.requiredPaths) !== canonical(['report.md']) ||
+      r.inputArtifacts.length ||
+      scope.repositories.length !== 1 ||
+      scope.repositories[0]?.access !== 'read' ||
+      scope.repositories[0].baseRevision !== e.source.commit ||
+      scope.network.destinations.length ||
+      scope.identityBindings.length ||
+      scope.allowedEffects.some((x) => !['artifact.write', 'repository.read'].includes(x))
+    )
+      throw new Error('operator-recipe-not-confined');
+  }
+  if (e.source.commit !== profiles.mirror.baseRevision) throw new Error('operator-source-mismatch');
+  return catalog;
 }
 
 export function composeOperatorEnrollment(
@@ -161,31 +193,7 @@ export function composeOperatorEnrollment(
     path.join(path.dirname(path.resolve(deps.databasePath)), 'managed', 'checkpoints'),
     runtime,
   );
-  const catalog = Object.fromEntries(
-    Object.entries(e.recipes).map(([k, v]) => [k, validateManagedRequest(v)]),
-  );
-  if (!Object.keys(catalog).length || Object.keys(catalog).length > 16)
-    throw new Error('invalid-operator-catalog');
-  for (const r of Object.values(catalog)) {
-    profileSetRequestPolicy(profiles)(r);
-    const scope = r.effectiveGrant.scope;
-    if (
-      r.route.executionTarget !== target ||
-      r.route.runtime !== 'codex' ||
-      r.outputs.source.mode !== 'none' ||
-      r.outputs.artifacts.mode !== 'required' ||
-      canonical(r.outputs.artifacts.requiredPaths) !== canonical(['report.md']) ||
-      r.inputArtifacts.length ||
-      scope.repositories.length !== 1 ||
-      scope.repositories[0]?.access !== 'read' ||
-      scope.repositories[0].baseRevision !== e.source.commit ||
-      scope.network.destinations.length ||
-      scope.identityBindings.length ||
-      scope.allowedEffects.some((x) => !['artifact.write', 'repository.read'].includes(x))
-    )
-      throw new Error('operator-recipe-not-confined');
-  }
-  if (e.source.commit !== profiles.mirror.baseRevision) throw new Error('operator-source-mismatch');
+  const catalog = confinedCatalog(e, profiles);
   if (e.authorities.basePolicyDigest !== operatorBasePolicy(e, profiles, deps.isolatedArtifacts))
     throw new Error('operator-policy-mismatch');
   const policyDigest = combinedPolicyDigest(e.authorities);
