@@ -3,7 +3,11 @@ import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { offlineController } from '../test-utils/offline-controller.js';
 import { operatorSeedFixture } from '../test-utils/operator-seed-fixture.js';
-import { composeOperatorEnrollment, parseOperatorEnrollment } from './operator-enrollment.js';
+import {
+  composeOperatorEnrollment,
+  operatorBasePolicy,
+  parseOperatorEnrollment,
+} from './operator-enrollment.js';
 import { registerOperatorRuns } from './operator-runs.js';
 
 it('commissions a confined v2 inspection only through the bound owner and preserves its single kickoff across restart', async () => {
@@ -29,10 +33,18 @@ it('commissions a confined v2 inspection only through the bound owner and preser
     accountId: 'anth-pro',
     model: 'claude-sonnet-5-5',
   };
-  const raw = { ...draft, version: 2, main };
+  const raw = {
+    ...draft,
+    version: 2,
+    main,
+    expectedRun: run,
+    expectedBasePolicy: operatorBasePolicy({ ...draft, main }, profiles, true),
+  };
   const e = parseOperatorEnrollment(JSON.stringify(raw));
   if (e?.version !== 2) throw new Error('expected owner task');
   for (const invalid of [
+    { ...raw, expectedRun: undefined },
+    { ...raw, expectedBasePolicy: undefined },
     { ...raw, checks, review, authorities },
     { ...raw, version: 1 },
     { ...raw, slot: 'accept' },
@@ -64,6 +76,18 @@ it('commissions a confined v2 inspection only through the bound owner and preser
   expect(() =>
     composeOperatorEnrollment({ ...e, budget: { ...e.budget, requests: 19 } }, deps),
   ).toThrow('inspection-run-scope');
+  expect(() =>
+    composeOperatorEnrollment(e, {
+      ...deps,
+      profiles: { ...profiles, image: profiles.image.replace(/.$/, 'd') },
+    }),
+  ).toThrow('inspection-preflight-binding-mismatch');
+  expect(() =>
+    composeOperatorEnrollment(e, {
+      ...deps,
+      cli: { ...cli, bindings: [{ ...operator, audience: 'another-api' }] },
+    }),
+  ).toThrow('inspection-preflight-binding-mismatch');
   const build = () => {
     const config = composeOperatorEnrollment(e, deps);
     const app = Fastify();
@@ -119,7 +143,18 @@ it('commissions a confined v2 inspection only through the bound owner and preser
     await a.app.close();
     await rm(e.source.bundlePath);
     await expect(
-      composeOperatorEnrollment({ ...e, mission: e.mission + ' changed' }, deps).prepare!(),
+      composeOperatorEnrollment(
+        {
+          ...e,
+          mission: e.mission + ' changed',
+          expectedBasePolicy: operatorBasePolicy(
+            { ...e, mission: e.mission + ' changed' },
+            profiles,
+            true,
+          ),
+        },
+        deps,
+      ).prepare!(),
     ).rejects.toThrow('enrollment-changed');
     a = build();
     await a.app.ready();

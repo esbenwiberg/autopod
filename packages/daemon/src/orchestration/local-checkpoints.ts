@@ -3,6 +3,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
+import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import type { ProfileLlmClient } from '../providers/llm-client.js';
 import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
@@ -161,7 +162,11 @@ export class LocalCheckpointHost {
       this.scratch,
       subject,
       bundle,
-      async (mirror) => (verify ? verify(subject, mirror) : undefined),
+      async (mirror) => {
+        if (verify) return verify(subject, mirror);
+        await sandboxTreeEntries(mirror, subject.commit);
+        return undefined;
+      },
     );
     if (verify) {
       if (!verification) throw new Error('checkpoint-verification-required');

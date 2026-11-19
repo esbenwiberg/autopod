@@ -85,6 +85,8 @@ export const operatorDraftSchema = schema.omit({ authorities: true, checks: true
 const ownerInspectionSchema = operatorDraftSchema.extend({
   version: z.literal(2),
   slot: z.literal('inspection'),
+  expectedRun: z.string().regex(/^[a-f0-9]{64}$/),
+  expectedBasePolicy: hash,
 });
 const enrollmentSchema = z.discriminatedUnion('version', [schema, ownerInspectionSchema]);
 type Draft = Omit<z.infer<typeof operatorDraftSchema>, 'version'>;
@@ -263,6 +265,8 @@ export function composeOperatorEnrollment(
     throw new Error('inspection-private-storage-required');
   const catalog = e.version === 2 ? inspectionPolicy(e, profiles, 0) : confinedCatalog(e, profiles);
   const base = operatorBasePolicy(e, profiles, deps.isolatedArtifacts);
+  if (e.version === 2 && (run !== e.expectedRun || base !== e.expectedBasePolicy))
+    throw new Error('inspection-preflight-binding-mismatch');
   if (e.version === 1 && e.authorities.basePolicyDigest !== base)
     throw new Error('operator-policy-mismatch');
   const policyDigest =

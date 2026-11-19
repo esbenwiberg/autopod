@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import { withVerifiedCheckpointMirror } from '../orchestration/local-checkpoints.js';
 import {
   allocateSandboxCheckpoint,
+  sandboxTreeEntries,
   VERIFY_SANDBOX_PROJECTION,
   withSandboxProjection,
 } from './sandbox-checkpoint.js';
@@ -60,6 +62,23 @@ it('projects only pinned regular blobs; local changes and unsupported links fail
   );
   expect(await readdir(s.root)).toEqual(['repo']);
   expect(use).not.toHaveBeenCalled();
+});
+it('rejects a valid Git bundle with a tracked executable before materializing a sandbox workspace', async () => {
+  const s = await seed();
+  s.git('update-index', '--chmod=+x', 'MAPLE/input.txt');
+  s.git('commit', '-qm', 'mode');
+  const file = path.join(s.root, 'exec.bundle');
+  s.git('bundle', 'create', file, 'HEAD');
+  const subject = {
+    commit: s.git('rev-parse', 'HEAD'),
+    tree: s.git('rev-parse', 'HEAD^{tree}'),
+    predecessor: s.commit,
+  };
+  await expect(
+    withVerifiedCheckpointMirror(s.root, subject, await readFile(file), (mirror) =>
+      sandboxTreeEntries(mirror, subject.commit),
+    ),
+  ).rejects.toThrow('sandbox-checkpoint-input');
 });
 it('rejects an unproven upload after recording the exact allocated identity', async () => {
   const s = await seed(),

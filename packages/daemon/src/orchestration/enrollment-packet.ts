@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sha256 } from '../managed/canonical.js';
 import { parseManagedCliConfig } from '../managed/cli-config.js';
 import { parseManagedProfileSetConfig } from '../managed/profile-set-config.js';
+import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import {
   combinedPolicyDigest,
@@ -41,7 +42,9 @@ export async function checkInspectionDraft(
     sha256(bundle) !== draft.source.bundleDigest
   )
     throw new Error('inspection-bundle-mismatch');
-  await withVerifiedCheckpointMirror(tmpdir(), draft.source, bundle, async () => {});
+  await withVerifiedCheckpointMirror(tmpdir(), draft.source, bundle, (mirror) =>
+    sandboxTreeEntries(mirror, draft.source.commit),
+  );
   const run = operatorRunId(enrolledOperator(draft, cli, profiles), draft.slot);
   return {
     draft,

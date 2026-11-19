@@ -5,43 +5,53 @@ import path from 'node:path';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { managedGit } from './source-git.js';
 
-// Restricted report input only. Don't upload .git, unrelated history, checkout
-// extras, links or dependencies. Compare the copied bytes with pinned Git blobs.
+// Validate the committed tree without checking out files. Shared by offline
+// preflight, daemon import and the final projection from the worker workspace.
+export async function sandboxTreeEntries(repo: string, commit: string) {
+  if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('sandbox-checkpoint-commit');
+  const listing = await managedGit(repo, ['ls-tree', '-r', '-l', '-z', commit]);
+  const entries = listing.split('\0').filter(Boolean);
+  if (!entries.length || entries.length > 64) throw new Error('sandbox-checkpoint-size');
+  let total = 0;
+  return entries.map((entry) => {
+    const match =
+      /^100644 blob ([0-9a-f]{40}) +([0-9]+)\t([A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*)$/.exec(
+        entry,
+      );
+    if (
+      !match ||
+      match[0] !== entry ||
+      match[3]!.length > 160 ||
+      match[3]!.split('/').includes('node_modules')
+    )
+      throw new Error('sandbox-checkpoint-input');
+    const size = Number(match[2]);
+    total += size;
+    if (!Number.isSafeInteger(total) || total > 1024 * 1024)
+      throw new Error('sandbox-checkpoint-size');
+    return { name: match[3]!, oid: match[1]!, size };
+  });
+}
+
+// Do not upload checkout extras; verify the actual worker bytes against the tree.
 export async function withSandboxProjection<T>(
   workspace: string,
   commit: string,
   use: (dir: string, manifest: string) => Promise<T>,
 ) {
-  if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('sandbox-checkpoint-commit');
   const root = await realpath(workspace);
-  const listing = await managedGit(root, ['ls-tree', '-r', '-z', commit]);
-  const entries = listing.split('\0').filter(Boolean);
-  if (!entries.length || entries.length > 64) throw new Error('sandbox-checkpoint-size');
+  const entries = await sandboxTreeEntries(root, commit);
   const dir = await mkdtemp(path.join(path.dirname(root), '.sandbox-projection-'));
   try {
     const manifest: Record<string, string> = Object.create(null);
-    let total = 0;
-    for (const entry of entries) {
-      const match =
-        /^100644 blob ([0-9a-f]{40})\t([A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*)$/.exec(
-          entry,
-        );
-      if (
-        !match ||
-        match[0] !== entry ||
-        match[2]!.length > 160 ||
-        match[2]!.split('/').includes('node_modules')
-      )
-        throw new Error('sandbox-checkpoint-input');
-      const name = match[2]!,
-        file = path.join(root, name);
+    for (const { name, oid, size } of entries) {
+      const file = path.join(root, name);
       if ((await realpath(file)) !== file) throw new Error('sandbox-checkpoint-link');
       const fd = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       let bytes: Buffer;
       try {
         const s = await fd.stat();
-        total += s.size;
-        if (!s.isFile() || total > 1024 * 1024) throw new Error('sandbox-checkpoint-size');
+        if (!s.isFile() || s.size !== size) throw new Error('sandbox-checkpoint-size');
         bytes = Buffer.alloc(s.size);
         let pos = 0;
         while (pos < bytes.length) {
@@ -56,7 +66,7 @@ export async function withSandboxProjection<T>(
         .update('blob ' + bytes.length + '\0')
         .update(bytes)
         .digest('hex');
-      if (blob !== match[1]) throw new Error('sandbox-checkpoint-content');
+      if (blob !== oid) throw new Error('sandbox-checkpoint-content');
       await mkdir(path.dirname(path.join(dir, name)), { recursive: true });
       await writeFile(path.join(dir, name), bytes, { flag: 'wx', mode: 0o600 });
       manifest[name] = createHash('sha256').update(bytes).digest('hex');
