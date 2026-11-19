@@ -68,7 +68,14 @@ jobs:
       - name: Full test suite (no cached test results)
         id: full-tests
         # TURBO_FORCE also rebuilds dependencies: deliberate nightly freshness.
-        run: TURBO_FORCE=true pnpm test 2>&1 | tee .ci-results/tests.log
+        # The memory-evidence integration test needs a real, measurable cgroup
+        # limit. Run the same full suite as the runner user in a disposable unit;
+        # do not mock process.constrainedMemory() or skip the test on large hosts.
+        run: |
+          sudo systemd-run --quiet --wait --pipe --collect --service-type=exec \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
+            --setenv="HOME=$HOME" --setenv="PATH=$PATH" --setenv=CI=true --setenv=SKIP_DB_TESTS=0 \
+            --property=MemoryMax=95% /usr/bin/env TURBO_FORCE=true pnpm test 2>&1 | tee .ci-results/tests.log
 
       - name: Dependency audit
         if: ${{ !cancelled() }}

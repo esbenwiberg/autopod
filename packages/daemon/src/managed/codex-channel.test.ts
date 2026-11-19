@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -61,6 +61,82 @@ it('rejects an incompatible immutable-image Codex CLI before installing helpers'
   ).rejects.toThrow('cli-incompatible');
   expect(exec).toHaveBeenCalledTimes(1);
   expect(exec.mock.calls[0]).toEqual(['ref', ['codex', 'exec', '--help'], { user: 'root' }]);
+});
+
+it.each([
+  'bound',
+  'bare-204',
+  'other-launch',
+  'stale-proof',
+  'legacy',
+])('queued channel proof: %s', async (scenario) => {
+  const { exec: control, channel } = setup();
+  const root = mkdtempSync(join(tmpdir(), 'managed-channel-proof-'));
+  const key = join(root, 'channel-health.key');
+  // Exercise both halves of the protocol with an in-memory transport. No listener,
+  // worker or provider starts. The only data crossing the mock connection is HTTP.
+  const helper = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const peer = `import http.client,os,re,runpy,sys
+from pathlib import Path
+from unittest.mock import Mock,patch
+scenario=${JSON.stringify(scenario)};root=Path(sys.argv[1]);serve=runpy.run_path(sys.argv[2])['serve']
+if scenario!='legacy':
+ with patch.dict(serve.__globals__,ThreadingHTTPServer=Mock()) as namespace:
+  server=namespace['ThreadingHTTPServer'];server.return_value.server_port=4187
+  serve(root,4187,0)
+  handler=server.call_args.args[1]
+ if scenario=='other-launch': (root/'channel-health.key').write_bytes(os.urandom(32))
+peer=Mock();response=peer.getresponse.return_value;response.status=204;response.getheader.return_value=''
+def request(method,path,headers):
+ assert method=='GET' and path=='/health' and set(headers)=={'X-Dispatcher-Challenge'}
+ assert re.fullmatch('[0-9a-f]{64}',headers['X-Dispatcher-Challenge'])
+ if scenario not in ('bare-204','legacy'):
+  health=Mock(path=path,headers=headers if scenario!='stale-proof' else {'X-Dispatcher-Challenge':'0'*64})
+  handler.do_GET(health);health.send_response.assert_called_once_with(204)
+  proof=dict([health.send_header.call_args.args]);response.getheader.side_effect=proof.get
+peer.request.side_effect=request
+http.client.HTTPConnection=Mock(return_value=peer)
+`;
+  let result: ReturnType<typeof spawnSync> | undefined;
+  control.mockImplementation(async (_ref, argv) => {
+    const run = spawnSync('python3', ['-I', '-c', peer + argv[3], root, helper], {
+      encoding: 'utf8',
+    });
+    result = run;
+    return { exitCode: run.status ?? -1, stdout: run.stdout, stderr: run.stderr };
+  });
+  const invoke = vi.fn();
+  try {
+    const attachment = channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'original-sandbox',
+      stateRoot: '/run/dispatcher-managed-one',
+      existingOnly: true,
+      invoke,
+    });
+    if (scenario === 'bound') {
+      const close = await attachment;
+      control.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+      close();
+    } else {
+      await expect(attachment).rejects.toThrow('managed-codex-channel-not-ready');
+    }
+    expect(control.mock.calls[0]).toEqual([
+      'original-sandbox',
+      ['python3', '-I', '-c', expect.any(String), '/run/dispatcher-managed-one'],
+      { user: 'root' },
+    ]);
+    expect(control).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: scenario === 'bound' ? 0 : 1,
+      stdout: scenario === 'bound' ? 'verified\n' : '',
+      stderr: '',
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    if (scenario === 'legacy') expect(existsSync(key)).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 it('admits a longer source-producing agent only through its explicit reviewed mode', async () => {

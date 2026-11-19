@@ -1,4 +1,5 @@
 import type { PodQualityScore } from '@autopod/shared';
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
@@ -378,16 +379,28 @@ describe('QualityScoreRepository.getQualityAnalytics', () => {
   });
 
   it('window boundary — pod at exact edge is included, pod one second before is excluded', () => {
-    const edgeAt = (db.prepare(`SELECT datetime('now', '-7 days') AS t`).get() as { t: string }).t;
-    const justBefore = (
-      db.prepare(`SELECT datetime(?, '-1 second') AS t`).get(edgeAt) as { t: string }
-    ).t;
-    repo.insert(baseScore({ podId: 'at-edge', completedAt: edgeAt }));
-    repo.insert(baseScore({ podId: 'before-edge', completedAt: justBefore }));
-    const result = repo.getQualityAnalytics(7);
-    const ids = result.scores.map((s) => s.podId);
-    expect(ids).toContain('at-edge');
-    expect(ids).not.toContain('before-edge');
+    // Separate SQL statements do not share SQLite's 'now': a second can tick
+    // between the two inserts and the query. Freeze only the clock on this DB.
+    const clock = new Database(':memory:');
+    try {
+      const relative = clock.prepare('SELECT datetime(?, ?)').pluck();
+      db.function('datetime', (base: string, offset: string) =>
+        relative.get(base === 'now' ? '2026-01-15 12:00:00' : base, offset),
+      );
+      const edgeAt = (db.prepare(`SELECT datetime('now', '-7 days') AS t`).get() as { t: string })
+        .t;
+      const justBefore = (
+        db.prepare(`SELECT datetime(?, '-1 second') AS t`).get(edgeAt) as { t: string }
+      ).t;
+      repo.insert(baseScore({ podId: 'at-edge', completedAt: edgeAt }));
+      repo.insert(baseScore({ podId: 'before-edge', completedAt: justBefore }));
+      const result = repo.getQualityAnalytics(7);
+      const ids = result.scores.map((s) => s.podId);
+      expect(ids).toContain('at-edge');
+      expect(ids).not.toContain('before-edge');
+    } finally {
+      clock.close();
+    }
   });
 
   it('reason counters de-duplicate — pod with multiple signals contributes 1 per reason', () => {

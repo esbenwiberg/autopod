@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -18,6 +20,11 @@ import {
   type ManagedRuntimeCompositionConfig,
   type ManagedWorkerProviderChannel,
 } from './runtime-composition.js';
+
+vi.mock('node:fs/promises', async (original) => {
+  const fs = await original<typeof import('node:fs/promises')>();
+  return { ...fs, writeFile: vi.fn(fs.writeFile) };
+});
 
 let f: ManagedFixture;
 let root: string;
@@ -168,6 +175,285 @@ function setup(
     },
   };
 }
+it('partitions restart attachment, observation and output collection by durable owner, not profile or runtime ID', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  const launch = async (owner: string) => {
+    const c = composeManagedRuntime({
+      ...x.config,
+      enabled: true,
+      ownsInstallation: (id) => id === owner,
+    });
+    instances.push(c);
+    try {
+      return await c.service.start(owner, x.request);
+    } finally {
+      c.close();
+    }
+  };
+  const a = await launch('fleet');
+  const b = await launch('worker');
+  f.restart();
+  // Same fixture backend ref and profile; only the durable owner distinguishes the rows.
+  for (const [owner, mine, other] of [
+    ['fleet', a, b],
+    ['worker', b, a],
+  ] as const) {
+    const lane = composeManagedRuntime({
+      ...x.config,
+      db: f.db,
+      enabled: true,
+      ownsInstallation: (id) => id === owner,
+    });
+    instances.push(lane);
+    x.channel.attach.mockClear();
+    await lane.resume();
+    expect(x.channel.attach).toHaveBeenCalledTimes(1);
+    expect(x.channel.attach.mock.calls[0]![0].podId).toBe(mine.podId);
+    await expect(lane.service.start(other.dispatcherInstallationId, x.request)).rejects.toThrow(
+      'not-found',
+    );
+    const observe = vi
+      .spyOn(lane.runtime, 'observe')
+      .mockResolvedValue({ state: 'running', consumedTokens: 7 });
+    await lane.service.enforceExpiry();
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(lane.service.row(owner, mine.podId).consumed_tokens).toBe(7);
+    f.db.prepare("UPDATE managed_pods SET observed_exit=1,state='validating'").run();
+    const finish = vi.spyOn(lane.pipeline, 'finish').mockResolvedValue(undefined);
+    await lane.pipeline.tick();
+    expect(finish.mock.calls).toEqual([[owner, mine.podId]]);
+    f.db.prepare("UPDATE managed_pods SET observed_exit=0,state='running',consumed_tokens=0").run();
+    lane.close();
+  }
+  expect(x.ensure).toHaveBeenCalledTimes(2);
+});
+it.each([
+  'disk-full',
+  'canceled',
+] as const)('keeps a %s local checkpoint projection on the unallocated side of the fence', async (failure) => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  x.config.sandboxCheckpoints = true;
+  const c = x.create(true);
+  const repo = x.request.effectiveGrant.scope.repositories[0]!;
+  const cancel = () => {
+    f.db.prepare('UPDATE managed_pods SET revoked=1,stop_requested=1').run();
+  };
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  vi.mocked(writeFile).mockImplementation(async (...args) => {
+    if (String(args[0]).includes('.sandbox-projection-')) {
+      vi.mocked(writeFile).mockReset();
+      if (failure === 'disk-full') throw new Error('ENOSPC');
+      cancel();
+    }
+    return actual.writeFile(...args);
+  });
+  await expect(
+    c.withCheckpoint(
+      { run: 'fixture', repository: repo.enrollmentId, commit: repo.baseRevision },
+      x.mirror,
+      (s) => s.start('native.fixture', x.request),
+    ),
+  ).rejects.toThrow(failure === 'disk-full' ? 'ENOSPC' : 'grant-inactive');
+  const row = c.service.lookup('native.fixture', x.request.startKey)!;
+  expect(row).toMatchObject({ allocation_attempted: 0, runtime_ref: null });
+  expect(x.ensure).not.toHaveBeenCalled();
+  cancel();
+  await c.service.enforceExpiry();
+  expect(c.service.row('native.fixture', row.pod_id)).toMatchObject({
+    state: 'killed',
+    observed_exit: 1,
+  });
+  expect(await c.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(true);
+});
+
+it('does not retry or infer exit after a sandbox allocation loses its response', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  x.config.sandboxCheckpoints = true;
+  const c = x.create(true);
+  const repo = x.request.effectiveGrant.scope.repositories[0]!;
+  x.ensure.mockRejectedValue(new Error('response lost'));
+  await expect(
+    c.withCheckpoint(
+      { run: 'fixture', repository: repo.enrollmentId, commit: repo.baseRevision },
+      x.mirror,
+      (s) => s.start('native.fixture', x.request),
+    ),
+  ).rejects.toThrow('response lost');
+  c.close();
+  f.restart();
+  const reopened = x.create(true);
+  await expect(reopened.service.reconcileStart('native.fixture', x.request)).rejects.toThrow(
+    'managed-sandbox-create-uncertain',
+  );
+  f.db.prepare('UPDATE managed_pods SET revoked=1,stop_requested=1').run();
+  await reopened.service.enforceExpiry();
+  const row = reopened.service.lookup('native.fixture', x.request.startKey)!;
+  expect(row).toMatchObject({ allocation_attempted: 1, runtime_ref: null, observed_exit: 0 });
+  expect(await reopened.runtime.cleanupUnallocated?.(row.pod_id, x.request)).toBe(false);
+  expect(x.ensure).toHaveBeenCalledTimes(1);
+  expect(x.channel.attach).not.toHaveBeenCalled();
+});
+
+it.each([
+  'resume',
+  'continuation',
+] as const)('recovers an already verified worker after a crash before the running transaction (%s)', async (recovery) => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  const scope = x.request.effectiveGrant.scope.repositories[0]!;
+  x.config.sandboxCheckpoints = true;
+  x.config.ownsInstallation = (i) => i === 'native.fixture';
+  // Ordinary configured mirror is deliberately unavailable. Only checkpoint custody works.
+  x.config.mirrors = [{ ...x.config.mirrors[0]!, path: path.join(root, 'missing') }];
+  const c = x.create(true);
+  const order: string[] = [];
+  let verified: Record<string, unknown> | undefined;
+  let proof = '';
+  x.ensure.mockImplementation(async (cfg) => {
+    expect(c.service.row('native.fixture', cfg.podId).allocation_attempted).toBe(1);
+    const src = cfg.volumes!.find((v) => v.container === '/repositories/' + scope.enrollmentId)!;
+    expect(src.readOnly).toBe(true);
+    expect(readFileSync(path.join(src.host, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
+    expect(() => readFileSync(path.join(src.host, '.git', 'HEAD'))).toThrow();
+    order.push('allocated');
+    cfg.onCreated?.('sandbox-1');
+    return 'sandbox-1';
+  });
+  x.exec.mockImplementation(async (ref, cmd, opts) => {
+    if (cmd[3]?.endsWith('/launch.json')) verified = JSON.parse(cmd[4]!).verifiedCheckpoint;
+    if (cmd.includes('--detach')) order.push('started');
+    if (cmd[3]?.includes("root/'launch.lock'")) {
+      expect(ref).toBe('sandbox-1');
+      expect(opts).toEqual({ user: 'root' });
+      return { exitCode: 0, stdout: proof, stderr: '' };
+    }
+    if (cmd[2]?.includes('sandbox checkpoint verification failed')) {
+      order.push('verified');
+      return {
+        exitCode: 0,
+        stdout: createHash('sha256').update(cmd[4]!).digest('hex'),
+        stderr: '',
+      };
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  await expect(
+    c.withCheckpoint(
+      { run: 'fixture', repository: scope.enrollmentId, commit: scope.baseRevision },
+      x.mirror,
+      (service) => service.start('native.fixture', x.request, 'after-agent-start'),
+    ),
+  ).rejects.toThrow('injected-after-agent-start');
+  const row = c.service.lookup('native.fixture', x.request.startKey)!;
+  expect(order).toEqual(['allocated', 'verified', 'started']);
+  expect(row).toMatchObject({ runtime_ref: 'sandbox-1', state: 'queued' });
+  expect(verified).toEqual({
+    repository: scope.enrollmentId,
+    commit: scope.baseRevision,
+    podId: row.pod_id,
+    runtimeRef: 'sandbox-1',
+    specDigest: x.request.executionSpecDigest,
+  });
+  c.close();
+  f.restart();
+  const reopened = x.create(true);
+  x.channel.attach.mockClear();
+  const execution = {
+    state: 'running',
+    observedExit: false,
+    specDigest: row.execution_spec_digest,
+  };
+  for (const bad of [
+    null,
+    { execution },
+    { verified, execution: { ...execution, state: 'claimed' } },
+    { verified, execution: { ...execution, observedExit: true } },
+    { verified, execution: { ...execution, specDigest: 'other' } },
+    { verified: { ...verified, runtimeRef: 'other' }, execution },
+  ]) {
+    proof = JSON.stringify(bad);
+    await reopened.resume();
+    expect(x.channel.attach).not.toHaveBeenCalled();
+    expect(reopened.service.row('native.fixture', row.pod_id).state).toBe('queued');
+  }
+  await expect(reopened.service.reconcileStart('native.fixture', x.request)).rejects.toThrow(
+    'managed-sandbox-create-uncertain',
+  );
+  await expect(reopened.service.start('native.fixture', x.request)).rejects.toThrow(
+    'managed-sandbox-create-uncertain',
+  );
+  proof = JSON.stringify({ verified, execution });
+  if (recovery === 'resume') await reopened.resume();
+  else await reopened.service.start('native.fixture', x.request);
+  await reopened.resume();
+  expect((await reopened.service.reconcileStart('native.fixture', x.request))?.podId).toBe(
+    row.pod_id,
+  );
+  expect(reopened.service.row('native.fixture', row.pod_id).state).toBe('running');
+  expect(x.channel.attach).toHaveBeenCalledTimes(1);
+  expect(x.attached()).toMatchObject({
+    existingOnly: true,
+    podId: row.pod_id,
+    runtimeRef: 'sandbox-1',
+  });
+  expect(order).toEqual(['allocated', 'verified', 'started']);
+});
+it('keeps a failed queued reattachment isolated and recovers the next bound worker', async () => {
+  const x = setup('sandbox', 'chatgpt', 'request-time');
+  x.config.sandboxCheckpoints = true;
+  const c = x.create(true);
+  const repo = x.request.effectiveGrant.scope.repositories[0]!;
+  const specDigest = x.request.executionSpecDigest;
+  const proofs = new Map<string, string>();
+  const seed = async (owner: string, runtimeRef: string) => {
+    await expect(c.service.start(owner, x.request, 'after-reservation')).rejects.toThrow(
+      'injected-after-reservation',
+    );
+    const podId = c.service.lookup(owner, x.request.startKey)!.pod_id;
+    f.db
+      .prepare('UPDATE managed_pods SET runtime_ref=?, allocation_attempted=1 WHERE pod_id=?')
+      .run(runtimeRef, podId);
+    proofs.set(
+      runtimeRef,
+      JSON.stringify({
+        verified: {
+          repository: repo.enrollmentId,
+          commit: repo.baseRevision,
+          podId,
+          runtimeRef,
+          specDigest,
+        },
+        execution: { state: 'running', observedExit: false, specDigest },
+      }),
+    );
+    return podId;
+  };
+  const first = await seed('native.first', 'sandbox-1');
+  const next = await seed('native.next', 'sandbox-2');
+  f.db
+    .prepare('INSERT INTO managed_results(pod_id, limitations_json) VALUES (?, ?)')
+    .run(first, JSON.stringify(['managed-launch-unconfirmed']));
+  x.exec.mockImplementation(async (ref) => ({ exitCode: 0, stdout: proofs.get(ref)!, stderr: '' }));
+  x.channel.attach.mockRejectedValueOnce(new Error('secret fixture channel output'));
+
+  await c.resume();
+
+  expect(
+    x.channel.attach.mock.calls.map(([{ podId, existingOnly }]) => [podId, existingOnly]),
+  ).toEqual([
+    [first, true],
+    [next, true],
+  ]);
+  expect(c.controls.observe('native.first', first, '0').result).toMatchObject({
+    state: 'queued',
+    limitations: ['managed-launch-unconfirmed', 'managed-checkpoint-reattach-failed'],
+  });
+  expect(c.controls.observe('native.next', next, '0').result).toMatchObject({
+    state: 'running',
+    limitations: [],
+  });
+  expect(x.ensure).not.toHaveBeenCalled();
+});
+
 it('defaults disabled without attaching channels or calling providers', async () => {
   const x = setup();
   const c = x.create();

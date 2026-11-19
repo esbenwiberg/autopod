@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
@@ -23,6 +24,8 @@ export interface ManagedWorkerProviderChannel {
     podId: string;
     runtimeRef: string;
     stateRoot: string;
+    /** Recover only the host side of an existing live channel; never install or spawn. */
+    existingOnly?: true;
     invoke: (
       key: string,
       prompt: string,
@@ -70,12 +73,15 @@ export interface ManagedRuntimeBinding {
 }
 export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsConfig, 'runtime'> {
   mirrors: readonly ManagedRepositoryMirror[];
+  sandboxCheckpoints?: boolean;
   bindings: readonly ManagedRuntimeBinding[];
 }
 
 /** Library composition only: never discovers credentials, changes native config or starts a listener.
  * The selected runtime's channel is a reviewed deployment input, not inferred from a profile name.
  */
+import { ownedRuntimeRow } from './owned-runtime-row.js';
+
 export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   const identities = config.bindings.map((binding) =>
     canonical({
@@ -95,16 +101,57 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   let closed = false;
   const channels = new Map<string, () => void>();
   const pending = new Map<string, Promise<void>>();
-  const rowFor = (ref: string) =>
-    config.db.prepare('SELECT * FROM managed_pods WHERE runtime_ref=?').get(ref) as
-      | ManagedPodRow
-      | undefined;
+  const rowFor = (ref: string) => ownedRuntimeRow(config.db, ref, config.ownsInstallation);
   const workspaces = new ManagedWorkspaces(
     config.db,
     path.join(config.stateRoot, 'workspaces'),
     config.mirrors,
   );
-  const attach = async (index: number, podId: string, ref: string, root: string) => {
+  // This scope exists only while the owner is restoring an admitted continuation.
+  // It is not a request field. Ordinary managed starts keep the enrolled mirror.
+  const checkpointScope = new AsyncLocalStorage<{
+    run: string;
+    repository: string;
+    commit: string;
+    mirror: string;
+  }>();
+  const prepareWorkspaces = async (podId: string, request: ManagedPodRequest) => {
+    const owner = config.db
+      .prepare('SELECT dispatcher_installation_id FROM managed_pods WHERE pod_id=?')
+      .pluck()
+      .get(podId);
+    const cp = checkpointScope.getStore();
+    if (typeof owner !== 'string') throw new Error('managed-workspace-owner-missing');
+    if (!owner.startsWith('native.') && !cp) return workspaces.prepare(podId, request);
+    const [repo] = request.effectiveGrant.scope.repositories;
+    const enrolled = config.mirrors.filter((m) => m.enrollmentId === repo?.enrollmentId);
+    if (
+      !cp ||
+      owner !== 'native.' + cp.run ||
+      (request.route.executionTarget !== 'local' &&
+        !(
+          request.route.executionTarget === 'sandbox' &&
+          config.sandboxCheckpoints &&
+          repo?.access === 'read'
+        )) ||
+      request.effectiveGrant.scope.repositories.length !== 1 ||
+      !repo ||
+      repo.baseRevision !== cp.commit ||
+      repo.enrollmentId !== cp.repository ||
+      enrolled.length !== 1 ||
+      enrolled[0]?.remote !== repo.remote
+    )
+      throw new Error('managed-checkpoint-workspace-binding');
+    const source = { ...enrolled[0]!, path: cp.mirror, baseRevision: cp.commit };
+    return new ManagedWorkspaces(config.db, workspaces.root, [source]).prepare(podId, request);
+  };
+  const attach = async (
+    index: number,
+    podId: string,
+    ref: string,
+    root: string,
+    existingOnly?: true,
+  ) => {
     if (closed) throw new Error('managed-composition-closed');
     if (channels.has(podId)) return;
     const existing = pending.get(podId);
@@ -125,6 +172,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         podId,
         runtimeRef: ref,
         stateRoot: root,
+        ...(existingOnly ? { existingOnly } : {}),
         invoke: (key, prompt, maximumTokens) =>
           gateways[index]!.invoke(
             row.dispatcher_installation_id,
@@ -206,10 +254,14 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         return true;
       },
       prepare: async (podId, request) => {
-        const volumes = await workspaces.prepare(podId, request);
+        const cp = checkpointScope.getStore();
+        const volumes = await prepareWorkspaces(podId, request);
         for (const input of components.service.inputs!.mounts(podId))
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
         return {
+          ...(cp && request.route.executionTarget === 'sandbox'
+            ? { sandboxCheckpoint: { repository: cp.repository, commit: cp.commit } }
+            : {}),
           ...(await binding.network(request, podId)),
           podId,
           image: binding.image,
@@ -223,7 +275,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
           workingDir: request.outputs.artifacts.mode === 'none' ? '/tmp' : '/output',
         };
       },
-      attachProviderChannel: (podId, ref, root) => attach(index, podId, ref, root),
+      attachProviderChannel: (podId, ref, root, _request, existingOnly) =>
+        attach(index, podId, ref, root, existingOnly),
       ...(binding.channel.send
         ? {
             sendMessage: (ref: string, message: FollowUpEnvelope, key: string) => {
@@ -319,6 +372,13 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     ...components,
     runtime,
     workspaces,
+    withCheckpoint<T>(
+      cp: { run: string; repository: string; commit: string },
+      mirror: string,
+      use: (service: typeof components.service) => Promise<T>,
+    ) {
+      return checkpointScope.run({ ...cp, mirror }, () => use(components.service));
+    },
     /** Reattach leases/channels to durable identities; never allocate or restart a worker. */
     async resume(profileIds?: ReadonlySet<string>) {
       if (!components.service.enabled) throw new Error('managed-lane-disabled');
@@ -327,9 +387,24 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         .prepare('SELECT * FROM managed_pods WHERE runtime_ref IS NOT NULL AND observed_exit=0')
         .all() as ManagedPodRow[];
       for (const row of rows) {
+        if (!components.service.ownsInstallation(row.dispatcher_installation_id)) continue;
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         if (profileIds && !profileIds.has(request.profileSnapshot.profileId)) continue;
+        if (config.sandboxCheckpoints && row.state === 'queued') {
+          // An ID alone cannot authorize replay or attachment.
+          try {
+            await components.service.restoreCheckpoint(row);
+          } catch {
+            // Leave the reservation untouched. Record the failure once, without channel output.
+            config.db
+              .prepare(`INSERT INTO managed_results(pod_id, limitations_json) VALUES (@podId, json_array(@code))
+                ON CONFLICT(pod_id) DO UPDATE SET limitations_json=json_insert(limitations_json, '$[#]', @code)
+                WHERE NOT EXISTS (SELECT 1 FROM json_each(limitations_json) WHERE value=@code)`)
+              .run({ podId: row.pod_id, code: 'managed-checkpoint-reattach-failed' });
+          }
+          continue;
+        }
         const index = bindings.findIndex(
           (binding) =>
             canonical(binding.route) === canonical(request.route) &&

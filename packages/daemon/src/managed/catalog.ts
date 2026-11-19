@@ -11,6 +11,7 @@ import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
 import type { ManagedGitHubReadConfig } from './github-read-gateway.js';
 import { type ManagedAdmission, REQUIRED_ENFORCEMENT } from './grants.js';
 import type { ManagedPodRow, ManagedRuntimePort } from './managed-service.js';
+import { ownedRuntimeRow } from './owned-runtime-row.js';
 import type { composeManagedProfileSet, ManagedProfileSetConfig } from './profile-set-config.js';
 import { composeManagedRuntime } from './runtime-composition.js';
 import type { ManagedRepositoryMirror } from './workspaces.js';
@@ -150,6 +151,7 @@ export function composeManagedCatalog(
     const network = dependencies.networkManager;
     const components = composeManagedRuntime({
       db,
+      ownsInstallation: dependencies.ownsInstallation,
       store: legacy.config.store,
       enabled: true,
       stateRoot,
@@ -216,9 +218,7 @@ export function composeManagedCatalog(
     return forRequest(request) ? composition(request).runtime : legacy.components.service.runtime;
   }
   function byRef(ref: string): ManagedRuntimePort {
-    const row = db.prepare('SELECT request_json FROM managed_pods WHERE runtime_ref=?').get(ref) as
-      | { request_json: string }
-      | undefined;
+    const row = ownedRuntimeRow(db, ref, dependencies.ownsInstallation);
     if (!row) throw new Error('managed-catalog-runtime-binding');
     return runtimeFor(JSON.parse(row.request_json) as ManagedPodRequest);
   }
@@ -249,6 +249,7 @@ export function composeManagedCatalog(
   };
   const componentsConfig: ManagedComponentsConfig = {
     db,
+    ownsInstallation: dependencies.ownsInstallation,
     store: legacy.config.store,
     enabled: true,
     stateRoot,
@@ -516,6 +517,7 @@ export function composeManagedCatalog(
         .prepare('SELECT * FROM managed_pods WHERE runtime_ref IS NOT NULL AND observed_exit=0')
         .all() as ManagedPodRow[];
       for (const row of rows) {
+        if (!components.service.ownsInstallation(row.dispatcher_installation_id)) continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
         if (forRequest(request))
           await composition(request).resume(new Set([request.profileSnapshot.profileId]));

@@ -63,7 +63,7 @@ Full validation runs Linux and macOS independently, in parallel:
 
 - **Linux:** frozen install, full-history secret scan, lint, build, typecheck,
   unfiltered `pnpm test` (all package and root script suites), and dependency audit.
-  `TURBO_FORCE=true` forces real test execution even on an unchanged tree; it also
+  The test step runs as the runner user inside a disposable systemd unit capped at 95% of host memory, so the Node memory-evidence fixture measures a real finite cgroup even on otherwise uncapped runners. `TURBO_FORCE=true` forces real test execution even on an unchanged tree; it also
   rebuilds task dependencies deliberately. SQLite is required. The audit remains
   advisory, preserving prior CI policy; its output and exit status are retained,
   but audit errors do not fail the job.

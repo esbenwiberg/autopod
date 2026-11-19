@@ -2,10 +2,8 @@
  * Route-level integration tests for GET /pods/analytics/reliability.
  * Uses app.inject() against a full Fastify server backed by an in-memory SQLite DB.
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import type { JwtPayload, ReadinessReview } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import Fastify, { type FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,17 +30,12 @@ import {
 import { createProfileStore } from '../../profiles/index.js';
 import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
-import { createPassingValidationResult, insertTestProfile } from '../../test-utils/mock-helpers.js';
+import {
+  createPassingValidationResult,
+  createTestDb,
+  insertTestProfile,
+} from '../../test-utils/mock-helpers.js';
 import { podRoutes } from './pods.js';
-
-// ── DB setup (mirrors routes-extended.test.ts pattern) ────────────────────────
-
-const migrationsDir = path.resolve(import.meta.dirname, '../../db/migrations');
-const MIGRATION_FILES = fs
-  .readdirSync(migrationsDir)
-  .filter((f) => f.endsWith('.sql'))
-  .sort()
-  .map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf-8'));
 
 const logger = pino({ level: 'silent' });
 
@@ -56,30 +49,6 @@ const testUser: JwtPayload = {
   exp: Math.floor(Date.now() / 1000) + 3600,
   iat: Math.floor(Date.now() / 1000),
 };
-
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-  for (const sql of MIGRATION_FILES) {
-    if (/--\s*@execute-whole/i.test(sql)) {
-      db.exec(sql);
-      continue;
-    }
-    const statements = sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const stmt of statements) {
-      try {
-        db.exec(`${stmt};`);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '';
-        if (!msg.includes('duplicate column name')) throw err;
-      }
-    }
-  }
-  return db;
-}
 
 describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;

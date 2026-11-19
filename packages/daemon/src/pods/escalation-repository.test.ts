@@ -1,43 +1,9 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createEscalationRepository, type EscalationRepository } from './escalation-repository.js';
-
-const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
-const MIGRATION_FILES = fs
-  .readdirSync(MIGRATIONS_DIR)
-  .filter((f) => f.endsWith('.sql'))
-  .sort();
-
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-  for (const file of MIGRATION_FILES) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
-    if (/--\s*@execute-whole/i.test(sql)) {
-      db.exec(sql);
-      continue;
-    }
-    const needsFkDisabled = /PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(sql);
-    if (needsFkDisabled) db.pragma('foreign_keys = OFF');
-    for (const stmt of sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean)) {
-      try {
-        db.exec(`${stmt};`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : '';
-        if (!msg.includes('duplicate column name')) throw err;
-      }
-    }
-    if (needsFkDisabled) db.pragma('foreign_keys = ON');
-  }
-  return db;
-}
 
 function seedSessionWithProfile(db: Database.Database): void {
   db.prepare(

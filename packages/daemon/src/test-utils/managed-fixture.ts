@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
@@ -29,7 +29,7 @@ export interface ManagedFixture {
   request: ManagedPodRequest;
   runtime: ManagedRuntimePort;
   admission: ManagedAdmission;
-  service(): ManagedPodService;
+  service(port?: ManagedRuntimePort): ManagedPodService;
   restart(): void;
   close(): void;
   launches(): number;
@@ -42,7 +42,7 @@ export function fixture(): ManagedFixture {
       'utf8',
     ),
   ).ManagedPodRequest;
-  const directory = mkdtempSync(path.join(tmpdir(), 'managed-start-'));
+  const directory = mkdtempSync(path.join(realpathSync(tmpdir()), 'managed-start-'));
   const database = path.join(directory, 'state.db');
   let db = createDatabase(database, logger);
   for (const migration of [
@@ -61,6 +61,7 @@ export function fixture(): ManagedFixture {
     '184_managed_provider_failure_diagnostics.sql',
     '185_managed_runtime_exit_code.sql',
     '206_managed_validations.sql',
+    '264_managed_allocation_attempted.sql',
   ]) {
     db.exec(readFileSync(new URL(`../db/migrations/${migration}`, import.meta.url), 'utf8'));
   }
@@ -101,8 +102,8 @@ export function fixture(): ManagedFixture {
     enforcement: REQUIRED_ENFORCEMENT,
     targets: ['local'] as const,
   };
-  const service = () => {
-    const value = new ManagedPodService(db, admission, runtime, () => now, true);
+  const service = (port = runtime) => {
+    const value = new ManagedPodService(db, admission, port, () => now, true);
     new ManagedArtifactPipeline(
       value,
       new ArtifactExports(db, new MemoryArtifactStore()),

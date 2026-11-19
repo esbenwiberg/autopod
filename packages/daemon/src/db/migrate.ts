@@ -52,6 +52,53 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     namesByVersion.set(version, file);
   }
 
+  // Release 255 is authoritative. The unpublished spike used 255–261 before
+  // the orchestration migrations were moved to 262–268. Never relabel its rows
+  // (especially unknown allocations) or run part of the new chain on mixed state.
+  if (namesByVersion.get(262) === '262_orchestration_continuations.sql' && currentVersion >= 255) {
+    const retired = db
+      .prepare('SELECT 1 FROM schema_version WHERE version BETWEEN 257 AND 261 LIMIT 1')
+      .get();
+    const table = (name: string) =>
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    // MAX(version) alone cannot prove that every preceding step was applied.
+    // schema_version.version is a primary key; the range count therefore proves
+    // the complete prefix up to this branch's last migration (or the current tip).
+    const expectedCount = Math.max(0, Math.min(currentVersion, 269) - 261);
+    const recordedCount = db
+      .prepare('SELECT count(*) FROM schema_version WHERE version BETWEEN 262 AND 269')
+      .pluck()
+      .get();
+    if (
+      retired ||
+      Boolean(table('fresh_handoff_preparations')) !== currentVersion >= 256 ||
+      Boolean(db.prepare('SELECT 1 FROM schema_version WHERE version=256').get()) !==
+        currentVersion >= 256 ||
+      !table('validation_phase_timings') ||
+      !db.prepare('SELECT 1 FROM schema_version WHERE version=255').get() ||
+      recordedCount !== expectedCount ||
+      Boolean(table('orchestration_runs')) !== expectedCount > 0
+    ) {
+      throw new Error(
+        'Unpublished or mixed orchestration migration lineage; database retained unchanged',
+      );
+    }
+  }
+
+  // No released database has pre-269 orchestration runs. Even an empty/missing
+  // custody table does not establish that such a run was nonoperator. Do not
+  // guess ownership when upgrading a populated unpublished intermediate build.
+  if (
+    namesByVersion.get(269) === '269_operator_run_ownership.sql' &&
+    currentVersion >= 262 &&
+    currentVersion < 269 &&
+    db.prepare('SELECT 1 FROM orchestration_runs LIMIT 1').get()
+  ) {
+    throw new Error(
+      'Unpublished run ownership requires explicit reconciliation; database retained unchanged',
+    );
+  }
+
   // Earlier unpublished reliability checkpoints used 151-163, which now overlap
   // the managed lane's authoritative 151-152. Never reinterpret or auto-renumber
   // a database from that lineage merely because MAX(version) looks recent.

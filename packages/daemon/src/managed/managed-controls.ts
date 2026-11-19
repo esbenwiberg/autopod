@@ -11,6 +11,7 @@ import {
 } from '@autopod/shared';
 import { canonical, digest } from './canonical.js';
 import { requireSubset } from './grants.js';
+import { signalLocalRun } from './local-run-signals.js';
 import type { ManagedPodRow, ManagedPodService } from './managed-service.js';
 
 export class ManagedControls {
@@ -43,6 +44,11 @@ export class ManagedControls {
           .run(canonical(event), sequence);
       })
       .immediate();
+    if (
+      key === 'runtime-stopped' ||
+      ['complete', 'validated', 'killed', 'failed', 'review_required'].includes(kind)
+    )
+      signalLocalRun(this.service.db, row.dispatcher_installation_id);
   }
   observe(installation: string, podId: string, cursor: string) {
     if (!/^(0|[1-9][0-9]{0,14})$/.test(cursor)) throw new Error('invalid-managed-cursor');

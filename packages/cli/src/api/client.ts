@@ -199,6 +199,17 @@ export interface TokenTelemetryRepairReport {
 }
 
 export class AutopodClient {
+  async operatorRun(op: 'start' | 'status' | 'cancel' | 'cleanup', slot: string): Promise<unknown> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(slot)) throw new Error('Invalid orchestration slot');
+    return this.request(
+      op === 'status' ? 'GET' : 'POST',
+      `/orchestration/runs/${slot}/${op}`,
+      undefined,
+      false,
+      'error',
+    );
+  }
+
   async listDeployments(): Promise<unknown[]> {
     return this.request('GET', '/deployments');
   }
@@ -1413,6 +1424,7 @@ export class AutopodClient {
     path: string,
     body?: unknown,
     retryAuth = true,
+    redirect: 'follow' | 'error' = 'follow',
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const binary = Buffer.isBuffer(body);
@@ -1430,6 +1442,7 @@ export class AutopodClient {
     try {
       response = await fetch(url, {
         method,
+        ...(redirect === 'error' && { redirect }),
         headers: {
           ...(body !== undefined ? { 'Content-Type': contentType } : {}),
           Authorization: `Bearer ${token}`,

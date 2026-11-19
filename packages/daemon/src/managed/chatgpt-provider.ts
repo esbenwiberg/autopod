@@ -321,7 +321,11 @@ export class ChatGptReportTransport implements BoundedProviderTransport {
       phase = 'wire-response';
       const value = codexSse(result);
       if (Buffer.byteLength(value) > this.maximumResponseBytes) throw new Error('output-size');
-      return { value, consumedTokens: result.usage.total_tokens };
+      return {
+        value,
+        consumedTokens: result.usage.total_tokens,
+        report: { text, usage: result.usage },
+      };
     } catch (error) {
       // Never publish payloads, tokens, provider messages or schema issue values.
       const abortReason = signal.aborted

@@ -4,6 +4,7 @@ import type { ArtifactOutput, FollowUpEnvelope, ManagedPodRequest, Route } from 
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { canonical } from './canonical.js';
 import type { ManagedRuntimePort } from './managed-service.js';
+import { allocateSandboxCheckpoint } from './sandbox-checkpoint.js';
 
 export interface ReviewedContainerBoundary {
   route: Route;
@@ -19,7 +20,10 @@ export interface ReviewedContainerBoundary {
   sourceWorkspace?(podId: string, repositoryId: string): string;
   cleanupNetwork?(podId: string): Promise<void>;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
-  prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
+  prepare(
+    podId: string,
+    request: ManagedPodRequest,
+  ): Promise<ContainerSpawnConfig & { sandboxCheckpoint?: { repository: string; commit: string } }>;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
   sendMessage?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   quotaReady(request: ManagedPodRequest): Promise<boolean>;
@@ -28,8 +32,24 @@ export interface ReviewedContainerBoundary {
     runtimeRef: string,
     stateRoot: string,
     request: ManagedPodRequest,
+    existingOnly?: true,
   ): Promise<void>;
 }
+
+// Only the root supervisor holds launch.lock while executing. A stale 'running'
+// file, a claimed launch, or a manager reporting a live container isn't sufficient.
+const READ_CHECKPOINT_EXECUTION = `import fcntl,json,os,pathlib,sys
+root=pathlib.Path(sys.argv[1])
+if root.resolve()!=root or root.stat().st_uid!=0 or root.stat().st_mode & 0o077: sys.exit(1)
+launch=json.loads((root/'launch.json').read_text());receipt=json.loads((root/'execution.json').read_text())
+if receipt.get('state')!='running' or type(receipt.get('pid')) is not int or receipt['pid']<=0: sys.exit(1)
+# Never take even a probe lock before the supervisor has published its running receipt.
+lock=(root/'launch.lock').open('r')
+try: fcntl.flock(lock,fcntl.LOCK_SH|fcntl.LOCK_NB)
+except BlockingIOError: pass
+else: sys.exit(1)
+os.kill(receipt['pid'],0)
+print(json.dumps({'verified':launch['verifiedCheckpoint'],'execution':receipt}))`;
 
 const ROOT_WRITE = `import os,sys
 p=sys.argv[1]; os.makedirs(os.path.dirname(p),mode=0o700,exist_ok=True)
@@ -149,6 +169,15 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     checkpoint: (ref: string) => void,
     fault?: string,
   ): Promise<{ runtimeRef: string }> {
+    return this.ensureAtBoundary(podId, request, checkpoint, fault, () => {});
+  }
+  async ensureAtBoundary(
+    podId: string,
+    request: ManagedPodRequest,
+    checkpoint: (ref: string) => void,
+    fault: string | undefined,
+    beforeAllocate: () => void,
+  ): Promise<{ runtimeRef: string }> {
     await this.preflight(request);
     const boundary = this.boundary(request);
     const config = await boundary.prepare(podId, request);
@@ -201,11 +230,16 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     }
     const allocate = boundary.manager.ensureManagedContainer;
     if (!allocate) throw new Error('managed-allocation-unavailable');
-    const runtimeRef = await allocate.call(boundary.manager, {
-      ...config,
+    const { sandboxCheckpoint, ...spawn } = config;
+    const launch = {
+      ...spawn,
       managedSpecDigest: request.executionSpecDigest,
       onCreated: checkpoint,
-    });
+    };
+    if (!sandboxCheckpoint) beforeAllocate();
+    const runtimeRef = sandboxCheckpoint
+      ? await allocateSandboxCheckpoint(boundary.manager, launch, sandboxCheckpoint, beforeAllocate)
+      : await allocate.call(boundary.manager, launch);
     checkpoint(runtimeRef);
     this.known.set(runtimeRef, boundary);
     if (fault === 'after-runtime-identity') throw new Error('injected-after-runtime-identity');
@@ -265,6 +299,17 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         ),
         maxDurationSeconds: grant.budget.maxDurationSeconds,
         specDigest: request.executionSpecDigest,
+        // Written in the supervisor's private root only after remote byte verification.
+        ...(sandboxCheckpoint
+          ? {
+              verifiedCheckpoint: {
+                ...sandboxCheckpoint,
+                podId,
+                runtimeRef,
+                specDigest: request.executionSpecDigest,
+              },
+            }
+          : {}),
         ...('maxTokens' in grant.budget
           ? { maxTokens: grant.budget.maxTokens }
           : { budgetMode: 'request-time' }),
@@ -290,6 +335,47 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     if (result.exitCode !== 0) throw new Error('managed-supervisor-start-failed');
     if (fault === 'after-agent-start') throw new Error('injected-after-agent-start');
     return { runtimeRef };
+  }
+  async restoreCheckpoint(podId: string, ref: string, specDigest: string): Promise<boolean> {
+    const record = this.resolve(ref);
+    const { boundary, request } = record;
+    const repos = request.effectiveGrant.scope.repositories;
+    if (
+      record.podId !== podId ||
+      request.executionSpecDigest !== specDigest ||
+      request.route.executionTarget !== 'sandbox' ||
+      repos.length !== 1 ||
+      repos[0]?.access !== 'read'
+    )
+      return false;
+    const root = `/run/dispatcher-${podId}`;
+    const proof = await boundary.manager
+      .execInContainer(ref, ['python3', '-I', '-c', READ_CHECKPOINT_EXECUTION, root], {
+        user: 'root',
+      })
+      .catch(() => null);
+    if (proof?.exitCode !== 0) return false;
+    try {
+      const { verified, execution } = JSON.parse(proof.stdout);
+      if (
+        execution.state !== 'running' ||
+        execution.observedExit !== false ||
+        execution.specDigest !== specDigest ||
+        canonical(verified) !==
+          canonical({
+            repository: repos[0].enrollmentId,
+            commit: repos[0].baseRevision,
+            podId,
+            runtimeRef: ref,
+            specDigest,
+          })
+      )
+        return false;
+    } catch {
+      return false;
+    }
+    await boundary.attachProviderChannel(podId, ref, root, request, true);
+    return true;
   }
   private resolve(ref: string) {
     const record = this.lookup(ref);
@@ -328,7 +414,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       )
       .catch(() => null);
     if (!result || result.exitCode !== 0) {
-      const state = await boundary.manager.getStatus(ref);
+      const state = await boundary.manager.getStatus(ref, 'managed-exit');
       return {
         state:
           state === 'deleted' ||

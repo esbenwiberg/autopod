@@ -50,6 +50,15 @@ import {
   createRateLimiter,
   createTeamsAdapter,
 } from './notifications/index.js';
+import { bindHostedControllerProfile } from './orchestration/hosted-controller-profile.js';
+import { bindInspectionCodex } from './orchestration/inspection-codex.js';
+import { claimDaemonLifetime } from './orchestration/local-recovery-claim.js';
+import {
+  assertOperatorRecovery,
+  composeOperatorEnrollment,
+  parseOperatorEnrollment,
+} from './orchestration/operator-enrollment.js';
+import { operatorPartition } from './orchestration/operator-partition.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -252,6 +261,7 @@ const managedCliConfig = parseManagedCliConfig(
 );
 
 const db = createDatabase(DB_PATH, logger);
+const lifetimeOwner = claimDaemonLifetime(db);
 
 // Migrations
 const migrationsDir =
@@ -1141,6 +1151,43 @@ await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');
 });
 
+const enrollment = parseOperatorEnrollment(process.env.AUTOPOD_OPERATOR_ENROLLMENT);
+const separateProfiles = parseManagedProfileSetConfig(process.env.AUTOPOD_OPERATOR_PROFILE_SET);
+const operatorProfiles = separateProfiles ?? managedProfileSetConfig;
+const partition = operatorPartition(
+  enrollment,
+  managedCliConfig,
+  managedProfileSetConfig,
+  separateProfiles,
+);
+if (
+  enrollment &&
+  (!managedCliConfig ||
+    !operatorProfiles ||
+    operatorProfiles.catalogArtifacts ||
+    !ENTRA_TENANT_ID ||
+    !ENTRA_CLIENT_ID ||
+    ALLOW_DEV_AUTH ||
+    MOCK_DOCKER ||
+    process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1')
+)
+  throw new Error('operator-production-boundaries-required');
+if (partition) assertOperatorRecovery(db, partition.run);
+const profileRuntime = managedProfileSetConfig
+  ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
+      ownsInstallation: partition?.ordinary,
+      db,
+      databasePath: DB_PATH,
+      manager:
+        managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+          ? containerManager
+          : sandboxContainerManager,
+      networkManager,
+      providerAccounts: providerAccountStore,
+      githubAuth,
+    })
+  : undefined;
+
 const legacyManagedRuntime = managedAcceptanceConfig
   ? composeManagedAcceptance(managedAcceptanceConfig, managedCliConfig, {
       db,
@@ -1148,24 +1195,11 @@ const legacyManagedRuntime = managedAcceptanceConfig
       manager: sandboxContainerManager,
       providerAccounts: providerAccountStore,
     })
-  : managedProfileSetConfig
-    ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
-        db,
-        databasePath: DB_PATH,
-        manager:
-          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
-            ? containerManager
-            : sandboxContainerManager,
-        networkManager,
-        providerAccounts: providerAccountStore,
-        githubAuth,
-      })
-    : undefined;
+  : profileRuntime;
 const managedRuntime =
-  managedProfileSetConfig?.catalogArtifacts &&
-  legacyManagedRuntime &&
-  'components' in legacyManagedRuntime
-    ? composeManagedCatalog(managedProfileSetConfig, legacyManagedRuntime, {
+  managedProfileSetConfig?.catalogArtifacts && profileRuntime
+    ? composeManagedCatalog(managedProfileSetConfig, profileRuntime, {
+        ownsInstallation: partition?.ordinary,
         db,
         databasePath: DB_PATH,
         manager:
@@ -1179,13 +1213,68 @@ const managedRuntime =
         worktrees: worktreeManager,
       })
     : legacyManagedRuntime;
-if (managedRuntime) await managedRuntime.resume();
+const separateRuntime =
+  separateProfiles && partition && managedCliConfig
+    ? composeManagedProfileSet(
+        separateProfiles,
+        {
+          bindings: managedCliConfig.bindings,
+          artifactDirectory: path.join(
+            path.dirname(fs.realpathSync(DB_PATH)),
+            'managed',
+            'operator-artifacts',
+          ),
+        },
+        {
+          db,
+          databasePath: DB_PATH,
+          manager: partition.target === 'sandbox' ? sandboxContainerManager : containerManager,
+          sandboxCheckpoints: partition.target === 'sandbox',
+          networkManager,
+          providerAccounts: providerAccountStore,
+          githubAuth,
+          ownsInstallation: partition.operator,
+        },
+      )
+    : undefined;
+const operatorRuns = enrollment
+  ? composeOperatorEnrollment(enrollment, {
+      db,
+      databasePath: DB_PATH,
+      isolatedArtifacts: !!partition,
+      profiles: operatorProfiles,
+      cli: managedCliConfig,
+      runtime: separateRuntime ?? profileRuntime,
+      bindCodex: (pin) =>
+        bindInspectionCodex(pin, providerAccountStore, providerAccountHealth, logger),
+      bind: (pin) =>
+        bindHostedControllerProfile(
+          pin,
+          configuration.store,
+          providerAccountStore,
+          providerAccountHealth,
+          logger,
+        ),
+    })
+  : undefined;
+if (!operatorRuns) {
+  assertOperatorRecovery(db, null);
+}
+if (!operatorRuns || separateRuntime) await managedRuntime?.resume();
 
 // Server
 const app = await createServer({
   configuration: configuration.routes,
   pim: configuration.scopedTools.pimRoutes,
   authModule,
+  operatorRuns: operatorRuns && {
+    ...operatorRuns,
+    lifetimeOwner,
+    watchdog: separateRuntime && {
+      service: separateRuntime.components.service,
+      finishOutputs: () => separateRuntime.components.pipeline.tick(),
+    },
+  },
   managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
   podManager,
   profileStore,
@@ -1284,6 +1373,35 @@ try {
 } catch (err) {
   app.log.fatal(err, 'Failed to start daemon');
   process.exit(1);
+}
+
+// Explicit owner-only one-shot. No HTTP trigger, profile workflow, startup retry or live DB fixture rows.
+if (process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1') {
+  void (async () => {
+    const { createConfigurationStore } = await import('./configuration/configuration-store.js');
+    const { bindCanaryProfile } = await import('./orchestration/canary-profile.js');
+    const { runHostedWaveCanary } = await import('./orchestration/hosted-wave-canary.js');
+    const provider = bindCanaryProfile(
+      createConfigurationStore(db),
+      providerAccountStore,
+      providerAccountHealth,
+      logger,
+    );
+    const result = await runHostedWaveCanary(
+      {
+        databasePath: path.resolve(DB_PATH),
+        migrations: migrationsDir,
+        socket: process.env.AUTOPOD_MANAGED_DOCKER_SOCKET ?? '',
+        image: process.env.AUTOPOD_WAVE_DOCKER_IMAGE ?? '',
+      },
+      provider,
+    );
+    logger.info(result, 'repofit wave canary passed');
+  })().catch(() =>
+    logger.warn(
+      'repofit wave canary did not pass; inspect the private canary ledger before any new attempt',
+    ),
+  );
 }
 
 // Background warmup of ML detectors so /health reports a real status and the
@@ -1444,10 +1562,12 @@ async function shutdown(signal: string) {
   backupManager.stop();
 
   // Close request-time provider gateways before their durable database closes.
+  separateRuntime?.close();
   managedRuntime?.close();
 
   // Close database
   db.close();
+  lifetimeOwner.close();
 
   logger.info('Shutdown complete');
   process.exit(0);

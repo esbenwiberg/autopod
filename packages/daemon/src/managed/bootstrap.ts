@@ -24,6 +24,8 @@ export interface ManagedComponentsConfig {
   validation?: ManagedValidationPort;
   /** Explicit reviewed enablement; omitting it always keeps starts dark. */
   enabled?: boolean;
+  /** Host-only partition for runtime recovery and background worker observation. */
+  ownsInstallation?: (installation: string) => boolean;
   /** Capabilities proven by the selected reviewed runtime composition. */
   runtimeCapabilities?: readonly (
     | 'managed-agent-session-v1'
@@ -46,6 +48,7 @@ export function managedComponents(config: ManagedComponentsConfig) {
     undefined,
     config.enabled ?? false,
     config.runtimeCapabilities ?? [],
+    config.ownsInstallation,
   );
   const controls = new ManagedControls(service);
   service.validation = new ManagedValidationRunner(service, config.validation);

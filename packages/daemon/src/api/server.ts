@@ -22,6 +22,7 @@ import {
   registerManagedUserComponentRoutes,
   registerManagedUserRoutes,
 } from '../managed/user-auth.js';
+import { type OperatorRunsConfig, registerOperatorRuns } from '../orchestration/operator-runs.js';
 import type {
   ContainerManagerFactory,
   EscalationRepository,
@@ -91,6 +92,7 @@ import './types.js';
 
 export interface ServerDependencies {
   authModule: AuthModule;
+  operatorRuns?: OperatorRunsConfig;
   /** Absent by default; adding routes never enables starts implicitly. */
   managed?:
     | { config: ManagedComponentsConfig; bindings: readonly ManagedUserBinding[] }
@@ -188,6 +190,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
         authenticateOperatorRequest(request, deps.authModule),
       ),
     );
+  const operatorRuns = deps.operatorRuns;
+  if (operatorRuns)
+    await app.register(async (scope) => {
+      registerOperatorRuns(scope, operatorRuns, deps.authModule);
+    });
   const managed = deps.managed;
   if (managed) {
     await app.register(async (managedApp) => {
