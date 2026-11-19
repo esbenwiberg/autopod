@@ -131,7 +131,10 @@ import Testing
     @Test func sortAndDensitySurviveCloseReopen() async throws {
         let host = try DesktopSelectionPerformanceHost(width: 2_000, redesign: false) { view in
             view.pods = Array(view.pods.prefix(2))
-            for index in view.pods.indices { view.pods[index].status = .failed }
+            for index in view.pods.indices {
+                view.pods[index].status = .failed
+                view.pods[index].updatedAt = Date(timeIntervalSince1970: Double(index))
+            }
         }
         defer { host.close() }
         try await host.selectTab("work")
@@ -153,9 +156,35 @@ import Testing
                 && selected("Compact", compactID: "fleet-compact-density")
         }
         try await host.wait { preferencesRetained() }
-        #expect(host.press(try #require(host.find(id: "detail-close"))))
+        // Swift Testing 6.1 can recursively reflect the AppKit host when
+        // an assertion captures a nested accessibility lookup or press.
+        guard let close = host.find(id: "detail-close") else {
+            Issue.record("Missing detail Close button")
+            return
+        }
+        let closed = host.press(close)
+        #expect(closed, "The native Close control must acknowledge its press")
         try await host.wait { host.find(id: "detail-close") == nil && preferencesRetained() }
-        #expect(host.press(try #require(host.find(label: "Open Fixture pod perf-0000"))))
+        // AppKit's native List selection is available on both toolchains,
+        // unlike the legacy card wrapper's accessibility action.
+        try await host.wait { host.fleetSegment("List") != nil }
+        try host.selectFleetSegment("List")
+        try await host.wait { host.fleetTable(rowCount: 2) != nil }
+        guard let table = host.fleetTable(rowCount: 2) else {
+            Issue.record("Missing native fleet table after switching to List")
+            return
+        }
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        try await host.wait { host.inputs.selectedID == "perf-0001" && host.destination("work") }
+        try await host.wait { host.fleetSegment("List") != nil }
+        // AppKit does not consistently expose the other segment's icon label.
+        guard let (mode, listIndex) = host.fleetSegment("List"), mode.segmentCount == 2 else {
+            Issue.record("Missing two-segment Cards/List control after reopening detail")
+            return
+        }
+        mode.selectedSegment = 1 - listIndex
+        let switchedToCards = mode.sendAction(mode.action, to: mode.target)
+        #expect(switchedToCards)
         try await host.wait { host.destination("work") && preferencesRetained() }
     }
 

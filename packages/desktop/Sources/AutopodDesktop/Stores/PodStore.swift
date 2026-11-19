@@ -71,6 +71,8 @@ public final class PodStore {
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
   private var statusRevisions: [String: Int] = [:]
+  // Retained across removal so an in-flight detail cannot attach to a reinserted pod.
+  private var failureDetailRevisions: [String: UInt64] = [:]
   // Tokens never repeat when a pod is removed and later reinserted.
   private var decisionSequence: UInt64 = 0
   private var decisionRevisions: [String: UInt64] = [:]
@@ -86,6 +88,7 @@ public final class PodStore {
       qualityScores.removeAll()
       seriesCache.removeAll()
       statusRevisions.removeAll()
+      failureDetailRevisions.removeAll()
       decisionRevisions.removeAll()
       insertionRevisions.removeAll()
     }
@@ -125,6 +128,7 @@ public final class PodStore {
   }
 
   private func forgetPodState(_ podId: String) {
+    failureDetailRevisions[podId, default: 0] += 1
     decisionReplies.forget(source: source, podID: podId)
     hydratedPodIds.remove(podId)
     hydratingPodIds.remove(podId)
@@ -166,6 +170,13 @@ public final class PodStore {
       return current
     }
     var merged = incoming
+    // Compact discovery has no full detail, even when it arrives through this path
+    // after hydration was invalidated. Stale REST cannot revive an earlier reason.
+    let compactCannotReplaceFull = incoming.failureDetail == nil
+      && incoming.updatedAt <= current.updatedAt
+    if compactCannotReplaceFull || current.updatedAt > incoming.updatedAt || preserveCurrentStatus {
+      merged.failureDetail = current.currentFailureDetail
+    }
     merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
     merged.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
@@ -244,6 +255,7 @@ public final class PodStore {
     merged.hasWebUi = incoming.hasWebUi
     merged.latestActivity = incoming.latestActivity
     merged.errorSummary = incoming.errorSummary
+    merged.failureDetail = nil
     merged.briefTitle = incoming.briefTitle
     merged.seriesId = incoming.seriesId
     merged.seriesName = incoming.seriesName
@@ -384,8 +396,10 @@ public final class PodStore {
     let epoch = configurationEpoch
     let statusRevision = statusRevisions[id, default: 0]
     let decisionRevision = decisionRevisions[id, default: 0]
+    let failureDetailRevision = failureDetailRevisions[id, default: 0]
     let response = try await api.getPod(id)
     guard epoch == configurationEpoch, accepting() else { throw CancellationError() }
+    guard response.id == id else { throw URLError(.badServerResponse) }
     let returned = PodMapper.map(response, baseURL: api.baseURL)
     var updated = returned
     if let index = pods.firstIndex(where: { $0.id == id }) {
@@ -396,11 +410,17 @@ public final class PodStore {
         preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision,
         preserveCurrentDecision: decisionRevisions[id, default: 0] != decisionRevision
       )
+      if failureDetailRevisions[id, default: 0] != failureDetailRevision {
+        updated.failureDetail = pods[index].currentFailureDetail
+      }
       if updated.validationProgress == nil && updated.status == .validating {
         updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
       }
       pods[index] = updated
     } else {
+      if failureDetailRevisions[id, default: 0] != failureDetailRevision {
+        updated.failureDetail = nil
+      }
       recordInsertion(id)
       pods.append(updated)
     }
@@ -473,6 +493,10 @@ public final class PodStore {
 
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if pods[index].status != status {
+      failureDetailRevisions[podId, default: 0] += 1
+      pods[index].failureDetail = nil
+    }
     pods[index].status = status
     statusRevisions[podId, default: 0] += 1
   }
