@@ -6,9 +6,8 @@ import { type ManagedPodApiDeps, registerManagedWatchdog } from '../api/routes/m
 import type { AuthModule } from '../interfaces/auth-module.js';
 import { digest } from '../managed/canonical.js';
 import { type ManagedUserBinding, managedUserAuthenticator } from '../managed/user-auth.js';
-import type { ProfileLlmClient } from '../providers/llm-client.js';
 import type { ContinuationCheckpoint } from './continuations.js';
-import type { ControllerConfig } from './controller-turns.js';
+import type { ControllerConfig, ControllerProvider } from './controller-turns.js';
 import type { LocalCheckpointHost } from './local-checkpoints.js';
 import { tryOperatorDaemonOwner } from './local-recovery-claim.js';
 
@@ -23,7 +22,7 @@ export interface OperatorRunSlot {
   checkpoint: ContinuationCheckpoint;
   catalog: Readonly<Record<string, ManagedPodRequest>>;
   policy: ControllerConfig;
-  provider: ProfileLlmClient;
+  provider: ControllerProvider;
 }
 export interface OperatorRunsConfig {
   /** Called with exclusive operator ownership, before any scheduler is attached. */

@@ -51,6 +51,7 @@ import {
   createTeamsAdapter,
 } from './notifications/index.js';
 import { bindHostedControllerProfile } from './orchestration/hosted-controller-profile.js';
+import { bindInspectionCodex } from './orchestration/inspection-codex.js';
 import { claimDaemonLifetime } from './orchestration/local-recovery-claim.js';
 import {
   assertOperatorRecovery,
@@ -1244,6 +1245,8 @@ const operatorRuns = enrollment
       profiles: operatorProfiles,
       cli: managedCliConfig,
       runtime: separateRuntime ?? profileRuntime,
+      bindCodex: (pin) =>
+        bindInspectionCodex(pin, providerAccountStore, providerAccountHealth, logger),
       bind: (pin) =>
         bindHostedControllerProfile(
           pin,

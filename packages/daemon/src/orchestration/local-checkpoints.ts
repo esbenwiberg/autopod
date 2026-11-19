@@ -5,9 +5,9 @@ import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
-import type { ProfileLlmClient } from '../providers/llm-client.js';
 import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
+import type { ControllerProvider } from './controller-turns.js';
 import { type ControllerConfig, tickController } from './controller-turns.js';
 import { attachLocalController } from './local-controller-loop.js';
 import { tryControllerOwner } from './local-recovery-claim.js';
@@ -107,11 +107,11 @@ export class LocalCheckpointHost {
     return this.ledger.recover(run);
   }
   /** Opt-in model-backed turn. Caller selects an approved client; never discovers credentials. */
-  tickController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
+  tickController(run: string, config: ControllerConfig, client: ControllerProvider) {
     return tickController(this.db, this.ledger, run, config, client);
   }
   /** Subscribe to worker state changes on this daemon connection and catch up from SQLite. */
-  watchController(run: string, config: ControllerConfig, client: ProfileLlmClient) {
+  watchController(run: string, config: ControllerConfig, client: ControllerProvider) {
     const policy = structuredClone(config);
     const release = tryControllerOwner(this.db, run);
     if (!release) throw new Error('local-controller-already-attached');

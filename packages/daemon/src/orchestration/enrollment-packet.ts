@@ -59,6 +59,7 @@ export function signingPacket(
   trusted: unknown,
 ) {
   const { draft, run, repository, basePolicyDigest } = checked;
+  if ('kind' in draft.main) throw new Error('inspection-codex-owner-only');
   // Only these two public-key records come from operator-controlled trust input,
   // never from a draft or submitted receipt.
   const pins = z

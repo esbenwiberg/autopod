@@ -25,6 +25,7 @@ import {
 } from './combined-attestation.js';
 import type { ContinuationCheckpoint } from './continuations.js';
 import type { MainProfilePin } from './hosted-controller-profile.js';
+import { type bindInspectionCodex, inspectionCodexPin } from './inspection-codex.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 import { type OperatorRunsConfig, operatorRunId } from './operator-runs.js';
 
@@ -81,7 +82,9 @@ export function parseOperatorEnrollment(raw: string | undefined) {
     throw new Error('invalid-operator-enrollment');
   }
 }
-export const operatorDraftSchema = schema.omit({ authorities: true, checks: true, review: true });
+export const operatorDraftSchema = schema
+  .omit({ authorities: true, checks: true, review: true })
+  .extend({ main: z.union([schema.shape.main, inspectionCodexPin]) });
 // A fresh, separately commissioned task needs a new run identity, never a reset
 // of an old slot's reservations. Only the daemon can enroll these names.
 const inspectionSlot = /^inspection(?:-[1-9][0-9]{0,7})?$/;
@@ -193,16 +196,17 @@ export function inspectionPolicy(draft: Draft, profiles: ManagedProfileSetConfig
     draft.budget.requests > 18 ||
     draft.budget.active > 6 ||
     Object.keys(draft.recipes).join(',') !== 'inspect' ||
-    canonical(draft.main) !==
-      canonical({
-        profileName: 'repofit',
-        profileId: 'profile-f3ec3b28e6369a8879e2a1da',
-        profileRevision: 2,
-        aiId: 'ai-2aa5da9e201c0adf52150c71',
-        aiRevision: 8,
-        accountId: 'anth-pro',
-        model: 'claude-sonnet-5-5',
-      })
+    (!inspectionCodexPin.safeParse(draft.main).success &&
+      canonical(draft.main) !==
+        canonical({
+          profileName: 'repofit',
+          profileId: 'profile-f3ec3b28e6369a8879e2a1da',
+          profileRevision: 2,
+          aiId: 'ai-2aa5da9e201c0adf52150c71',
+          aiRevision: 8,
+          accountId: 'anth-pro',
+          model: 'claude-sonnet-5-5',
+        }))
   )
     throw new Error('inspection-run-scope');
   const catalog = confinedCatalog(draft, profiles);
@@ -248,6 +252,7 @@ export function composeOperatorEnrollment(
     cli: ManagedCliConfig | undefined;
     runtime: Runtime | undefined;
     bind: (pin: MainProfilePin) => ProfileLlmClient;
+    bindCodex?: (pin: z.infer<typeof inspectionCodexPin>) => ReturnType<typeof bindInspectionCodex>;
   },
 ): OperatorRunsConfig {
   const { profiles, cli, runtime, db } = deps;
@@ -307,7 +312,9 @@ export function composeOperatorEnrollment(
     runtime,
     e.version === 2 ? checkpoint.evidenceDigest : undefined,
   );
-  const provider = deps.bind(e.main);
+  const codex = 'kind' in e.main;
+  const provider = 'kind' in e.main ? deps.bindCodex?.(e.main) : deps.bind(e.main);
+  if (!provider) throw new Error('inspection-codex-binding-required');
   const prepare = async () => {
     assertOperatorRecovery(db, run);
     const prior = db
@@ -423,10 +430,14 @@ export function composeOperatorEnrollment(
         provider,
         policy: {
           mission: e.mission,
-          routeId: 'hosted-main',
+          routeId: codex ? 'inspection-codex-v1' : 'hosted-main',
           findings: 'report.md',
           recipes: Object.fromEntries(Object.keys(catalog).map((k) => [k, '@' + k])),
-          limits: { turns: e.budget.turns, workers: e.budget.workers, outputTokens: 512 },
+          limits: {
+            turns: e.budget.turns,
+            workers: e.budget.workers,
+            outputTokens: codex ? 'request-time-30s' : 512,
+          },
         },
       },
     ],
