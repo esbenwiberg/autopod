@@ -3,6 +3,12 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { digest } from '../managed/canonical.js';
 
+// Multiplex distinct logical claims on one owning connection. Other connections
+// (also older binaries) still see the original OS lock for the whole lifetime.
+const held = new WeakMap<
+  Database.Database,
+  Map<string, { claims: Set<string>; unlock: () => void }>
+>();
 /** OS-released writer lock spanning one async local recovery operation. Never hold the
  * application DB write lock while awaiting Git or a backend. A bounded set of sibling
  * lock files lives with the local SQLite database (not disposable mirror scratch).
@@ -14,8 +20,29 @@ export function tryRecoveryClaim(
 ): (() => void) | null {
   const dir = realpathSync(db.name) + '.continuation-locks';
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const slot = digest([run, key]).slice(-2);
-  return tryLock(path.join(dir, slot));
+  const claim = digest([run, key]),
+    slot = claim.slice(-2);
+  const slots = held.get(db) ?? new Map<string, { claims: Set<string>; unlock: () => void }>();
+  let entry = slots.get(slot);
+  if (!entry) {
+    const unlock = tryLock(path.join(dir, slot));
+    if (!unlock) return null;
+    entry = { claims: new Set<string>(), unlock };
+    slots.set(slot, entry);
+    held.set(db, slots);
+  }
+  if (entry.claims.has(claim)) return null;
+  entry.claims.add(claim);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    entry.claims.delete(claim);
+    if (!entry.claims.size) {
+      slots.delete(slot);
+      entry.unlock();
+    }
+  };
 }
 
 /** A watching scheduler retains its own lock until its final pass drains. Separate

@@ -4,42 +4,81 @@ import type { OrchestrationContinuations } from './continuations.js';
 import { ControllerPassFailure } from './controller-turns.js';
 
 type Pass = ReturnType<OrchestrationContinuations['recover']>;
-/** Single local owner. Subscribe BEFORE catch-up. Edges during a pass request one more pass;
- * no timer, concurrent provider calls, recursive callbacks or wait-for-all. */
-export function attachLocalController(db: Database.Database, run: string, pass: () => Pass) {
+
+// A hint during an awaited operation requests one trailing pass on this lane.
+function lane(pass: () => Promise<void>) {
   let dirty = false,
-    closed = false;
-  let active: Promise<void> | undefined;
-  let outcome: Awaited<Pass> = { blocked: [] };
+    closed = false,
+    active: Promise<void> | undefined;
   let failure: { error: unknown } | undefined;
-  function enqueue() {
-    if (closed) return;
-    dirty = true;
-    active ??= Promise.resolve().then(async () => {
-      try {
-        while (dirty && !closed) {
-          dirty = false;
-          try {
-            outcome = await pass();
-            failure = undefined;
-          } catch (error) {
-            if (error instanceof ControllerPassFailure) outcome = error.recovery;
-            failure = { error };
+  return {
+    enqueue() {
+      if (closed) return;
+      dirty = true;
+      active ??= Promise.resolve().then(async () => {
+        try {
+          while (dirty && !closed) {
+            dirty = false;
+            try {
+              await pass();
+              failure = undefined;
+            } catch (error) {
+              failure = { error };
+            }
           }
+        } finally {
+          active = undefined;
         }
-      } finally {
-        active = undefined;
-      }
-    });
-  }
+      });
+    },
+    stop() {
+      closed = true;
+    },
+    get active() {
+      return active;
+    },
+    get failure() {
+      return failure;
+    },
+  };
+}
+/** Subscribe before catch-up. Only one pass per lane; no timer, overlap of two model
+ * calls, or concurrent recovery passes. Observing a ready report never waits for Azure
+ * allocation when the optional independent planner is used. */
+export function attachLocalController(
+  db: Database.Database,
+  run: string,
+  recover: () => Pass,
+  plan?: () => Promise<void>,
+) {
+  let outcome: Awaited<Pass> = { blocked: [] };
+  const execution = lane(async () => {
+    try {
+      outcome = await recover();
+    } catch (error) {
+      if (error instanceof ControllerPassFailure) outcome = error.recovery;
+      throw error;
+    }
+  });
+  const planner = plan ? lane(plan) : undefined;
+  const enqueue = () => {
+    planner?.enqueue();
+    execution.enqueue();
+  };
   const detach = subscribeLocalRun(db, `native.${run}`, enqueue);
   enqueue();
+  const failure = () => planner?.failure ?? execution.failure;
+  const join = async () => {
+    while (planner?.active || execution.active)
+      await Promise.all([planner?.active, execution.active]);
+  };
   return {
     status() {
-      const reason = failure?.error instanceof Error ? failure.error.message : '';
+      const err = failure()?.error;
+      const reason = err instanceof Error ? err.message : '';
       return {
-        planning: failure ? 'blocked' : active ? 'active' : 'idle',
-        ...(failure
+        planning: failure() ? 'blocked' : (planner ?? execution).active ? 'active' : 'idle',
+        ...(failure()
           ? {
               reason: /^(?:controller-[a-z-]{1,64}|controller-provider-http-[3-5][0-9]{2})$/.test(
                 reason,
@@ -51,17 +90,17 @@ export function attachLocalController(db: Database.Database, run: string, pass: 
         blocked: outcome.blocked,
       };
     },
-    /** Join work already signaled; does not request another pass. Surfaces blocked intents or failures. */
     async settled() {
-      while (active) await active;
-      if (failure) throw failure.error;
+      await join();
+      const f = failure();
+      if (f) throw f.error;
       return outcome;
     },
-    /** Stop listening and join an in-progress pass. Use the run fence, not close, to revoke authority. */
     async close() {
-      closed = true;
       detach();
-      await active;
+      planner?.stop();
+      execution.stop();
+      await join();
     },
   };
 }

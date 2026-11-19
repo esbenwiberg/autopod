@@ -52,14 +52,14 @@ function project(template: ManagedPodRequest, brief: string, key: string) {
 
 /** One tool-free model request per retained wake. A process that loses an unrecorded reply
  * leaves its reservation uncertain, rather than calling the provider a second time. */
-export async function tickController(
+export function controllerPlan(
   db: Database.Database,
   ledger: OrchestrationContinuations,
   run: string,
   config: ControllerConfig,
   provider: ControllerProvider,
 ) {
-  const plan = async () => {
+  return async () => {
     const mission = z.string().trim().min(1).max(4096).parse(config.mission);
     const route = name.parse(config.routeId);
     const model = provider.model;
@@ -371,8 +371,12 @@ export async function tickController(
     }
     await ledger.waves.dispatch(run, turn);
   };
+}
+
+export async function tickController(...args: Parameters<typeof controllerPlan>) {
+  const [, ledger, run] = args;
   try {
-    await plan();
+    await controllerPlan(...args)();
   } catch (error) {
     throw new ControllerPassFailure(error, await ledger.recover(run));
   }

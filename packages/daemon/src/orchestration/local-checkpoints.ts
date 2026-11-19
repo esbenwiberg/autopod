@@ -8,7 +8,7 @@ import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 import type { ControllerProvider } from './controller-turns.js';
-import { type ControllerConfig, tickController } from './controller-turns.js';
+import { type ControllerConfig, controllerPlan, tickController } from './controller-turns.js';
 import { attachLocalController } from './local-controller-loop.js';
 import { tryControllerOwner } from './local-recovery-claim.js';
 import type { ResultWake } from './run-waves.js';
@@ -117,9 +117,15 @@ export class LocalCheckpointHost {
     const release = tryControllerOwner(this.db, run);
     if (!release) throw new Error('local-controller-already-attached');
     try {
-      const loop = attachLocalController(this.db, run, () =>
-        this.tickController(run, policy, client),
-      );
+      const loop =
+        policy.findings === 'required-case-report/v1'
+          ? attachLocalController(
+              this.db,
+              run,
+              () => this.ledger.recover(run),
+              controllerPlan(this.db, this.ledger, run, policy, client),
+            )
+          : attachLocalController(this.db, run, () => this.tickController(run, policy, client));
       let closing: Promise<void> | undefined;
       return {
         status: loop.status,

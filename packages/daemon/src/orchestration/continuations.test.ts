@@ -329,6 +329,81 @@ it('serves a paid queued worker even if the later controller reply is permanentl
   expect(calls()).toBe(2);
   expect(f.launches()).toBe(2);
 });
+it('admits the report-driven decision while the final original launch is still pending', async () => {
+  const { f, root, cp, request, host } = await setup(18, 6);
+  const runtime = waveProcessRuntime(root),
+    gate = Promise.withResolvers<void>(),
+    entered = Promise.withResolvers<void>();
+  let launches = 0;
+  Object.assign(f.runtime, runtime.port, {
+    ensure: async (...args: Parameters<typeof runtime.port.ensure>) => {
+      if (++launches === 6) {
+        entered.resolve();
+        await gate.promise;
+      }
+      return runtime.port.ensure(...args);
+    },
+  });
+  request.outputs.artifacts.mode = 'required';
+  request.outputs.artifacts.requiredPaths = ['report.md'];
+  resign(request);
+  const owner = host();
+  await owner.ledger.kickoff(cp, { inspect: request });
+  const { calls, provider } = offlineController((raw) => {
+    const ctx = JSON.parse(JSON.parse(raw).messages[0].content);
+    const first = ctx.phase === 'kickoff';
+    if (!first)
+      expect(
+        ctx.results.filter((x: { finding: { status: string } }) => x.finding.status === 'excerpt'),
+      ).toHaveLength(3);
+    return JSON.stringify({
+      children: Array.from({ length: first ? 6 : 2 }, (_, i) => ({
+        recipe: 'inspect',
+        brief: 'inspect ' + i,
+      })),
+      waitFor: first ? 3 : null,
+    });
+  });
+  const loop = owner.watchController(
+    cp.run,
+    {
+      mission: 'inspect',
+      findings: 'required-case-report/v1',
+      routeId: 'offline',
+      recipes: { inspect: '@inspect' },
+    },
+    provider,
+  );
+  try {
+    await entered.promise;
+    const live = await runtime.live();
+    expect(live.size).toBe(5);
+    for (const pod of [...live.keys()].slice(0, 3)) {
+      await runtime.finish(pod);
+      await f.service().enforceExpiry();
+      await f.service().artifactPipeline?.tick();
+    }
+    await vi.waitFor(
+      () =>
+        expect(
+          f.db
+            .prepare('select count(*) from orchestration_continuations where run_id=?')
+            .pluck()
+            .get(cp.run),
+        ).toBe(8),
+      { timeout: 2000 },
+    );
+    expect(calls()).toBe(2);
+    expect(launches).toBe(6);
+    gate.resolve();
+    await loop.settled();
+    expect(launches).toBe(8);
+  } finally {
+    gate.resolve();
+    await loop.close();
+    await runtime.dispose();
+  }
+});
 it('refuses a reportless result before the results turn is reserved, including on reattach', async () => {
   const { cp, f, request, host } = await setup(6, 1);
   await host().ledger.kickoff(cp, { inspect: request });
