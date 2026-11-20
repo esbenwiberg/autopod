@@ -92,12 +92,22 @@ final class ParentFamilyModel {
   ) async {
     guard !Task.isCancelled else { return }
     await load(parent: scope.parent, connectionID: scope.connectionID, using: loader)
-    // A known but empty family already belongs to the parent and should refresh.
-    while !Task.isCancelled, family(for: scope) != nil {
+    var discovered = family(for: scope) != nil
+    var discoveryRetries = 2
+    // An initially unavailable family gets a short, bounded discovery window.
+    // Only an authorized, known family (including an empty one) polls thereafter.
+    while !Task.isCancelled, self.scope == scope {
+      let known = family(for: scope) != nil
+      if !known && (discovered || discoveryRetries == 0) { return }
       do { try await pause() } catch { return }
-      guard !Task.isCancelled, family(for: scope) != nil else { return }
+      guard !Task.isCancelled, self.scope == scope else { return }
       if !isLoading {
+        if family(for: scope) == nil {
+          if discovered { return }
+          discoveryRetries -= 1
+        }
         await load(parent: scope.parent, connectionID: scope.connectionID, using: loader)
+        discovered = discovered || family(for: scope) != nil
       }
     }
   }

@@ -38,19 +38,16 @@ import Testing
   #expect(model.isStale == false)
 }
 
-@MainActor @Test func parentFamilyObserveRediscoversOnLifecycleChangeAndOnlyPollsKnownFamily() async throws {
+@MainActor @Test func parentFamilyObserveBoundsDiscoveryAndPollsKnownFamilies() async throws {
   let model = ParentFamilyModel()
   let scope = ParentFamilyScope(connectionID: UUID(), parent: "parent")
   var loads = 0
   await model.observe(scope, using: { _ in
     loads += 1
     return nil // old daemon or non-family
-  }, pause: {
-    Issue.record("An unavailable family must not poll")
-    throw CancellationError()
-  })
+  }, pause: {})
   #expect(model.family == nil)
-  #expect(loads == 1)
+  #expect(loads == 3)
 
   // This is the production .task identity: phase changes trigger another discovery.
   #expect(ParentFamilyModel.loadKey(for: scope, status: .queued)
@@ -60,7 +57,7 @@ import Testing
   var pauses = 0
   await model.observe(scope, using: { _ in
     loads += 1
-    return loads == 2 ? reserved : started
+    return loads == 4 ? reserved : started
   }, pause: {
     pauses += 1
     if pauses == 1 {
@@ -70,7 +67,28 @@ import Testing
     }
   })
   #expect(model.family == started)
+  #expect(loads == 5)
+}
+
+@MainActor @Test(arguments: [false, true]) func parentFamilyRecoversInitialAbsenceOrFailureWithoutLifecycleChange(transient: Bool) async throws {
+  let model = ParentFamilyModel()
+  let scope = ParentFamilyScope(connectionID: UUID(), parent: "parent")
+  let available = try decodeFamily(children: [("late", "child", "started")])
+  var loads = 0
+  await model.observe(scope, using: { _ in
+    loads += 1
+    if loads == 1 {
+      if transient { throw URLError(.timedOut) }
+      return nil
+    }
+    // Revoke on the next poll. No further discovery may retain the old rows.
+    return loads == 2 ? available : nil
+  }, pause: {
+    if loads == 2 { #expect(model.family == available) }
+  })
   #expect(loads == 3)
+  #expect(model.family == nil)
+  #expect(model.lastError == nil)
 }
 
 @MainActor @Test func parentFamilyMayBeKnownBeforeAnyChildIsAdmitted() async throws {
