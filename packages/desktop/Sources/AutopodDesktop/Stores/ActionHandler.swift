@@ -425,6 +425,11 @@ public final class ActionHandler {
       try await self.perform { await self.podStore.refreshSession(id) }
     }
     result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
+    result.parentFamilyConnectionID = replyContextID
+    result.loadParentFamily = { [weak self] id in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.getParentManagedFamily(id) }
+    }
     return result
   }
 

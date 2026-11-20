@@ -30,26 +30,33 @@ final class ConfirmedActionPeer: @unchecked Sendable {
   private var closed = false
   private var expired = 0
   private let immediateGETResponses: [String: String]
+  private let immediateGETNotFound: Set<String>
+  private let noParentFamilies: Bool
   private var immediateRecorded: [URLRequest] = []
   var immediateRequests: [URLRequest] { lock.withLock { immediateRecorded } }
   var requests: [URLRequest] { lock.withLock { recorded } }
   var activeCount: Int { lock.withLock { active.count } }
   var deadlines: Int { lock.withLock { expired } }
 
-  init(immediateGETResponses: [String: String] = [:]) {
+  init(immediateGETResponses: [String: String] = [:], immediateGETNotFound: Set<String> = [],
+       noParentFamilies: Bool = false) {
     self.immediateGETResponses = immediateGETResponses
+    self.immediateGETNotFound = immediateGETNotFound
+    self.noParentFamilies = noParentFamilies
     (stream, continuation) = AsyncStream.makeStream()
   }
   func receive(_ request: ConfirmedActionProtocol) {
     // Explicit read-only background observations must not consume the held
     // pause/kill/delete response stream or masquerade as extra control calls.
     if request.request.httpMethod == "GET", let path = request.request.url?.path,
-       let body = immediateGETResponses[path] {
+       immediateGETResponses[path] != nil || immediateGETNotFound.contains(path)
+           || (noParentFamilies && path.range(of: #"^/orchestration/parents/[a-zA-Z0-9_-]+/family$"#, options: .regularExpression) != nil) {
       let accepted = lock.withLock {
         immediateRecorded.append(request.request)
         return !closed
       }
-      if accepted { request.respond(status: 200, body: body) }
+      if accepted, let body = immediateGETResponses[path] { request.respond(status: 200, body: body) }
+      else if accepted { request.respond(status: 404, body: #"{"code":"parent-family-not-found"}"#) }
       else { request.fail(URLError(.cancelled)) }
       return
     }

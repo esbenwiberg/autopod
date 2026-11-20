@@ -42,6 +42,19 @@ struct OverviewTab: View {
     @State private var infrastructureExpanded = false
     @State private var quality: PodQualitySignals? = nil
     @State private var poller = PreviewPoller()
+    @State private var parentFamilyModel = ParentFamilyModel()
+
+    private var parentFamilyScope: ParentFamilyScope? {
+        ParentFamilyModel.scope(
+            parent: pod.id,
+            isWorkspace: pod.isWorkspace,
+            connectionID: actions.parentFamilyConnectionID
+        )
+    }
+
+    private var parentFamilyLoadKey: String? {
+        ParentFamilyModel.loadKey(for: parentFamilyScope, status: pod.status)
+    }
 
     var body: some View {
         ScrollView {
@@ -64,6 +77,15 @@ struct OverviewTab: View {
                 }
 
                 readinessCompactCard
+
+                if let family = parentFamilyModel.family(for: parentFamilyScope) {
+                    ParentFamilyCard(
+                        family: family,
+                        isStale: parentFamilyModel.isStale,
+                        isRefreshing: parentFamilyModel.isLoading,
+                        refresh: refreshParentFamily
+                    )
+                }
 
                 if pod.worktreeCompromised {
                     WorktreeCompromisedBanner()
@@ -115,11 +137,19 @@ struct OverviewTab: View {
         .task(id: pod.id) {
             await fetchQuality()
         }
+        .task(id: parentFamilyLoadKey) {
+            guard let scope = parentFamilyScope else {
+                parentFamilyModel.invalidate()
+                return
+            }
+            await parentFamilyModel.observe(scope, using: actions.loadParentFamily)
+        }
         .onAppear {
             startPollingIfNeeded()
         }
         .onDisappear {
             poller.stop()
+            parentFamilyModel.invalidate()
             replySurface.unmount()
         }
         .onChange(of: pod.status) { _, newStatus in
@@ -341,6 +371,19 @@ struct OverviewTab: View {
         .padding(10)
         .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Parent-managed family
+
+    private func refreshParentFamily() {
+        guard let scope = parentFamilyScope else { return }
+        Task {
+            await parentFamilyModel.load(
+                parent: scope.parent,
+                connectionID: scope.connectionID,
+                using: actions.loadParentFamily
+            )
+        }
     }
 
     // MARK: - Quality
