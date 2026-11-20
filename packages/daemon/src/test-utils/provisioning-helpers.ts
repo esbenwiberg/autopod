@@ -245,7 +245,7 @@ export function createProvisioningFixture(disk = false, initialPod = true) {
     sandbox,
     cm: ctx.containerManager,
     worktreeManager: ctx.worktreeManager,
-    pod: () => podRepo.getOrThrow(selectedPodId),
+    pod: () => deps.podRepo.getOrThrow(selectedPodId),
     selectPod: (id: string) => {
       selectedPodId = id;
     },
@@ -262,11 +262,25 @@ export function createProvisioningFixture(disk = false, initialPod = true) {
       db.close();
       db = createDatabase(filename, logger);
       db.pragma('foreign_keys=ON');
-      return {
+      const reopened = {
         pods: createPodRepository(db),
         profiles: createProfileStore(db),
         accounts: createProviderAccountStore(db),
       };
+      const events = createEventRepository(db);
+      Object.assign(deps, {
+        podRepo: reopened.pods,
+        profileStore: reopened.profiles,
+        providerAccountStore: reopened.accounts,
+        providerAttemptRepo: createProviderAttemptRepository(db),
+        escalationRepo: createEscalationRepository(db),
+        nudgeRepo: createNudgeRepository(db),
+        fixFeedbackRepo: createFixFeedbackRepository(db),
+        validationRepo: createValidationRepository(db),
+        eventRepo: events,
+        eventBus: createEventBus(events, deps.logger),
+      });
+      return reopened;
     },
     close() {
       if (db !== ctx.db) db.close();

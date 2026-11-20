@@ -52,6 +52,7 @@ async function fixture(
   workers = 2,
   runtimeRequest = false,
   loseAllocation = false,
+  restartBeforeProvision = false,
 ) {
   // Real SQLite migrations, admission, source custody and parent provisioning; external execution is fake.
   const source = await setupOrchestrationRun(
@@ -144,9 +145,21 @@ async function fixture(
         resolveLaunchExecutionSettings(launch, { image: 'fixture-image' }),
     },
   });
+  const principal = { oid: operator.objectId, iss: operator.issuer, aud: operator.audience };
+  for (const invalid of [
+    undefined,
+    { ...principal, oid: 'another-operator' },
+    { ...principal, iss: 'https://wrong-issuer.example/' },
+    { ...principal, aud: 'api://wrong-audience' },
+  ]) {
+    expect(() => owner.authorizeLaunch(requestId, invalid)).toThrow(
+      'Enrolled parent operator required',
+    );
+  }
   const admitted = await admitLaunch({
     request: launchRequest,
     actorId: 'operator',
+    authorize: (id) => owner.authorizeLaunch(id, principal),
     services,
     snapshots,
     createPod: (launch) => {
@@ -239,12 +252,7 @@ async function fixture(
     });
   const restart = async () => {
     await app.close();
-    const reopened = p.reopen();
-    Object.assign(p.deps, {
-      podRepo: reopened.pods,
-      profileStore: reopened.profiles,
-      providerAccountStore: reopened.accounts,
-    });
+    p.reopen();
     live.launchConfiguration!.read = createLaunchSnapshotRepository(
       p.db,
       createConfigurationStore(p.db),
@@ -262,6 +270,16 @@ async function fixture(
       throw new Error('Missing provisioned ingress');
     return mcp.headers.Authorization.slice(7);
   };
+  if (restartBeforeProvision) {
+    expect(p.db.prepare('SELECT pod_id, current_attempt FROM parent_managed_runs').get()).toEqual({
+      pod_id: original.id,
+      current_attempt: null,
+    });
+    expect(p.db.prepare('SELECT count(*) FROM parent_managed_sessions').pluck().get()).toBe(0);
+    await restart();
+    expect((await family()).json()).toMatchObject({ parent: original.id, children: [] });
+    expect(source.f.launches()).toBe(0);
+  }
   if (runtimeRequest) {
     // Fake model/runtime adapter, called by production processPod. It learns authority ONLY
     // from its real SpawnConfig and sends a model-selected recipe/brief over its scoped ingress.
@@ -328,8 +346,11 @@ async function fixture(
   };
 }
 
-it('production processPod dispatches a fake parent runtime whose model turn uses its own provisioned scoped ingress', async () => {
-  const f = await fixture(2, 1, 1, true);
+it.each([
+  false,
+  true,
+])('production processPod provisions a parent and its runtime commissions a child (restart before provision: %s)', async (restartBeforeProvision) => {
+  const f = await fixture(2, 1, 1, true, false, restartBeforeProvision);
   expect(f.source.f.launches()).toBe(1);
   expect(f.stages).toEqual(['reserved', 'started']);
   expect(f.p.pod().status).toBe('failed'); // fake parent runtime has exited; no display-only process
@@ -399,6 +420,18 @@ it('a real launched parent commissions through provisioned MCP ingress; lost rep
   expect(JSON.stringify((await f.family()).json())).not.toMatch(
     /grant|policy_json|runtime_ref|credential/,
   );
+});
+
+it('retains the continuation identity when current runtime observation is unavailable', async () => {
+  const f = await fixture();
+  await f.call({ requestKey: 'history', recipe: 'inspect', brief: 'Read the pinned source' });
+  const { child } = (await f.family()).json().children[0];
+  expect(child).toMatch(/^managed-/);
+  // A synthetic retained history without a matching runtime observation.
+  f.p.db
+    .prepare('UPDATE orchestration_continuations SET attempt_id=? WHERE pod_id=?')
+    .run('fixture-unavailable-observation', child);
+  expect((await f.family()).json().children[0]).toMatchObject({ child, status: 'unknown' });
 });
 
 it('rejects humans, unrelated pods, stale attempts, absent policy, unknown recipes and over-budget requests without allocations', async () => {

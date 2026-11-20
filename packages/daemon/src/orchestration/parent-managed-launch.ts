@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { ScopedPodTools } from '@autopod/escalation-mcp';
-import type { EffectiveLaunchConfig, Pod } from '@autopod/shared';
+import {
+  AutopodError,
+  type EffectiveLaunchConfig,
+  type JwtPayload,
+  type Pod,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -28,6 +33,7 @@ const requestSchema = z
 interface Binding {
   run_id: string;
   pod_id: string;
+  launch_digest: string;
   policy_digest: string;
   policy_json: string;
   current_attempt: string | null;
@@ -57,8 +63,11 @@ export class ParentManagedLaunch {
       const existing = this.db
         .prepare('SELECT pod_id FROM pod_launch_snapshots WHERE request_id=?')
         .get(slot.parent!.requestId) as { pod_id: string } | undefined;
-      if (existing && !this.binding(existing.pod_id))
-        throw new Error('parent-launch-must-be-future');
+      if (existing) {
+        const binding = this.binding(existing.pod_id);
+        if (!binding) throw new Error('parent-launch-must-be-future');
+        if (this.slot(binding) !== slot) throw new Error('parent-policy-unavailable');
+      }
     }
   }
   private get db(): Database.Database {
@@ -82,59 +91,74 @@ export class ParentManagedLaunch {
     const slot = this.slots.find((s) => s.checkpoint.run === binding.run_id);
     if (
       !slot ||
+      binding.launch_digest !== slot.parent?.launchDigest ||
       binding.policy_json !== this.policy(slot) ||
       binding.policy_digest !== digest(this.policy(slot))
     )
       throw new Error('parent-policy-unavailable');
     return slot;
   }
-  /** Called only by real agent provisioning, before delivering the runtime MCP configuration. */
-  async provision(podId: string): Promise<string | undefined> {
-    const pod = this.pod(podId);
-    const launch = this.db
-      .prepare('SELECT request_id,payload FROM pod_launch_snapshots WHERE pod_id=?')
-      .get(podId) as { request_id: string; payload: string } | undefined;
-    const candidates = this.slots.filter((s) => s.parent?.requestId === launch?.request_id);
-    if (!candidates.length) {
-      if (this.binding(podId)) throw new Error('parent-policy-unavailable');
-      return undefined;
-    }
+  /** Only the authenticated ordinary-launch route may reserve this parent identity. */
+  authorizeLaunch(
+    requestId: string | undefined,
+    principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'> | undefined,
+  ) {
+    const candidates = this.slots.filter((s) => s.parent?.requestId === requestId);
+    if (!candidates.length) return undefined;
     const slot = candidates[0]!;
-    const frozen = JSON.parse(launch!.payload) as EffectiveLaunchConfig;
-    if (
-      !frozen.execution.networkPolicy?.enabled ||
-      frozen.execution.networkPolicy.mode === 'allow-all' ||
-      frozen.workflow.completion !== 'approval' ||
-      frozen.pim.length ||
-      frozen.githubAccess.some((access) =>
-        access.rule.operations.some((op) => !op.endsWith('.read')),
-      ) ||
-      frozen.repository?.setup.integrations.deployment?.enabled
-    )
-      throw new Error('parent-launch-authority-not-confined');
     if (
       candidates.length !== 1 ||
+      principal?.oid !== slot.operator.objectId ||
+      principal.iss !== slot.operator.issuer ||
+      principal.aud !== slot.operator.audience
+    )
+      throw new AutopodError('Enrolled parent operator required', 'PARENT_OPERATOR_REQUIRED', 403);
+    return (podId: string, frozen: EffectiveLaunchConfig) => {
+      if (
+        frozen.digest !== slot.parent?.launchDigest ||
+        frozen.intent !== 'task' ||
+        !frozen.execution.networkPolicy?.enabled ||
+        frozen.execution.networkPolicy.mode === 'allow-all' ||
+        frozen.workflow.completion !== 'approval' ||
+        frozen.pim.length ||
+        frozen.githubAccess.some((access) =>
+          access.rule.operations.some((op) => !op.endsWith('.read')),
+        ) ||
+        frozen.repository?.setup.integrations.deployment?.enabled ||
+        !slot.policy.limits ||
+        !this.issuer.generateAttempt ||
+        !this.issuer.verifyAttempt ||
+        this.pod(podId).userId !== principal.oid ||
+        !this.db.inTransaction
+      )
+        throw new AutopodError('Frozen parent launch refused', 'PARENT_LAUNCH_REFUSED', 409);
+      const policy = this.policy(slot);
+      // Same transaction as ordinary pod and snapshot insertion. No provider work here.
+      this.db
+        .prepare(
+          'INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json) VALUES(?,?,?,?,?)',
+        )
+        .run(slot.checkpoint.run, podId, frozen.digest, digest(policy), policy);
+    };
+  }
+  /** Called only by real agent provisioning, before delivering the runtime MCP configuration. */
+  async provision(podId: string): Promise<string | undefined> {
+    const binding = this.binding(podId);
+    if (!binding) return undefined;
+    const slot = this.slot(binding);
+    const pod = this.pod(podId);
+    if (
       pod.userId !== slot.operator.objectId ||
-      pod.launchConfigDigest !== slot.parent?.launchDigest ||
+      pod.launchConfigDigest !== binding.launch_digest ||
       !pod.containerId ||
       pod.status !== 'running' ||
       !this.issuer.generateAttempt ||
-      !this.issuer.verifyAttempt ||
-      !slot.policy.limits
+      !this.issuer.verifyAttempt
     )
       throw new Error('parent-launch-binding-refused');
     const attempt = randomUUID();
-    const policy = this.policy(slot);
     this.db
       .transaction(() => {
-        const prior = this.binding(podId);
-        if (prior) this.slot(prior);
-        else
-          this.db
-            .prepare(
-              'INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json) VALUES(?,?,?,?,?)',
-            )
-            .run(slot.checkpoint.run, podId, pod.launchConfigDigest, digest(policy), policy);
         this.db
           .prepare(
             'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,?,?)',
@@ -274,7 +298,7 @@ export class ParentManagedLaunch {
       run: binding.run_id,
       children: this.db
         .prepare(`
-      SELECT q.request_key AS requestKey,q.parent_attempt AS parentAttempt,p.pod_id AS child,
+      SELECT q.request_key AS requestKey,q.parent_attempt AS parentAttempt,coalesce(c.pod_id,p.pod_id) AS child,
       CASE WHEN p.pod_id IS NULL AND c.pod_id IS NOT NULL THEN 'unknown'
         WHEN p.observed_exit=1 THEN 'exited'
         WHEN p.state='running' AND coalesce(p.last_runtime_observation,'running')<>'unknown' THEN 'started'

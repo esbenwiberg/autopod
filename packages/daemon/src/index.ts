@@ -811,6 +811,9 @@ const configurationHostPath =
 // cutover receipt, so an unconverted database stays closed. Legacy callers remain retired (410).
 const configurationAdmissionReady = () => configurationCutoverReadiness(db, true);
 const reviewerRegistry = acr;
+let parentManaged:
+  | import('./orchestration/parent-managed-launch.js').ParentManagedLaunch
+  | undefined;
 const configuration = createHostConfigurationComponents({
   db,
   logger,
@@ -846,11 +849,10 @@ const configuration = createHostConfigurationComponents({
   ),
   podManager: () => podManager,
   admissionReady: configurationAdmissionReady,
+  authorizeParentLaunch: (requestId, principal) =>
+    parentManaged?.authorizeLaunch(requestId, principal),
 });
 await configuration.recover();
-let parentManaged:
-  | import('./orchestration/parent-managed-launch.js').ParentManagedLaunch
-  | undefined;
 
 podManager = createPodManager({
   launchConfiguration: configuration.launchConfiguration,

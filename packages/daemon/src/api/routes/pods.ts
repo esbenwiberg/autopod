@@ -611,6 +611,7 @@ export function podRoutes(
         email: request.user.preferred_username,
         name: request.user.name,
         actor: humanActor(request),
+        principal: { oid: request.user.oid, iss: request.user.iss, aud: request.user.aud },
       });
       reply.status(201);
       return serializePodForRequest(pod, request, providerAttemptRepo, eventRepo, podRepo);

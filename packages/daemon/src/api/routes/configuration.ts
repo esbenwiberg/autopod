@@ -3,6 +3,7 @@ import {
   configurationIdSchema,
   configurationKindSchema,
   type EffectiveLaunchConfig,
+  type JwtPayload,
   type OperatorActor,
   type Pod,
   reviewerBudgetRevisionRequestSchema,
@@ -69,7 +70,13 @@ export interface ConfigurationRouteDependencies {
   /** Supplied only after conversion and the execution dependencies are ready. */
   admit?: (
     request: unknown,
-    identity: { userId: string; email?: string; name?: string; actor: OperatorActor },
+    identity: {
+      userId: string;
+      email?: string;
+      name?: string;
+      actor: OperatorActor;
+      principal?: Pick<JwtPayload, 'oid' | 'iss' | 'aud'>;
+    },
   ) => Promise<Pod>;
 }
 const writeSchema = z

@@ -45,13 +45,16 @@ these receipts or edit the daemon enrollment.
 3. Enroll through the existing daemon-owned operator configuration procedure, then
    launch the exact preview as the enrolled operator. This implementation does not
    change production configuration or restart the hosted daemon. The selected request
-   must still be a future launch when this composition is installed. An existing
-   parent binding can be recovered, but another pod cannot take over its run.
+   must still be a future launch when this composition is installed. Admission
+   checks the enrolled issuer, audience and object ID from the authenticated
+   request and commits the parent binding with the ordinary launch snapshot.
+   This lets the daemon recover an admitted parent even before first provisioning,
+   without adopting a previously unrelated pod.
    The reviewed envelope is `AUTOPOD_OPERATOR_ENROLLMENT`; use a separately
    partitioned `AUTOPOD_OPERATOR_PROFILE_SET` and the existing managed CLI owner
    bindings. Setting these is operator deployment work, outside this PR's execution.
-4. Parent provisioning records the pod/run/policy and a fresh runtime attempt bound
-   to its actual container and lifecycle generation. Only its injected, signed
+4. Parent provisioning uses the committed binding and records a fresh runtime attempt
+   bound to the actual container and lifecycle generation. Only its injected, signed
    attempt credential supplies authority at the existing `/mcp/:podId` boundary.
    Ordinary pod credentials and operator Entra credentials cannot invoke the child
    operation. Reprovision/resume supersedes the previous parent attempt.

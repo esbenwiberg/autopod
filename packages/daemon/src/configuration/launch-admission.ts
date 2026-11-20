@@ -20,10 +20,15 @@ export async function admitLaunch(input: {
   snapshots: LaunchSnapshotRepository;
   /** Synchronous DB insertion only; dispatch follows the committed result. */
   createPod: (config: EffectiveLaunchConfig) => string;
+  /** Optional trusted route authorization; returned DB-only binding runs in the snapshot transaction. */
+  authorize?: (
+    requestId: string | undefined,
+  ) => ((podId: string, config: EffectiveLaunchConfig) => void) | undefined;
   /** Optional read-only async preflight; its returned insertion rechecks observations synchronously. */
   preparePod?: (config: EffectiveLaunchConfig) => Promise<() => string>;
 }): Promise<{ podId: string; created: boolean; config: EffectiveLaunchConfig }> {
   const request = launchRequestSchema.parse(input.request);
+  const bind = input.authorize?.(request.requestId);
   const requestDigest = configurationDigest({
     actorId: input.actorId,
     request,
@@ -51,7 +56,11 @@ export async function admitLaunch(input: {
     config,
     requestId: request.requestId,
     requestDigest,
-    createPod,
+    createPod: () => {
+      const podId = createPod();
+      bind?.(podId, config);
+      return podId;
+    },
   });
   // Another request may have won while discovery was in flight.
   const admitted = input.snapshots.get(result.podId);
