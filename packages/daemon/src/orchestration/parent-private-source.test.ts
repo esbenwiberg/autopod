@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -208,6 +209,66 @@ it('refuses a small compressed export whose expanded object exceeds the pre-impo
       maxBundleBytes: 64 * 1024,
     }),
   ).rejects.toThrow('object-limit');
+});
+
+it('exports without deltas from a repository whose pack actually contains deltas', async () => {
+  const source = Array.from({ length: 4096 }, (_, i) => `line ${i}: retained fixture data\n`).join(
+    '',
+  );
+  const f = await fixture('src/allowed.ts', source);
+  await writeFile(path.join(f.repository, 'src/allowed.ts'), `${source}one added line\n`);
+  await managedGit(f.repository, ['add', '--', 'src/allowed.ts']);
+  await managedGit(f.repository, [...identity, 'commit', '-m', 'Small incremental change']);
+  const commit = await managedGit(f.repository, ['rev-parse', 'HEAD']);
+  const tree = await managedGit(f.repository, ['rev-parse', 'HEAD^{tree}']);
+  await managedGit(f.repository, ['repack', '-adf']);
+  const packDirectory = path.join(f.repository, '.git', 'objects', 'pack');
+  const indexes = (await readdir(packDirectory)).filter((name) => name.endsWith('.idx'));
+  expect(indexes).toHaveLength(1);
+  const listing = await managedGit(f.repository, [
+    'verify-pack',
+    '-v',
+    path.join(packDirectory, indexes.join('')),
+  ]);
+  expect(listing).toMatch(/^chain length = 1: /m);
+
+  // Exercise the documented collection format on real packed history.
+  const pack = spawnSync(
+    'git',
+    [
+      'pack-objects',
+      '--revs',
+      '--stdout',
+      '--window=0',
+      '--no-reuse-object',
+      '--no-reuse-delta',
+      '--no-use-bitmap-index',
+    ],
+    {
+      cwd: f.repository,
+      input: `${commit}\n`,
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        PATH: process.env.PATH,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_NO_REPLACE_OBJECTS: '1',
+      },
+    },
+  );
+  expect(pack.error).toBeUndefined();
+  expect(pack.status).toBe(0);
+  const bundle = Buffer.concat([Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`), pack.stdout]);
+  await expect(
+    verifyParentPrivateSource(f.root, bundle, {
+      base: f.commit,
+      commit,
+      tree,
+      allowlist: [{ kind: 'file', path: 'src/allowed.ts' }],
+      maxBundleBytes: bundle.length,
+    }),
+  ).resolves.toMatchObject({ commit, tree, paths: ['src/allowed.ts'] });
 });
 
 it('requires an explicit bounded export before creating a verification mirror', async () => {
