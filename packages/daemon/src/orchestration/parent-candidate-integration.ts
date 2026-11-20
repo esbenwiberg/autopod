@@ -11,7 +11,7 @@ import {
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { type ParentCandidateSelection, readParentCandidate } from './parent-candidate-custody.js';
 
-interface Input extends ParentCandidateSelection {
+export interface ParentIntegrationInput extends ParentCandidateSelection {
   expectedTree: string;
   allowlist: readonly CandidatePathAllowance[];
 }
@@ -53,7 +53,7 @@ export async function buildParentIntegration(
   db: Database.Database,
   scratch: string,
   run: string,
-  inputs: readonly [Readonly<Input>, Readonly<Input>],
+  inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
 ) {
   if (inputs.length !== 2 || inputs[0].requestKey === inputs[1].requestKey)
     throw new Error('parent-integration-distinct-inputs-required');
@@ -75,12 +75,12 @@ export async function buildParentIntegration(
   if (a.base !== b.base || a.receipt.newCommit === b.receipt.newCommit)
     throw new Error('parent-integration-base-or-candidate-mismatch');
   const base = a.base;
-  const subject = (material: typeof a, selected: Input) => ({
+  const subject = (material: typeof a, selected: ParentIntegrationInput) => ({
     predecessor: base,
     commit: material.receipt.newCommit,
     tree: selected.expectedTree,
   });
-  const validate = (repository: string, selected: Input, material: typeof a) =>
+  const validate = (repository: string, selected: ParentIntegrationInput, material: typeof a) =>
     validateCandidatePathScope({
       repository,
       base,
@@ -186,13 +186,20 @@ export async function buildParentIntegration(
       };
     },
   );
-  const final = readPair();
   const isSame = (before: typeof a, after: typeof a) =>
     before.base === after.base &&
     before.authorityDigest === after.authorityDigest &&
     canonical(before.receipt) === canonical(after.receipt) &&
     before.bundle.equals(after.bundle);
-  if (final.fingerprint !== fingerprint || !isSame(a, final.a) || !isSame(b, final.b))
-    throw new Error('parent-integration-stale');
-  return snapshot;
+  const assertCurrent = () => {
+    const final = readPair();
+    if (final.fingerprint !== fingerprint || !isSame(a, final.a) || !isSame(b, final.b))
+      throw new Error('parent-integration-stale');
+  };
+  assertCurrent();
+  return {
+    ...snapshot,
+    bindingDigest: digest([fingerprint, a.authorityDigest, b.authorityDigest]),
+    assertCurrent,
+  };
 }

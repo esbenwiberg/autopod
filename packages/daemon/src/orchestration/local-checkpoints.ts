@@ -151,6 +151,7 @@ export class LocalCheckpointHost {
     bytes: Buffer,
     verify: Verify | null,
     operatorSeed?: { requests: number; active: number },
+    assertCurrentAuthority?: () => void,
   ): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
     if (!bytes.length || bytes.length > MAX_CANDIDATE_BYTES)
@@ -203,6 +204,7 @@ export class LocalCheckpointHost {
             operatorSeed.active,
           );
         if (!current()) throw new Error('checkpoint-run-mismatch');
+        assertCurrentAuthority?.();
         if (operatorSeed)
           this.db
             .prepare('UPDATE orchestration_runs SET operator_owned=1 WHERE id=?')
