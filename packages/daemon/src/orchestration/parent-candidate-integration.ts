@@ -189,6 +189,7 @@ export async function buildParentIntegration(
   const final = readPair();
   const isSame = (before: typeof a, after: typeof a) =>
     before.base === after.base &&
+    before.authorityDigest === after.authorityDigest &&
     canonical(before.receipt) === canonical(after.receipt) &&
     before.bundle.equals(after.bundle);
   if (final.fingerprint !== fingerprint || !isSame(a, final.a) || !isSame(b, final.b))

@@ -15,7 +15,10 @@ type IntegrationInput = Readonly<{
 }>;
 
 // Private ledger fixture only; the live report catalog has no coding capability.
-async function fixture(paths: readonly [string, string] = ['proof-one.txt', 'proof-two.txt']) {
+async function fixture(
+  paths: readonly [string, string] = ['proof-one.txt', 'proof-two.txt'],
+  origin: 'own' | 'foreign' = 'own',
+) {
   const f = await setupOrchestrationRun(2, 1, 'coding-parent');
   const run = f.cp.run;
   const db = f.f.db;
@@ -30,9 +33,17 @@ async function fixture(paths: readonly [string, string] = ['proof-one.txt', 'pro
   db.prepare(
     'INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json) VALUES(?,?,?,?,?)',
   ).run(run, 'fixture-parent', digest('launch'), digest('policy'), '{}');
+  if (origin === 'foreign') {
+    db.prepare(`INSERT INTO orchestration_runs(id,repository,policy_digest,accepted_commit,worker_request_limit)
+      SELECT 'foreign-run',repository,policy_digest,accepted_commit,worker_request_limit
+      FROM orchestration_runs WHERE id=?`).run(run);
+    db.prepare(`INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json)
+      SELECT 'foreign-run','foreign-parent',launch_digest,policy_digest,policy_json
+      FROM parent_managed_runs WHERE run_id=?`).run(run);
+  }
   db.prepare(
     'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,1,?)',
-  ).run('parent-session', run, 'parent-container');
+  ).run('parent-session', origin === 'foreign' ? 'foreign-run' : run, 'parent-container');
 
   const createChild = async (index: 0 | 1) => {
     const ordinal = index + 1;
@@ -179,6 +190,7 @@ it('reads a private candidate from the exact current parent run without mutating
     receipt: child.receipt,
     bundle: child.bundle,
     base: f.cp.commit,
+    authorityDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
   });
   expect(f.db.prepare('SELECT total_changes()').pluck().get()).toBe(dbChanges);
   expect(f.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(0);
@@ -193,6 +205,25 @@ it('reads a private candidate from the exact current parent run without mutating
       candidateDigest: digest('wrong'),
     }),
   ).toThrow('binding');
+});
+
+it('rejects foreign origins but preserves earlier attempts from the same run', async () => {
+  const foreign = await fixture(undefined, 'foreign');
+  expect(() => readParentCandidate(foreign.db, foreign.run, foreign.children[0].selection)).toThrow(
+    'unavailable',
+  );
+  const f = await fixture();
+  f.db
+    .prepare(
+      'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,2,?)',
+    )
+    .run('fresh-session', f.run, 'fresh-container');
+  f.db
+    .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
+    .run('fresh-session', f.run);
+  expect(readParentCandidate(f.db, f.run, f.children[0].selection).receipt).toEqual(
+    f.children[0].receipt,
+  );
 });
 
 it('imports only the retained bundle into a private mirror and verifies exact diff scope', async () => {
@@ -326,6 +357,32 @@ it('refuses a changed checkpoint even when the accepted commit and both candidat
       SET checkpoint_json=json_set(checkpoint_json,'$.evidenceDigest',?) WHERE run_id=?`)
       .run(evidence, f.run);
   })();
+  await expect(pending).rejects.toThrow('parent-integration-stale');
+});
+
+it.each([
+  'grant',
+  'parent-attempt',
+] as const)('refuses changed %s during integration even when both candidate bytes and the base are unchanged', async (field) => {
+  const f = await fixture();
+  const pending = buildParentIntegration(f.db, path.join(f.root, 'moved-authority'), f.run, [
+    f.children[0].input,
+    f.children[1].input,
+  ]);
+  if (field === 'grant') {
+    f.db
+      .prepare('UPDATE managed_pods SET grant_revision=grant_revision+1 WHERE pod_id=?')
+      .run(f.children[0].podId);
+  } else {
+    f.db
+      .prepare(
+        'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,2,?)',
+      )
+      .run('fresh-session', f.run, 'fresh-container');
+    f.db
+      .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
+      .run('fresh-session', f.run);
+  }
   await expect(pending).rejects.toThrow('parent-integration-stale');
 });
 
