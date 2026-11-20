@@ -362,7 +362,7 @@ it('refuses a changed checkpoint even when the accepted commit and both candidat
 
 it.each([
   'grant',
-  'parent-attempt',
+  'continuation',
 ] as const)('refuses changed %s during integration even when both candidate bytes and the base are unchanged', async (field) => {
   const f = await fixture();
   const pending = buildParentIntegration(f.db, path.join(f.root, 'moved-authority'), f.run, [
@@ -375,13 +375,8 @@ it.each([
       .run(f.children[0].podId);
   } else {
     f.db
-      .prepare(
-        'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,2,?)',
-      )
-      .run('fresh-session', f.run, 'fresh-container');
-    f.db
-      .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
-      .run('fresh-session', f.run);
+      .prepare('UPDATE orchestration_continuations SET operation_digest=? WHERE pod_id=?')
+      .run(digest('different continuation authorization'), f.children[0].podId);
   }
   await expect(pending).rejects.toThrow('parent-integration-stale');
 });
