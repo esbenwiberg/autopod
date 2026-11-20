@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
-import { digest } from '../managed/canonical.js';
+import { z } from 'zod';
+import { canonical, digest, sha256 } from '../managed/canonical.js';
+import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import {
   type CombinedPolicy,
   combinedPolicyDigest,
@@ -15,17 +17,66 @@ import {
   type ParentIntegrationInput,
 } from './parent-candidate-integration.js';
 
-export interface ParentIntegrationGateRequest {
-  subject: Omit<ContinuationCheckpoint, 'evidenceDigest'>;
-  inputs: readonly {
-    requestKey: string;
-    candidateDigest: string;
-    expectedTree: string;
-    scopeDigest: string;
-  }[];
-  paths: readonly string[];
-  bindingDigest: string;
-  bundleDigest: string;
+const maxGateRequestBytes = 8192;
+const sha = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const oid = z.string().regex(/^[a-f0-9]{40}$/);
+const subjectSchema = z
+  .object({
+    run: z.string().min(1).max(160),
+    repository: z.string().min(1).max(160),
+    predecessor: oid,
+    commit: oid,
+    tree: oid,
+    policyDigest: sha,
+  })
+  .strict();
+const gateRequestSchema = z
+  .object({
+    subject: subjectSchema,
+    inputs: z
+      .array(
+        z
+          .object({
+            requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+            candidateDigest: sha,
+            expectedTree: oid,
+            scopeDigest: sha,
+          })
+          .strict(),
+      )
+      .length(2),
+    paths: z.array(z.string().min(1).max(4096)).min(1).max(2048),
+    bindingDigest: sha,
+    bundleDigest: sha,
+  })
+  .strict();
+export type ParentIntegrationGateRequest = z.infer<typeof gateRequestSchema>;
+
+const retainedSchema = z
+  .object({
+    version: z.literal(1),
+    subject: subjectSchema,
+    bundleDigest: sha,
+    verification: z
+      .object({
+        subjectDigest: sha,
+        gateRequest: gateRequestSchema,
+        inputDigest: sha,
+        gatePolicy: gatePolicySchema,
+        checks: z
+          .object({ status: z.literal('passed'), receiptDigest: sha, receipt: z.unknown() })
+          .strict(),
+        independentReview: z
+          .object({ status: z.literal('passed'), receiptDigest: sha, receipt: z.unknown() })
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();
+
+function requireBoundedRequest(request: ParentIntegrationGateRequest) {
+  if (Buffer.byteLength(canonical(request)) > maxGateRequestBytes)
+    throw new Error('parent-integration-evidence-too-large');
 }
 
 type Evaluator = (
@@ -42,6 +93,66 @@ export interface ParentIntegrationGates {
 /** Evaluators must verify the bundle and evaluate the actual tree before signing. */
 export function parentIntegrationGateDigest(request: ParentIntegrationGateRequest) {
   return digest(['autopod.parent-integration-gate.v1', request]);
+}
+
+/** Private read-back of historical custody, not authority to advance or publish. */
+export function readQualifiedParentIntegration(
+  db: Database.Database,
+  run: string,
+  evidenceDigest: string,
+) {
+  sha.parse(evidenceDigest);
+  const row = db
+    .prepare(`SELECT r.repository, r.policy_digest,
+    CASE WHEN length(CAST(c.manifest AS BLOB))<=16384 THEN c.manifest END AS manifest,
+    CASE WHEN length(c.bundle) BETWEEN 1 AND ? THEN c.bundle END AS bundle
+    FROM orchestration_checkpoint_custody c
+    JOIN orchestration_runs r ON r.id=c.run_id
+    JOIN parent_managed_runs p ON p.run_id=r.id
+    WHERE c.run_id=? AND c.evidence_digest=?`)
+    .get(MAX_CANDIDATE_BYTES, run, evidenceDigest) as
+    | {
+        repository: string;
+        policy_digest: string;
+        manifest: string | null;
+        bundle: Buffer | null;
+      }
+    | undefined;
+  if (!row?.manifest || !row.bundle || sha256(row.manifest) !== evidenceDigest)
+    throw new Error('parent-integration-custody-unavailable');
+  const { subject, bundleDigest, verification } = retainedSchema.parse(JSON.parse(row.manifest));
+  const { gateRequest, gatePolicy } = verification;
+  requireBoundedRequest(gateRequest);
+  if (
+    subject.run !== run ||
+    subject.repository !== row.repository ||
+    subject.policyDigest !== row.policy_digest ||
+    combinedPolicyDigest(gatePolicy) !== subject.policyDigest ||
+    canonical(gateRequest.subject) !== canonical(subject) ||
+    verification.subjectDigest !== digest(subject) ||
+    gateRequest.bundleDigest !== bundleDigest ||
+    sha256(row.bundle) !== bundleDigest ||
+    parentIntegrationGateDigest(gateRequest) !== verification.inputDigest
+  )
+    throw new Error('parent-integration-custody-binding');
+  const checks = verifyGateReceipt(
+    gatePolicy,
+    'checks',
+    verification.inputDigest,
+    verification.checks.receipt,
+  );
+  const independentReview = verifyGateReceipt(
+    gatePolicy,
+    'independentReview',
+    verification.inputDigest,
+    verification.independentReview.receipt,
+  );
+  if (
+    checks.receiptDigest !== verification.checks.receiptDigest ||
+    independentReview.receiptDigest !== verification.independentReview.receiptDigest
+  )
+    throw new Error('parent-integration-custody-binding');
+  return { checkpoint: { ...subject, evidenceDigest }, gateRequest, checks, independentReview };
 }
 
 /** Host-only qualification using trusted evaluator ports. No worker or HTTP surface. */
@@ -72,7 +183,7 @@ export async function qualifyParentIntegration(
       throw new Error('parent-integration-policy-mismatch');
     integration.assertCurrent();
   };
-  const request: ParentIntegrationGateRequest = {
+  const request = gateRequestSchema.parse({
     subject: {
       run,
       repository: runBinding.repository,
@@ -85,7 +196,8 @@ export async function qualifyParentIntegration(
     paths: integration.paths,
     bindingDigest: integration.bindingDigest,
     bundleDigest: integration.bundleDigest,
-  };
+  });
+  requireBoundedRequest(request);
   const inputDigest = parentIntegrationGateDigest(request);
   return host.retain(
     request.subject,

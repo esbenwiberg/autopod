@@ -12,6 +12,7 @@ import { buildParentIntegration } from './parent-candidate-integration.js';
 import {
   parentIntegrationGateDigest,
   qualifyParentIntegration,
+  readQualifiedParentIntegration,
 } from './parent-integration-qualified.js';
 
 type IntegrationInput = Readonly<{
@@ -421,6 +422,49 @@ it('qualifies exact integration bytes with independent offline gates without adv
     operationsBefore,
   );
   expect(f.f.launches()).toBe(0);
+  f.f.restart();
+  const db = f.f.db;
+  const retained = readQualifiedParentIntegration(db, f.run, checkpoint.evidenceDigest);
+  expect(retained.checkpoint).toEqual(checkpoint);
+  expect(retained.gateRequest.paths).toEqual(['proof-one.txt', 'proof-two.txt']);
+  expect(retained.checks.status).toBe('passed');
+  expect(retained.independentReview.status).toBe('passed');
+  expect(() =>
+    readQualifiedParentIntegration(db, 'foreign-run', checkpoint.evidenceDigest),
+  ).toThrow('parent-integration-custody-unavailable');
+  // The digest match and a claimed outer status cannot turn a signed veto into a pass.
+  const stored = db
+    .prepare(
+      'SELECT manifest,bundle FROM orchestration_checkpoint_custody WHERE run_id=? AND evidence_digest=?',
+    )
+    .get(f.run, checkpoint.evidenceDigest) as { manifest: string; bundle: Buffer };
+  const manifest = JSON.parse(stored.manifest);
+  const veto = f.independentReview.attest({
+    status: 'failed',
+    inputDigest: parentIntegrationGateDigest(retained.gateRequest),
+    evidenceDigest: digest('fixture-review-veto'),
+  });
+  manifest.verification.independentReview = {
+    status: 'passed',
+    receipt: veto,
+    receiptDigest: digest(veto),
+  };
+  const substituted = JSON.stringify(manifest);
+  db.prepare('INSERT INTO orchestration_checkpoint_custody VALUES (?,?,?,?)').run(
+    f.run,
+    sha256(substituted),
+    substituted,
+    stored.bundle,
+  );
+  expect(() => readQualifiedParentIntegration(db, f.run, sha256(substituted))).toThrow(
+    'combined-independentReview-required',
+  );
+  db.prepare(
+    'UPDATE orchestration_checkpoint_custody SET bundle=? WHERE run_id=? AND evidence_digest=?',
+  ).run(Buffer.from('corrupt fixture'), f.run, checkpoint.evidenceDigest);
+  expect(() => readQualifiedParentIntegration(db, f.run, checkpoint.evidenceDigest)).toThrow(
+    'parent-integration-custody-binding',
+  );
 });
 
 it('rejects a shared evaluator callback before launching either check', async () => {
