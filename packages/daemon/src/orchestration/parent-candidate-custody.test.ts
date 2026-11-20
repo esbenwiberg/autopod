@@ -7,7 +7,7 @@ import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.j
 import { inspectParentCandidate, readParentCandidate } from './parent-candidate-custody.js';
 
 // Private ledger fixture only; the live report catalog has no coding capability.
-async function fixture() {
+async function fixture(origin: 'own' | 'foreign' = 'own') {
   const f = await setupOrchestrationRun(2, 1, 'coding-parent');
   const run = f.cp.run;
   const db = f.f.db;
@@ -83,9 +83,17 @@ async function fixture() {
   db.prepare(
     'INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json) VALUES(?,?,?,?,?)',
   ).run(run, 'fixture-parent', digest('launch'), digest('policy'), '{}');
+  if (origin === 'foreign') {
+    db.prepare(`INSERT INTO orchestration_runs(id,repository,policy_digest,accepted_commit,worker_request_limit)
+      SELECT 'foreign-run',repository,policy_digest,accepted_commit,worker_request_limit
+      FROM orchestration_runs WHERE id=?`).run(run);
+    db.prepare(`INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json)
+      SELECT 'foreign-run','foreign-parent',launch_digest,policy_digest,policy_json
+      FROM parent_managed_runs WHERE run_id=?`).run(run);
+  }
   db.prepare(
     'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,1,?)',
-  ).run('parent-session', run, 'parent-container');
+  ).run('parent-session', origin === 'foreign' ? 'foreign-run' : run, 'parent-container');
   db.prepare(
     'INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest) VALUES(?,?,?,?,?)',
   ).run(run, startKey, requestKey, 'parent-session', digest('input'));
@@ -127,6 +135,7 @@ it('reads a private candidate from the exact current parent run without mutating
     receipt: f.receipt,
     bundle: f.bundle,
     base: f.cp.commit,
+    authorityDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
   });
   expect(f.db.prepare('SELECT total_changes()').pluck().get()).toBe(dbChanges);
   expect(f.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(0);
@@ -138,6 +147,24 @@ it('reads a private candidate from the exact current parent run without mutating
   expect(() =>
     readParentCandidate(f.db, f.run, { ...f.selection, candidateDigest: digest('wrong') }),
   ).toThrow('binding');
+});
+
+it('rejects origins from another run but keeps candidates across reconnects of the same run', async () => {
+  const foreign = await fixture('foreign');
+  expect(() => readParentCandidate(foreign.db, foreign.run, foreign.selection)).toThrow(
+    'unavailable',
+  );
+
+  const f = await fixture();
+  f.db
+    .prepare(
+      'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,2,?)',
+    )
+    .run('fresh-session', f.run, 'fresh-container');
+  f.db
+    .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
+    .run('fresh-session', f.run);
+  expect(readParentCandidate(f.db, f.run, f.selection).receipt).toEqual(f.receipt);
 });
 
 it('imports only the retained bundle into a private mirror and verifies exact diff scope', async () => {
