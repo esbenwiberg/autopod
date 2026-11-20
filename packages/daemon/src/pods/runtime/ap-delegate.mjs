@@ -26,7 +26,7 @@ class CliError extends Error {
 function usage() {
   return [
     'Usage:',
-    '  ap delegate start --key KEY --recipe RECIPE --brief TEXT',
+    '  ap delegate start --key KEY --recipe RECIPE --brief TEXT [--from N[,N...]]',
     '  ap delegate status',
     '  ap delegate results [--after N]',
     '  ap delegate wait [--after N] [--timeout-ms N]',
@@ -40,6 +40,24 @@ function parseInteger(value, name, maximum = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed > maximum) {
     throw new CliError('INVALID_ARGUMENT', `${name} is out of range`);
+  }
+  return parsed;
+}
+
+function parseResultCursors(value) {
+  const cursors = value.split(',');
+  if (cursors.length < 1 || cursors.length > 4) {
+    throw new CliError('INVALID_ARGUMENT', '--from must contain 1 to 4 result cursors');
+  }
+  const parsed = cursors.map((cursor) => {
+    const result = parseInteger(cursor, '--from');
+    if (result === 0) {
+      throw new CliError('INVALID_ARGUMENT', '--from cursors must be positive integers');
+    }
+    return result;
+  });
+  if (new Set(parsed).size !== parsed.length) {
+    throw new CliError('INVALID_ARGUMENT', '--from cursors must be distinct');
   }
   return parsed;
 }
@@ -72,10 +90,12 @@ export function parseCommand(argv) {
   if (command === undefined || command === '--help' || command === '-h') return { kind: 'help' };
 
   if (command === 'start') {
-    const options = parseOptions(tokens, new Set(['--key', '--recipe', '--brief']));
+    const options = parseOptions(tokens, new Set(['--key', '--recipe', '--brief', '--from']));
     const key = options['--key'];
     const recipe = options['--recipe'];
     const brief = options['--brief'];
+    const from =
+      options['--from'] === undefined ? undefined : parseResultCursors(options['--from']);
     if (!KEY_PATTERN.test(key ?? '')) {
       throw new CliError('INVALID_ARGUMENT', '--key must match [a-zA-Z0-9_-]{1,64}');
     }
@@ -85,7 +105,13 @@ export function parseCommand(argv) {
     if (typeof brief !== 'string' || brief.trim().length === 0 || brief.length > 2048) {
       throw new CliError('INVALID_ARGUMENT', '--brief must contain 1 to 2048 characters');
     }
-    return { kind: 'start', requestKey: key, recipe, brief };
+    return {
+      kind: 'start',
+      requestKey: key,
+      recipe,
+      brief,
+      ...(from === undefined ? {} : { from }),
+    };
   }
 
   if (command === 'status') {
@@ -266,6 +292,7 @@ function callFor(command) {
           requestKey: command.requestKey,
           recipe: command.recipe,
           brief: command.brief,
+          ...(command.from === undefined ? {} : { from: command.from }),
         },
       };
     case 'status':

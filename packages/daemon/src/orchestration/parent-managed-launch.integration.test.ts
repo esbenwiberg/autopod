@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import Fastify from 'fastify';
 import pino from 'pino';
@@ -12,6 +12,8 @@ import { admitLaunch } from '../configuration/launch-admission.js';
 import { resolveLaunchExecutionSettings } from '../configuration/launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
+import { ArtifactExports } from '../managed/artifact-exports.js';
+import { MemoryArtifactStore } from '../managed/artifact-store.js';
 import { ManagedPodService } from '../managed/managed-service.js';
 import {
   PARENT_DELEGATE_BIN,
@@ -514,6 +516,106 @@ it('reads the same durable outcome after reconnect and never charges a read or w
   expect(await f.delegate(['results'], replacement)).toEqual(first); // same run, fresh attempt
   expect(f.remaining()).toBe(0);
   expect(f.boundaryCalls()).toBe(1);
+});
+
+it('freezes two verified same-run reports as follow-up evidence and replays without rereading them', async () => {
+  const f = await fixture(6, 2, 3);
+  const followup = {
+    requestKey: 'followup',
+    recipe: 'inspect',
+    brief: 'Choose the next assertion using both findings',
+    from: [1, 2],
+  };
+  expect((await f.call(followup)).rejected).toBe(true);
+  expect(f.reservations()).toBe(0);
+  expect(f.boundaryCalls()).toBe(0);
+  expect(f.remaining()).toBe(6);
+  for (const key of ['playback', 'history']) {
+    expect(
+      (await f.call({ requestKey: key, recipe: 'inspect', brief: 'Investigate' })).rejected,
+    ).toBe(false);
+  }
+  const workers = (await f.family()).json().children as { requestKey: string; child: string }[];
+  for (const { requestKey, child } of workers) {
+    const dir = path.join(await realpath(f.p.directory), 'report-' + requestKey);
+    await mkdir(dir);
+    await writeFile(path.join(dir, 'report.md'), 'Finding from ' + requestKey);
+    const binding = f.p.db
+      .prepare(
+        'SELECT pod_id AS podId, dispatcher_attempt_id AS dispatcherAttemptId, execution_spec_digest AS executionSpecDigest FROM managed_pods WHERE pod_id=?',
+      )
+      .get(child) as { podId: string; dispatcherAttemptId: string; executionSpecDigest: string };
+    await new ArtifactExports(f.p.db, new MemoryArtifactStore()).export(
+      binding,
+      dir,
+      {
+        ...f.source.request.outputs.artifacts,
+        mode: 'required',
+        include: ['report.md'],
+        requiredPaths: ['report.md'],
+      },
+      true,
+    );
+    f.p.db
+      .prepare(
+        "UPDATE managed_pods SET state='complete',observed_exit=1,exit_code=0 WHERE pod_id=?",
+      )
+      .run(child);
+  }
+  const results = (await f.delegate(['results'])).stdout.result.results as {
+    cursor: number;
+    requestKey: string;
+  }[];
+  expect(results.map(({ requestKey }) => requestKey)).toEqual(['playback', 'history']);
+  const selected = results.slice().reverse(); // Preserve caller order, not cursor order.
+  const from = selected.map(({ cursor }) => cursor);
+  const args = [
+    'start',
+    '--key',
+    followup.requestKey,
+    '--recipe',
+    followup.recipe,
+    '--brief',
+    followup.brief,
+    '--from',
+    from.join(','),
+  ];
+  expect(await f.delegate(args)).toMatchObject({
+    exit: 0,
+    stdout: { result: { requestKey: 'followup' } },
+  });
+  const record = f.p.db
+    .prepare(
+      `SELECT q.report_dependencies_json AS edges, json_extract(c.request_json,'$.task.objective') AS objective
+       FROM parent_managed_requests q JOIN orchestration_continuations c USING (run_id,start_key)
+      WHERE q.request_key='followup'`,
+    )
+    .get() as { edges: string; objective: string };
+  expect(JSON.parse(record.edges)).toEqual(
+    selected.map(({ cursor, requestKey }) => ({
+      cursor,
+      requestKey,
+      childId: workers.find((worker) => worker.requestKey === requestKey)?.child,
+      artifactId: expect.any(String),
+      excerptDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      truncated: false,
+    })),
+  );
+  expect(record.objective).toContain('untrusted observations');
+  expect(record.objective).toContain('Finding from playback');
+  expect(record.objective).toContain('Finding from history');
+  expect(record.objective.indexOf('Finding from history')).toBeLessThan(
+    record.objective.indexOf('Finding from playback'),
+  );
+  expect(f.remaining()).toBe(0);
+  expect(f.reservations()).toBe(3);
+  expect(f.boundaryCalls()).toBe(3);
+  f.p.db.prepare('UPDATE artifact_exports SET bundle_bytes=?').run(Buffer.from('corrupt fixture'));
+  await f.restart();
+  expect(await f.delegate(args)).toMatchObject({ exit: 0 });
+  expect((await f.call({ ...followup, from: from.slice().reverse() })).rejected).toBe(true);
+  expect(f.reservations()).toBe(3);
+  expect(f.boundaryCalls()).toBe(3);
 });
 
 it('retains the continuation identity when current runtime observation is unavailable', async () => {

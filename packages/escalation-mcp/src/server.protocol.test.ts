@@ -124,6 +124,86 @@ it('serves real MCP JSON schemas and validates tool arguments with patched Zod (
   }
 });
 
+it('validates and forwards optional ordered result cursors for managed child requests', async () => {
+  const request = vi.fn(async (input: unknown) => ({ input }));
+  const { server } = createEscalationMcpServer({
+    podId: 'managed-parent',
+    bridge: createMockBridge({
+      getScopedTools: () => ({ managedChildRequest: request, managedFamily: vi.fn() }),
+    }),
+  });
+  const client = new Client({ name: 'managed-child-from', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const tools = await client.listTools();
+    expect(
+      tools.tools.find((tool) => tool.name === 'managed_child_request')?.inputSchema,
+    ).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        from: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 4,
+          items: { type: 'integer', exclusiveMinimum: 0 },
+        },
+      },
+    });
+
+    for (const from of [[0], [1, 1], [1, 2, 3, 4, 5], [Number.MAX_SAFE_INTEGER + 1]]) {
+      const invalid = await client.callTool({
+        name: 'managed_child_request',
+        arguments: { requestKey: 'stable', recipe: 'inspect', brief: 'Inspect once', from },
+      });
+      expect(invalid.isError).toBe(true);
+    }
+    const unexpected = await client.callTool({
+      name: 'managed_child_request',
+      arguments: {
+        requestKey: 'stable',
+        recipe: 'inspect',
+        brief: 'Inspect once',
+        from: [1],
+        podId: 'other',
+      },
+    });
+    expect(unexpected.isError).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+
+    await client.callTool({
+      name: 'managed_child_request',
+      arguments: { requestKey: 'without', recipe: 'inspect', brief: 'No cursor dependency' },
+    });
+    expect(request).toHaveBeenNthCalledWith(1, {
+      requestKey: 'without',
+      recipe: 'inspect',
+      brief: 'No cursor dependency',
+    });
+
+    await client.callTool({
+      name: 'managed_child_request',
+      arguments: {
+        requestKey: 'with',
+        recipe: 'inspect',
+        brief: 'Use selected results',
+        from: [8, 3, 5],
+      },
+    });
+    expect(request).toHaveBeenNthCalledWith(2, {
+      requestKey: 'with',
+      recipe: 'inspect',
+      brief: 'Use selected results',
+      from: [8, 3, 5],
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 it('registers scoped managed result tools with strict cursor-only inputs', async () => {
   const results = vi.fn(async (input: unknown) => ({ kind: 'results', input }));
   const wait = vi.fn(async (input: unknown) => ({ kind: 'wait', input }));

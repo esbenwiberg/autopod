@@ -55,7 +55,7 @@ it.each([
           .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
           .pluck()
           .all(),
-      ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271]);
+      ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272]);
       expect(
         db.prepare('SELECT * FROM schema_version WHERE version<=? ORDER BY version').all(release),
       ).toEqual(prior);
@@ -132,7 +132,7 @@ it('resumes a valid partially applied orchestration prefix', async () => {
         .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
         .pluck()
         .all(),
-    ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271]);
+    ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272]);
     assertBackupIntegrity(db);
   } finally {
     db.close();

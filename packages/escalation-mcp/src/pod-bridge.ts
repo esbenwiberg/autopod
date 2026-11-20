@@ -31,6 +31,7 @@ export interface ScopedPodTools {
     requestKey: string;
     recipe: string;
     brief: string;
+    from?: number[];
   }): Promise<unknown>;
   managedFamily?(): Promise<unknown>;
   managedResults?(input: unknown): Promise<unknown>;

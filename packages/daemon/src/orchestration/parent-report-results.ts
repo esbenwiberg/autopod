@@ -35,6 +35,15 @@ export interface ParentReportPage {
   results: ParentReportResult[];
 }
 
+export interface ParentReportDependency {
+  cursor: number;
+  artifactId: string;
+  childId: string;
+  requestKey: string;
+  text: string;
+  truncated: boolean;
+}
+
 const activeWaits = new WeakMap<Database.Database, Map<string, number>>();
 
 /** Durable, parent-scoped projection of terminal managed outcomes. Reads never contact a provider. */
@@ -123,6 +132,55 @@ export class ParentReportResults {
         },
       })),
     };
+  }
+
+  async dependencies(
+    cursors: readonly number[],
+    authenticate: () => string,
+  ): Promise<ParentReportDependency[]> {
+    const run = authenticate();
+    this.materialize(run);
+    const lookup = this.db.prepare(
+      `SELECT o.sequence,o.start_key,o.pod_id,o.state,o.exit_code,o.artifact_id,o.candidate_digest,q.request_key
+       FROM orchestration_child_outcomes o
+       JOIN parent_managed_requests q ON q.run_id=o.run_id AND q.start_key=o.start_key
+       JOIN orchestration_continuations c ON c.run_id=o.run_id AND c.start_key=o.start_key
+       JOIN managed_pods p ON p.pod_id=c.pod_id AND p.pod_id=o.pod_id
+         AND p.dispatcher_installation_id=('native.' || c.run_id) AND p.managed_start_key=c.start_key
+         AND p.dispatcher_attempt_id=c.attempt_id AND p.observed_exit=1
+         AND p.state='complete' AND p.exit_code=0
+         AND p.execution_spec_digest=json_extract(c.request_json,'$.executionSpecDigest')
+       WHERE o.run_id=? AND o.sequence=?`,
+    );
+    const rows = cursors.map((cursor) => {
+      const row = lookup.get(run, cursor) as Outcome | undefined;
+      if (!row || row.state !== 'complete' || row.exit_code !== 0 || !row.artifact_id)
+        throw new Error('parent-report-dependency-refused');
+      return { ...row, artifact_id: row.artifact_id };
+    });
+    if (!rows.length) return [];
+    const findings = await controllerFindings(this.db, run, {
+      key: '@parent-dependency',
+      cursor: Math.max(...cursors),
+      results: rows,
+      inFlight: [],
+      queued: [],
+      available: 0,
+    });
+    if (authenticate() !== run) throw new Error('parent-session-stale');
+    return rows.map((row, index) => {
+      const finding = findings[index];
+      if (finding?.status !== 'excerpt' || !finding.text?.trim())
+        throw new Error('parent-report-dependency-refused');
+      return {
+        cursor: row.sequence,
+        artifactId: row.artifact_id,
+        childId: row.pod_id,
+        requestKey: row.request_key,
+        text: finding.text,
+        truncated: finding.truncated ?? false,
+      };
+    });
   }
 
   async results(raw: unknown, authenticate: () => string): Promise<ParentReportPage> {
