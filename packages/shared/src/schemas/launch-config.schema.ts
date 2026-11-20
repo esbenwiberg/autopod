@@ -527,6 +527,7 @@ const launchOptions = z
       .default([]),
     expectedDigest: digest.optional(),
     requestId: id.optional(),
+    requireParentEnrollment: z.literal(true).optional(),
   })
   .strict();
 /** Reusable selection for scheduled callers. Task and retry identity belong to each run. */
@@ -536,6 +537,7 @@ const savedLaunchOptions = launchOptions.omit({
   work: true,
   expectedDigest: true,
   requestId: true,
+  requireParentEnrollment: true,
 });
 // Name the exact object shapes at union boundaries. Otherwise declaration emit
 // repeatedly serializes the full overrides/work graph in each arm and consumer.
@@ -579,6 +581,22 @@ export const launchRequestSchema: LaunchRequestSchema = z
     launchOptions.extend({ emptyWorkspace: z.literal(true), profileId: id }).strict(),
   ])
   .superRefine((v, ctx) => {
+    if (v.requireParentEnrollment) {
+      if (!z.uuid().safeParse(v.requestId).success) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['requestId'],
+          message: 'Parent enrollment requires the exact request UUID',
+        });
+      }
+      if (!v.expectedDigest) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expectedDigest'],
+          message: 'Parent enrollment requires the reviewed launch digest',
+        });
+      }
+    }
     if (v.intent === 'goal' && v.task.length > 4000) {
       ctx.addIssue({
         code: 'custom',

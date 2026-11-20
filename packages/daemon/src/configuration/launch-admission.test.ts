@@ -11,6 +11,43 @@ import { admitLaunch } from './launch-admission.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 
 describe('launch admission retries', () => {
+  it.each([
+    undefined,
+    () => undefined,
+  ])('fails closed before resolving or inserting a guarded launch with no enrollment', async (authorize) => {
+    const db = createTestDb();
+    try {
+      const { store, services } = createTestConfiguration(db);
+      const snapshots = createLaunchSnapshotRepository(db, store);
+      const createPod = vi.fn();
+      const preparePod = vi.fn();
+      await expect(
+        admitLaunch({
+          request: {
+            repositoryId: 'repo-a',
+            task: 'Parent',
+            requestId: '11111111-1111-4111-8111-111111111111',
+            expectedDigest: 'a'.repeat(64),
+            requireParentEnrollment: true,
+          },
+          actorId: 'user',
+          services,
+          snapshots,
+          authorize,
+          createPod,
+          preparePod,
+        }),
+      ).rejects.toMatchObject({ code: 'PARENT_ENROLLMENT_REQUIRED', statusCode: 409 });
+      expect(services.resolveEnvironment).not.toHaveBeenCalled();
+      expect(preparePod).not.toHaveBeenCalled();
+      expect(createPod).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT count(*) FROM pods').pluck().get()).toBe(0);
+      expect(db.prepare('SELECT count(*) FROM pod_launch_snapshots').pluck().get()).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('rolls back the ordinary task when the synchronous parent binding is rejected', async () => {
     const db = createTestDb();
     try {

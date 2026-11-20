@@ -20,8 +20,14 @@ these receipts or edit the daemon enrollment.
    Preview it without launching, and retain its exact launch digest. Select restricted
    egress, read-only GitHub rules, no PIM or deployment, and approval completion.
    Provider, environment and repository provisioning remain ordinary launch components.
-   Use `ap run --config parent-launch.json --request-id <UUID> --preview --json`;
-   retain the same file and its preview digest for `expectedDigest` when launching.
+   Put the UUID in `parent-launch.json` and run
+   `ap run --config parent-launch.json --preview --json`.
+   Once reviewed, add the exact preview digest as `expectedDigest` and set
+   `"requireParentEnrollment": true` in that launch file. Keep the original request
+   UUID. This opt-in refuses admission with `PARENT_ENROLLMENT_REQUIRED` if the
+   signed enrollment is not active for that UUID; it never falls back to an ordinary
+   Task. Older clients and daemons reject the unknown field. Do not remove the
+   guard or replace the UUID as a retry.
 2. Add this optional field to the new version 1 enrollment draft before generating its
    checks/review receipts:
 
