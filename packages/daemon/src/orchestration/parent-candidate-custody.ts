@@ -37,9 +37,8 @@ export function readParentCandidate(
       json_extract(c.request_json,'$.outputs.source') AS source_json,
       json_array(
         r.id, r.repository, r.policy_digest, r.accepted_commit, r.accepted_evidence,
-        b.pod_id, b.launch_digest, b.policy_digest, b.policy_json, b.current_attempt,
+        b.pod_id, b.launch_digest, b.policy_digest, b.policy_json,
         origin.attempt, origin.generation, origin.container_id,
-        active.attempt, active.generation, active.container_id,
         q.request_key, q.start_key, q.input_digest,
         c.operation_digest, c.checkpoint_json, c.request_json, c.reserved_requests,
         p.pod_id, p.dispatcher_attempt_id, p.execution_spec_digest, p.profile_snapshot_digest,
@@ -49,7 +48,6 @@ export function readParentCandidate(
     JOIN parent_managed_runs b ON b.run_id=q.run_id
     -- Historical work survives reconnect; origin must still belong to this run.
     JOIN parent_managed_sessions origin ON origin.attempt=q.parent_attempt AND origin.run_id=b.run_id
-    LEFT JOIN parent_managed_sessions active ON active.attempt=b.current_attempt AND active.run_id=b.run_id
     JOIN orchestration_runs r ON r.id=b.run_id
     JOIN orchestration_continuations c ON c.run_id=q.run_id AND c.start_key=q.start_key
     JOIN managed_pods p ON p.pod_id=c.pod_id AND p.dispatcher_installation_id=('native.'||r.id)
@@ -57,7 +55,6 @@ export function readParentCandidate(
       AND p.execution_spec_digest=json_extract(c.request_json,'$.executionSpecDigest')
     JOIN managed_source_candidates s ON s.pod_id=p.pod_id
     WHERE q.run_id=? AND q.request_key=? AND r.canceled=0
-      AND (b.current_attempt IS NULL OR active.attempt IS NOT NULL)
       AND json_extract(c.checkpoint_json,'$.repository')=r.repository
       AND json_extract(c.checkpoint_json,'$.policyDigest')=r.policy_digest
       AND json_extract(c.checkpoint_json,'$.commit')=r.accepted_commit
@@ -93,7 +90,7 @@ export function readParentCandidate(
     receipt,
     bundle: row.bundle,
     base: row.base_commit,
-    authorityDigest: sha256(row.authority_json),
+    authorityDigest: digest([row.authority_json, candidateDigest, receipt.evidenceDigest]),
   };
 }
 

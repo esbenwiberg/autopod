@@ -156,6 +156,7 @@ it('rejects origins from another run but keeps candidates across reconnects of t
   );
 
   const f = await fixture();
+  const before = readParentCandidate(f.db, f.run, f.selection);
   f.db
     .prepare(
       'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,2,?)',
@@ -164,7 +165,7 @@ it('rejects origins from another run but keeps candidates across reconnects of t
   f.db
     .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
     .run('fresh-session', f.run);
-  expect(readParentCandidate(f.db, f.run, f.selection).receipt).toEqual(f.receipt);
+  expect(readParentCandidate(f.db, f.run, f.selection)).toEqual(before);
 });
 
 it('imports only the retained bundle into a private mirror and verifies exact diff scope', async () => {
