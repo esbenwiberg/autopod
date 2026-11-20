@@ -72,7 +72,7 @@ export function createPodTokenIssuer(
       const [podId, expiresStr] = parts;
       const providedSig = parts.at(-1);
       if (!podId || !expiresStr || !providedSig) return null;
-      const epoch = parts.length >= 4 ? (parts[2] || null) : null;
+      const epoch = parts.length >= 4 ? parts[2] || null : null;
 
       // Check expiry
       const expires = Number(expiresStr);
