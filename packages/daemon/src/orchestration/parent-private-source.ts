@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { inflateSync } from 'node:zlib';
+import { promisify } from 'node:util';
+import { inflate } from 'node:zlib';
 import { sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import { type CandidatePathAllowance, validateCandidatePathScope } from './candidate-path-scope.js';
@@ -30,7 +31,11 @@ export interface VerifiedParentPrivateSource {
 // Initial private exporter contract: one SHA-1 HEAD, no prerequisites/deltas.
 // Inspect expansion before invoking Git on untrusted bytes. A worker can export
 // this format with `git -c pack.window=0 bundle create FILE HEAD`.
-function assertBoundedHeadPack(bundle: Buffer, commit: string) {
+const inflateObject = promisify(inflate);
+const maxExportObjects = 4096;
+const maxExpansionMs = 30_000;
+
+async function assertBoundedHeadPack(bundle: Buffer, commit: string) {
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('parent-private-source-pack-format');
   const header = Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`);
   const packEnd = bundle.length - 20;
@@ -46,7 +51,8 @@ function assertBoundedHeadPack(bundle: Buffer, commit: string) {
   )
     throw new Error('parent-private-source-pack-format');
   const count = bundle.readUInt32BE(header.length + 8);
-  if (!count || count > 8192) throw new Error('parent-private-source-object-limit');
+  if (!count || count > maxExportObjects) throw new Error('parent-private-source-object-limit');
+  const deadline = performance.now() + maxExpansionMs;
   let offset = header.length + 12;
   let remaining = MAX_CANDIDATE_BYTES;
   for (let i = 0; i < count; i++) {
@@ -54,7 +60,7 @@ function assertBoundedHeadPack(bundle: Buffer, commit: string) {
     if (byte === undefined || offset >= packEnd)
       throw new Error('parent-private-source-pack-format');
     const type = (byte >>> 4) & 7;
-    if (type < 1 || type > 4) throw new Error('parent-private-source-object-type');
+    if (type < 1 || type > 3) throw new Error('parent-private-source-object-type');
     let size = byte & 15;
     let shift = 4;
     while (byte & 128) {
@@ -68,13 +74,16 @@ function assertBoundedHeadPack(bundle: Buffer, commit: string) {
       throw new Error('parent-private-source-object-limit');
     let result: { buffer: Buffer; engine: { bytesWritten: number } };
     try {
-      result = inflateSync(bundle.subarray(offset, packEnd), {
+      // Node's asynchronous zlib work stays off the daemon event loop. Keep only
+      // one expansion in flight; its compressed input and output are both bounded.
+      result = (await inflateObject(bundle.subarray(offset, packEnd), {
         maxOutputLength: size + 1,
         info: true,
-      }) as unknown as typeof result;
+      })) as unknown as typeof result;
     } catch {
       throw new Error('parent-private-source-pack-format');
     }
+    if (performance.now() >= deadline) throw new Error('parent-private-source-expansion-timeout');
     if (result.buffer.length !== size || !result.engine.bytesWritten)
       throw new Error('parent-private-source-pack-format');
     offset += result.engine.bytesWritten;
@@ -114,7 +123,7 @@ export async function verifyParentPrivateSource(
     ? input.allowlist.map((entry) => ({ kind: entry.kind, path: entry.path }))
     : input.allowlist;
 
-  assertBoundedHeadPack(bundle, commit);
+  await assertBoundedHeadPack(bundle, commit);
   const scoped = await withVerifiedCheckpointMirror(
     scratch,
     { predecessor: base, commit, tree },

@@ -163,6 +163,39 @@ it('rejects additional refs and objects hidden behind a single advertised HEAD',
   );
 });
 
+it('rejects a merge with additional reachable history even if the final tree is allowed', async () => {
+  const f = await fixture();
+  await managedGit(f.repository, ['checkout', '-b', 'other', f.base]);
+  await writeFile(path.join(f.repository, 'other.txt'), 'unrelated history\n');
+  await managedGit(f.repository, ['add', '--', 'other.txt']);
+  await managedGit(f.repository, [...identity, 'commit', '-m', 'Unrelated']);
+  const other = await managedGit(f.repository, ['rev-parse', 'HEAD']);
+  const merge = await managedGit(f.repository, [
+    ...identity,
+    'commit-tree',
+    f.tree,
+    '-p',
+    f.base,
+    '-p',
+    other,
+    '-m',
+    'Disallowed merge',
+  ]);
+  await managedGit(f.repository, ['checkout', '--detach', merge]);
+  const file = path.join(f.root, 'merge.bundle');
+  await managedGit(f.repository, ['-c', 'pack.window=0', 'bundle', 'create', file, 'HEAD']);
+  const bundle = await readFile(file);
+  await expect(
+    verifyParentPrivateSource(f.root, bundle, {
+      commit: merge,
+      base: f.base,
+      tree: f.tree,
+      allowlist: [{ kind: 'file', path: 'src/allowed.ts' }],
+      maxBundleBytes: bundle.length,
+    }),
+  ).rejects.toThrow('candidate-path-scope-base-mismatch');
+});
+
 it('refuses a small compressed export whose expanded object exceeds the pre-import limit', async () => {
   const f = await fixture('src/allowed.ts', Buffer.alloc(9 * 1024 * 1024, 65));
   expect(f.bundle.length).toBeLessThan(64 * 1024);
