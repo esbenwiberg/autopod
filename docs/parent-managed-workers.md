@@ -63,6 +63,34 @@ these receipts or edit the daemon enrollment.
    uncertain reply. It can call `managed_family` without selecting another parent.
    Operator `/orchestration/runs/:slot/start` is refused for parent slots.
 
+### Restricted report CLI inside the parent
+
+The daemon provisions the restricted `ap` helper and its existing attempt-scoped
+MCP connection only for an enrolled parent. Use a Node.js 22 worker image.
+
+```sh
+ap delegate start --key research-1 --recipe inspect --brief 'Check the pinned source'
+ap delegate status
+ap delegate results --after 0
+ap delegate wait --after 0 --timeout-ms 10000
+```
+
+Successful commands return JSON. A start receipt identifies the request and its
+last recorded child status; `reserved` is not proof of execution. If the
+reply is uncertain, inspect status and use the exact same key and input to
+reconcile, never a replacement key or an automatic retry. No owner login,
+arbitrary endpoint, generic spawn, coding, or publication is exposed here.
+
+Results return at most one bounded page of terminal outcomes and a `nextCursor`;
+use that cursor on subsequent commands. Only a verified committed report
+contributes a bounded, sanitized excerpt. An exit awaiting report export or
+reconciliation doesn't consume a result cursor. A failed child or unverified
+exit is not a successful report. Wait has a 15-second server budget including
+report verification, plus up to two seconds of CLI transport grace; timeout
+preserves the cursor. A fresh authenticated attempt of the **same parent run**
+can resume reading run history, while stale attempts cannot. Reconnect never
+creates another child or calls a provider.
+
 The parent request and its originating attempt, continuation reservation and request
 debit commit together **before dispatch**. The production continuation scheduler
 reconciles the managed identity by installation/start key/spec/attempt. Replays do

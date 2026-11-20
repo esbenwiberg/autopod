@@ -123,3 +123,95 @@ it('serves real MCP JSON schemas and validates tool arguments with patched Zod (
     await server.close();
   }
 });
+
+it('registers scoped managed result tools with strict cursor-only inputs', async () => {
+  const results = vi.fn(async (input: unknown) => ({ kind: 'results', input }));
+  const wait = vi.fn(async (input: unknown) => ({ kind: 'wait', input }));
+  const { server } = createEscalationMcpServer({
+    podId: 'managed-parent',
+    bridge: createMockBridge({
+      getScopedTools: () => ({
+        managedChildRequest: vi.fn(),
+        managedFamily: vi.fn(),
+        managedResults: results,
+        managedWait: wait,
+      }),
+    }),
+  });
+  const client = new Client({ name: 'managed-results', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const tools = await client.listTools();
+    expect(tools.tools.find((tool) => tool.name === 'managed_results')?.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: { after: { type: 'integer', minimum: 0 } },
+    });
+    expect(tools.tools.find((tool) => tool.name === 'managed_wait')?.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        after: { type: 'integer', minimum: 0 },
+        timeoutMs: { type: 'integer', exclusiveMinimum: 0, maximum: 15_000 },
+      },
+    });
+
+    const unexpected = await client.callTool({
+      name: 'managed_results',
+      arguments: { after: 0, podId: 'other' },
+    });
+    expect(unexpected.isError).toBe(true);
+    expect(results).not.toHaveBeenCalled();
+    const invalidWait = await client.callTool({
+      name: 'managed_wait',
+      arguments: { timeoutMs: 15_001 },
+    });
+    expect(invalidWait.isError).toBe(true);
+    expect(wait).not.toHaveBeenCalled();
+
+    const resultResponse = await client.callTool({
+      name: 'managed_results',
+      arguments: { after: 3 },
+    });
+    expect(results).toHaveBeenCalledExactlyOnceWith({ after: 3 });
+    expect(resultResponse.content).toContainEqual({
+      type: 'text',
+      text: JSON.stringify({ kind: 'results', input: { after: 3 } }),
+    });
+    const waitResponse = await client.callTool({
+      name: 'managed_wait',
+      arguments: { after: 3, timeoutMs: 15_000 },
+    });
+    expect(wait).toHaveBeenCalledExactlyOnceWith({ after: 3, timeoutMs: 15_000 });
+    expect(waitResponse.content).toContainEqual({
+      type: 'text',
+      text: JSON.stringify({ kind: 'wait', input: { after: 3, timeoutMs: 15_000 } }),
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it('omits managed result tools when their scoped methods are unavailable', async () => {
+  const { server } = createEscalationMcpServer({
+    podId: 'managed-parent',
+    bridge: createMockBridge({
+      getScopedTools: () => ({ managedChildRequest: vi.fn(), managedFamily: vi.fn() }),
+    }),
+  });
+  const client = new Client({ name: 'managed-results-absent', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const toolNames = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(toolNames).not.toContain('managed_results');
+    expect(toolNames).not.toContain('managed_wait');
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

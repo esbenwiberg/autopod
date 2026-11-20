@@ -581,6 +581,41 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       {},
       async () => ({ content: [{ type: 'text' as const, text: JSON.stringify(await family()) }] }),
     );
+    if (scoped.managedResults) {
+      const results = scoped.managedResults;
+      server.registerTool(
+        'managed_results',
+        {
+          description: 'Read retained managed worker results after an optional event cursor.',
+          inputSchema: z
+            .object({
+              after: z.number().int().nonnegative().safe().optional(),
+            })
+            .strict(),
+        },
+        async (input) => ({
+          content: [{ type: 'text' as const, text: JSON.stringify(await results(input)) }],
+        }),
+      );
+    }
+    if (scoped.managedWait) {
+      const wait = scoped.managedWait;
+      server.registerTool(
+        'managed_wait',
+        {
+          description: 'Wait once for managed worker results after an optional event cursor.',
+          inputSchema: z
+            .object({
+              after: z.number().int().nonnegative().safe().optional(),
+              timeoutMs: z.number().int().positive().max(15_000).optional(),
+            })
+            .strict(),
+        },
+        async (input) => ({
+          content: [{ type: 'text' as const, text: JSON.stringify(await wait(input)) }],
+        }),
+      );
+    }
   }
   if (scoped?.deploymentPrepare && scoped.deploymentStatus) {
     const prepare = scoped.deploymentPrepare;
