@@ -9,11 +9,13 @@ import {
   type StdioInjectedMcpServer,
 } from '@autopod/shared';
 import type { LaunchExecutionCredentials } from '../configuration/execution-credentials.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { mergeMcpServers } from './injection-merger.js';
+import { provisionParentDelegate } from './parent-delegate-materials.js';
 
 interface RuntimeResumeContextDependencies {
   launchConfiguration?: {
@@ -22,6 +24,7 @@ interface RuntimeResumeContextDependencies {
   };
   sessionTokenIssuer?: { generate(podId: string): string };
   provisionParentSession?: (podId: string) => Promise<string | undefined>;
+  containerManagerFactory?: { get(target: Pod['executionTarget']): ContainerManager };
 }
 
 interface RuntimeResumeContextCaptured {
@@ -74,8 +77,18 @@ export function createRuntimeResumeContext(
     const material = launch ? await executionCredentialsFor(launch)?.agent(launch) : undefined;
     const profile = material ? { ...frozenProfile, ...material } : frozenProfile;
     const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
-    const mcpSessionToken =
-      (await deps.provisionParentSession?.(pod.id)) ?? deps.sessionTokenIssuer?.generate(pod.id);
+    const parentToken = await deps.provisionParentSession?.(pod.id);
+    if (parentToken) {
+      if (!deps.containerManagerFactory) throw new Error('Parent delegate runtime unavailable');
+      await provisionParentDelegate(
+        deps.containerManagerFactory.get(pod.executionTarget),
+        containerId,
+        pod.executionTarget,
+        mcpUrl,
+        parentToken,
+      );
+    }
+    const mcpSessionToken = parentToken ?? deps.sessionTokenIssuer?.generate(pod.id);
     const escalationHeaders = mcpSessionToken
       ? { Authorization: `Bearer ${mcpSessionToken}` }
       : undefined;

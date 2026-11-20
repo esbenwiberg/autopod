@@ -13,9 +13,14 @@ import { resolveLaunchExecutionSettings } from '../configuration/launch-executio
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
 import { ManagedPodService } from '../managed/managed-service.js';
+import {
+  PARENT_DELEGATE_BIN,
+  PARENT_DELEGATE_DESCRIPTOR,
+} from '../pods/parent-delegate-materials.js';
 import { createSessionBridge } from '../pods/pod-bridge-impl.js';
 import type { PodManagerDependencies } from '../pods/pod-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
+import { runDelegate } from '../pods/runtime/ap-delegate.mjs';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
@@ -244,6 +249,40 @@ async function fixture(
       result: envelope.result,
     };
   };
+  const delegate = async (args: string[], replacementToken?: string) => {
+    const writes = vi.mocked(p.cm.writeFile).mock.calls;
+    const descriptor = writes.findLast((entry) => entry[1] === PARENT_DELEGATE_DESCRIPTOR);
+    expect(descriptor?.[3]).toMatchObject({ mode: 0o600, preserveParentModes: true });
+    expect(writes.findLast((entry) => entry[1] === `${PARENT_DELEGATE_BIN}/ap`)?.[3]).toMatchObject(
+      {
+        mode: 0o500,
+      },
+    );
+    const config = JSON.parse(String(descriptor?.[2]));
+    if (replacementToken) config.authorization = `Bearer ${replacementToken}`;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exit = await runDelegate(['delegate', ...args], {
+      config,
+      stdout: { write: (s: string) => stdout.push(s) },
+      stderr: { write: (s: string) => stderr.push(s) },
+      transport: async (url: string, init: RequestInit) => {
+        const headers = Object.fromEntries(new Headers(init.headers));
+        const result = await app.inject({
+          url: new URL(url).pathname,
+          method: 'POST',
+          headers,
+          payload: String(init.body),
+        });
+        await scheduler.settled(source.cp.run);
+        return new Response(result.body, {
+          status: result.statusCode,
+          headers: { 'content-type': String(result.headers['content-type']) },
+        });
+      },
+    });
+    return { exit, stdout: stdout.length ? JSON.parse(stdout.join('')) : null, stderr };
+  };
   const family = (credential = 'operator', podId = original.id) =>
     app.inject({
       method: 'GET',
@@ -286,12 +325,20 @@ async function fixture(
     vi.mocked(p.ctx.runtime.spawn).mockImplementation(async function* (spawn) {
       token = runtimeToken(spawn.mcpServers ?? []);
       expect(issuer.verifyAttempt(token)?.podId).toBe(spawn.podId);
-      const modelReply = {
-        requestKey: 'model-turn-one',
-        recipe: 'inspect',
-        brief: 'Read the pinned source',
-      };
-      expect(await call(modelReply, token, spawn.podId)).toMatchObject({ rejected: false });
+      const commissioned = await delegate([
+        'start',
+        '--key',
+        'model-turn-one',
+        '--recipe',
+        'inspect',
+        '--brief',
+        'Read the pinned source',
+      ]);
+      expect(commissioned).toMatchObject({
+        exit: 0,
+        stdout: { ok: true, result: { requestKey: 'model-turn-one' } },
+        stderr: [],
+      });
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
@@ -314,6 +361,7 @@ async function fixture(
     p,
     source,
     call,
+    delegate,
     family,
     operatorStart: () =>
       app.inject({
@@ -420,6 +468,52 @@ it('a real launched parent commissions through provisioned MCP ingress; lost rep
   expect(JSON.stringify((await f.family()).json())).not.toMatch(
     /grant|policy_json|runtime_ref|credential/,
   );
+});
+
+it('reads the same durable outcome after reconnect and never charges a read or wait', async () => {
+  const f = await fixture();
+  const admitted = await f.delegate([
+    'start',
+    '--key',
+    'results',
+    '--recipe',
+    'inspect',
+    '--brief',
+    'Read',
+  ]);
+  expect(admitted).toMatchObject({ exit: 0, stdout: { result: { requestKey: 'results' } } });
+  const pending = await f.delegate(['results']);
+  expect(pending).toMatchObject({ exit: 0, stdout: { result: { nextCursor: 0, results: [] } } });
+  const waited = await f.delegate(['wait', '--timeout-ms', '5']);
+  expect(waited).toMatchObject({ exit: 0, stdout: { result: { timedOut: true, results: [] } } });
+  f.source.f.advance(401);
+  const service = new ManagedPodService(
+    f.p.db,
+    f.source.f.admission,
+    f.source.f.runtime,
+    () => 401,
+    true,
+  );
+  await service.enforceExpiry(); // requests stop for the expired worker
+  await service.enforceExpiry(); // observes the worker's actual exit
+  const first = await f.delegate(['results']);
+  expect(first).toMatchObject({
+    exit: 0,
+    stdout: { result: { results: [{ requestKey: 'results', cursor: expect.any(Number) }] } },
+  });
+  await f.restart();
+  expect(await f.delegate(['results'])).toEqual(first);
+  const latestCursor = first.stdout.result.nextCursor;
+  expect(await f.delegate(['results', '--after', String(latestCursor)])).toMatchObject({
+    exit: 0,
+    stdout: { result: { nextCursor: latestCursor, results: [] } },
+  });
+  const replacement = await f.owner().provision(f.parentId);
+  expect(replacement).toBeTruthy();
+  expect((await f.delegate(['results'])).exit).toBe(1); // old attempt has no read authority
+  expect(await f.delegate(['results'], replacement)).toEqual(first); // same run, fresh attempt
+  expect(f.remaining()).toBe(0);
+  expect(f.boundaryCalls()).toBe(1);
 });
 
 it('retains the continuation identity when current runtime observation is unavailable', async () => {
