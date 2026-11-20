@@ -3,9 +3,16 @@ import path from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { digest, sha256 } from '../managed/canonical.js';
 import { managedGit } from '../managed/source-git.js';
+import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
+import { combinedPolicyDigest } from './combined-attestation.js';
+import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { inspectParentCandidate, readParentCandidate } from './parent-candidate-custody.js';
 import { buildParentIntegration } from './parent-candidate-integration.js';
+import {
+  parentIntegrationGateDigest,
+  qualifyParentIntegration,
+} from './parent-integration-qualified.js';
 
 type IntegrationInput = Readonly<{
   requestKey: string;
@@ -22,14 +29,25 @@ async function fixture(
   const f = await setupOrchestrationRun(2, 1, 'coding-parent');
   const run = f.cp.run;
   const db = f.f.db;
+  const checks = fixtureSigner('checks', 'fixture-parent-checks', digest('parent-checks/v1'));
+  const independentReview = fixtureSigner(
+    'independentReview',
+    'fixture-parent-review',
+    digest('parent-review/v1'),
+  );
+  const policy = {
+    basePolicyDigest: f.cp.policyDigest,
+    checks: checks.authority,
+    independentReview: independentReview.authority,
+  };
+  const policyDigest = combinedPolicyDigest(policy);
+  const cp = { ...f.cp, policyDigest };
   const baseBundle = path.join(f.root, 'base.bundle');
   await writeFile(baseBundle, f.bytes);
 
-  db.prepare('UPDATE orchestration_runs SET accepted_commit=?,accepted_evidence=? WHERE id=?').run(
-    f.cp.commit,
-    f.cp.evidenceDigest,
-    run,
-  );
+  db.prepare(
+    'UPDATE orchestration_runs SET policy_digest=?,accepted_commit=?,accepted_evidence=? WHERE id=?',
+  ).run(policyDigest, cp.commit, cp.evidenceDigest, run);
   db.prepare(
     'INSERT INTO parent_managed_runs(run_id,pod_id,launch_digest,policy_digest,policy_json) VALUES(?,?,?,?,?)',
   ).run(run, 'fixture-parent', digest('launch'), digest('policy'), '{}');
@@ -107,7 +125,7 @@ async function fixture(
       startKey,
       dispatcherAttemptId,
       digest(`operation-${ordinal}`),
-      JSON.stringify(f.cp),
+      JSON.stringify(cp),
       request,
       podId,
     );
@@ -147,7 +165,7 @@ async function fixture(
   };
 
   const children = [await createChild(0), await createChild(1)] as const;
-  return { ...f, db, run, children };
+  return { ...f, cp, db, run, children, policy, checks, independentReview };
 }
 
 function privateEffects(f: Awaited<ReturnType<typeof fixture>>) {
@@ -316,6 +334,217 @@ it('builds one exact offline two-parent tree and a real HEAD bundle from disjoin
   expect(await managedGit(imported, ['show', `${result.commit}:proof-two.txt`])).toBe(
     'tested candidate fixture 2',
   );
+});
+
+it('qualifies exact integration bytes with independent offline gates without advancing or publishing', async () => {
+  const f = await fixture();
+  const inputs = [f.children[0].input, f.children[1].input] as const;
+  const acceptedBefore = f.db
+    .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+    .get(f.run);
+  const operationsBefore = f.db
+    .prepare('SELECT count(*) FROM managed_source_operations')
+    .pluck()
+    .get();
+  const seen: string[] = [];
+  const checkpoint = await qualifyParentIntegration(
+    f.db,
+    f.host(),
+    path.join(f.root, 'qualified-integration'),
+    f.run,
+    inputs,
+    {
+      policy: f.policy,
+      checks: async (request, bundle) => {
+        seen.push('checks');
+        expect(request.subject.run).toBe(f.run);
+        expect(request.subject.predecessor).toBe(f.cp.commit);
+        expect(request.paths).toEqual(['proof-one.txt', 'proof-two.txt']);
+        expect(request.bundleDigest).toBe(sha256(bundle));
+        await withVerifiedCheckpointMirror(
+          path.join(f.root, 'checks-import'),
+          request.subject,
+          bundle,
+          async (mirror) => {
+            expect(
+              await managedGit(mirror, ['show', `${request.subject.commit}:proof-one.txt`]),
+            ).toBe('tested candidate fixture 1');
+            expect(
+              await managedGit(mirror, ['show', `${request.subject.commit}:proof-two.txt`]),
+            ).toBe('tested candidate fixture 2');
+          },
+        );
+        return f.checks.attest({
+          status: 'passed',
+          inputDigest: parentIntegrationGateDigest(request),
+          evidenceDigest: digest('offline-check-evidence'),
+        });
+      },
+      independentReview: async (request, bundle) => {
+        seen.push('independentReview');
+        await withVerifiedCheckpointMirror(
+          path.join(f.root, 'review-import'),
+          request.subject,
+          bundle,
+          async (mirror) => {
+            expect(
+              await managedGit(mirror, ['rev-parse', `${request.subject.commit}^{tree}`]),
+            ).toBe(request.subject.tree);
+            expect(
+              await managedGit(mirror, ['show', '-s', '--format=%P', request.subject.commit]),
+            ).toBe(`${f.children[0].receipt.newCommit} ${f.children[1].receipt.newCommit}`);
+          },
+        );
+        return f.independentReview.attest({
+          status: 'passed',
+          inputDigest: parentIntegrationGateDigest(request),
+          evidenceDigest: digest('offline-review-evidence'),
+        });
+      },
+    },
+  );
+
+  expect(seen).toEqual(['checks', 'independentReview']);
+  expect(checkpoint).toMatchObject({
+    run: f.run,
+    repository: f.cp.repository,
+    predecessor: f.cp.commit,
+    policyDigest: combinedPolicyDigest(f.policy),
+  });
+  expect(checkpoint.evidenceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+  expect(
+    f.db
+      .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+      .get(f.run),
+  ).toEqual(acceptedBefore);
+  expect(f.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(
+    operationsBefore,
+  );
+  expect(f.f.launches()).toBe(0);
+});
+
+it('rejects a shared evaluator callback before launching either check', async () => {
+  const f = await fixture();
+  const evaluate = vi.fn();
+  await expect(
+    qualifyParentIntegration(
+      f.db,
+      f.host(),
+      path.join(f.root, 'same-evaluator'),
+      f.run,
+      [f.children[0].input, f.children[1].input],
+      { policy: f.policy, checks: evaluate, independentReview: evaluate },
+    ),
+  ).rejects.toThrow('parent-integration-independent-evaluators-required');
+  expect(evaluate).not.toHaveBeenCalled();
+});
+
+it('does not retain, advance, or publish an integration when independent review fails', async () => {
+  const f = await fixture();
+  const inputs = [f.children[0].input, f.children[1].input] as const;
+  const acceptedBefore = f.db
+    .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+    .get(f.run);
+  const custodyBefore = f.db
+    .prepare('SELECT count(*) FROM orchestration_checkpoint_custody')
+    .pluck()
+    .get();
+  await expect(
+    qualifyParentIntegration(
+      f.db,
+      f.host(),
+      path.join(f.root, 'failed-qualified-integration'),
+      f.run,
+      inputs,
+      {
+        policy: f.policy,
+        checks: async (request) =>
+          f.checks.attest({
+            status: 'passed',
+            inputDigest: parentIntegrationGateDigest(request),
+            evidenceDigest: digest('passing-checks'),
+          }),
+        independentReview: async (request, bundle) => {
+          await withVerifiedCheckpointMirror(
+            path.join(f.root, 'failed-review-import'),
+            request.subject,
+            bundle,
+            async (mirror) => {
+              expect(
+                await managedGit(mirror, ['show', `${request.subject.commit}:proof-two.txt`]),
+              ).toBe('tested candidate fixture 2');
+            },
+          );
+          return f.independentReview.attest({
+            status: 'failed',
+            inputDigest: parentIntegrationGateDigest(request),
+            evidenceDigest: digest('review-failure'),
+          });
+        },
+      },
+    ),
+  ).rejects.toThrow('independentReview-required');
+  expect(
+    f.db
+      .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+      .get(f.run),
+  ).toEqual(acceptedBefore);
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_checkpoint_custody').pluck().get()).toBe(
+    custodyBefore,
+  );
+  expect(f.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(0);
+});
+
+it('refuses qualification when child authority becomes stale during a gate', async () => {
+  const f = await fixture();
+  const inputs = [f.children[0].input, f.children[1].input] as const;
+  const acceptedBefore = f.db
+    .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+    .get(f.run);
+  await expect(
+    qualifyParentIntegration(
+      f.db,
+      f.host(),
+      path.join(f.root, 'stale-qualified-integration'),
+      f.run,
+      inputs,
+      {
+        policy: f.policy,
+        checks: async (request, bundle) => {
+          await withVerifiedCheckpointMirror(
+            path.join(f.root, 'stale-gate-import'),
+            request.subject,
+            bundle,
+            async (mirror) => {
+              expect(
+                await managedGit(mirror, ['show', `${request.subject.commit}:proof-one.txt`]),
+              ).toBe('tested candidate fixture 1');
+            },
+          );
+          f.db
+            .prepare('UPDATE managed_pods SET grant_revision=grant_revision+1 WHERE pod_id=?')
+            .run(f.children[0].podId);
+          return f.checks.attest({
+            status: 'passed',
+            inputDigest: parentIntegrationGateDigest(request),
+            evidenceDigest: digest('stale-check-evidence'),
+          });
+        },
+        independentReview: async (request) =>
+          f.independentReview.attest({
+            status: 'passed',
+            inputDigest: parentIntegrationGateDigest(request),
+            evidenceDigest: digest('unused-review-evidence'),
+          }),
+      },
+    ),
+  ).rejects.toThrow('parent-integration-stale');
+  expect(
+    f.db
+      .prepare('SELECT accepted_commit,accepted_evidence FROM orchestration_runs WHERE id=?')
+      .get(f.run),
+  ).toEqual(acceptedBefore);
+  expect(f.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(0);
 });
 
 it('pins the same integration tree and commit for repeated ordered inputs', async () => {

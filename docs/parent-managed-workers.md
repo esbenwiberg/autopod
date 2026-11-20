@@ -128,6 +128,18 @@ request is not an exit. The projection joins real managed rows rather than addin
 normal fleet pod rows. Parent exit does not delete this history or keep a process
 alive for display. There is no Desktop grouping in this slice.
 
+## Private integration qualification (host only)
+
+`qualifyParentIntegration` builds from two same-run retained coding candidates.
+Trusted check and independent-review adapters each receive the exact bounded
+bundle and must import and evaluate that tree before signing. The gate digest
+binds both selections and path scopes, the run and checkpoint authority, the
+commit/tree, and the bundle SHA-256. Both evaluator keys and configurations are
+pinned by the run policy. Custody rechecks the same database rows under the
+write transaction. Passing qualification retains the bundle and receipts; it
+neither advances accepted source nor approves delivery. No worker or HTTP
+operation exposes this helper, and no production evaluator is configured here.
+
 ## Evidence and remaining milestones
 
 Run the offline contract:
