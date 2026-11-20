@@ -568,6 +568,14 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
             requestKey: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
             recipe: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
             brief: z.string().trim().min(1).max(2048),
+            from: z
+              .array(z.number().int().positive().safe())
+              .min(1)
+              .max(4)
+              .refine((cursors) => new Set(cursors).size === cursors.length, {
+                message: 'Result cursors must be distinct',
+              })
+              .optional(),
           })
           .strict(),
       },

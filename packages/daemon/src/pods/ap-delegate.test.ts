@@ -59,6 +59,79 @@ describe('restricted delegate CLI', () => {
     }
   });
 
+  it('validates the optional ordered result cursor list on start', () => {
+    expect(
+      parseCommand([
+        'delegate',
+        'start',
+        '--key',
+        'stable',
+        '--recipe',
+        'inspect',
+        '--brief',
+        'Inspect prior results',
+      ]),
+    ).toEqual({
+      kind: 'start',
+      requestKey: 'stable',
+      recipe: 'inspect',
+      brief: 'Inspect prior results',
+    });
+    expect(
+      parseCommand([
+        'delegate',
+        'start',
+        '--key',
+        'stable',
+        '--recipe',
+        'inspect',
+        '--brief',
+        'Inspect prior results',
+        '--from',
+        '9,2,7',
+      ]),
+    ).toEqual({
+      kind: 'start',
+      requestKey: 'stable',
+      recipe: 'inspect',
+      brief: 'Inspect prior results',
+      from: [9, 2, 7],
+    });
+
+    for (const from of ['', '0', '1,1', '1,2,3,4,5', '1, 2', '9007199254740992']) {
+      expect(() =>
+        parseCommand([
+          'delegate',
+          'start',
+          '--key',
+          'stable',
+          '--recipe',
+          'inspect',
+          '--brief',
+          'Inspect prior results',
+          '--from',
+          from,
+        ]),
+      ).toThrow();
+    }
+    expect(() =>
+      parseCommand([
+        'delegate',
+        'start',
+        '--key',
+        'stable',
+        '--recipe',
+        'inspect',
+        '--brief',
+        'Inspect prior results',
+        '--from',
+        '1',
+        '--from',
+        '2',
+      ]),
+    ).toThrow('unsupported or repeated option');
+  });
+
   it.each([
     {
       argv: ['delegate', 'status'],
@@ -152,6 +225,42 @@ describe('restricted delegate CLI', () => {
       command: 'start',
       result: { requestKey: 'stable_key', child: 'managed-1', status: 'reserved' },
     });
+  });
+
+  it('preserves ordered start cursors in the single request', async () => {
+    const transport = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(JSON.parse(String(init.body)).params).toEqual({
+        name: 'managed_child_request',
+        arguments: {
+          requestKey: 'stable_from',
+          recipe: 'inspect',
+          brief: 'Use selected results',
+          from: [8, 3, 5],
+        },
+      });
+      return toolResponse({
+        children: [{ requestKey: 'stable_from', child: 'managed-2', status: 'reserved' }],
+      });
+    });
+
+    const result = await run(
+      [
+        'delegate',
+        'start',
+        '--key',
+        'stable_from',
+        '--recipe',
+        'inspect',
+        '--brief',
+        'Use selected results',
+        '--from',
+        '8,3,5',
+      ],
+      transport,
+    );
+
+    expect(result.code).toBe(0);
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 
   it('accepts one standard SSE result event', async () => {

@@ -79,6 +79,8 @@ ap delegate start --key research-1 --recipe inspect --brief 'Check the pinned so
 ap delegate status
 ap delegate results --after 0
 ap delegate wait --after 0 --timeout-ms 10000
+# Use the actual positive cursors of verified reports from this parent run.
+ap delegate start --key followup --recipe inspect --brief 'Refine the best assertion' --from 1,2
 ```
 
 Successful commands return JSON. A start receipt identifies the request and its
@@ -86,6 +88,13 @@ last recorded child status; `reserved` is not proof of execution. If the
 reply is uncertain, inspect status and use the exact same key and input to
 reconcile, never a replacement key or an automatic retry. No owner login,
 arbitrary endpoint, generic spawn, coding, or publication is exposed here.
+
+`--from` is an ordered list of up to four distinct result cursors. The daemon only
+accepts verified, successful same-run reports, freezes bounded excerpts as untrusted
+observations in the continuation, and records their provenance with the reservation.
+It never substitutes a missing or unverified report. An exact replay reads the
+original reservation without rebuilding its brief from the reports. Changing order,
+selectors, recipe, or brief requires a new deliberate request, never a retry.
 
 Results return at most one bounded page of terminal outcomes and a `nextCursor`;
 use that cursor on subsequent commands. Only a verified committed report

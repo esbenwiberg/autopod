@@ -16,6 +16,7 @@ import { canonical, digest } from '../managed/canonical.js';
 import { managedUserAuthenticator } from '../managed/user-auth.js';
 import { projectManagedRecipe } from './controller-turns.js';
 import type { OperatorRunSlot, OperatorRunsConfig } from './operator-runs.js';
+import { bindParentReportBrief } from './parent-report-brief.js';
 import { ParentReportResults } from './parent-report-results.js';
 
 export const parentLaunchPolicySchema = z
@@ -29,6 +30,12 @@ const requestSchema = z
     requestKey: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
     recipe: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
     brief: z.string().trim().min(1).max(2048),
+    from: z
+      .array(z.number().int().safe().positive())
+      .min(1)
+      .max(4)
+      .refine((ids) => new Set(ids).size === ids.length)
+      .optional(),
   })
   .strict();
 interface Binding {
@@ -220,18 +227,37 @@ export class ParentManagedLaunch {
         const { binding, slot } = this.active(podId);
         if (!Object.hasOwn(slot.catalog, input.recipe)) throw new Error('parent-recipe-refused');
         const key = `parent-${digest([binding.run_id, input.requestKey]).slice(7)}`;
-        const request = projectManagedRecipe(slot.catalog[input.recipe]!, input.brief, key);
-        await this.config.host.ledger.spawnWave(slot.checkpoint, [request], () => {
-          this.active(podId);
+        const inputDigest = digest(input);
+        const replay = () => {
           const prior = this.db
             .prepare(
               'SELECT input_digest FROM parent_managed_requests WHERE run_id=? AND start_key=?',
             )
             .get(binding.run_id, key) as { input_digest: string } | undefined;
-          if (prior) {
-            if (prior.input_digest !== digest(input)) throw new Error('parent-request-conflict');
-            return;
-          }
+          if (prior && prior.input_digest !== inputDigest)
+            throw new Error('parent-request-conflict');
+          return !!prior;
+        };
+        const recoverFamily = async () => {
+          await this.config.host.ledger.recover(binding.run_id);
+          this.active(podId);
+          return this.family(podId);
+        };
+        // A replay uses the already-frozen continuation. Never reconstruct it
+        // from an artifact that may have become unavailable after admission.
+        if (replay()) return recoverFamily();
+        const template = slot.catalog[input.recipe]!;
+        const reports = input.from ? await this.reports.dependencies(input.from, authenticate) : [];
+        if (replay()) return recoverFamily();
+        const { brief, dependencies } = bindParentReportBrief(
+          template.task.objective,
+          input.brief,
+          reports,
+        );
+        const request = projectManagedRecipe(template, brief, key);
+        await this.config.host.ledger.spawnWave(slot.checkpoint, [request], () => {
+          this.active(podId);
+          if (replay()) return;
           const count = Number(
             this.db
               .prepare('SELECT count(*) FROM orchestration_continuations WHERE run_id=?')
@@ -256,18 +282,18 @@ export class ParentManagedLaunch {
             throw new Error('parent-capacity-exhausted');
           this.db
             .prepare(
-              'INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest) VALUES(?,?,?,?,?)',
+              'INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest,report_dependencies_json) VALUES(?,?,?,?,?,?)',
             )
             .run(
               binding.run_id,
               key,
               input.requestKey,
               this.scope.getStore()!.attempt,
-              digest(input),
+              inputDigest,
+              JSON.stringify(dependencies),
             );
         });
-        await this.config.host.ledger.recover(binding.run_id);
-        return this.family(podId);
+        return recoverFamily();
       },
       managedFamily: async () => {
         this.active(podId);
