@@ -37,6 +37,11 @@ public struct PodActions: Sendable {
   public var loadFindingsContent: @MainActor @Sendable (String, ResearchFindingsResponse, String) async throws -> SessionFileContent = { _, _, _ in
     throw DaemonError.badRequest("Findings report connection unavailable")
   }
+  /// Read-only lookup for children managed by a terminal parent task.
+  /// A nil result means the family is absent or unavailable to this client.
+  public var loadParentFamily: @MainActor @Sendable (String) async throws -> ParentManagedFamily? = { _ in nil }
+  /// Stable connection ownership used to reject responses from a prior daemon selection.
+  public var parentFamilyConnectionID: UUID? = nil
   public var acceptFindings: @MainActor @Sendable (String, ResearchFindingsResponse) async throws -> Void = { _, _ in }
   public var approvalPending: @MainActor @Sendable (String) -> Bool = { _ in false }
   public var repair: PodRepairActions = .unavailable
@@ -215,8 +220,12 @@ public struct PodActions: Sendable {
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
     launchWorker: @escaping @MainActor @Sendable (String, String, BriefPodMetadata?, [String]?) async -> String? = { _, _, _, _ in nil },
     syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil },
-    updateFromBase: @escaping @MainActor @Sendable (String) async -> UpdateFromBaseResponse? = { _ in nil }
+    updateFromBase: @escaping @MainActor @Sendable (String) async -> UpdateFromBaseResponse? = { _ in nil },
+    loadParentFamily: @escaping @MainActor @Sendable (String) async throws -> ParentManagedFamily? = { _ in nil },
+    parentFamilyConnectionID: UUID? = nil
   ) {
+    self.loadParentFamily = loadParentFamily
+    self.parentFamilyConnectionID = parentFamilyConnectionID
     self.approve = approve
     self.reject = reject
     self.reply = reply

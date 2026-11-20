@@ -277,6 +277,28 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)")
   }
 
+  public func getParentManagedFamily(_ id: String) async throws -> ParentManagedFamily? {
+    guard id.range(of: #"\A[a-zA-Z0-9_-]{1,128}\z"#, options: .regularExpression) != nil else {
+      throw DaemonError.badRequest("Invalid parent pod ID")
+    }
+
+    do {
+      let family: ParentManagedFamily = try await request(
+        "GET", "/orchestration/parents/\(id)/family"
+      )
+      guard family.parent == id else {
+        throw DaemonError.decodingError("Parent-managed family did not match the requested parent")
+      }
+      return family
+    } catch DaemonError.unauthorized {
+      return nil
+    } catch DaemonError.notFound {
+      return nil
+    } catch DaemonError.serverError(let status, _) where status == 403 {
+      return nil
+    }
+  }
+
   public func listCompactPodPage(
     cursor: String? = nil,
     limit: Int = 500,

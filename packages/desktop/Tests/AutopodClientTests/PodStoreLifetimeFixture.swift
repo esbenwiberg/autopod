@@ -6,8 +6,9 @@ import AutopodUI
 
 @MainActor final class PodStoreLifetimeFixture {
   let store = PodStore()
-  let a = ConfirmedActionPeer()
-  let b = ConfirmedActionPeer()
+  // This ownership fixture has ordinary pods and no enrolled parent families.
+  let a = ConfirmedActionPeer(noParentFamilies: true)
+  let b = ConfirmedActionPeer(noParentFamilies: true)
   let apiA: DaemonAPI
   let apiB: DaemonAPI
   private var sessions: [URLSession]

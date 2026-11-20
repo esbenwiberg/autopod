@@ -146,7 +146,7 @@ func withConfirmedActionFixture(
       {"podId":"observed-pod","generation":1,"status":"running","binding":"\(String(repeating: "a", count: 64))",
       "custody":[],"canStop":false,"canCompleteMerged":false,"blockers":["No retained custody"],"operation":null}
       """,
-  ])
+  ], immediateGETNotFound: ["/orchestration/parents/observed-pod/family"])
   let store = PodStore()
   let handler: ActionHandler
   private let session: URLSession
