@@ -52,9 +52,11 @@ describe('restricted delegate CLI', () => {
     expect(() => parseCommand(['delegate', 'results', '--from', 'cursor'])).toThrow(
       'unsupported or repeated option',
     );
-    expect(() => parseCommand(['delegate', 'wait', '--timeout-ms', '15001'])).toThrow(
-      '--timeout-ms is out of range',
-    );
+    for (const ms of ['0', '15001']) {
+      expect(() => parseCommand(['delegate', 'wait', '--timeout-ms', ms])).toThrow(
+        '--timeout-ms is out of range',
+      );
+    }
   });
 
   it.each([

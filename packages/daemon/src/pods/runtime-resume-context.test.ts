@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,13 +28,17 @@ import { createDatabase } from '../db/connection.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import {
+  createMockContainerManager,
   createMockProfileStore,
   createMockRuntime,
   createTestDb,
   insertTestProfile,
 } from '../test-utils/mock-helpers.js';
+import { PARENT_DELEGATE_BIN, PARENT_DELEGATE_DESCRIPTOR } from './parent-delegate-materials.js';
 import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
+// @ts-expect-error The worker CLI is an independent JavaScript executable.
+import { runDelegate } from './runtime/ap-delegate.mjs';
 import { createRuntimeResumeContext } from './runtime-resume-context.js';
 
 const cleanup: Array<() => void> = [];
@@ -179,6 +184,7 @@ async function fixture(kind: Pod['runtime'] = 'pi') {
     },
   );
   const captured = {
+    containerManagerFactory: { get: vi.fn(() => createMockContainerManager()) },
     executionForPod: execution,
     executionCredentialsFor: resolve,
     injectionsForPod: injections,
@@ -727,6 +733,7 @@ async function persistedFixture() {
       sessionTokenIssuer: issuer,
     },
     {
+      containerManagerFactory: { get: () => createMockContainerManager() },
       executionForPod: () => profile,
       executionCredentialsFor: () => adapter,
       injectionsForPod: () => ({ mcpServers: [] }),
@@ -763,6 +770,125 @@ async function persistedFixture() {
 }
 
 describe('runtime resume context local credential and token integration', () => {
+  it('refreshes the restricted helper with the resumed parent attempt and uses the captured backend', async () => {
+    const f = await fixture();
+    const backend = createMockContainerManager();
+    const localMcp = 'http://127.0.0.1:18129';
+    f.captured.mcpBaseUrl = localMcp;
+    f.captured.containerManagerFactory.get.mockReturnValue(backend);
+    f.live.provisionParentSession = vi.fn(async () => 'new-parent-attempt');
+    const resumed = createRuntimeResumeContext(f.live, f.captured);
+    const servers = await resumed.primeRuntimeForResume(
+      f.pod,
+      f.runtime,
+      'retained-parent-container',
+      {},
+    );
+    expect(f.captured.containerManagerFactory.get).toHaveBeenCalledWith(f.pod.executionTarget);
+    expect(f.live.sessionTokenIssuer?.generate).not.toHaveBeenCalled();
+    expect(servers[0]).toMatchObject({
+      name: 'escalation',
+      headers: { Authorization: 'Bearer new-parent-attempt' },
+    });
+    expect(backend.writeFile).toHaveBeenCalledWith(
+      'retained-parent-container',
+      `${PARENT_DELEGATE_BIN}/ap`,
+      expect.stringContaining('ap-delegate.mjs'),
+      { mode: 0o500, preserveParentModes: true },
+    );
+    const descriptor = vi
+      .mocked(backend.writeFile)
+      .mock.calls.find((entry) => entry[1] === PARENT_DELEGATE_DESCRIPTOR);
+    expect(descriptor?.[3]).toEqual({ mode: 0o600, preserveParentModes: true });
+    expect(
+      await runDelegate(['delegate', 'status'], {
+        config: JSON.parse(String(descriptor?.[2])),
+        stdout: { write: vi.fn() },
+        stderr: { write: vi.fn() },
+        transport: async (url: string, init: RequestInit) => {
+          expect(url).toBe(`${localMcp}/mcp/${f.pod.id}`);
+          expect(new Headers(init.headers).get('authorization')).toBe('Bearer new-parent-attempt');
+          expect(JSON.parse(String(init.body)).params.name).toBe('managed_family');
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              content: [{ type: 'text', text: '{"children":[]}' }],
+            },
+          });
+        },
+      }),
+    ).toBe(0);
+
+    // Opt-in fixture: run the *installed* wrapper and fixed-path descriptor
+    // with synthetic loopback MCP, no mounts/host networking or image pulls.
+    const image = process.env.AUTOPOD_PARENT_DELEGATE_DOCKER_IMAGE;
+    if (image) {
+      expect(image).toMatch(/^sha256:[a-f0-9]{64}$/);
+      const files = vi.mocked(backend.writeFile).mock.calls.map(([, path, bytes, opts]) => ({
+        path,
+        content: String(bytes),
+        mode: opts?.mode,
+      }));
+      const result = spawnSync(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--pull=never',
+          '--network',
+          'none',
+          '--read-only',
+          '--tmpfs',
+          '/run/autopod:rw,exec,mode=0755',
+          '--entrypoint',
+          'node',
+          '-i',
+          image,
+          '--input-type=module',
+          '-e',
+          `
+          import { readFileSync, mkdirSync, writeFileSync, chownSync, chmodSync } from 'node:fs';
+          import { dirname } from 'node:path';
+          import { createServer } from 'node:http';
+          import { execFile } from 'node:child_process';
+          import assert from 'node:assert/strict';
+          const files = JSON.parse(readFileSync(0, 'utf8'));
+          for (const {path,content,mode} of files) {
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, content);
+            chownSync(path, 1000, 1000);
+            chmodSync(path, mode);
+          }
+          const server = createServer(async (req, res) => {
+            const parts = [];
+            for await (const part of req) parts.push(part);
+            assert.equal(req.headers.authorization, 'Bearer new-parent-attempt');
+            const input = JSON.parse(Buffer.concat(parts));
+            assert.equal(input.params.name, 'managed_family');
+            res.writeHead(200, {'Content-Type':'application/json'});
+            res.end(JSON.stringify({jsonrpc:'2.0',id:input.id,result:{content:[{type:'text',text:'{"children":[]}'}]}}));
+          }).listen(18129, '127.0.0.1', () => {
+            execFile('/run/autopod/delegate-bin/ap', ['delegate','status'], {
+              uid:1000,gid:1000,timeout:3000
+            }, (error, stdout) => {
+              server.close();
+              assert.ifError(error);
+              assert.equal(JSON.parse(stdout).ok, true);
+              assert.ok(!stdout.includes('new-parent-attempt'));
+              console.log('RESUMED_DELEGATE_OK');
+            });
+          });
+        `,
+        ],
+        { input: JSON.stringify(files), encoding: 'utf8', timeout: 12_000 },
+      );
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe('RESUMED_DELEGATE_OK');
+    }
+  }, 15_000);
+
   it('uses a real pod token, resolves rotated scoped stdio env and leaves durable state unchanged through reopen', async () => {
     const f = await persistedFixture();
     const initial = f.rows();

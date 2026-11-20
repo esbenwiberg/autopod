@@ -104,6 +104,7 @@ export function parseCommand(argv) {
       '--timeout-ms',
       MAX_WAIT_MS,
     );
+    if (timeoutMs === 0) throw new CliError('INVALID_ARGUMENT', '--timeout-ms is out of range');
     return { kind: 'wait', after, timeoutMs };
   }
 
