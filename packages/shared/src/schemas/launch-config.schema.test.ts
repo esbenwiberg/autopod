@@ -7,6 +7,7 @@ import {
   launchProfileSchema,
   launchRequestSchema,
   repositoryConfigSchema,
+  savedLaunchSelectionSchema,
 } from './launch-config.schema.js';
 
 describe('composable launch contracts', () => {
@@ -99,6 +100,34 @@ describe('composable launch contracts', () => {
       }).success,
     ).toBe(false);
   });
+  it('limits the signed parent precondition to exact per-launch requests', () => {
+    const base = { emptyWorkspace: true, profileId: 'scratch', task: 'Delegate' } as const;
+    const guarded = { ...base, requireParentEnrollment: true } as const;
+    const requestId = '11111111-1111-4111-8111-111111111111';
+    const expectedDigest = 'a'.repeat(64);
+    expect(launchRequestSchema.parse(base)).not.toHaveProperty('requireParentEnrollment');
+    expect(launchRequestSchema.parse({ ...guarded, requestId, expectedDigest })).toMatchObject({
+      requireParentEnrollment: true,
+      requestId,
+      expectedDigest,
+    });
+    for (const request of [
+      { ...guarded, requestId },
+      { ...guarded, expectedDigest },
+      { ...guarded, requestId: 'not-a-uuid', expectedDigest },
+      { ...base, requireParentEnrollment: false, requestId, expectedDigest },
+    ]) {
+      expect(launchRequestSchema.safeParse(request).success).toBe(false);
+    }
+    expect(
+      savedLaunchSelectionSchema.safeParse({
+        emptyWorkspace: true,
+        profileId: 'scratch',
+        requireParentEnrollment: true,
+      }).success,
+    ).toBe(false);
+  });
+
   it('keeps workflow and branch scope independent and has no delivery operations', () => {
     const access = githubAccessPresetSchema.parse({
       rules: [

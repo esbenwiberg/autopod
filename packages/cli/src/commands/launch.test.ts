@@ -560,6 +560,31 @@ describe('shared launch request CLI', () => {
     expect(launch.mock.calls[1]?.[0]).toEqual(launch.mock.calls[0]?.[0]);
     expect(statSync(saved).mode & 0o777).toBe(0o600);
   });
+  it('keeps the parent enrollment guard in the exact request sent and saved', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dir = temporary();
+    const request = launchRequestSchema.parse({
+      emptyWorkspace: true,
+      profileId: 'parent',
+      task: 'Delegate',
+      requestId: '11111111-1111-4111-8111-111111111111',
+      expectedDigest: 'a'.repeat(64),
+      requireParentEnrollment: true,
+    });
+    const file = join(dir, 'input.json');
+    writeFileSync(file, JSON.stringify(request));
+    const launchPod = vi.fn(async () => ({ id: 'parent' }));
+    const resolveLaunch = vi.fn();
+    const client = { launchPod, resolveLaunch } as unknown as AutopodClient;
+    const save = vi.fn((receipt: LaunchRequest) => saveLaunchReceipt(receipt, dir));
+    const program = new Command().exitOverride();
+    registerLaunchCommand(program, () => client, save);
+    await program.parseAsync(['node', 'ap', 'run', '--config', file, '--json']);
+    expect(resolveLaunch).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledExactlyOnceWith(request);
+    expect(launchPod).toHaveBeenCalledExactlyOnceWith(request);
+  });
   it('refuses to overwrite a saved request key with a different payload', () => {
     const dir = temporary();
     const request = launchRequestSchema.parse({

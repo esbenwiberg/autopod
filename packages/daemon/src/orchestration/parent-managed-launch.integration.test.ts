@@ -162,7 +162,7 @@ async function fixture(
     );
   }
   const admitted = await admitLaunch({
-    request: launchRequest,
+    request: { ...launchRequest, expectedDigest: preview.digest, requireParentEnrollment: true },
     actorId: 'operator',
     authorize: (id) => owner.authorizeLaunch(id, principal),
     services,

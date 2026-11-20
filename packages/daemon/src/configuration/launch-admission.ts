@@ -29,6 +29,13 @@ export async function admitLaunch(input: {
 }): Promise<{ podId: string; created: boolean; config: EffectiveLaunchConfig }> {
   const request = launchRequestSchema.parse(input.request);
   const bind = input.authorize?.(request.requestId);
+  if (request.requireParentEnrollment && !bind) {
+    configurationError(
+      'No signed parent enrollment matches this launch request',
+      'PARENT_ENROLLMENT_REQUIRED',
+      409,
+    );
+  }
   const requestDigest = configurationDigest({
     actorId: input.actorId,
     request,
