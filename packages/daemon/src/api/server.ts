@@ -93,6 +93,7 @@ import './types.js';
 export interface ServerDependencies {
   authModule: AuthModule;
   operatorRuns?: OperatorRunsConfig;
+  parentManaged?: import('../orchestration/parent-managed-launch.js').ParentManagedLaunch;
   /** Absent by default; adding routes never enables starts implicitly. */
   managed?:
     | { config: ManagedComponentsConfig; bindings: readonly ManagedUserBinding[] }
@@ -364,6 +365,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   // WebSocket handler
   websocketHandler(app, deps.authModule, deps.eventBus, deps.eventRepo);
 
+  deps.parentManaged?.registerFamily(app, deps.authModule);
   // MCP handler for escalation tools
   mcpHandler(
     app,
@@ -380,6 +382,8 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
         ? deps.podRepo.retainedCheckpoints.withWorkerScope(podId, coding)
         : coding();
     },
+    deps.parentManaged &&
+      ((podId, token, run) => deps.parentManaged!.withIngress(podId, token, run)),
   );
 
   // MCP proxy handler — forwards agent requests to injected profile MCP servers,

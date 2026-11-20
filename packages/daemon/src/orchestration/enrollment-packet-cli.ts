@@ -60,6 +60,8 @@ async function main() {
     String(await read(dir, 'cli.json')),
     await read(dir, 'inspection.bundle', MAX_CANDIDATE_BYTES),
   );
+  if (mode === 'owner' && checked.draft.parent)
+    throw new Error('parent-requires-signed-v1-enrollment');
   if (mode === 'owner')
     return {
       ...checked.draft,

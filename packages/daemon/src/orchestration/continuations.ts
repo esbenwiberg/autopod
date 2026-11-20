@@ -184,14 +184,19 @@ export class OrchestrationContinuations {
     return this.admit('spawn', input, raw);
   }
   /** Preflight outside SQLite, then reserve the whole controller proposal or none of it. */
-  async spawnWave(input: ContinuationCheckpoint, requests: ManagedPodRequest[]) {
+  async spawnWave(
+    input: ContinuationCheckpoint,
+    requests: ManagedPodRequest[],
+    assertOwnerActive?: () => void,
+  ) {
     if (requests.length > 8) throw new Error('controller-wave-too-large');
-    await this.admitBatch('spawn', input, requests);
+    await this.admitBatch('spawn', input, requests, assertOwnerActive);
   }
   private async admitBatch(
     kind: Kind,
     input: ContinuationCheckpoint,
     requests: ManagedPodRequest[],
+    assertOwnerActive?: () => void,
   ) {
     const cp = { ...input };
     const pending: ManagedPodRequest[] = [];
@@ -204,6 +209,7 @@ export class OrchestrationContinuations {
       });
     const changed = this.db
       .transaction(() => {
+        assertOwnerActive?.();
         let changed = false;
         for (const insert of inserts) if (insert()) changed = true;
         return changed;

@@ -58,6 +58,7 @@ export function createProvisioningAgentMaterials(
     | 'providerAttemptRepo'
     | 'launchConfiguration'
     | 'sessionTokenIssuer'
+    | 'provisionParentSession'
   >,
   captured: Captured,
 ) {
@@ -451,7 +452,8 @@ export function createProvisioningAgentMaterials(
     // Generate a pod-scoped token so the container can authenticate its MCP calls.
     // The token is passed as Authorization: Bearer on the escalation MCP server config
     // and verified by the /mcp/:podId route handler.
-    const mcpSessionToken = deps.sessionTokenIssuer?.generate(podId);
+    const mcpSessionToken =
+      (await deps.provisionParentSession?.(podId)) ?? deps.sessionTokenIssuer?.generate(podId);
     const escalationHeaders = mcpSessionToken
       ? { Authorization: `Bearer ${mcpSessionToken}` }
       : undefined;

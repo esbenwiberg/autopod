@@ -445,6 +445,10 @@ export class ManagedPodService {
       if (!this.ownsInstallation(row.dispatcher_installation_id)) continue;
       if (row.runtime_ref && !this.starts.has(row.pod_id)) {
         const observed = await this.runtime.observe(row.runtime_ref);
+        // Parent family history distinguishes a proven start from a later unknown observation.
+        this.db
+          .prepare('UPDATE managed_pods SET last_runtime_observation=? WHERE pod_id=?')
+          .run(observed.state, row.pod_id);
         this.db
           .prepare('UPDATE managed_pods SET consumed_tokens=max(consumed_tokens,?) WHERE pod_id=?')
           .run(observed.consumedTokens, row.pod_id);

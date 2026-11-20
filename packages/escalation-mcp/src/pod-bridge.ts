@@ -27,6 +27,12 @@ export interface MemoryPlanIntentItem {
 }
 
 export interface ScopedPodTools {
+  managedChildRequest?(request: {
+    requestKey: string;
+    recipe: string;
+    brief: string;
+  }): Promise<unknown>;
+  managedFamily?(): Promise<unknown>;
   deploymentPrepare?(request: import('@autopod/shared').DeploymentRequest): Promise<unknown>;
   deploymentStatus?(runId: string): Promise<unknown>;
   serviceRules?(): Promise<ServiceAccessRule[]>;

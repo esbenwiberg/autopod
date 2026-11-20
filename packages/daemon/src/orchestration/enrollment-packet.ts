@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import { sha256 } from '../managed/canonical.js';
 import { parseManagedCliConfig } from '../managed/cli-config.js';
+import { admitManagedRequest, REQUIRED_ENFORCEMENT } from '../managed/grants.js';
 import { parseManagedProfileSetConfig } from '../managed/profile-set-config.js';
 import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
@@ -14,6 +15,7 @@ import {
 } from './combined-attestation.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import {
+  confinedCatalog,
   enrolledOperator,
   inspectionPolicy,
   operatorBasePolicy,
@@ -35,7 +37,31 @@ export async function checkInspectionDraft(
   const profiles = parseManagedProfileSetConfig(profileRaw),
     cli = parseManagedCliConfig(cliRaw, false);
   if (!profiles || !cli) throw new Error('inspection-profile-scope');
-  inspectionPolicy(draft, profiles, Math.floor(Date.now() / 1000));
+  if (draft.parent) {
+    if (
+      profiles.catalogArtifacts ||
+      profiles.source ||
+      profiles.githubRead ||
+      profiles.mirror.dependencyCachePath ||
+      profiles.profiles.some((s) => s.caseDirectory)
+    )
+      throw new Error('parent-profile-scope');
+    for (const request of Object.values(confinedCatalog(draft, profiles))) {
+      const profile = request.profileSnapshot;
+      admitManagedRequest(
+        request,
+        {
+          profiles: new Map([[profile.snapshotDigest, profile]]),
+          targets: [profile.route.executionTarget],
+          enrollmentCeiling: profile.scope,
+          identityCeiling: profile.scope,
+          backendCeiling: profile.scope,
+          enforcement: REQUIRED_ENFORCEMENT,
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    }
+  } else inspectionPolicy(draft, profiles, Math.floor(Date.now() / 1000));
   if (
     !bundle.length ||
     bundle.length > MAX_CANDIDATE_BYTES ||

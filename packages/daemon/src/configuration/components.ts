@@ -2,6 +2,7 @@ import {
   type AgentRoute,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   type EffectiveLaunchConfig,
+  type JwtPayload,
   MAX_INPUT_BUNDLE_BYTES,
   MAX_INPUT_FILE_BYTES,
   MAX_INPUT_FILES,
@@ -99,6 +100,10 @@ export interface ConfigurationComponentsOptions {
   nativeGoalEvidence?: readonly unknown[];
   /** Bound after constructing PodManager, before admitting or recovering any launch. */
   podManager(): PodManager;
+  authorizeParentLaunch?: (
+    requestId: string | undefined,
+    principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'> | undefined,
+  ) => ((podId: string, config: EffectiveLaunchConfig) => void) | undefined;
 }
 
 /** The daemon composition shares one frozen resolver and one current operator ceiling everywhere. */
@@ -698,6 +703,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       const admitted = await admitLaunch({
         request,
         actorId: identity.userId,
+        authorize: (requestId) => options.authorizeParentLaunch?.(requestId, identity.principal),
         services: resolution,
         snapshots,
         ...(prepareSession

@@ -11,6 +11,34 @@ import { admitLaunch } from './launch-admission.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 
 describe('launch admission retries', () => {
+  it('rolls back the ordinary task when the synchronous parent binding is rejected', async () => {
+    const db = createTestDb();
+    try {
+      const { store, services } = createTestConfiguration(db);
+      const snapshots = createLaunchSnapshotRepository(db, store);
+      await expect(
+        admitLaunch({
+          request: { repositoryId: 'repo-a', task: 'Parent', requestId: 'parent-test' },
+          actorId: 'user',
+          services,
+          snapshots,
+          createPod: () => insertConfigurationTestPod(db, 'parent-test'),
+          authorize: () => () => {
+            expect(db.inTransaction).toBe(true);
+            expect(db.prepare('SELECT id FROM pods WHERE id=?').pluck().get('parent-test')).toBe(
+              'parent-test',
+            );
+            throw new Error('Parent binding rejected');
+          },
+        }),
+      ).rejects.toThrow('Parent binding rejected');
+      expect(db.prepare('SELECT count(*) FROM pods').pluck().get()).toBe(0);
+      expect(db.prepare('SELECT count(*) FROM pod_launch_snapshots').pluck().get()).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('spawns a workspace worker from its frozen template, including references, without copying parent series identity', async () => {
     const db = createTestDb();
     try {

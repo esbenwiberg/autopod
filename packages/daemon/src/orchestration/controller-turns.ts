@@ -41,7 +41,7 @@ interface TurnRow {
 function turnKey(run: string, wait: string, wakeDigest: string, index: number | string) {
   return `turn-${digest([run, wait, wakeDigest, index]).slice(7)}`;
 }
-function project(template: ManagedPodRequest, brief: string, key: string) {
+export function projectManagedRecipe(template: ManagedPodRequest, brief: string, key: string) {
   const req = structuredClone(template);
   req.dispatcherAttemptId = req.effectiveGrant.dispatcherAttemptId = req.startKey = key;
   req.effectiveGrant.grantId = key;
@@ -174,7 +174,7 @@ export function controllerPlan(
           const key = turnKey(run, '@kickoff', kickoff.wake_digest, i);
           cases.set(key, {
             recipe,
-            executionSpecDigest: project(template, brief, key).executionSpecDigest,
+            executionSpecDigest: projectManagedRecipe(template, brief, key).executionSpecDigest,
           });
         }
       }
@@ -380,7 +380,7 @@ export function controllerPlan(
       const requests = decision.children.map((c, i) => {
         const template = recipes.get(c.recipe);
         if (!template) throw new Error('controller-recipe-not-admitted');
-        return project(template, c.brief, id(i));
+        return projectManagedRecipe(template, c.brief, id(i));
       });
       if (limits) {
         const keys = db

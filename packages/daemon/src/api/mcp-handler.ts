@@ -12,6 +12,11 @@ export function mcpHandler(
   logger: Logger,
   sessionTokenIssuer?: PodTokenIssuer,
   withWorkerScope?: (podId: string, operation: () => Promise<void>) => Promise<void>,
+  withParentScope?: (
+    podId: string,
+    token: string | undefined,
+    operation: () => Promise<void>,
+  ) => Promise<void>,
 ): void {
   // Only pendingRequests is stored per pod — the McpServer is created fresh per
   // HTTP request to avoid the "Already connected to a transport" error from the MCP SDK,
@@ -118,7 +123,16 @@ export function mcpHandler(
       request.raw.setTimeout(0);
       reply.raw.setTimeout?.(0);
       const handle = async () => {
-        await transport.handleRequest(request.raw, reply.raw, request.body);
+        const run = async () => {
+          await transport.handleRequest(request.raw, reply.raw, request.body);
+        };
+        if (withParentScope)
+          await withParentScope(
+            podId,
+            request.user ? undefined : request.headers.authorization?.match(/^Bearer (.+)$/i)?.[1],
+            run,
+          );
+        else await run();
       };
       if (withWorkerScope) await withWorkerScope(podId, handle);
       else await handle();

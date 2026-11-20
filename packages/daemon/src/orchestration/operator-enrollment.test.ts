@@ -7,6 +7,7 @@ import { operatorSeedFixture } from '../test-utils/operator-seed-fixture.js';
 import {
   assertOperatorRecovery,
   composeOperatorEnrollment,
+  operatorBasePolicy,
   parseOperatorEnrollment,
 } from './operator-enrollment.js';
 
@@ -94,6 +95,56 @@ it('provisions only a countersigned, confined seed and rejects rotation against 
     )
     .run(other, digest(1), JSON.stringify(cp), '{}');
   expect(() => assertOperatorRecovery(f.db, null)).not.toThrow();
+});
+it('requires countersignatures for the future parent selection and never binds a host model for a parent slot', async () => {
+  const { f, enrollment, profiles, cli, sign } = await operatorSeedFixture(image);
+  const parent = {
+    requestId: '5ecff8d3-de82-48cb-961a-dc06dc506533',
+    launchDigest: 'a'.repeat(64),
+  };
+  const input = { ...enrollment, parent };
+  const bind = vi.fn(() => {
+    throw new Error('host-controller-must-not-run');
+  });
+  const deps = {
+    db: f.db,
+    databasePath: f.db.name,
+    profiles,
+    cli,
+    bind,
+    runtime: { config: { db: f.db }, resume: vi.fn() } as unknown as NonNullable<
+      Parameters<typeof composeOperatorEnrollment>[1]['runtime']
+    >,
+  };
+  expect(() => composeOperatorEnrollment(input, deps)).toThrow('policy-mismatch');
+  const authorities = {
+    ...enrollment.authorities,
+    basePolicyDigest: operatorBasePolicy(input, profiles),
+  };
+  const parsed = parseOperatorEnrollment(
+    JSON.stringify({ ...input, authorities, ...sign(authorities) }),
+  );
+  if (!parsed) throw new Error('missing enrollment');
+  const enrolled = composeOperatorEnrollment(parsed, deps);
+  await enrolled.prepare!();
+  expect(enrolled.slots[0]?.parent).toEqual(parent);
+  expect(enrolled.slots[0]?.provider).toBeUndefined();
+  expect(bind).not.toHaveBeenCalled();
+  expect(f.db.prepare('SELECT count(*) FROM orchestration_continuations').pluck().get()).toBe(0);
+  const legacy = Object.fromEntries(
+    Object.entries(input).filter(([key]) => !['authorities', 'checks', 'review'].includes(key)),
+  );
+  expect(() =>
+    parseOperatorEnrollment(
+      JSON.stringify({
+        ...legacy,
+        version: 2,
+        slot: 'inspection-99',
+        expectedRun: 'a'.repeat(64),
+        expectedBasePolicy: digest('fixture'),
+      }),
+    ),
+  ).toThrow('invalid-operator-enrollment');
 });
 it('requires a separately enrolled, signed sandbox target and never starts a fresh run during preparation', async () => {
   const { f, profiles, enrollment, cli } = await operatorSeedFixture(
