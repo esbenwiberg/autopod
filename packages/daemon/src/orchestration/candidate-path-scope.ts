@@ -157,7 +157,8 @@ function parseRawChanges(raw: Buffer): RawChange[] {
 
 // A new name can collide with an unchanged tracked path, not just another diff
 // entry. Include directories so aliases cannot hide under different leaf names.
-async function assertTreeNames(repository: string, commit: string) {
+export async function assertPortableCandidateTree(repository: string, commit: string) {
+  validateObjectId(commit, 'tree-invalid');
   const text = decode(
     await managedGitBytes(repository, ['ls-tree', '-r', '-t', '-z', '--full-tree', commit]),
   );
@@ -268,6 +269,6 @@ export async function validateCandidatePathScope(
   const changedPaths = [...new Set(changes.map((change) => change.path))].sort((a, b) =>
     Buffer.from(a).compare(Buffer.from(b)),
   );
-  await assertTreeNames(request.repository, request.candidate);
+  await assertPortableCandidateTree(request.repository, request.candidate);
   return { base: request.base, candidate: request.candidate, tree: commit.tree, changedPaths };
 }
