@@ -33,6 +33,8 @@ export interface ScopedPodTools {
     brief: string;
   }): Promise<unknown>;
   managedFamily?(): Promise<unknown>;
+  managedResults?(input: unknown): Promise<unknown>;
+  managedWait?(input: unknown): Promise<unknown>;
   deploymentPrepare?(request: import('@autopod/shared').DeploymentRequest): Promise<unknown>;
   deploymentStatus?(runId: string): Promise<unknown>;
   serviceRules?(): Promise<ServiceAccessRule[]>;

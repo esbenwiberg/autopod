@@ -4,6 +4,7 @@ import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js'
 import type { ContainerManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { shellQuote } from '../util/shell-quote.js';
+import { PARENT_DELEGATE_BIN } from './parent-delegate-materials.js';
 import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 
 /** Path to the agent shim script inside every pod container. */
@@ -31,6 +32,10 @@ fi
 # Privileged sandbox supervisors intentionally start with a system-only PATH.
 # Restore selected user-installed CLIs only in this unprivileged worker shim.
 export PATH="${CONTAINER_HOME_DIR}/.local/bin:\${PATH:-/usr/local/bin:/usr/bin:/bin}"
+
+if [ -x ${PARENT_DELEGATE_BIN}/ap ]; then
+  export PATH="${PARENT_DELEGATE_BIN}:$PATH"
+fi
 
 # Persist the worker PID so daemon restart recovery can terminate the orphaned
 # streaming process before resuming the durable CLI session in this sandbox.

@@ -16,6 +16,7 @@ import { canonical, digest } from '../managed/canonical.js';
 import { managedUserAuthenticator } from '../managed/user-auth.js';
 import { projectManagedRecipe } from './controller-turns.js';
 import type { OperatorRunSlot, OperatorRunsConfig } from './operator-runs.js';
+import { ParentReportResults } from './parent-report-results.js';
 
 export const parentLaunchPolicySchema = z
   .object({
@@ -43,12 +44,14 @@ interface Binding {
 export class ParentManagedLaunch {
   private readonly scope = new AsyncLocalStorage<{ podId: string; attempt: string } | undefined>();
   private readonly slots: OperatorRunSlot[];
+  private readonly reports: ParentReportResults;
   constructor(
     private readonly config: OperatorRunsConfig,
     private readonly issuer: PodTokenIssuer,
     private readonly pod: (id: string) => Pod,
   ) {
     if (!config.host.usesDatabase(config.db)) throw new Error('parent-owner-database-mismatch');
+    this.reports = new ParentReportResults(config.db);
     this.slots = config.slots
       .filter((s) => s.parent)
       .map((s) => ({
@@ -210,7 +213,8 @@ export class ParentManagedLaunch {
   }
   tools(podId: string): ScopedPodTools | undefined {
     if (!this.binding(podId)) return undefined;
-    return {
+    const authenticate = () => this.active(podId).binding.run_id;
+    const tools: ScopedPodTools = {
       managedChildRequest: async (raw) => {
         const input = requestSchema.parse(raw);
         const { binding, slot } = this.active(podId);
@@ -269,7 +273,10 @@ export class ParentManagedLaunch {
         this.active(podId);
         return this.family(podId);
       },
+      managedResults: async (input) => this.reports.results(input, authenticate),
+      managedWait: async (input) => this.reports.wait(input, authenticate),
     };
+    return tools;
   }
   registerFamily(app: FastifyInstance, auth: AuthModule) {
     const authorize = managedUserAuthenticator(

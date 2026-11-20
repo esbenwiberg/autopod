@@ -8,6 +8,10 @@ import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
 import { selectRelevantMemories } from './memory-selector.js';
+import {
+  PARENT_DELEGATE_INSTRUCTIONS,
+  provisionParentDelegate,
+} from './parent-delegate-materials.js';
 import { projectMemoryScope } from './project-memory-scope.js';
 import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type {
@@ -428,7 +432,7 @@ export function createProvisioningAgentMaterials(
     const instructionPod = deps.providerAttemptRepo
       ? { ...pod, providerAttempts: deps.providerAttemptRepo.list(podId) }
       : pod;
-    const systemInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
+    const baseInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
       referenceRevisions: Object.fromEntries(
         (deps.launchConfiguration?.read(podId)?.references ?? []).map((reference, index) => [
           `${index + 1}-${reference.id}`,
@@ -447,13 +451,23 @@ export function createProvisioningAgentMaterials(
     // CLAUDE.md / copilot-instructions.md is never overwritten.
     // Claude CLI reads this via --append-system-prompt-file; Copilot via customInstructions.
     emitStatus('Writing system instructions to container…');
+    const parentToken = await deps.provisionParentSession?.(podId);
+    if (parentToken) {
+      await provisionParentDelegate(
+        containerManager,
+        containerId,
+        pod.executionTarget,
+        mcpUrl,
+        parentToken,
+      );
+    }
+    const systemInstructions = parentToken
+      ? baseInstructions + PARENT_DELEGATE_INSTRUCTIONS
+      : baseInstructions;
     await containerManager.writeFile(containerId, AUTOPOD_INSTRUCTIONS_PATH, systemInstructions);
 
-    // Generate a pod-scoped token so the container can authenticate its MCP calls.
-    // The token is passed as Authorization: Bearer on the escalation MCP server config
-    // and verified by the /mcp/:podId route handler.
-    const mcpSessionToken =
-      (await deps.provisionParentSession?.(podId)) ?? deps.sessionTokenIssuer?.generate(podId);
+    // The same short-lived pod token authenticates the existing MCP boundary.
+    const mcpSessionToken = parentToken ?? deps.sessionTokenIssuer?.generate(podId);
     const escalationHeaders = mcpSessionToken
       ? { Authorization: `Bearer ${mcpSessionToken}` }
       : undefined;

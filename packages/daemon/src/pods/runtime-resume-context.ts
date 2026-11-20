@@ -14,6 +14,8 @@ import type { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { mergeMcpServers } from './injection-merger.js';
+import { provisionParentDelegate } from './parent-delegate-materials.js';
+import type { ContainerManagerFactory } from './pod-manager-contracts.js';
 
 interface RuntimeResumeContextDependencies {
   launchConfiguration?: {
@@ -25,6 +27,7 @@ interface RuntimeResumeContextDependencies {
 }
 
 interface RuntimeResumeContextCaptured {
+  containerManagerFactory: Pick<ContainerManagerFactory, 'get'>;
   executionForPod(pod: Pod): PodExecutionSettings;
   executionCredentialsFor(config: EffectiveLaunchConfig): LaunchExecutionCredentials | undefined;
   injectionsForPod(pod: Pod): { mcpServers: InjectedMcpServer[] };
@@ -48,6 +51,7 @@ export function createRuntimeResumeContext(
   ): Promise<McpServerConfig[]>;
 } {
   const {
+    containerManagerFactory,
     executionForPod,
     executionCredentialsFor,
     injectionsForPod,
@@ -74,8 +78,17 @@ export function createRuntimeResumeContext(
     const material = launch ? await executionCredentialsFor(launch)?.agent(launch) : undefined;
     const profile = material ? { ...frozenProfile, ...material } : frozenProfile;
     const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
-    const mcpSessionToken =
-      (await deps.provisionParentSession?.(pod.id)) ?? deps.sessionTokenIssuer?.generate(pod.id);
+    const parentToken = await deps.provisionParentSession?.(pod.id);
+    if (parentToken) {
+      await provisionParentDelegate(
+        containerManagerFactory.get(pod.executionTarget),
+        containerId,
+        pod.executionTarget,
+        mcpUrl,
+        parentToken,
+      );
+    }
+    const mcpSessionToken = parentToken ?? deps.sessionTokenIssuer?.generate(pod.id);
     const escalationHeaders = mcpSessionToken
       ? { Authorization: `Bearer ${mcpSessionToken}` }
       : undefined;

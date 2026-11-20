@@ -269,6 +269,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const { primeRuntimeForResume } = createRuntimeResumeContext(deps, {
+    containerManagerFactory,
     executionForPod,
     executionCredentialsFor,
     injectionsForPod,

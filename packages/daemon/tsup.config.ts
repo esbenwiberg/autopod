@@ -163,6 +163,7 @@ export default defineConfig({
     mkdirSync('dist/actions/defaults', { recursive: true });
     cpSync('src/actions/defaults', 'dist/actions/defaults', { recursive: true });
     mkdirSync('dist/runtime', { recursive: true });
+    cpSync('src/pods/runtime/ap-delegate.mjs', 'dist/runtime/ap-delegate.mjs');
     cpSync('src/managed/runtime/supervisor.py', 'dist/runtime/supervisor.py');
     cpSync('src/managed/runtime/validation-supervisor.py', 'dist/runtime/validation-supervisor.py');
     cpSync('src/managed/runtime/codex_channel.py', 'dist/runtime/codex_channel.py');
