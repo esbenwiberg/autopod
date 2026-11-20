@@ -14,6 +14,7 @@ import {
   qualifyParentIntegration,
   readQualifiedParentIntegration,
 } from './parent-integration-qualified.js';
+import { verifyParentPrivateSource } from './parent-private-source.js';
 
 type IntegrationInput = Readonly<{
   requestKey: string;
@@ -85,8 +86,19 @@ async function fixture(
     const newCommit = await managedGit(repository, ['rev-parse', 'HEAD']);
     const tree = await managedGit(repository, ['rev-parse', 'HEAD^{tree}']);
     const file = path.join(f.root, `candidate-${ordinal}.bundle`);
-    await managedGit(repository, ['bundle', 'create', file, 'HEAD']);
-    const bundle = await readFile(file);
+    await managedGit(repository, ['-c', 'pack.window=0', 'bundle', 'create', file, 'HEAD']);
+    const exported = await readFile(file);
+    const { bundle, bundleDigest } = await verifyParentPrivateSource(
+      path.join(f.root, 'private-export'),
+      exported,
+      {
+        base: f.cp.commit,
+        commit: newCommit,
+        tree,
+        allowlist: [{ kind: 'file', path: changedPath }],
+        maxBundleBytes: 1024 * 1024,
+      },
+    );
     const source = {
       mode: 'commit',
       repository: f.cp.repository,
@@ -145,7 +157,7 @@ async function fixture(
       base: source.base,
       expectedOldCommit: '0'.repeat(40),
       newCommit,
-      evidenceDigest: sha256(bundle),
+      evidenceDigest: bundleDigest,
     };
     const candidateDigest = digest(body);
     const receipt = { ...body, candidateDigest };
