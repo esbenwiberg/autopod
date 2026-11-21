@@ -141,7 +141,6 @@ struct WorkTab: View {
         switch selectedSection {
         case .task:
             PodGoalCard(podId: pod.id, podStatus: pod.status.rawValue, actions: actions)
-            DispatchPreflightCard(podId: pod.id, actions: actions)
             promptCard
             if let configurationActions {
                 ReferenceAttachmentsCard(podId: pod.id, actions: configurationActions)

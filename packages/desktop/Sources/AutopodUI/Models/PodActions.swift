@@ -106,10 +106,6 @@ public struct PodActions: Sendable {
   public var retryDraftScope: String
   public var loadGoal: @MainActor @Sendable (String) async throws -> PodGoalResponse?
   public var controlGoal: @MainActor @Sendable (String, PodGoalControlRequest) async throws -> PodGoalResponse
-  public var loadExecutionProvenance: @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse
-  public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
-  public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
-  public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
   public var loadValidationRecovery: @MainActor @Sendable (String) async throws -> ValidationRecoveryState
   public var requestValidationRecovery: @MainActor @Sendable (String, ValidationRecoveryRequest) async throws -> Void
   public var loadRetryState: @MainActor @Sendable (String, String) async throws -> TaskRetryState
@@ -197,10 +193,6 @@ public struct PodActions: Sendable {
     retryDraftScope: String = "preview",
     loadGoal: @escaping @MainActor @Sendable (String) async throws -> PodGoalResponse? = { _ in nil },
     controlGoal: @escaping @MainActor @Sendable (String, PodGoalControlRequest) async throws -> PodGoalResponse = { _, _ in throw URLError(.unsupportedURL) },
-    loadExecutionProvenance: @escaping @MainActor @Sendable (String) async throws -> ExecutionProvenanceResponse = { _ in throw URLError(.unsupportedURL) },
-    loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
-    loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
-    createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
     loadValidationRecovery: @escaping @MainActor @Sendable (String) async throws -> ValidationRecoveryState = { _ in throw URLError(.unsupportedURL) },
     requestValidationRecovery: @escaping @MainActor @Sendable (String, ValidationRecoveryRequest) async throws -> Void = { _, _ in throw URLError(.unsupportedURL) },
     loadRetryState: @escaping @MainActor @Sendable (String, String) async throws -> TaskRetryState = { _, _ in throw URLError(.unsupportedURL) },
@@ -260,12 +252,8 @@ public struct PodActions: Sendable {
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.retryDraftScope = retryDraftScope
-    self.loadExecutionProvenance = loadExecutionProvenance
     self.loadGoal = loadGoal
     self.controlGoal = controlGoal
-    self.loadDispatchPreflight = loadDispatchPreflight
-    self.loadRerunTemplate = loadRerunTemplate
-    self.createIntentionalRerun = createIntentionalRerun
     self.loadValidationRecovery = loadValidationRecovery
     self.requestValidationRecovery = requestValidationRecovery
     self.loadRetryState = loadRetryState

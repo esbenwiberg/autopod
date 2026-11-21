@@ -152,8 +152,6 @@ public struct DesktopDesignPreview: View {
 
   private static var fixtureActions: PodActions {
     var actions = PodActions.preview
-    actions.loadDispatchPreflight = { _ in decodeFixture(DispatchPreflightResponse.self, #"{"latest":null}"#) }
-    actions.loadExecutionProvenance = { _ in decodeFixture(ExecutionProvenanceResponse.self, #"{"latest":null}"#) }
     actions.loadRetryState = { id, stage in decodeFixture(TaskRetryState.self, """
       {"taskId":"\(id)","stage":"\(stage)","admissionCount":0,"executedCount":0,"transientRetryCount":0,"interruptedCount":0,"authorizations":[],"telemetry":"unavailable"}
       """) }

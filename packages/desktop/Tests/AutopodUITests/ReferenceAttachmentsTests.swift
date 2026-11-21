@@ -139,6 +139,10 @@ import Testing
       .environment(\.desktopRedesign, true).preferredColorScheme(light ? .light : .dark), light: light)
     defer { host.close() }
     try await host.wait { host.has("reference-attachment-0") && fixture.reads.contains(0) }
+    #expect(host.text.contains(pod.task))
+    #expect(!host.text.contains("Dispatch preflight"))
+    #expect(!host.text.contains("Execution details"))
+    #expect(!host.text.contains("Intentional rerun"))
     #expect(host.has("reference-attachments-card"))
     #expect(!host.has("reference-attachments-empty"))
     #expect(host.text.contains("Provided inputs · not added to source"))

@@ -140,24 +140,6 @@ public final class ActionHandler {
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.perform { try await self.api.controlGoal(id, body: request) }
       },
-      loadExecutionProvenance: { [weak self] id in
-        guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.perform { try await self.api.getExecutionProvenance(id) }
-      },
-      loadDispatchPreflight: { [weak self] id in
-        guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.perform { try await self.api.getDispatchPreflight(id) }
-      },
-      loadRerunTemplate: { [weak self] id in
-        guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.perform { try await self.api.getRerunTemplate(id) }
-      },
-      createIntentionalRerun: { [weak self] request in
-        guard let self else { throw URLError(.notConnectedToInternet) }
-        let response = try await self.perform { try await self.api.createIntentionalRerun(request) }
-        self.podStore.upsertSession(PodMapper.map(response))
-        return response.id
-      },
       loadValidationRecovery: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.perform { try await self.api.getValidationRecovery(id) }
