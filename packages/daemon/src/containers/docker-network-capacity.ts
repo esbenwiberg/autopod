@@ -4,19 +4,19 @@ import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import { retainedCheckpointNetworkIdentities } from '../pods/retained-checkpoint-repository.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
+import {
+  createPruneContainerInventory,
+  inspectPodNetworkPrune,
+  POD_NETWORK_LABEL,
+  podNetworkIdentity,
+} from './pod-network-prune.js';
 import { planRetainedNetworkReleases } from './retained-network-release.js';
 
-export const POD_NETWORK_LABEL = 'com.autopod.pod-network';
 export const HOST_NETWORK_CAPACITY = 'HOST_NETWORK_CAPACITY';
 /** Reclaimable headroom at or below this count is reported as a warning. */
 export const NETWORK_HEADROOM_WARNING = 5;
 export const DOCKER_SUBNET_EXHAUSTED = 'all predefined address pools have been fully subnetted';
 export const NETWORK_CAPACITY_DOCS = 'docs/hosted-daemon-docker-networks.md';
-
-/** Identity encoded in an `autopod-<identity>` pod network name; empty for other names. */
-export function podNetworkIdentity(name: string): string {
-  return name.startsWith('autopod-') ? name.slice('autopod-'.length) : '';
-}
 
 export interface AddressPool {
   base: string;
@@ -160,18 +160,22 @@ export async function inspectNetworkCapacity({
     timeoutMs: DOCKER_CALL_TIMEOUTS.listNetworks,
     logger,
   });
-  const subnets = networks
-    .filter((network) => (network.Scope ?? 'local') === 'local')
-    .flatMap((network) => (network.IPAM?.Config ?? []).map((config) => config.Subnet ?? ''));
+  const localSubnets = (released: ReadonlySet<string>) =>
+    networks
+      .filter((network) => (network.Scope ?? 'local') === 'local' && !released.has(network.Id))
+      .flatMap((network) => (network.IPAM?.Config ?? []).map((config) => config.Subnet ?? ''));
+  const eligibleIds = new Set<string>();
   const capacity = poolSource === 'unknown' ? null : addressPoolCapacity(pools);
-  const used = capacity === null ? null : addressPoolUsage(pools, subnets);
+  const used = capacity === null ? null : addressPoolUsage(pools, localSubnets(eligibleIds));
 
   const podNetworks = networks.filter((network) => network.Labels?.[POD_NETWORK_LABEL] === 'true');
   let retained = 0;
   let attached = 0;
   let unattached = 0;
   let reclaimable = 0;
+  let blocked = 0;
   let unknown = 0;
+  const listContainers = createPruneContainerInventory(docker, logger);
   await Promise.all(
     podNetworks.map(async (network) => {
       const isRetained = held?.has(podNetworkIdentity(network.Name)) === true;
@@ -187,7 +191,24 @@ export async function inspectNetworkCapacity({
           return;
         }
         unattached++;
-        if (held !== null && !isRetained) reclaimable++;
+        if (!db || held === null || isRetained) return;
+        const result = await inspectPodNetworkPrune(
+          docker,
+          db,
+          network,
+          live,
+          logger,
+          listContainers,
+        );
+        const verdict = result.kind === 'eligible' ? result.recheck() : result.kind;
+        if (verdict === 'eligible') {
+          reclaimable++;
+          eligibleIds.add(network.Id);
+        } else if (verdict === 'attached') {
+          unattached--;
+          attached++;
+        } else if (verdict === 'retained') retained++;
+        else blocked++;
       } catch {
         unknown++;
       }
@@ -199,17 +220,18 @@ export async function inspectNetworkCapacity({
   let releasable: number | null = null;
   if (db && held !== null) {
     try {
-      releasable = (await planRetainedNetworkReleases({ docker, db, logger })).filter(
-        (candidate) => candidate.eligible,
-      ).length;
+      const plan = await planRetainedNetworkReleases({ docker, db, logger });
+      const eligible = plan.filter((candidate) => candidate.eligible);
+      releasable = eligible.length;
+      for (const candidate of eligible) eligibleIds.add(candidate.networkId);
     } catch (err) {
       logger?.warn({ err }, 'Retained bridge release plan unavailable for capacity check');
     }
   }
   const reclaimableHeadroom =
-    free === null || (db && held !== null && releasable === null)
+    capacity === null || (db && held !== null && releasable === null)
       ? null
-      : free + reclaimable + (releasable ?? 0);
+      : Math.max(0, capacity - addressPoolUsage(pools, localSubnets(eligibleIds)));
   return {
     checkedAt,
     severity: classifyNetworkHeadroom(reclaimableHeadroom),
@@ -225,6 +247,7 @@ export async function inspectNetworkCapacity({
       attached,
       unattached,
       reclaimable: held === null ? null : reclaimable,
+      blocked: held === null ? null : blocked,
       releasable,
       unknown,
     },

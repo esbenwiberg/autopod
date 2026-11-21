@@ -123,7 +123,7 @@ function fakeDocker(specs: FakeNetworkSpec[]) {
   const removed: string[] = [];
   const containerMutations = vi.fn();
   const removeFailures = new Map<string, Error>();
-  const networks = specs.map((spec) => ({
+  const networks = specs.map((spec, index) => ({
     Id: `net-${spec.identity}`,
     Name: `autopod-${spec.identity}`,
     Created: spec.created,
@@ -131,7 +131,7 @@ function fakeDocker(specs: FakeNetworkSpec[]) {
     Driver: 'bridge',
     Internal: false,
     EnableIPv6: false,
-    IPAM: { Config: [{ Subnet: '172.18.0.0/16', Gateway: '172.18.0.1' }] },
+    IPAM: { Config: [{ Subnet: `10.200.${index}.0/24`, Gateway: `10.200.${index}.1` }] },
     Options: { 'com.docker.network.bridge.enable_icc': 'true' },
     Labels: { 'com.autopod.pod-network': 'true', 'com.autopod.pod-id': spec.identity },
     spec,
@@ -179,7 +179,7 @@ function fakeDocker(specs: FakeNetworkSpec[]) {
       kill: containerMutations,
     })),
     createNetwork: vi.fn(async () => ({})),
-    info: vi.fn(async () => ({ DefaultAddressPools: [{ Base: '172.18.0.0/16', Size: 16 }] })),
+    info: vi.fn(async () => ({ DefaultAddressPools: [{ Base: '10.200.0.0/21', Size: 24 }] })),
   };
   return {
     docker: docker as unknown as Dockerode,
@@ -301,7 +301,7 @@ describe('releaseRetainedNetwork()', () => {
     });
     expect(JSON.parse(record.spec as string)).toMatchObject({
       driver: 'bridge',
-      ipam: { Config: [{ Subnet: '172.18.0.0/16' }] },
+      ipam: { Config: [{ Subnet: '10.200.1.0/24' }] },
       labels: { 'com.autopod.pod-id': 'live' },
     });
     expect(JSON.parse(record.containers as string)).toEqual([
@@ -413,7 +413,7 @@ describe('capacity reporting', () => {
     const f = fakeDocker(standardNetworks);
     const capacity = await inspectNetworkCapacity({ docker: f.docker, db: database(), logger });
     expect(capacity.podNetworks.releasable).toBe(2);
-    expect(capacity.addressPools).toMatchObject({ capacity: 1, used: 8, free: 0 });
+    expect(capacity.addressPools).toMatchObject({ capacity: 8, used: 8, free: 0 });
     // free 0 + reclaimable 1 (`unrelated`) + releasable 2
     expect(capacity.reclaimableHeadroom).toBe(3);
     expect(f.removed).toEqual([]);
