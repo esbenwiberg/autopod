@@ -6,12 +6,16 @@ public struct HistoryView: View {
     public let actions: PodActions
     public let profileNames: [String]
     public var configurationActions: LaunchConfigurationActions?
+    private let openPod: ((String) -> Void)?
+    @State private var tab = "Patterns"
 
-    public init(pods: [Pod], actions: PodActions, profileNames: [String], configurationActions: LaunchConfigurationActions? = nil) {
+    public init(pods: [Pod], actions: PodActions, profileNames: [String],
+                configurationActions: LaunchConfigurationActions? = nil, openPod: ((String) -> Void)? = nil) {
         self.pods = pods
         self.actions = actions
         self.profileNames = profileNames
         self.configurationActions = configurationActions
+        self.openPod = openPod
     }
 
 
@@ -68,17 +72,31 @@ public struct HistoryView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
-                heroStats
-
-                if !profileHistoryStats.isEmpty {
-                    profileBreakdown
+                if openPod != nil {
+                    Picker("History section", selection: $tab) {
+                        Text("Patterns").tag("Patterns")
+                        Text(PreviouslyArchivedPods.title).tag(PreviouslyArchivedPods.title)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
 
-                if !recentFailures.isEmpty {
-                    recentFailuresList
-                }
+                if let openPod, tab == PreviouslyArchivedPods.title {
+                    PreviouslyArchivedPodsView(pods: pods, openPod: openPod)
+                } else {
+                    heroStats
 
-                workspaceLauncher
+                    if !profileHistoryStats.isEmpty {
+                        profileBreakdown
+                    }
+
+                    if !recentFailures.isEmpty {
+                        recentFailuresList
+                    }
+
+                    workspaceLauncher
+                }
             }
             .padding(24)
         }
