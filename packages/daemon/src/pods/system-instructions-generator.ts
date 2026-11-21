@@ -365,6 +365,11 @@ export function generateSystemInstructions(
     if (profile.testCommand) {
       lines.push(`- Test: \`${profile.testCommand}\``);
     }
+    if (profile.buildCommand || profile.lintCommand || profile.testCommand) {
+      lines.push(
+        '- Configured checks may rely on a scoped build environment that a bare agent shell does not necessarily inherit. Use `validate_locally` for fixed configured phases when that environment is needed and the tool is available.',
+      );
+    }
     lines.push(`- Start: \`${profile.startCommand}\``);
     lines.push(`- Health check: ${profile.healthPath}`);
     lines.push(
@@ -774,6 +779,9 @@ export function generateSystemInstructions(
       for (const { label, command } of configuredCommands) {
         lines.push(`   - ${label}: \`${command}\``);
       }
+      lines.push(
+        '   Use `validate_locally` when a configured phase needs its scoped build environment. It runs fixed phases, not arbitrary commands or Facts. For targeted shell checks, use the repository’s documented setup and invocation; a bare shell command may not use the configured toolchain. Check that distinction before reporting an infrastructure blocker.',
+      );
       lines.push(
         '   If a check fails, fix the underlying issue and re-run. If it looks like infrastructure (native module errors that persist after one retry, registry auth, etc.) call `report_blocker` rather than fighting it.',
       );
