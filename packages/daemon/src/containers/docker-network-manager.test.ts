@@ -563,6 +563,14 @@ describe('DockerNetworkManager', () => {
       // Route getNetwork by argument: inspect path uses the shared _inspect mock;
       // the prune step uses the removeFn.
       docker.mock.getNetwork.mockImplementation((id: string) => {
+        if (id === 'net1')
+          return {
+            inspect: vi.fn(async () => ({
+              Id: id,
+              Name: 'autopod-active',
+              Containers: { ctr1: {} },
+            })),
+          };
         if (id === 'net2')
           return {
             remove: removeFn,

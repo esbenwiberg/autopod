@@ -316,13 +316,11 @@ export class DockerNetworkManager {
             logger: this.logger,
           },
         );
-        const candidates = nets.filter(
-          (n) => !n.Containers || Object.keys(n.Containers).length === 0,
-        );
-        prune.candidates = candidates.length;
-        prune.attached = nets.length - candidates.length;
+        // The list's endpoint map may be omitted or stale. Like health, use
+        // a live inspection before deciding whether a bridge can free capacity.
+        prune.candidates = nets.length;
         await Promise.all(
-          candidates.map(async (n) => {
+          nets.map(async (n) => {
             try {
               const db = this.managedDatabase;
               const network = this.docker.getNetwork(n.Id);

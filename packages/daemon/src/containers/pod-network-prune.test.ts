@@ -117,6 +117,17 @@ describe('subnet pressure and completed Docker pods with stale container records
     expect(f.podRepo.getOrThrow(podId)).toMatchObject({ containerId, status: 'complete' });
   });
 
+  it('uses current endpoints for both health and pressure when the list is stale', async () => {
+    const f = fixture();
+    vi.spyOn(f.mock, 'listNetworks').mockResolvedValue([
+      { ...f.network, Containers: { 'already-gone': {} } },
+    ]);
+    expect(await f.health()).toMatchObject({ podNetworks: { attached: 0, reclaimable: 1 } });
+    expect(await f.allocate()).toBe('autopod-new-pod');
+    expect(f.remove).toHaveBeenCalledOnce();
+    expect(f.disconnect).not.toHaveBeenCalled();
+  });
+
   it.each([
     'container still exists',
     'disconnected container mode has a name reference',
