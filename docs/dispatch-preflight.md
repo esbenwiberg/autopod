@@ -18,6 +18,11 @@ settle an unknown exit, replay a lost mutation, release retained source/reports,
 reset accounting, grant a retry or waive validation. Independent ownership,
 custody and budget checks remain in force.
 
+For diagnostics, use `ap dispatch-preflight <id>` for the admission receipt and
+`ap execution-provenance <id>` for environment details. The desktop Work → Task
+view does not show these receipts or offer intentional reruns; use `ap rerun --help`
+for the CLI workflow.
+
 ## Queued PR repair identity
 
 `[PR FIX] Awaiting queued feedback.` is a shared placeholder. Its task/contract

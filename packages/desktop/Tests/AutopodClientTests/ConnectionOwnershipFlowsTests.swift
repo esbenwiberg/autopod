@@ -138,18 +138,15 @@ import AutopodUI
     }
   }
 
-  @Test(arguments: ["create", "rerun", "waiver"], [false, true])
+  @Test(arguments: ["create", "waiver"], [false, true])
   func directPublicationAndReturnedIDsRequireCurrentOwner(kind: String, superseded: Bool) async throws {
     try await withPodStoreLifetimeFixture { f in
       let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
       let task = f.startResult {
-        do {
-          switch kind {
-          case "create": return await handler.createPod(profileName: "fixture", task: "Synthetic", model: nil, pod: nil, baseBranch: nil)
-          case "rerun": return try await handler.actions.createIntentionalRerun(JSONDecoder().decode(IntentionalRerunDraft.self, from: Data(#"{"intentionalRerun":{"ofPodId":"pod","reason":"Synthetic","requestKey":"fixture"}}"#.utf8)))
-          default: await handler.approveFactWaiver("pod", factId: "fact", reason: nil); return nil
-          }
-        } catch { return error.localizedDescription }
+        switch kind {
+        case "create": return await handler.createPod(profileName: "fixture", task: "Synthetic", model: nil, pod: nil, baseBranch: nil)
+        default: await handler.approveFactWaiver("pod", factId: "fact", reason: nil); return nil
+        }
       }
       var held = try await f.a.next()
       if kind == "waiver" {
@@ -161,7 +158,7 @@ import AutopodUI
       let result = await task.value
       if superseded {
         #expect(f.store.pods.first?.task == "B owned")
-        #expect(kind == "rerun" ? result?.contains("Connection changed") == true : result == nil)
+        #expect(result == nil)
       } else {
         #expect(f.store.pods.first?.task == "Full detail task")
         #expect(result == (kind == "waiver" ? nil : "pod"))
