@@ -585,6 +585,7 @@ public struct DetailPanelView: View {
             } else { Text(pod.desktopRepositoryPlaceholder).font(.caption).foregroundStyle(.secondary) }
             Label(pod.branch, systemImage: "arrow.triangle.branch")
                 .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            creationTimestamp
             if !pod.task.isEmpty {
                 Text(pod.task).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -594,6 +595,15 @@ public struct DetailPanelView: View {
             if offersSavedWorkDraft { savedWorkDraftAction }
             if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(DesktopTheme.surface)
+    }
+
+    @ViewBuilder
+    private var creationTimestamp: some View {
+        if let createdAt = pod.createdAt {
+            Text("Created \(createdAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var legacyDetailHeader: some View {
@@ -679,6 +689,7 @@ public struct DetailPanelView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                creationTimestamp
 
                 if let fixLifecycle = pod.prFixLifecycleLabel {
                     Label(fixLifecycle, systemImage: "arrow.triangle.2.circlepath")

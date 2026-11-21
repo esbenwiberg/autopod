@@ -18,10 +18,11 @@ public enum PodMapper {
   }()
 
   static func parseDate(_ string: String?) -> Date {
-    guard let string else { return Date() }
-    return isoFormatter.date(from: string)
-        ?? isoFormatterNoFraction.date(from: string)
-        ?? Date()
+    string.flatMap { parseTimestamp($0) } ?? Date()
+  }
+
+  private static func parseTimestamp(_ string: String) -> Date? {
+    isoFormatter.date(from: string) ?? isoFormatterNoFraction.date(from: string)
   }
 
   private static func mapFactDeviation(_ dto: FactDeviationRequestResponse) -> FactDeviationItem {
@@ -126,6 +127,7 @@ public enum PodMapper {
       ?? response.lastCorrectionMessage
       ?? response.mergeBlockReason
       ?? response.failureReason
+    let createdAt = parseTimestamp(response.createdAt)
     var result = Pod(
       id: response.id,
       status: PodStatus(rawValue: response.status) ?? .queued,
@@ -138,7 +140,7 @@ public enum PodMapper {
       profileName: response.profileName,
       task: searchableTask.isEmpty ? response.title : searchableTask,
       model: response.model,
-      startedAt: parseDate(response.startedAt ?? response.createdAt),
+      startedAt: response.startedAt.map { parseDate($0) } ?? createdAt ?? Date(),
       updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
       diffStats: DiffStats(
@@ -165,6 +167,7 @@ public enum PodMapper {
       dependsOnPodIds: response.dependsOnPodIds ?? [],
       runningAt: response.runningAt.map { parseDate($0) }
     )
+    result.createdAt = createdAt
     result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
@@ -527,6 +530,7 @@ public enum PodMapper {
     let dependencyStartedAt: Date? = response.dependencyStartedAt.map { parseDate($0) }
     let runningAt: Date? = response.runningAt.map { parseDate($0) }
 
+    let createdAt = parseTimestamp(response.createdAt)
     var result = Pod(
       id: response.id,
       status: status,
@@ -539,7 +543,7 @@ public enum PodMapper {
       profileName: response.profileName,
       task: response.task,
       model: response.model,
-      startedAt: parseDate(response.startedAt ?? response.createdAt),
+      startedAt: response.startedAt.map { parseDate($0) } ?? createdAt ?? Date(),
       updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
       contract: response.contract,
@@ -585,6 +589,7 @@ public enum PodMapper {
       readinessReview: mapReadinessReview(response.readinessReview),
       runningAt: runningAt
     )
+    result.createdAt = createdAt
     result.worktreeCompromised = response.worktreeCompromised ?? false
     result.failureDetail = FailureDetail(
       podID: result.id, updatedAt: result.updatedAt, status: result.status,

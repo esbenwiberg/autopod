@@ -1583,6 +1583,25 @@ func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) thr
   #expect(checks.validationPhaseCount == 9)
 }
 
+@Test func mapsCreationTimeSeparatelyFromStartAcrossCompactAndDetail() throws {
+  let decoder = JSONDecoder()
+  let detailJSON = lifetimePod(id: "created-pod")
+  let compactJSON = lifetimePage(id: "created-pod", hasNext: false)
+    .replacingOccurrences(of: #""startedAt":null"#, with: #""startedAt":"2026-07-01T00:00:01Z""#)
+  let expected = try Date("2026-07-01T00:00:00Z", strategy: .iso8601)
+  let detail = try decoder.decode(SessionResponse.self, from: Data(detailJSON.utf8))
+  let page = try decoder.decode(CompactPodPageResponse.self, from: Data(compactJSON.utf8))
+  let compact = try #require(page.pods.first)
+  for pod in [PodMapper.map(detail), PodMapper.map(compact)] {
+    #expect(pod.createdAt == expected)
+    #expect(pod.startedAt == expected.addingTimeInterval(1))
+  }
+
+  let malformed = detailJSON.replacingOccurrences(of: "2026-07-01T00:00:00Z", with: "unknown")
+  let malformedDetail = try decoder.decode(SessionResponse.self, from: Data(malformed.utf8))
+  #expect(PodMapper.map(malformedDetail).createdAt == nil)
+}
+
 @Test func mapsArtifactCollectionRecoveryWithoutReworkAcrossCompactAndDetail() throws {
   let json = """
   {

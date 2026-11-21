@@ -158,6 +158,7 @@ public final class PodStore {
     current.fleetArchivedAt = incoming.fleetArchivedAt
     // Configuration availability can change without an execution updatedAt change.
     current.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
+    current.createdAt = current.createdAt ?? incoming.createdAt
     if !preferIncomingOnEqual
       && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
       if current.updatedAt == incoming.updatedAt, current.fleetDisplay == nil,
@@ -179,6 +180,7 @@ public final class PodStore {
     }
     merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
     merged.profileDisplay = incoming.profileDisplay ?? current.profileDisplay
+    merged.createdAt = current.createdAt
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
       copyDecision(from: current, to: &merged)
     }
@@ -224,6 +226,7 @@ public final class PodStore {
     var hydrated = hydrated
     hydrated.fleetArchivedAt = incoming.fleetArchivedAt
     hydrated.profileDisplay = incoming.profileDisplay ?? hydrated.profileDisplay
+    hydrated.createdAt = hydrated.createdAt ?? incoming.createdAt
     guard incoming.updatedAt > hydrated.updatedAt else {
       if incoming.updatedAt == hydrated.updatedAt, hydrated.fleetDisplay == nil,
          incoming.fleetDisplay != nil {

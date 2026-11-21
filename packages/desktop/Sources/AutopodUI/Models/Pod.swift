@@ -917,6 +917,7 @@ public struct Pod: Identifiable, Sendable {
     public var profileLabel: String { profileDisplay?.label ?? profileName }
     public var task: String
     public var model: String
+    public var createdAt: Date? = nil
     public var startedAt: Date
     public var runningAt: Date?
     public var updatedAt: Date
