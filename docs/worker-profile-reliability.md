@@ -31,6 +31,18 @@ Stable source retains the existing fingerprint framing; no receipt migration or
 live preparation-policy override is needed. A source probe alone does not prove
 that preparation or the project's browser/module checks passed.
 
+## Worker checks and scoped build variables
+
+Repository preparation and configured validation can receive `buildEnv` without
+making it a general agent-shell environment. A successful preparation command
+can install dependencies while a bare shell test still picks the wrong toolchain.
+For configured setup, lint, build or tests that need the scoped environment, use
+`validate_locally` when available. It runs fixed phases and does not accept custom
+commands or run Facts. For focused shell checks, follow the repository’s documented
+setup and invocation (for example, explicitly selecting a non-secret fixture path).
+Do not copy credential bindings into prompts or shell commands. Worker checks
+never replace independently configured daemon gates.
+
 ## Autopod
 
 - Full-repository work uses the Docker (`local`) profile rather than overriding it

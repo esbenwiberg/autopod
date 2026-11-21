@@ -746,6 +746,31 @@ human_review: []
     expect(md).toContain('tests: `npm test`');
   });
 
+  it('distinguishes configured checks from bare shell checks without exposing build variables', () => {
+    const md = generateSystemInstructions(
+      makeProfile({
+        buildCommand: 'npm run build',
+        testCommand: 'npm test',
+        buildEnv: { PI_PACKAGE_ROOT: '/tmp/private-fixture-root', AUTH: 'sentinel-build-value' },
+      }),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    const buildAndRun = md.split('## Build & Run')[1]?.split('\n## ')[0];
+    expect(buildAndRun).toContain('Test: `npm test`');
+    expect(buildAndRun).toContain('a bare agent shell does not necessarily inherit');
+    expect(buildAndRun).toContain('Use `validate_locally` for fixed configured phases');
+
+    const reference = md.split('**Configured command reference**')[1]?.split('**Self-review')[0];
+    expect(reference).toContain('Use `validate_locally` when a configured phase needs');
+    expect(reference).toContain('fixed phases, not arbitrary commands or Facts');
+    expect(reference).toContain('For targeted shell checks, use the repository’s documented setup');
+    expect(md).not.toContain('/tmp/private-fixture-root');
+    expect(md).not.toContain('sentinel-build-value');
+    expect(md).not.toContain('PI_PACKAGE_ROOT');
+  });
+
   it('mentions buildWorkDir when set so the agent runs commands in the right place', () => {
     const md = generateSystemInstructions(
       makeProfile({ buildCommand: 'npm run build', buildWorkDir: 'apps/web' }),
