@@ -64,7 +64,6 @@ struct WorkTab: View {
         }
         .task(id: pod.id) {
             await fetchQuality()
-            await fetchCost()
         }
         .onAppear {
             selectedSection = defaultSection
@@ -142,7 +141,7 @@ struct WorkTab: View {
         case .task:
             PodGoalCard(podId: pod.id, podStatus: pod.status.rawValue, actions: actions)
             DisclosureGroup("Task budget") {
-                TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, onSaved: { await fetchCost() })
+                TaskBudgetControls(podId: pod.id, actions: actions.taskBudget)
                     .id("\(pod.id).\(actions.taskBudget.scope)")
             }
             DisclosureGroup("Task retry limits") {
@@ -183,11 +182,14 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
-            if let cost, cost.podId == pod.id {
-                SessionCostCard(breakdown: cost, showResources: pod.executionTarget == "sandbox")
-            } else {
-                emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+            Group {
+                if let cost, cost.podId == pod.id {
+                    SessionCostCard(breakdown: cost, showResources: pod.executionTarget == "sandbox")
+                } else {
+                    emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+                }
             }
+            .task(id: pod.id) { await fetchCost() }
         }
     }
 
@@ -217,11 +219,9 @@ struct WorkTab: View {
 
     private func fetchCost() async {
         guard let loadCost else { return }
-        do {
-            cost = try await loadCost(pod.id)
-        } catch {
-            cost = nil
-        }
+        let result = try? await loadCost(pod.id)
+        guard !Task.isCancelled else { return }
+        cost = result
     }
 
     // MARK: - Prompt
