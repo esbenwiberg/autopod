@@ -41,6 +41,17 @@ import Testing
 }
 
 @Suite(.serialized) @MainActor struct DesktopDetailNavigationTests {
+    @Test(arguments: [true, false]) func headerShowsPodCreationTime(redesign: Bool) async throws {
+        let inputs = DetailNavigationInputs()
+        let createdAt = inputs.pod.startedAt.addingTimeInterval(-86_400)
+        inputs.pod.createdAt = createdAt
+        inputs.pod.status = .failed
+        let host = LaunchComposerHost(DetailNavigationFixtureView(inputs: inputs), width: 800, redesign: redesign)
+        defer { host.close() }
+        let label = "Created \(createdAt.formatted(date: .abbreviated, time: .shortened))"
+        try await host.wait { host.containsText(label) }
+    }
+
     @Test func closeKeepsSelectionAndCardReopensSamePodWithTabRetained() async throws {
         let host = try DesktopSelectionPerformanceHost(width: 1_100)
         defer { host.close() }

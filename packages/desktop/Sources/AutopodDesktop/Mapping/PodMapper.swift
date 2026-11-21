@@ -18,10 +18,19 @@ public enum PodMapper {
   }()
 
   static func parseDate(_ string: String?) -> Date {
-    guard let string else { return Date() }
-    return isoFormatter.date(from: string)
-        ?? isoFormatterNoFraction.date(from: string)
-        ?? Date()
+    string.flatMap { parseTimestamp($0) } ?? Date()
+  }
+
+  private static func parseTimestamp(_ string: String) -> Date? {
+    isoFormatter.date(from: string) ?? isoFormatterNoFraction.date(from: string)
+  }
+
+  private static func parseCreationTime(_ string: String) -> Date? {
+    // pods.created_at defaults to SQLite datetime('now'): YYYY-MM-DD HH:MM:SS in UTC.
+    if string.utf8.count == 19, string.dropFirst(10).first == " " {
+      return isoFormatterNoFraction.date(from: string.replacingOccurrences(of: " ", with: "T") + "Z")
+    }
+    return parseTimestamp(string)
   }
 
   private static func mapFactDeviation(_ dto: FactDeviationRequestResponse) -> FactDeviationItem {
@@ -165,6 +174,7 @@ public enum PodMapper {
       dependsOnPodIds: response.dependsOnPodIds ?? [],
       runningAt: response.runningAt.map { parseDate($0) }
     )
+    result.createdAt = parseCreationTime(response.createdAt)
     result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
@@ -585,6 +595,7 @@ public enum PodMapper {
       readinessReview: mapReadinessReview(response.readinessReview),
       runningAt: runningAt
     )
+    result.createdAt = parseCreationTime(response.createdAt)
     result.worktreeCompromised = response.worktreeCompromised ?? false
     result.failureDetail = FailureDetail(
       podID: result.id, updatedAt: result.updatedAt, status: result.status,

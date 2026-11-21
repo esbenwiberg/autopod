@@ -1583,6 +1583,25 @@ func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) thr
   #expect(checks.validationPhaseCount == 9)
 }
 
+@Test(arguments: ["2026-07-01 00:00:00", "2026-07-01T00:00:00Z", "2026-07-01T00:00:00.000Z", "unknown"])
+func mapsCreationTimeSeparatelyFromStartAcrossCompactAndDetail(wireTimestamp: String) throws {
+  let decoder = JSONDecoder()
+  let original = #""createdAt":"2026-07-01T00:00:00Z""#
+  let replacement = #""createdAt":"\#(wireTimestamp)""#
+  let detailJSON = lifetimePod(id: "created-pod").replacingOccurrences(of: original, with: replacement)
+  let compactJSON = lifetimePage(id: "created-pod", hasNext: false)
+    .replacingOccurrences(of: original, with: replacement)
+    .replacingOccurrences(of: #""startedAt":null"#, with: #""startedAt":"2026-07-01T00:00:01Z""#)
+  let expected = try Date("2026-07-01T00:00:00Z", strategy: .iso8601)
+  let detail = try decoder.decode(SessionResponse.self, from: Data(detailJSON.utf8))
+  let page = try decoder.decode(CompactPodPageResponse.self, from: Data(compactJSON.utf8))
+  let compact = try #require(page.pods.first)
+  for pod in [PodMapper.map(detail), PodMapper.map(compact)] {
+    #expect(pod.createdAt == (wireTimestamp == "unknown" ? nil : expected))
+    #expect(pod.startedAt == expected.addingTimeInterval(1))
+  }
+}
+
 @Test func mapsArtifactCollectionRecoveryWithoutReworkAcrossCompactAndDetail() throws {
   let json = """
   {
