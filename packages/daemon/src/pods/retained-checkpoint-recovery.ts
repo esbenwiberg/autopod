@@ -50,6 +50,7 @@ import {
   type PreparedCheckpoint,
 } from './retained-checkpoint-repository.js';
 import type { CodingBinding } from './retained-coding-repository.js';
+import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
   assertValidationExecutionSettled,
   requiresValidationSettlement,
@@ -335,11 +336,27 @@ export function createRetainedCheckpointRecovery(deps: {
         'Typed prerequisite repair requires actual environment qualification through repair continuation, not infrastructure rework',
         'REPAIR_QUALIFICATION_REQUIRED',
       );
+    // Only the bound, completed checks predecessor can qualify a reviewer
+    // outage. Status, skip kind, and operator diagnosis alone grant nothing.
+    const result = predecessor?.checked?.result;
+    const reviewInfrastructureChecks =
+      pod.status === 'review_required' &&
+      infrastructure?.mode === 'checks' &&
+      predecessor?.binding.continuation?.infrastructure?.mode !== 'rework' &&
+      result?.infrastructureFailure?.phase === 'review' &&
+      result.infrastructureFailure.code === 'REVIEW_UNAVAILABLE' &&
+      result.taskReview === null &&
+      result.setup?.status !== 'fail' &&
+      result.smoke.status === 'pass' &&
+      isReviewInfrastructureOnlyFailure(result);
     if (
       infrastructure &&
       (pod.executionTarget !== 'local' ||
         (pod.status !== 'failed' &&
-          !(pod.status === 'review_required' && memory && predecessor?.id === memory.id)) ||
+          !(
+            pod.status === 'review_required' &&
+            ((memory && predecessor?.id === memory.id) || reviewInfrastructureChecks)
+          )) ||
         deps.readLaunch?.(pod.id)?.ai.reviewer.mode !== 'independent' ||
         (!predecessor &&
           (!deps.podRepo.hasInfrastructureBlocker?.(pod.id) ||
@@ -456,6 +473,14 @@ export function createRetainedCheckpointRecovery(deps: {
       for (const id of deps.podRepo.sourceAdoptions.taskPodIds(pod.id))
         if (deps.podRepo.sandboxWakeups?.listForPod(id).some((intent) => intent.endedAt === null))
           checkpointError('Unsettled wakeup requires separate reconciliation');
+    }
+    if (reviewInfrastructureChecks && predecessor) {
+      assertValidationExecutionSettled(pod);
+      if (repo.hasUnsettledReviewer(predecessor.taskId))
+        checkpointError(
+          'Reviewer settlement/reconciliation is required before checks-only recovery',
+          'REVIEWER_RECONCILIATION_REQUIRED',
+        );
     }
     deps.podRepo.taskExecutions.assertCanDelete(pod.id); // Settled WORKERS only; no deletion follows.
     deps.podRepo.validationExecutions.assertNoActiveTaskExecution(pod.id);
