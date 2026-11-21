@@ -950,6 +950,7 @@ public struct Pod: Identifiable, Sendable {
     public var failureDetail: FailureDetail? = nil
     /// Recorded restart/wakeup hold, not a timer-based inference of process exit.
     public var executionRecoveryNote: String? = nil
+    public var executionTarget: String? = nil
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 

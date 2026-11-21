@@ -1582,6 +1582,7 @@ async function shutdown(signal: string) {
   managedRuntime?.close();
 
   // Close database
+  sandboxContainerManager?.stopComputeObservations();
   db.close();
   lifetimeOwner.close();
 

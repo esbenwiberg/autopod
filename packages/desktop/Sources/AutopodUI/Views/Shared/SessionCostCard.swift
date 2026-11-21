@@ -3,9 +3,11 @@ import SwiftUI
 
 public struct SessionCostCard: View {
     public let breakdown: PodCostBreakdownResponse
+    public let showResources: Bool
 
-    public init(breakdown: PodCostBreakdownResponse) {
+    public init(breakdown: PodCostBreakdownResponse, showResources: Bool = false) {
         self.breakdown = breakdown
+        self.showResources = showResources || breakdown.resourceCost != nil
     }
 
     public var body: some View {
@@ -13,51 +15,15 @@ public struct SessionCostCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "dollarsign.circle")
                     .foregroundStyle(.green)
-                Text("Session Cost Subtotal")
+                Text(breakdown.totalLabel)
                     .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
-                Text(formatCost(breakdown.totalCostUsd))
+                Text(formatCost(breakdown.combinedCostUsd))
                     .font(.system(size: 18, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
             }
-
-            CostEvidenceView(evidence: breakdown.costEvidence)
-
-            if let task = breakdown.taskExecution {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Task accounting").font(.headline)
-                    Text(task.taskId).font(.caption).textSelection(.enabled)
-                    Text("\(task.podCount) pods · \(task.agentRunCount) recorded agent runs · \(task.providerAttemptCount) provider attempts · \(task.validationExecutionCount) validations")
-                    if let delivery = task.delivery {
-                        Text("\(delivery.receiptCount) PR receipts · \(delivery.unresolvedCount) unresolved of \(delivery.intentCount) intents")
-                        Text("Durable ledger only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("PR receipts unavailable").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let disposition = task.delivery?.disposition {
-                        Text("Last recorded PR status: \(disposition.openCount) open · \(disposition.mergedCount) merged · \(disposition.closedCount) closed · \(disposition.unavailableCount) unavailable")
-                    } else {
-                        Text("PR disposition observations unavailable.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let merge = task.merge {
-                        Text("Source-bound merges: \(merge.mergedPrCount) merged PRs · \(merge.requestCount) recorded requests · \(merge.unresolvedPrCount) unresolved of \(merge.prCount) PRs")
-                        Text("\(merge.mergedWithoutRecordedRequestCount) merged PRs observed with no recorded request; merge actor is not inferred.")
-                        Text("Last recorded closed PRs: \(merge.closedPrCount.map(String.init) ?? "unavailable")")
-                        Text("Source-bound journal only; historical PR URLs excluded.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("Source-bound merge evidence unavailable.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("Current provider status unverified.").font(.caption).foregroundStyle(.secondary)
-                    Text("Stored task cost subtotal: \(formatCost(task.recordedCostUsd)) · \(task.telemetry) telemetry")
-                    CostEvidenceView(evidence: task.costEvidence)
-                    Text("Task tokens: \(task.totalRecordedTokens) / \(task.tokenBudget.map(String.init) ?? "no configured limit")")
-                    Text(task.budgetCheck?.reason ?? "Task budget admission evidence unavailable.")
-                    ForEach(task.diagnostics, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
-                }
-            } else {
-                Text("Task accounting unavailable").font(.caption).foregroundStyle(.secondary)
-            }
+            .help("Per-pod model subtotal plus usable Azure compute estimates, without rounding before addition. Known total excludes unavailable or unobserved usage. Linked repairs, storage, transfer, grants and discounts are excluded; billing is unverified.")
 
             costBar
 
@@ -68,6 +34,20 @@ public struct SessionCostCard: View {
                     if index < breakdown.segments.count - 1 {
                         Divider().opacity(0.45)
                     }
+                }
+                if showResources {
+                    Divider().opacity(0.45)
+                    HStack(spacing: 10) {
+                        Circle().fill(breakdown.resourceCost?.usableEstimate == nil ? Color.secondary.opacity(0.25) : Color.green).frame(width: 9, height: 9)
+                        Text("Resources").font(.subheadline.weight(.medium))
+                        Spacer()
+                        if let value = breakdown.resourceCost?.usableEstimate {
+                            Text("\(formatCost(value)) \(breakdown.resourceCost?.qualifier ?? "est.")")
+                        } else { Text("Unavailable").foregroundStyle(.secondary) }
+                    }
+                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                    .padding(.vertical, 9)
+                    .help("Azure sandbox running vCPU and GiB at public active retail rates through the last observation. Excludes storage, transfer, grants, discounts and linked repairs. Partial estimates omit missing coverage; this is not an invoice. Cutoff: \(breakdown.resourceCost?.observationCutoff ?? "unavailable")")
                 }
             }
 
@@ -113,7 +93,8 @@ public struct SessionCostCard: View {
     @ViewBuilder
     private var costBar: some View {
         let segments = breakdown.segments.filter { $0.costUsd > 0 }
-        let total = segments.reduce(0.0) { $0 + $1.costUsd }
+        let resource = breakdown.resourceCost?.usableEstimate ?? 0
+        let total = segments.reduce(0.0) { $0 + $1.costUsd } + resource
 
         if total > 0 {
             GeometryReader { geo in
@@ -122,8 +103,12 @@ public struct SessionCostCard: View {
                         Rectangle()
                             .fill(segmentColor(segment.bucket))
                             .frame(
-                                width: max(CGFloat(segment.costUsd / total) * geo.size.width, 1)
+                                width: CGFloat(segment.costUsd / total) * geo.size.width
                             )
+                    }
+                    if resource > 0 {
+                        Rectangle().fill(Color.green)
+                            .frame(width: CGFloat(resource / total) * geo.size.width)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -269,7 +254,8 @@ public struct SessionCostCard: View {
                     outputTokens: 0,
                     sourcePhases: ["agent_legacy"]
                 ),
-            ]
+            ],
+            resourceCost: PodResourceCost(state: "partial", estimateUsd: 0.018, observationCutoff: "2026-11-21T12:00:00Z")
         )
     )
     .frame(width: 520)

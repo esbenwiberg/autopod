@@ -18,6 +18,8 @@ import {
   createPodRepository,
 } from './pods/index.js';
 import { createNudgeRepository } from './pods/nudge-repository.js';
+import { createSandboxComputeCost } from './pods/sandbox-compute-cost.js';
+import { createTaskHistoryArchive } from './pods/task-history-archive.js';
 import { createProfileStore } from './profiles/index.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, 'db/migrations');
@@ -655,6 +657,71 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json().profileName).toBe('test-app');
       expect(res.json().status).toBe('queued');
+    });
+
+    it('sandbox compute cost is pod scoped, durable, additive and unavailable for legacy', async () => {
+      const headers = { authorization: 'Bearer test-token' };
+      const create = async () =>
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/pods',
+            headers,
+            payload: { profileName: 'test-app', task: 'Cost fixture' },
+          })
+        ).json().id as string;
+      const first = await create();
+      const second = `${first}-repair`;
+      podRepo.insert({
+        id: second,
+        profileName: 'test-app',
+        task: 'Related repair',
+        status: 'queued',
+        model: 'test',
+        runtime: 'claude',
+        executionTarget: 'sandbox',
+        branch: 'repair',
+        userId: testUser.oid,
+        maxValidationAttempts: 3,
+        executionParentPodId: first,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      const docker = await create();
+      db.prepare("UPDATE pods SET execution_target='sandbox' WHERE id IN (?,?)").run(first, second);
+      const store = createSandboxComputeCost(db);
+      for (const at of [0, 30_000])
+        store.observe({
+          resourceKey: 'exact-group/first',
+          sandboxId: 'first',
+          podId: first,
+          at,
+          state: 'running',
+          region: 'swedencentral',
+          cpu: 2,
+          gib: 4,
+        });
+      const get = async (id: string) => {
+        const response = await app.inject({ method: 'GET', url: `/pods/${id}/cost`, headers });
+        expect(response.statusCode).toBe(200);
+        return response.json();
+      };
+      const priced = await get(first);
+      expect(priced.resourceCost.estimateUsd).toBeCloseTo(0.0018);
+      expect(priced.totalCostUsd).toBe(0);
+      expect((await get(second)).resourceCost).toMatchObject({
+        state: 'unavailable',
+        estimateUsd: null,
+      });
+      expect((await get(docker)).resourceCost).toBeUndefined();
+      db.prepare('UPDATE pods SET container_id=NULL WHERE id=?').run(first);
+      expect((await get(first)).resourceCost).toEqual(priced.resourceCost);
+      expect(createPodRepository(db).getResourceCost(first)).toEqual(priced.resourceCost);
+      db.transaction(() => {
+        createTaskHistoryArchive(db)(first);
+        db.prepare('DELETE FROM pods WHERE id=?').run(first);
+      })();
+      expect((await get(first)).resourceCost).toEqual(priced.resourceCost);
     });
 
     it.each([

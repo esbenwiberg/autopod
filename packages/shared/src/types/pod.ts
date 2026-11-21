@@ -102,6 +102,8 @@ export interface PodCostSegment {
 }
 
 export interface PodCostBreakdownResponse {
+  /** Pod-only Azure sandbox compute estimate; absent for Docker and older daemons. */
+  resourceCost?: PodResourceCost;
   costEvidence?: CostEvidence;
   taskExecution?: import('./task-execution.js').TaskExecutionSummary | null;
   podId: string;
@@ -110,6 +112,12 @@ export interface PodCostBreakdownResponse {
   inputTokens: number;
   outputTokens: number;
   segments: PodCostSegment[];
+}
+
+export interface PodResourceCost {
+  state: 'estimated' | 'partial' | 'unavailable';
+  estimateUsd: number | null;
+  observationCutoff: string | null;
 }
 
 /** Current recoverable infrastructure incident affecting this pod, if any. */

@@ -10,6 +10,18 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
   public let segments: [PodCostSegment]
   public let taskExecution: TaskExecutionSummary?
   public let costEvidence: CostEvidence?
+  public let resourceCost: PodResourceCost?
+
+  public var combinedCostUsd: Double { totalCostUsd + (resourceCost?.usableEstimate ?? 0) }
+  public var totalLabel: String {
+    let modelUsable = costEvidence.map {
+      $0.unavailablePhaseCount == 0 && $0.conflictingPodCount == 0 &&
+        !$0.diagnostics.contains { ["AGENT_COST_UNAVAILABLE", "PHASE_PAYLOAD_LIMIT", "PHASE_PAYLOAD_INVALID", "UNKNOWN_COST_PHASE"].contains($0.code) }
+    } ??
+      !segments.contains { $0.attribution == "unavailable" && ($0.inputTokens + $0.outputTokens > 0 || ($0.storedCostUsd ?? 0) > 0) }
+    return resourceCost?.state == "estimated" && resourceCost?.usableEstimate != nil && modelUsable
+      ? "Estimated total" : "Known total"
+  }
 
   public init(
     podId: String,
@@ -19,7 +31,8 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     outputTokens: Int,
     segments: [PodCostSegment],
     taskExecution: TaskExecutionSummary? = nil,
-    costEvidence: CostEvidence? = nil
+    costEvidence: CostEvidence? = nil,
+    resourceCost: PodResourceCost? = nil
   ) {
     self.podId = podId
     self.model = model
@@ -29,6 +42,22 @@ public struct PodCostBreakdownResponse: Codable, Equatable, Sendable {
     self.segments = segments
     self.taskExecution = taskExecution
     self.costEvidence = costEvidence
+    self.resourceCost = resourceCost
+  }
+}
+
+public struct PodResourceCost: Codable, Equatable, Sendable {
+  public let state: String
+  public let estimateUsd: Double?
+  public let observationCutoff: String?
+  public var usableEstimate: Double? {
+    guard state == "estimated" || state == "partial", let estimateUsd,
+      estimateUsd.isFinite, estimateUsd >= 0 else { return nil }
+    return estimateUsd
+  }
+  public var qualifier: String { state == "partial" ? "partial est." : "est." }
+  public init(state: String, estimateUsd: Double?, observationCutoff: String?) {
+    self.state = state; self.estimateUsd = estimateUsd; self.observationCutoff = observationCutoff
   }
 }
 

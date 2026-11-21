@@ -1277,10 +1277,15 @@ export function podRoutes(
       podRepo?.getCostRecord?.(podId) ?? podManager.getSession(podId),
       podRepo?.getProviderUsage?.(podId),
     );
+    const resourceCost = podRepo?.getResourceCost?.(podId);
     try {
-      return { ...breakdown, taskExecution: podRepo?.taskExecutions?.snapshot(podId) ?? null };
+      return {
+        ...breakdown,
+        resourceCost,
+        taskExecution: podRepo?.taskExecutions?.snapshot(podId) ?? null,
+      };
     } catch {
-      return { ...breakdown, taskExecution: null };
+      return { ...breakdown, resourceCost, taskExecution: null };
     }
   });
 

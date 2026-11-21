@@ -141,6 +141,18 @@ struct WorkTab: View {
         switch selectedSection {
         case .task:
             PodGoalCard(podId: pod.id, podStatus: pod.status.rawValue, actions: actions)
+            DisclosureGroup("Task budget") {
+                TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, onSaved: { await fetchCost() })
+                    .id("\(pod.id).\(actions.taskBudget.scope)")
+            }
+            DisclosureGroup("Task retry limits") {
+                if pod.pod.output != .artifact {
+                    TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
+                }
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
+            }
             promptCard
             if let configurationActions {
                 ReferenceAttachmentsCard(podId: pod.id, actions: configurationActions)
@@ -171,20 +183,11 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
-            TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, onSaved: { await fetchCost() })
-                .id("\(pod.id).\(actions.taskBudget.scope)")
-            // Spend detail and retry accounting support the task-wide budget controls.
             if let cost, cost.podId == pod.id {
-                SessionCostCard(breakdown: cost)
+                SessionCostCard(breakdown: cost, showResources: pod.executionTarget == "sandbox")
             } else {
                 emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
             }
-            if pod.pod.output != .artifact {
-                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
-            }
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
         }
     }
 
