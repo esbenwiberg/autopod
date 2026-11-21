@@ -97,6 +97,7 @@ import {
   createRetainedFinalizationRepository,
   type RetainedFinalizationRepository,
 } from './retained-finalization-repository.js';
+import { createSandboxComputeCost } from './sandbox-compute-cost.js';
 import {
   createSourceAdoptionRepository,
   type SourceAdoptionRepository,
@@ -398,6 +399,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   /** Bounded cost projection; never materializes contracts, prompts or validation payloads. */
   listCostRecords?(completedSince: string): PodCostSource[];
   getCostRecord?(podId: string): PodCostSource;
+  getResourceCost?(podId: string): import('@autopod/shared').PodResourceCost | undefined;
   getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
@@ -1701,6 +1703,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .get(podId) as Record<string, unknown> | undefined;
       if (!row) throw new PodNotFoundError(podId);
       return rowToCostSource(row);
+    },
+
+    getResourceCost(podId: string) {
+      const row = db.prepare('SELECT execution_target FROM retained_pods WHERE id=?').get(podId) as
+        | { execution_target: string }
+        | undefined;
+      if (row?.execution_target !== 'sandbox') return undefined;
+      try {
+        return createSandboxComputeCost(db).get(podId);
+      } catch {
+        return { state: 'unavailable', estimateUsd: null, observationCutoff: null };
+      }
     },
 
     listCostRecords(completedSince: string): PodCostSource[] {

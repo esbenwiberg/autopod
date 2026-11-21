@@ -2641,6 +2641,65 @@ it.each([
 });
 
 describe('observed sandbox allocation', () => {
+  it('does not let compute sampling settle lifecycle wakeup claims', async () => {
+    const fixture = createSandboxWakeupFixture();
+    const observeRunning = vi.spyOn(fixture.journal, 'observeRunning');
+    const observeCompute = vi.fn();
+    const { client } = makeClient(
+      [
+        {
+          status: 200,
+          body: { id: 'observed', state: 'Running', resources: { cpu: '2', memory: '4Gi' } },
+        },
+      ],
+      { wakeupJournal: fixture.journal, observeCompute },
+    );
+    await client.sampleCompute('observed');
+    expect(observeCompute).toHaveBeenCalledOnce();
+    expect(observeRunning).not.toHaveBeenCalled();
+  });
+  it('reuses state and allocation in one response without letting accounting block status', async () => {
+    const body = { id: 'observed', state: 'Running', resources: { cpu: '2', memory: '4Gi' } };
+    const observeCompute = vi.fn(() => {
+      throw new Error('accounting storage unavailable');
+    });
+    const { client, requests } = makeClient([{ status: 200, body }], { observeCompute });
+    expect(await client.getStatus('observed')).toBe('running');
+    expect(observeCompute).toHaveBeenCalledWith('observed', body);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('does not settle compute on DELETE 202, and reuses confirmed terminal observations', async () => {
+    const observeCompute = vi.fn();
+    const { client, requests } = makeClient(
+      [
+        { status: 202, body: {} },
+        {
+          status: 200,
+          body: { id: 'observed', state: 'Running', resources: { cpu: '2', memory: '4Gi' } },
+        },
+        { status: 404, body: {} },
+      ],
+      { observeCompute },
+    );
+    await client.destroy('observed');
+    expect(observeCompute.mock.calls.map((call) => call[1]?.state ?? 'terminal')).toEqual([
+      'Running',
+      'terminal',
+    ]);
+    expect(requests.map((request) => request.init?.method)).toEqual(['DELETE', 'GET', 'GET']);
+  });
+
+  it('breaks coverage when a lifecycle observation fails', async () => {
+    const observeCompute = vi.fn();
+    const { client } = makeClient([{ status: 500, body: { error: 'failed observation' } }], {
+      observeCompute,
+      retry: { maxAttempts: 1 },
+    });
+    await expect(client.getStatus('observed')).rejects.toThrow();
+    expect(observeCompute).toHaveBeenCalledWith('observed', { id: 'observed', state: 'Unknown' });
+  });
+
   it.each([
     ['2000m', '4096Mi', 2, 4294967296],
     ['0.5', '4Gi', 0.5, 4294967296],

@@ -176,6 +176,7 @@ public enum PodMapper {
     )
     result.createdAt = parseCreationTime(response.createdAt)
     result.profileDisplay = response.profileDisplay
+    result.executionTarget = response.executionTarget
     result.fleetArchivedAt = response.fleetArchivedAt
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
@@ -602,6 +603,7 @@ public enum PodMapper {
       reason: response.failureReason, validationTitle: failureTitle(response)
     )
     result.skipValidation = response.skipValidation
+    result.executionTarget = response.executionTarget
     result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
     result.fixIteration = response.fixIteration ?? 0

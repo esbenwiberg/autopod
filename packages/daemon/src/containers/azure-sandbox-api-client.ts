@@ -108,6 +108,7 @@ interface ExecStreamTransport {
 export type WebSocketFactory = (url: string, headers: Record<string, string>) => WebSocketLike;
 
 export interface AzureSandboxApiClientConfig {
+  observeCompute?: (id: string, response: SandboxResponse | null) => void;
   /** Azure subscription ID. */
   subscriptionId: string;
   /** Resource group hosting the SandboxGroup (Microsoft.App/SandboxGroups). */
@@ -238,6 +239,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     registryCredentials?: SandboxRegistryCredentials;
   };
   private readonly logger: Logger;
+  private readonly observeCompute?: AzureSandboxApiClientConfig['observeCompute'];
+  private readonly computeGaps = new Set<string>();
   private readonly credential: TokenCredentialLike;
   private readonly fetchFn: FetchLike;
   private readonly webSocketFactory: WebSocketFactory;
@@ -266,6 +269,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
+    this.observeCompute = config.observeCompute;
     this.config = {
       subscriptionId: config.subscriptionId,
       resourceGroup: config.resourceGroup,
@@ -454,7 +458,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const unknown = { memoryLimitBytes: null, cpuLimit: null };
     const observed = await this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId), {
       timeoutMs: 5000,
+    }).catch((error) => {
+      this.recordCompute(
+        sandboxId,
+        isStatusError(error, 404) ? null : { id: sandboxId, state: 'Unknown' },
+      );
+      throw error;
     });
+    this.recordCompute(sandboxId, observed);
     if (observed.id !== sandboxId || observed.state !== 'Running') return unknown;
     const memory = /^(\d+)(Mi|Gi)$/.exec(String(observed.resources?.memory));
     const memoryBytes = memory
@@ -474,7 +485,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   async getImageDigest(sandboxId: string): Promise<string | null> {
     const sandbox = await this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId), {
       timeoutMs: 5000,
+    }).catch((error) => {
+      this.recordCompute(
+        sandboxId,
+        isStatusError(error, 404) ? null : { id: sandboxId, state: 'Unknown' },
+      );
+      throw error;
     });
+    this.recordCompute(sandboxId, sandbox);
     const diskId = sandbox.sourcesRef?.diskImage?.id;
     if (sandbox.id !== sandboxId || sandbox.state !== 'Running' || !diskId) return null;
     const disk = await this.requestData<DiskImageResponse>(
@@ -1490,19 +1508,38 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async getStatus(sandboxId: string): Promise<SandboxStatus> {
+    return this.readStatus(sandboxId, true);
+  }
+
+  /** Accounting samples must never settle wakeup claims or grant lifecycle rights. */
+  async sampleCompute(sandboxId: string): Promise<void> {
+    await this.readStatus(sandboxId, false);
+  }
+
+  private async readStatus(sandboxId: string, lifecycle: boolean): Promise<SandboxStatus> {
     const response = await this.request(
       'data',
       'GET',
       `${this.dataEndpoint}${this.sandboxPath(sandboxId)}`,
       { okStatuses: [200, 404], params: { 'api-version': API_VERSION } },
-    );
+    ).catch((error) => {
+      this.recordCompute(
+        sandboxId,
+        isStatusError(error, 404) ? null : { id: sandboxId, state: 'Unknown' },
+      );
+      throw error;
+    });
     // A 404 is a confirmed deletion, not an indeterminate data-plane failure.
     // Keep it distinct from an unavailable/unknown status so pod recovery does
     // not wait or park a sandbox that Azure has definitively removed.
-    if (response.status === 404) return 'deleted';
+    if (response.status === 404) {
+      this.recordCompute(sandboxId, null);
+      return 'deleted';
+    }
     const sandbox = (await readJsonOrEmpty(response)) as SandboxResponse;
+    this.recordCompute(sandboxId, sandbox);
     if (sandbox.state === 'Running') {
-      this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
+      if (lifecycle) this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
       return 'running';
     }
     if (stoppedStates.has(sandbox.state ?? '')) return 'stopped';
@@ -1806,12 +1843,30 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       'GET',
       this.sandboxPath(sandboxId),
       options,
-    );
+    ).catch((error) => {
+      this.recordCompute(
+        sandboxId,
+        isStatusError(error, 404) ? null : { id: sandboxId, state: 'Unknown' },
+      );
+      throw error;
+    });
     options.signal?.throwIfAborted();
     options.beforeObserve?.();
+    this.recordCompute(sandboxId, sandbox);
     if (sandbox.state === 'Running')
       this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
     return sandbox;
+  }
+
+  private recordCompute(id: string, sandbox: SandboxResponse | null): void {
+    try {
+      if (this.computeGaps.has(id)) this.observeCompute?.(id, { id, state: 'Unknown' });
+      this.observeCompute?.(id, sandbox);
+      this.computeGaps.delete(id);
+    } catch (error) {
+      this.computeGaps.add(id);
+      this.logger.warn({ error, sandboxId: id }, 'Compute observation unavailable');
+    }
   }
 
   getResourceKey(sandboxId: string): string {

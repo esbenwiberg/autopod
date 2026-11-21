@@ -48,6 +48,7 @@ import {
   assertFinalizationResourceAvailable,
   ownsRetainedFinalizationStop,
 } from '../pods/retained-finalization-repository.js';
+import { createSandboxComputeCost } from '../pods/sandbox-compute-cost.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
@@ -148,6 +149,11 @@ export class SandboxContainerManager implements ContainerManager {
   private readonly volumeUploadChunkBytes: number;
   private readonly egressPolicies = new Map<string, ReturnType<typeof egressPolicyForMode>>();
   private readonly managedDatabase?: Database.Database;
+  private stopComputeSampler?: () => void;
+
+  stopComputeObservations(): void {
+    this.stopComputeSampler?.();
+  }
 
   constructor(
     client: SandboxApiClient,
@@ -182,8 +188,60 @@ export class SandboxContainerManager implements ContainerManager {
     logger: Logger,
     options: Omit<SandboxContainerManagerOptions, 'defaultTier'> = {},
   ): SandboxContainerManager {
+    const db = options.managedDatabase;
+    let stopped = false;
+    let computeTimer: ReturnType<typeof setInterval> | undefined;
+    const costs = (() => {
+      try {
+        return db ? createSandboxComputeCost(db) : undefined;
+      } catch (error) {
+        logger.warn({ error }, 'Compute ledger unavailable');
+        return undefined;
+      }
+    })();
     const client = new AzureSandboxApiClient(
       {
+        observeCompute: (id, response) => {
+          if (stopped || !costs || !db) return;
+          const key = JSON.stringify([client.executionResourceScope, id]);
+          const previous = costs.last(key);
+          if (response && response.id !== id) {
+            if (previous) costs.observe({ ...previous, at: Date.now(), state: 'unknown' });
+            return;
+          }
+          const labels = response?.labels ?? response?.properties?.labels;
+          const labelledOwner =
+            labels?.managedBy === 'autopod' && labels.podId
+              ? (db
+                  .prepare('SELECT id FROM retained_pods WHERE id=? AND execution_target=?')
+                  .get(labels.podId, 'sandbox') as { id: string } | undefined)
+              : undefined;
+          const podId = previous?.podId ?? labelledOwner?.id;
+          if (!podId) return;
+          if (labels?.podId && labels.podId !== podId) {
+            if (previous) costs.observe({ ...previous, at: Date.now(), state: 'unknown' });
+            return;
+          }
+          const memory = /^(\d+(?:\.\d+)?)(Mi|Gi)$/.exec(String(response?.resources?.memory));
+          const cpu = /^(\d+(?:\.\d+)?)(m?)$/.exec(String(response?.resources?.cpu));
+          costs.observe({
+            resourceKey: key,
+            sandboxId: id,
+            podId,
+            region: config.location,
+            at: Date.now(),
+            state:
+              response === null
+                ? 'terminal'
+                : response.state === 'Running'
+                  ? 'running'
+                  : ['Stopped', 'Suspended', 'Idle'].includes(response.state ?? '')
+                    ? 'stopped'
+                    : 'unknown',
+            cpu: cpu ? Number(cpu[1]) / (cpu[2] === 'm' ? 1000 : 1) : null,
+            gib: memory ? Number(memory[1]) / (memory[2] === 'Gi' ? 1 : 1024) : null,
+          });
+        },
         subscriptionId: config.subscriptionId,
         resourceGroup: config.resourceGroup,
         location: config.location,
@@ -209,10 +267,65 @@ export class SandboxContainerManager implements ContainerManager {
       },
       logger,
     );
-    return new SandboxContainerManager(client, logger, {
+    if (costs && db) {
+      try {
+        for (const o of costs.tracked()) {
+          if (o.resourceKey === JSON.stringify([client.executionResourceScope, o.sandboxId]))
+            costs.observe({ ...o, at: Math.max(Date.now(), o.at + 1), state: 'unknown' });
+        }
+      } catch (error) {
+        logger.warn({ error }, 'Compute restart boundary unavailable');
+      }
+      let sampling = false;
+      // One in-flight observer; transport supplies bounded retries/backoff. Never wakes resources.
+      computeTimer = setInterval(() => {
+        if (stopped || sampling) return;
+        sampling = true;
+        void (async () => {
+          const current = db
+            .prepare(
+              "SELECT container_id FROM pods WHERE execution_target='sandbox' AND container_id IS NOT NULL",
+            )
+            .all() as { container_id: string }[];
+          const tracked = costs
+            .tracked()
+            .filter(
+              (o) => o.resourceKey === JSON.stringify([client.executionResourceScope, o.sandboxId]),
+            );
+          const ids = new Set([
+            ...current.map((r) => r.container_id),
+            ...tracked.map((o) => o.sandboxId),
+          ]);
+          for (const id of ids) {
+            if (stopped) break;
+            if (
+              costs.last(JSON.stringify([client.executionResourceScope, id]))?.state === 'terminal'
+            )
+              continue;
+            try {
+              await client.sampleCompute(id);
+            } catch {
+              const previous = tracked.find((o) => o.sandboxId === id);
+              if (previous) costs.observe({ ...previous, at: Date.now(), state: 'unknown' });
+            }
+          }
+        })()
+          .catch((error) => logger.warn({ error }, 'Compute sampler unavailable'))
+          .finally(() => {
+            sampling = false;
+          });
+      }, 30_000);
+      computeTimer.unref();
+    }
+    const manager = new SandboxContainerManager(client, logger, {
       ...options,
       defaultTier: config.tier ?? 'L',
     });
+    manager.stopComputeSampler = () => {
+      stopped = true;
+      if (computeTimer) clearInterval(computeTimer);
+    };
+    return manager;
   }
 
   async getResourceKey(containerId: string): Promise<string> {

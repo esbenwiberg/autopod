@@ -64,7 +64,6 @@ struct WorkTab: View {
         }
         .task(id: pod.id) {
             await fetchQuality()
-            await fetchCost()
         }
         .onAppear {
             selectedSection = defaultSection
@@ -141,6 +140,18 @@ struct WorkTab: View {
         switch selectedSection {
         case .task:
             PodGoalCard(podId: pod.id, podStatus: pod.status.rawValue, actions: actions)
+            DisclosureGroup("Task budget") {
+                TaskBudgetControls(podId: pod.id, actions: actions.taskBudget)
+                    .id("\(pod.id).\(actions.taskBudget.scope)")
+            }
+            DisclosureGroup("Task retry limits") {
+                if pod.pod.output != .artifact {
+                    TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
+                }
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
+                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
+            }
             promptCard
             if let configurationActions {
                 ReferenceAttachmentsCard(podId: pod.id, actions: configurationActions)
@@ -171,20 +182,14 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
-            TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, onSaved: { await fetchCost() })
-                .id("\(pod.id).\(actions.taskBudget.scope)")
-            // Spend detail and retry accounting support the task-wide budget controls.
-            if let cost, cost.podId == pod.id {
-                SessionCostCard(breakdown: cost)
-            } else {
-                emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+            Group {
+                if let cost, cost.podId == pod.id {
+                    SessionCostCard(breakdown: cost, showResources: pod.executionTarget == "sandbox")
+                } else {
+                    emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+                }
             }
-            if pod.pod.output != .artifact {
-                TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions)
-            }
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "sandbox_startup")
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "codex_interruption")
-            TaskRetryCard(podId: pod.id, status: pod.status.rawValue, actions: actions, stage: "worker")
+            .task(id: pod.id) { await fetchCost() }
         }
     }
 
@@ -214,11 +219,9 @@ struct WorkTab: View {
 
     private func fetchCost() async {
         guard let loadCost else { return }
-        do {
-            cost = try await loadCost(pod.id)
-        } catch {
-            cost = nil
-        }
+        let result = try? await loadCost(pod.id)
+        guard !Task.isCancelled else { return }
+        cost = result
     }
 
     // MARK: - Prompt

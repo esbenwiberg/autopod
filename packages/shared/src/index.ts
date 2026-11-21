@@ -402,6 +402,7 @@ export type {
   PodProfileDisplay,
   PodQualityScore,
   PodRepositoryDisplay,
+  PodResourceCost,
   PodStatus,
   PodSummary,
   PreSubmitReviewSnapshot,

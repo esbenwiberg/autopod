@@ -42,6 +42,40 @@ import Testing
   #expect(response.segments[0].bucket == "work")
   #expect(response.segments[0].id == "work")
   #expect(response.segments[1].sourcePhases == ["review", "plan_eval"])
+  #expect(response.resourceCost == nil)
+  #expect(response.totalLabel == "Known total")
+}
+
+@Test func sandboxResourceCostDecodingAndPresentation() throws {
+  for state in ["estimated", "partial", "unavailable", "future-state"] {
+    let json = """
+    {"podId":"automatic-mackerel","model":"gpt-6.1-sol","totalCostUsd":3.19,
+     "inputTokens":21400000,"outputTokens":57000,"segments":[],
+     "resourceCost":{"state":"\(state)","estimateUsd":0.018,"observationCutoff":"2026-11-21T12:00:00Z"}}
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(PodCostBreakdownResponse.self, from: json)
+    let usable = state == "estimated" || state == "partial"
+    #expect(abs(response.combinedCostUsd - (usable ? 3.208 : 3.19)) < 0.0000001)
+    #expect(response.totalLabel == (state == "estimated" ? "Estimated total" : "Known total"))
+    #expect(response.resourceCost?.qualifier == (state == "partial" ? "partial est." : "est."))
+    #expect((response.resourceCost?.usableEstimate != nil) == usable)
+  }
+  let unavailable = PodResourceCost(state: "unavailable", estimateUsd: nil, observationCutoff: nil)
+  #expect(unavailable.usableEstimate == nil)
+  let unknownModel = PodCostBreakdownResponse(podId: "automatic-mackerel", model: nil,
+    totalCostUsd: 1, inputTokens: 20, outputTokens: 0,
+    segments: [PodCostSegment(bucket: "work", label: "Work", costUsd: 0, inputTokens: 20,
+      outputTokens: 0, sourcePhases: [], attribution: "unavailable")],
+    resourceCost: PodResourceCost(state: "estimated", estimateUsd: 0.018, observationCutoff: nil))
+  #expect(unknownModel.totalLabel == "Known total")
+  let unreadable = """
+  {"podId":"automatic-mackerel","model":"test","totalCostUsd":0,"inputTokens":20,"outputTokens":0,"segments":[],
+   "resourceCost":{"state":"estimated","estimateUsd":0.018,"observationCutoff":null},
+   "costEvidence":{"basis":"stored_subtotal","billingVerified":false,"knownEstimatedCostUsd":0,
+    "unavailablePhaseCount":0,"conflictingPodCount":0,"omittedDiagnosticCount":0,
+    "diagnostics":[{"podId":"automatic-mackerel","code":"AGENT_COST_UNAVAILABLE","message":"Missing model cost"}]}}
+  """.data(using: .utf8)!
+  #expect(try JSONDecoder().decode(PodCostBreakdownResponse.self, from: unreadable).totalLabel == "Known total")
 }
 
 @Test func podCostBreakdownResponseDecodesNullModel() throws {
