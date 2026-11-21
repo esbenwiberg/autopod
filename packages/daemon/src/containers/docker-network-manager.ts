@@ -21,6 +21,7 @@ import {
   NETWORK_CAPACITY_DOCS,
 } from './docker-network-capacity.js';
 import { generateHaproxyConfig, HAPROXY_LISTEN_PORT } from './haproxy-config.js';
+import { inspectPodNetworkPrune, podNetworkPruneOwner } from './pod-network-prune.js';
 import { planRetainedNetworkReleases, releaseRetainedNetwork } from './retained-network-release.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
@@ -233,40 +234,12 @@ export class DockerNetworkManager {
 
   /** Automatic GC is not the exact owner's teardown authority. */
   private assertNetworkPrunable(name: string): void {
-    const refuse: () => never = () => {
-      throw new AutopodError(
-        'Network has a live or unverified allocation owner; retain it for owner cleanup.',
-        'NETWORK_OWNER_RETAINED',
-        409,
-      );
-    };
-    const db = this.managedDatabase;
-    if (!db || !name.startsWith('autopod-')) refuse();
-    const id = name.slice('autopod-'.length);
-    const pod = db.prepare('SELECT status, container_id FROM pods WHERE id=?').get(id) as
-      | { status: string; container_id: string | null }
-      | undefined;
-    // Failed/paused/validated is not a release receipt. Provisioning may own
-    // an empty bridge before the container or its durable ID exists.
-    if (pod) {
-      if (!['complete', 'killed'].includes(pod.status) || pod.container_id) refuse();
-      return;
-    }
-    const reviewer = db
-      .prepare('SELECT state,cleanup,reconciled_at FROM isolated_reviewer_runs WHERE id=?')
-      .get(id) as { state: string; cleanup: string; reconciled_at: string | null } | undefined;
-    if (reviewer) {
-      if (
-        reviewer.cleanup !== 'clean' ||
-        ['preparing', 'running'].includes(reviewer.state) ||
-        (reviewer.state === 'uncertain' && !reviewer.reconciled_at)
-      )
-        refuse();
-      return;
-    }
-    // Other isolated protocols do not share the ordinary pod ownership table.
-    // Missing records there cannot authorize tearing down their allocation.
-    if (/^(review-|system-|deploy-)/.test(id) || id.includes('-artifact-checks-')) refuse();
+    if (podNetworkPruneOwner(this.managedDatabase, name) === 'unclaimed') return;
+    throw new AutopodError(
+      'Network has a live or unverified allocation owner; retain it for owner cleanup.',
+      'NETWORK_OWNER_RETAINED',
+      409,
+    );
   }
 
   private async inspectNetworkCustody(network: ReturnType<Dockerode['getNetwork']>, name: string) {
@@ -351,29 +324,35 @@ export class DockerNetworkManager {
         await Promise.all(
           candidates.map(async (n) => {
             try {
-              this.assertNetworkMutable(n.Name);
-              this.assertNetworkPrunable(n.Name);
+              const db = this.managedDatabase;
               const network = this.docker.getNetwork(n.Id);
               const live = await this.inspectNetworkCustody(network, n.Name);
-              if (live && Object.keys(live.Containers ?? {}).length > 0) {
-                prune.attached++;
+              if (!db || !live) {
+                prune.owned++;
                 return;
               }
-              this.assertNetworkMutable(n.Name, Object.keys(live?.Containers ?? {}));
-              this.assertNetworkPrunable(n.Name);
+              const result = await inspectPodNetworkPrune(this.docker, db, n, live, this.logger);
+              const verdict = result.kind === 'eligible' ? result.recheck() : result.kind;
+              if (verdict !== 'eligible') {
+                prune[verdict === 'blocked' ? 'owned' : verdict]++;
+                return;
+              }
               await boundedDockerCall(network.remove(), {
                 label: 'network.remove',
                 timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
                 logger: this.logger,
               });
               prune.removed++;
+              if (result.kind === 'eligible' && result.staleContainerId) {
+                this.logger.info(
+                  { networkId: n.Id, network: n.Name, staleContainerId: result.staleContainerId },
+                  'Pruned empty bridge from completed Docker pod',
+                );
+              }
             } catch (pruneErr) {
               // Best effort. Custody refusals (409) are expected for retained
               // checkpoints and are counted separately from Docker failures.
-              if (pruneErr instanceof AutopodError && pruneErr.code === 'NETWORK_OWNER_RETAINED')
-                prune.owned++;
-              else if (pruneErr instanceof AutopodError && pruneErr.statusCode === 409)
-                prune.retained++;
+              if (pruneErr instanceof AutopodError && pruneErr.statusCode === 409) prune.retained++;
               else prune.failed++;
             }
           }),

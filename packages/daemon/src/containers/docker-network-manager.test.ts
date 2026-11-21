@@ -566,7 +566,7 @@ describe('DockerNetworkManager', () => {
         if (id === 'net2')
           return {
             remove: removeFn,
-            inspect: vi.fn(async () => ({ Name: 'autopod-orphan', Containers: {} })),
+            inspect: vi.fn(async () => ({ Id: id, Name: 'autopod-orphan', Containers: {} })),
           };
         return { inspect: docker.mock._inspect };
       });

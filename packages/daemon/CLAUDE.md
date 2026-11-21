@@ -274,7 +274,11 @@ touches retained-checkpoint bridges. On pool exhaustion,
 oldest first, after recording them in `retained_network_releases`. Operators can
 also run `ap release-retained-networks`. If no subnet can be freed, new pods
 fail with `HOST_NETWORK_CAPACITY`. `/health?detail=full` reports
-`docker.networks` pressure. See `docs/hosted-daemon-docker-networks.md`.
+`docker.networks` pressure. Health and pressure pruning share the same
+ownership checks. A stale completed Docker pod may release only its exact
+empty bridge, after Docker confirms that the recorded container is missing
+and that no container references the bridge. The pod record is preserved.
+See `docs/hosted-daemon-docker-networks.md`.
 
 ### Sandboxes (`src/containers/sandbox-container-manager.ts`)
 

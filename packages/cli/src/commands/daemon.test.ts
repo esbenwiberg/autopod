@@ -53,10 +53,11 @@ it('ap health reads full diagnostics and warns about exhausted Docker network ca
             addressPools: { source: 'builtin-default', capacity: 31, used: 31, free: 0 },
             podNetworks: {
               total: 30,
-              retained: 26,
+              retained: 19,
               attached: 4,
               unattached: 26,
               reclaimable: 0,
+              blocked: 7,
               unknown: 0,
             },
             reclaimableHeadroom: 0,
@@ -75,7 +76,7 @@ it('ap health reads full diagnostics and warns about exhausted Docker network ca
     expect(receivedUrl).toBe('/health?detail=full');
     const output = log.mock.calls.flat().join('\n');
     expect(output).toContain('CRITICAL');
-    expect(output).toContain('30 autopod (26 retained, 4 attached, 0 reclaimable)');
+    expect(output).toContain('30 autopod (19 retained, 4 attached, 0 reclaimable, 7 blocked)');
     expect(output).toContain('31/31 pool subnets used (builtin-default)');
     expect(output).toContain('HOST_NETWORK_CAPACITY');
   } finally {

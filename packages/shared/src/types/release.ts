@@ -18,9 +18,8 @@ export interface BackupHealth {
 export type DockerNetworkCapacitySeverity = 'ok' | 'warning' | 'critical' | 'unknown';
 /**
  * Read-only Docker bridge address-pool pressure. `reclaimableHeadroom` is free
- * pool subnets plus unattached autopod networks that are not held by retained
- * custody, plus superseded retained bridges eligible for release (the
- * subnet-exhaustion path can free both). Null means unknown.
+ * pool subnets plus pool slots that eligible ordinary or retained bridge
+ * cleanup can free. Null means unknown.
  */
 export interface DockerNetworkCapacity {
   checkedAt: string;
@@ -37,6 +36,8 @@ export interface DockerNetworkCapacity {
     attached: number;
     unattached: number;
     reclaimable: number | null;
+    /** Empty non-retained bridges that failed the automatic prune ownership checks. */
+    blocked?: number | null;
     /** Superseded retained bridges eligible for the release protocol. */
     releasable: number | null;
     unknown: number;

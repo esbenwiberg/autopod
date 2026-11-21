@@ -15,7 +15,8 @@ default `docker0` bridge uses one of them.
 | Owner | Released when |
 |---|---|
 | Running or validating pod | The pod is cleaned up |
-| Failed pod that has not been killed | `ap kill <pod>`, or the subnet-exhaustion prune below (if no custody holds it) |
+| Failed pod that has not been killed | Exact-owner cleanup with `ap kill <pod>` when no custody holds it; not removed by subnet-exhaustion pruning |
+| Completed Docker pod whose recorded container is already gone | Subnet-exhaustion pruning, after verifying that the bridge has no endpoints, container references, or retention hold |
 | Current identity of a live retained pod, or an in-progress artifact check | Not released |
 | Superseded retained-checkpoint or artifact-checks identity (original and older `-retained-*` generations) | The release protocol below: automatically under pool pressure, or `ap release-retained-networks --apply` |
 | Any identity of a pod with a retained finalization or a recovery fork | Not released |
@@ -23,9 +24,15 @@ default `docker0` bridge uses one of them.
 ## What the daemon does
 
 1. When `network.create` reports exhausted pools, the daemon prunes unattached
-   `com.autopod.pod-network` bridges. Retained-custody bridges are never
-   removed. The daemon logs the number of networks it removed and how many it
-   skipped as retained, attached or failed (`Subnet pool prune finished`).
+   `com.autopod.pod-network` bridges. Ordinary pruning protects both retained
+   custody and live or unverified owners. For a completed Docker pod with a
+   recorded container ID, pruning requires a 404 for that exact full ID, no
+   containers referencing the bridge by ID or name in their declared Docker
+   network mode or network settings (including stopped and disconnected
+   containers), a fresh endpoint check, and unchanged ownership and custody
+   before removing the exact bridge ID. It leaves pod records, containers and
+   source untouched. The daemon logs the reclaim and the overall result
+   (`Subnet pool prune finished`).
 2. If creation still fails, the daemon releases superseded retained bridges,
    oldest first and one at a time, retrying creation after each. It stops as
    soon as the new network is created (`Pod network created after retained
@@ -85,11 +92,15 @@ curl -s "$DAEMON/health?detail=full" | jq .docker.networks
   when it reports none, and `unknown` when `docker info` failed.
 - `podNetworks`: the number of autopod bridges, broken down as `retained`
   (custody-held), `attached` (live endpoints), `unattached`, `reclaimable`
-  (unattached and not retained, so the prune can free them), `releasable`
+  (pass the same eligibility checks as subnet-exhaustion pruning), `blocked`
+  (unattached and non-retained, but protected by ownership checks), `releasable`
   (superseded retained bridges the release protocol may remove) and `unknown`
-  (inspection failed).
-- `reclaimableHeadroom`: `free` plus `reclaimable` plus `releasable`. `severity` is `critical`
-  at 0 and `warning` at 5 or fewer. A `critical` result makes
+  (inspection failed). An individual unverified bridge is not credited as
+  headroom.
+- `reclaimableHeadroom`: `free` plus pool slots occupied by bridges eligible
+  for automatic pruning or retained release. Bridges outside the address pool
+  do not add headroom. `severity` is `critical` at 0 and `warning` at 5 or
+  fewer. A `critical` result makes
   `/health?detail=full` report `degraded`. Basic `/health` is unchanged.
 
 These counts are a read-only estimate. A value that could not be measured is

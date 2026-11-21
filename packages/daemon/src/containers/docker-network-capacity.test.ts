@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTestDb } from '../test-utils/mock-helpers.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import {
   addressPoolCapacity,
   addressPoolUsage,
@@ -56,9 +56,9 @@ function fakeDocker(networks: FakeNetwork[], info: unknown = {}) {
     listNetworks: vi.fn(async () => networks),
     getNetwork: vi.fn((id: string) => ({
       inspect: vi.fn(async () => {
-        const live = networks.find((network) => network.Id === id)?.live;
-        if (live instanceof Error) throw live;
-        return { Containers: live ?? {} };
+        const network = networks.find((network) => network.Id === id);
+        if (network?.live instanceof Error) throw network.live;
+        return { ...network, Containers: network?.live ?? {} };
       }),
     })),
   } as unknown as Dockerode & { getNetwork: ReturnType<typeof vi.fn> };
@@ -159,6 +159,40 @@ describe('inspectNetworkCapacity()', () => {
       addressPools: { source: 'configured', capacity: 256, used: 2, free: 254 },
       podNetworks: { total: 2, retained: 1, unattached: 2, reclaimable: 1, unknown: 0 },
       reclaimableHeadroom: 255,
+    });
+  });
+
+  it('excludes empty bridges protected by durable owners from headroom', async () => {
+    const db = retainedDatabase();
+    insertTestProfile(db, { name: 'proj' });
+    const insert = db.prepare(
+      `INSERT INTO pods (id, profile_name, task, status, branch, user_id, execution_target, container_id, model)
+        VALUES (?, 'proj', 'task', ?, ?, 'operator', 'local', ?, 'synthetic')`,
+    );
+    insert.run('pending', 'provisioning', 'pending', null);
+    insert.run('failed', 'failed', 'failed', 'f'.repeat(64));
+    const docker = fakeDocker(
+      [podNetwork('pending', '10.200.0.0/24'), podNetwork('failed', '10.200.1.0/24')],
+      { DefaultAddressPools: [{ Base: '10.200.0.0/23', Size: 24 }] },
+    );
+    expect(await inspectNetworkCapacity({ docker, db })).toMatchObject({
+      severity: 'critical',
+      addressPools: { free: 0 },
+      podNetworks: { unattached: 2, blocked: 2, reclaimable: 0 },
+      reclaimableHeadroom: 0,
+    });
+  });
+
+  it('does not count reclamation outside the configured pool as pool headroom', async () => {
+    const db = retainedDatabase();
+    const docker = fakeDocker(
+      [podNetwork('held', '10.200.0.0/24'), podNetwork('old-pool', '172.18.0.0/16')],
+      { DefaultAddressPools: [{ Base: '10.200.0.0/24', Size: 24 }] },
+    );
+    expect(await inspectNetworkCapacity({ docker, db })).toMatchObject({
+      severity: 'critical',
+      podNetworks: { reclaimable: 1 },
+      reclaimableHeadroom: 0,
     });
   });
 

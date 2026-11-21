@@ -29,6 +29,7 @@ export function formatNetworkCapacity(health: DaemonHealthSummary): string | nul
     `Docker networks: ${severity}; ${pods.total} autopod ` +
     `(${pods.retained ?? '?'} retained, ${pods.attached} attached, ` +
     `${pods.reclaimable ?? '?'} reclaimable` +
+    `${pods.blocked === undefined ? '' : `, ${pods.blocked ?? '?'} blocked`}` +
     `${pods.releasable === undefined ? '' : `, ${pods.releasable ?? '?'} releasable`}); ${poolText}; ` +
     `headroom ${networks.reclaimableHeadroom ?? '?'}`;
   if (networks.severity !== 'critical' && networks.severity !== 'warning') return line;
