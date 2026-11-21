@@ -577,6 +577,14 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       checkpointError('No current infrastructure repair worker owns this MCP request');
     return record;
   }
+  function hasUnsettledReviewer(taskId: string) {
+    return Boolean(
+      db
+        .prepare(`SELECT 1 FROM isolated_reviewer_runs
+        WHERE pod_id IN (SELECT pod_id FROM task_executions WHERE task_id=?) AND ${UNRECONCILED_REVIEWER_RUN}`)
+        .get(taskId),
+    );
+  }
   /** Positive exact-worker proof, not inference from failed status or a free-text report. */
   function blockedRepairPredecessor(pod: Pod, id = latest(pod.id)?.id) {
     const prior = id ? get(id) : null;
@@ -623,13 +631,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         worker.generation,
         worker.runId,
       );
-    if (
-      db
-        .prepare(`SELECT 1 FROM isolated_reviewer_runs
-      WHERE pod_id IN (SELECT pod_id FROM task_executions WHERE task_id=?) AND ${UNRECONCILED_REVIEWER_RUN}`)
-        .get(prior.taskId)
-    )
-      return null;
+    if (hasUnsettledReviewer(prior.taskId)) return null;
     return completed ? prior : null;
   }
   function assertAvailable(podId: string) {
@@ -728,6 +730,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     get,
     latest,
     blockedRepairPredecessor,
+    hasUnsettledReviewer,
     infrastructureEvent,
     async stopOriginal(id: string, stop: () => Promise<void>, assertCurrent: () => void) {
       const record = get(id) ?? checkpointError('Recovery unavailable');
@@ -1047,13 +1050,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
             link.predecessorRepairId)
         )
           checkpointError('Exact settled blocked repair required for checks-only handoff');
-        if (
-          blocked &&
-          db
-            .prepare(`SELECT 1 FROM isolated_reviewer_runs
-          WHERE pod_id IN (SELECT pod_id FROM task_executions WHERE task_id=?) AND ${UNRECONCILED_REVIEWER_RUN}`)
-            .get(blocked.taskId)
-        )
+        if (blocked && hasUnsettledReviewer(blocked.taskId))
           checkpointError(
             'Reviewer settlement/reconciliation is required before checks-only handoff',
           );

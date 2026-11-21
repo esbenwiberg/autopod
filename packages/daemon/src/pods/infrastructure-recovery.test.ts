@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import type { InfrastructureRecoveryRequest } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 import { errorHandler } from '../api/error-handler.js';
 import { authPlugin } from '../api/plugins/auth.js';
 import { checkpointRecoveryRoutes } from '../api/routes/checkpoint-recovery.js';
@@ -25,6 +25,7 @@ import {
 } from '../test-utils/retained-checkpoint-helpers.js';
 import { terminationAuth } from '../test-utils/termination-reconciliation-helpers.js';
 import { INTEGRATION_TEST_TIMEOUT_MS } from '../test-utils/test-budgets.js';
+import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
 import { createCompletionGuards } from './completion-guards.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
@@ -142,6 +143,94 @@ function passingReview(f: Awaited<ReturnType<typeof fixture>>) {
       diff: config.diff,
     },
   }));
+}
+
+async function retainedReviewFailure(
+  kind: 'infrastructure' | 'critic' | 'checks' | 'missing-typed-evidence' = 'infrastructure',
+) {
+  const f = await fixture();
+  const resources = new Map<string, string>();
+  const running = new Set<string>();
+  const status = vi.mocked(f.cm.getStatus).getMockImplementation();
+  const stop = vi.mocked(f.cm.stop).getMockImplementation();
+  assert(status && stop);
+  vi.mocked(f.cm.spawn).mockImplementation(async (config) => {
+    const id = String(resources.size + 2).repeat(64);
+    assert(config.resourceIdentity);
+    resources.set(id, config.resourceIdentity);
+    running.add(id);
+    return id;
+  });
+  vi.mocked(f.cm.getStatus).mockImplementation(async (id) =>
+    resources.has(id) ? (running.has(id) ? 'running' : 'stopped') : status(id),
+  );
+  vi.mocked(f.cm.stop).mockImplementation(async (id) => {
+    if (!resources.has(id)) return stop(id);
+    running.delete(id);
+  });
+  f.cm.getResourceKey.mockImplementation(async (id?: string) =>
+    id && resources.has(id) ? JSON.stringify(['docker', 'fixture', id]) : f.resourceKey,
+  );
+  f.cm.getExecutionMetadata = vi.fn(async (id) => ({
+    podId: f.podId,
+    resourceIdentity: resources.get(id),
+    imageDigest: null,
+    memoryLimitBytes: null,
+    cpuLimit: null,
+    networkMode: null,
+  }));
+  f.ctx.podRepo.update(f.podId, { maxValidationAttempts: 1 });
+  const validate = vi.mocked(f.ctx.validationEngine.validate);
+  const run = validate.getMockImplementation();
+  assert(run);
+  validate.mockImplementationOnce(async (config) => ({
+    ...(await run(config)),
+    overall: 'fail',
+    ...(kind === 'critic'
+      ? {
+          taskReview: {
+            status: 'fail',
+            reasoning: 'Real critic verdict, not an infrastructure failure',
+            issues: ['Product defect'],
+            model: 'fixture-reviewer',
+            screenshots: [],
+            diff: config.diff,
+          },
+        }
+      : {
+          setup: { status: 'pass', output: '', duration: 1 },
+          test: { status: kind === 'checks' ? 'fail' : 'pass', duration: 1 },
+          factValidation: { status: 'pass', results: [] },
+          reviewSkipKind: 'review-failed',
+          ...(kind === 'missing-typed-evidence'
+            ? {}
+            : {
+                infrastructureFailure: {
+                  phase: 'review',
+                  code: 'REVIEW_UNAVAILABLE',
+                  message: 'Reviewer could not allocate a Docker bridge',
+                  retryable: false,
+                },
+              }),
+        }),
+  }));
+  await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+  await f.recovery.wait(f.request.id);
+  await f.manager.processPod(f.podId);
+  const [prior] = f.recovery.list(f.podId);
+  assert(prior?.checked?.source);
+  expect(f.pod().status).toBe('review_required');
+  expect(prior.checked.result.overall).toBe('fail');
+  expect(prior.blocked).toBeNull();
+  const { checked } = prior;
+  const request = {
+    ...f.request,
+    id: 'checks-after-review-failure',
+    expectedGeneration: 2,
+    expectedResultHash: checked.resultHash,
+    checkpointHead: prior.checked.source.head,
+  };
+  return { f, prior, checked, request };
 }
 
 async function failedRepairFixture() {
@@ -815,6 +904,132 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === f.containerId)).toHaveLength(1);
     expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
     await publishAndComplete(f, provider);
+  });
+
+  it('runs an exact checks-only successor after the reviewer cleanup hold is settled', async () => {
+    const { f, prior, checked, request } = await retainedReviewFailure();
+    const stopped = vi.mocked(f.cm.stop).mock.calls.length;
+    const reviewers = new ReviewerRunRepository(f.ctx.db);
+    const launch = f.launch.read(f.podId);
+    assert(launch?.ai.reviewer.mode === 'independent');
+    reviewers.reserve('review-unavailable', f.pod(), launch, launch.ai.reviewer.route);
+    reviewers.finish('review-unavailable', false, false, undefined, 'network');
+    reviewers.cleaned('review-unavailable', false);
+    await expect(f.recovery.recoverInfrastructure(f.podId, request, f.actor)).rejects.toMatchObject(
+      {
+        code: 'REVIEWER_RECONCILIATION_REQUIRED',
+      },
+    );
+    expect(f.recovery.list(f.podId)).toEqual([prior]);
+    expect(f.cm.stop).toHaveBeenCalledTimes(stopped);
+    reviewers.cleaned('review-unavailable', true);
+    const reviewer = reviewers.get(f.podId, 'review-unavailable');
+    expect(reviewer?.requiresReconciliation).toBe(false);
+    expect(f.recovery.inspect(f.podId).infrastructure.policies.checks?.state).toBe(
+      'no_recorded_blocker',
+    );
+    await expect(f.manager.resumePod(f.podId)).rejects.toMatchObject({
+      code: 'CONTINUATION_SOURCE_HELD',
+    });
+
+    const before = f.pod();
+    const { taskRetries: retries, taskExecutions: tasks } = f.ctx.podRepo;
+    assert(retries && tasks && before.containerId);
+    const retryState = retries.state(f.podId);
+    const task = tasks.snapshot(f.podId);
+    const content = 'This request tries to start an unrelated coding repair.';
+    await expect(
+      f.recovery.recoverInfrastructure(
+        f.podId,
+        {
+          ...request,
+          mode: 'rework',
+          instructions: { content, sha256: createHash('sha256').update(content).digest('hex') },
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow();
+    expect(f.recovery.list(f.podId)).toEqual([prior]);
+    await f.recovery.recoverInfrastructure(f.podId, request, f.actor);
+    await f.recovery.wait(request.id);
+    expect(f.pod()).toMatchObject({
+      status: 'queued',
+      lifecycleGeneration: 3,
+      skipAgent: true,
+      validationAttempts: before.validationAttempts,
+      maxValidationAttempts: before.maxValidationAttempts,
+      reworkCount: before.reworkCount,
+    });
+    expect(retries.state(f.podId)).toEqual(retryState);
+    expect(f.cm.stop).toHaveBeenCalledTimes(stopped); // The previous checks container was already stopped.
+    const successor = f.recovery.list(f.podId).find((record) => record.id === request.id);
+    expect(successor).toMatchObject({
+      containerId: before.containerId,
+      resourceKey: await f.cm.getResourceKey(before.containerId),
+      worktreePath: before.worktreePath,
+      binding: {
+        resultHash: checked.resultHash,
+        head: checked.source?.head,
+        continuation: {
+          infrastructure: {
+            mode: 'checks',
+            predecessorChecksId: prior.id,
+            originalTree: checked.source?.tree,
+          },
+        },
+      },
+      originalEvidence: { result: checked.result },
+    });
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).toThrow();
+    retries.authorize(f.podId, 'fresh-review-checks', 'Authorize one fresh validation', f.actor);
+    passingReview(f);
+    await f.manager.processPod(f.podId);
+    const next = f.recovery.list(f.podId).find((record) => record.id === request.id);
+    assert(next?.checked, f.pod().failureReason ?? 'Missing checked result');
+    expect(next.blocked).toBeNull();
+    expect(next.checked).toMatchObject({
+      source: checked.source,
+      result: { overall: 'pass', taskReview: { status: 'pass' } },
+    });
+    expect(next.checked.snapshot).not.toBeNull();
+    expect(f.pod().status).toBe('validated');
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+    const fresh = vi.mocked(f.ctx.validationEngine.validate).mock.calls[1]?.[0];
+    assert(fresh);
+    expect(fresh.reviewerExecutor).toBeDefined();
+    expect(fresh.reviewOnly).not.toBe(true);
+    expect(fresh.skipPhases).not.toContain('review');
+    expect(fresh.skipPhases).not.toContain('test');
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(tasks.snapshot(f.podId).agentRunCount).toBe(task.agentRunCount);
+    expect(reviewers.get(f.podId, 'review-unavailable')).toEqual(reviewer);
+    expect(f.recovery.list(f.podId).find((record) => record.id === prior.id)).toEqual(prior);
+  });
+
+  it.each([
+    'critic',
+    'checks',
+    'missing-typed-evidence',
+    'dirty-source',
+  ] as const)('refuses a retained review_required successor with %s', async (kind) => {
+    const { f, prior, request } = await retainedReviewFailure(
+      kind === 'dirty-source' ? 'infrastructure' : kind,
+    );
+    if (kind === 'dirty-source') {
+      const { worktreePath } = f.pod();
+      assert(worktreePath);
+      await writeFile(path.join(worktreePath, 'source.ts'), 'Unverified source change');
+    }
+    const stopped = vi.mocked(f.cm.stop).mock.calls.length;
+    await expect(f.recovery.recoverInfrastructure(f.podId, request, f.actor)).rejects.toThrow(
+      kind === 'dirty-source' ? 'clean retained host checkpoint' : 'native idle failed Docker task',
+    );
+    expect(f.recovery.list(f.podId)).toEqual([prior]);
+    expect(f.cm.stop).toHaveBeenCalledTimes(stopped);
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
   });
 
   it('repairs a canonical linked fix once with its failed parent held, fresh checks and no delivery', async () => {

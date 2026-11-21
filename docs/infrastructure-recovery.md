@@ -54,6 +54,15 @@ worker. With no recorded post-check source field, only the already selected
 prepared checkpoint is supported, not an inferred final container export.
 Unsynced files/reports and the whole original container remain retained.
 
+This includes a pod parked at `review_required` when that completed checks-only
+predecessor records `phase: review`, `code: REVIEW_UNAVAILABLE`, no critic verdict,
+and no failed product checks or pending Facts. The reviewer must be settled and
+cleanup confirmed through its existing controls before selection. Use a new
+`mode: checks` request with the current generation, immutable checked result hash,
+and exact retained HEAD. Fresh checks and independent review still run under
+existing retry and reviewer budgets; this is not a path around critic rejection,
+failed checks, or a reviewer hold.
+
 This is the continuation/quiescence protocol, **not** `finalize-retained
 --stop-retain`: finalization permanently owns the task and would prevent further
 continuation. Do not use finalization to make an original appear stopped.
