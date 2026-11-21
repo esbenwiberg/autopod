@@ -10,6 +10,8 @@ import {
   verifyArtifactSnapshot,
   writeArtifactSnapshotReceipt,
 } from '../pods/artifact-snapshot-receipt.js';
+import type { AllocationScope } from '../pods/retained-allocation-inventory.js';
+import { gitWorktreeIdentity, physicalIdentity, samePhysical } from './allocation-identity.js';
 import {
   inspectAdoptionGit,
   inspectSupplementalAdoptionGit,
@@ -58,6 +60,8 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   cycle: number;
   assertCurrent(): void;
   allowSupplementalFiles?: true;
+  allocation?: AllocationScope;
+  sourceStoreOwnership?: 'shared-cache' | 'private-prepared';
 }) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
@@ -98,7 +102,24 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   const original = await inspect(git(source), options.branch);
   if (original.head !== options.head) fail('Selected checkpoint is not the retained host HEAD');
   options.assertCurrent();
-  await mkdir(root, { mode: 0o700 }); // Exclusive; an uncertain prior attempt is not replayed.
+  const allocation = options.allocation?.begin('prepared-source', root);
+  const sourceReference = allocation
+    ? await gitWorktreeIdentity(
+        options.source,
+        options.sourceStoreOwnership ?? 'shared-cache',
+      ).catch(() => null)
+    : null;
+  options.assertCurrent();
+  try {
+    await mkdir(root, { mode: 0o700 }); // Exclusive; an uncertain prior attempt is not replayed.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST')
+      allocation?.refuse('reused-or-foreign', 'prepared-root-preexisted');
+    throw err;
+  }
+  const privateRoot = allocation
+    ? await physicalIdentity(root, 'directory').catch(() => null)
+    : null;
   if ((await realpath(root)) !== physicalRoot) fail('Recovery namespace changed');
   await chmod(root, 0o700);
   const hostRoot = path.join(root, 'host');
@@ -154,6 +175,54 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   )
     fail('Checkpoint source changed during isolated materialization');
   await verifyArtifactSnapshot(snapshot, hostRoot, options.generation, options.cycle);
+  if (allocation) {
+    const identity = await (async () => {
+      if (
+        !privateRoot ||
+        !sourceReference ||
+        !samePhysical(privateRoot, await physicalIdentity(root, 'directory')) ||
+        JSON.stringify(sourceReference) !==
+          JSON.stringify(
+            await gitWorktreeIdentity(options.source, sourceReference.commonStoreOwnership),
+          )
+      )
+        return null;
+      const privateGit = await gitWorktreeIdentity(worktree, 'private-prepared', bare);
+      const privateSnapshotRoot = await physicalIdentity(hostRoot, 'directory');
+      const privateSnapshot = await physicalIdentity(snapshot, 'directory');
+      const privateSnapshotReceipt = await physicalIdentity(`${snapshot}.receipt.json`, 'file');
+      const privateBundle = await physicalIdentity(bundle, 'file');
+      const paths = [
+        privateGit.worktree,
+        privateGit.gitlink,
+        privateGit.registration,
+        privateGit.commonStore,
+        privateSnapshotRoot,
+        privateSnapshot,
+        privateSnapshotReceipt,
+        privateBundle,
+      ];
+      if (
+        paths.some(
+          (entry) =>
+            entry.realpath !== path.join(privateRoot.realpath, path.relative(root, entry.path)),
+        )
+      )
+        return null;
+      return {
+        sourceReference,
+        privateRoot,
+        privateGit,
+        privateSnapshotRoot,
+        privateSnapshot,
+        privateSnapshotReceipt,
+        privateBundle,
+      };
+    })().catch(() => null);
+    options.assertCurrent();
+    if (identity) allocation.owned(identity);
+    else allocation.refuse('unverified', 'prepared-git-or-physical-identity-unavailable');
+  }
   options.assertCurrent();
   return {
     worktree,

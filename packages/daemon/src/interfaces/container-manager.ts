@@ -1,5 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
+import type { AllocationScope } from '../pods/retained-allocation-inventory.js';
 import type { RecoveryFileContent, RecoveryFileListing } from './recovery-files.js';
 
 /** Fence retained-resource wakeup across asynchronous provider/auth observations. */
@@ -19,6 +20,7 @@ export interface DirectoryExtractionOptions {
 }
 
 export interface ContainerSpawnConfig {
+  allocation?: AllocationScope;
   image: string;
   managedSpecDigest?: string;
   podId: string;

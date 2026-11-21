@@ -1,4 +1,5 @@
 import type { RequiredFact } from '@autopod/shared';
+import type { AllocationScope } from '../pods/retained-allocation-inventory.js';
 import type { PodExecutionSettings } from './pod-execution-settings.js';
 export interface ContractBaseEvidence {
   baseCommitSha: string;
@@ -35,6 +36,7 @@ export interface BranchPublicationOptions {
 }
 
 export interface WorktreeCreateConfig {
+  allocation?: AllocationScope;
   repoUrl: string;
   branch: string;
   baseBranch: string;

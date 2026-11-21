@@ -36,6 +36,11 @@ import {
   ownsArtifactChecksStop,
 } from '../pods/artifact-checks-recovery-repository.js';
 import {
+  type AllocationScope,
+  createRetainedAllocationInventory,
+  isDockerNativeId,
+} from '../pods/retained-allocation-inventory.js';
+import {
   assertCheckpointResourceNotRetained,
   ownsInfrastructureRecoveryStop,
 } from '../pods/retained-checkpoint-repository.js';
@@ -46,6 +51,7 @@ import {
 } from '../pods/stalled-worker-recovery-repository.js';
 import { boundOutput } from '../util/bounded-output.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
+import { ALLOCATION_LABEL, observeDockerEngine } from './docker-allocation-evidence.js';
 import {
   boundedDockerCall,
   DOCKER_CALL_TIMEOUTS,
@@ -338,18 +344,48 @@ export class DockerContainerManager implements ContainerManager {
       }
     }
 
+    const scope = config.allocation;
+    if (!scope && this.managedDatabase) {
+      createRetainedAllocationInventory(this.managedDatabase)
+        .scope(config.podId)
+        ?.begin('unsupported', containerName)
+        .refuse('unverified', 'unscoped-container-producer');
+    }
+    const receipts: {
+      allocation: ReturnType<AllocationScope['begin']>;
+      engineId: string | null;
+    }[] = [];
+    const createOnce = async (options: Dockerode.ContainerCreateOptions) => {
+      if (!scope) return this.docker.createContainer(options);
+      const allocation = scope.begin('container', containerName);
+      const engineId = await observeDockerEngine(this.docker, this.logger);
+      const created = await this.docker
+        .createContainer({
+          ...options,
+          Labels: { ...options.Labels, [ALLOCATION_LABEL]: allocation.id },
+        })
+        .catch((err: unknown) => {
+          if (isExpectedDockerError(err, [409]))
+            allocation.refuse('reused-or-foreign', 'container-create-conflict');
+          throw err;
+        });
+      if (isDockerNativeId(created.id)) allocation.createReply({ engineId, id: created.id });
+      receipts.push({ allocation, engineId });
+      return created;
+    };
+
     // A retained replacement name is an observation identity, not authority to
     // discard a previous/uncertain allocation after a lost create reply.
     const create =
       config.managedSpecDigest || config.resourceIdentity
-        ? (_docker: Dockerode, options: Dockerode.ContainerCreateOptions) =>
-            this.docker.createContainer(options)
+        ? (_docker: Dockerode, options: Dockerode.ContainerCreateOptions) => createOnce(options)
         : (docker: Dockerode, options: Dockerode.ContainerCreateOptions, logger: Logger) =>
             createContainerWithStaleRetry(
               docker,
               options,
               logger,
               this.managedDatabase ? (id) => this.assertNotRetained(id) : undefined,
+              createOnce,
             );
     const container = await create(
       this.docker,
@@ -460,6 +496,43 @@ export class DockerContainerManager implements ContainerManager {
             ? 'Firewall setup failed but AUTOPOD_FAIL_OPEN_FIREWALL=1 — continuing with NO network isolation'
             : 'Failed to apply firewall rules, continuing without network isolation',
         );
+      }
+    }
+
+    // Observe after firewall setup, never extending the pre-firewall window.
+    const recorded = receipts[0];
+    if (recorded && scope) {
+      const { allocation, engineId } = recorded;
+      const id = container.id;
+      const network = config.networkName;
+      const observed =
+        engineId && network && isDockerNativeId(id)
+          ? await boundedDockerCall(this.docker.getContainer(id).inspect(), {
+              label: 'container.inspect (allocation identity)',
+              timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+              logger: this.logger,
+            }).catch(() => null)
+          : null;
+      const endpoints = observed?.NetworkSettings?.Networks ?? {};
+      const bridgeId = network ? endpoints[network]?.NetworkID : undefined;
+      if (
+        engineId &&
+        observed?.Id === id &&
+        observed.Config.Labels?.[ALLOCATION_LABEL] === allocation.id &&
+        Object.keys(endpoints).length === 1 &&
+        isDockerNativeId(bridgeId) &&
+        scope.knowsBridge({ engineId, id: bridgeId }) &&
+        (await observeDockerEngine(this.docker, this.logger)) === engineId
+      ) {
+        allocation.owned({
+          engineId,
+          id,
+          bridge: { engineId, id: bridgeId },
+          sourceMount:
+            config.volumes?.find((volume) => volume.container === '/mnt/worktree')?.host ?? null,
+        });
+      } else {
+        allocation.refuse('unverified', 'container-engine-or-bridge-binding-unavailable');
       }
     }
 

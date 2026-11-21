@@ -34,9 +34,11 @@ export async function createContainerWithStaleRetry(
   opts: Dockerode.ContainerCreateOptions,
   logger: Logger,
   assertMutable?: (containerId: string) => void,
+  create: (opts: Dockerode.ContainerCreateOptions) => Promise<Dockerode.Container> = (opts) =>
+    docker.createContainer(opts),
 ): Promise<Dockerode.Container> {
   try {
-    return await boundedDockerCall(docker.createContainer(opts), {
+    return await boundedDockerCall(create(opts), {
       label: 'docker.createContainer',
       timeoutMs: DOCKER_CALL_TIMEOUTS.createContainer,
       logger,
@@ -74,7 +76,7 @@ export async function createContainerWithStaleRetry(
       timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
       logger,
     });
-    return boundedDockerCall(docker.createContainer(opts), {
+    return boundedDockerCall(create(opts), {
       label: 'docker.createContainer (post-stale-retry)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.createContainer,
       logger,

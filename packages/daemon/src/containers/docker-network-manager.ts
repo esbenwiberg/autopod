@@ -10,11 +10,18 @@ import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import {
+  type AllocationScope,
+  createRetainedAllocationInventory,
+  isDockerNativeId,
+} from '../pods/retained-allocation-inventory.js';
+import {
   assertCheckpointResourceNotRetained,
   checkpointError,
   retainedCheckpointNetworkIdentities,
 } from '../pods/retained-checkpoint-repository.js';
+import { ALLOCATION_LABEL, observeDockerEngine } from './docker-allocation-evidence.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
+import { isExpectedDockerError } from './docker-helpers.js';
 import {
   DOCKER_SUBNET_EXHAUSTED,
   HOST_NETWORK_CAPACITY,
@@ -266,18 +273,38 @@ export class DockerNetworkManager {
    * nothing else lives here. Pod-to-pod isolation comes from each pod
    * having its own bridge, not from ICC.
    */
-  async ensureNetworkForPod(podId: string): Promise<string> {
+  async ensureNetworkForPod(podId: string, scope?: AllocationScope): Promise<string> {
     const name = networkNameForPod(podId);
+    // Refresh can allocate a bridge too. Ordinary names map directly to the
+    // logical pod; replacement names are scoped explicitly by provisioning.
+    scope ??= this.managedDatabase
+      ? createRetainedAllocationInventory(this.managedDatabase).scope(podId)
+      : undefined;
+    const engine = scope ? await observeDockerEngine(this.docker, this.logger) : null;
+    let existing: Awaited<ReturnType<Dockerode.Network['inspect']>> | undefined;
     try {
-      await boundedDockerCall(this.docker.getNetwork(name).inspect(), {
+      existing = await boundedDockerCall(this.docker.getNetwork(name).inspect(), {
         label: 'network.inspect',
         timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
         logger: this.logger,
       });
+    } catch (err) {
+      if (!isExpectedDockerError(err, [404]))
+        scope?.begin('bridge', name).refuse('unverified', 'initial-bridge-observation-unavailable');
+      // Preserve ordinary provisioning's create fallback.
+    }
+    if (existing) {
+      if (
+        scope &&
+        !(
+          engine &&
+          isDockerNativeId(existing.Id) &&
+          scope.knowsBridge({ engineId: engine, id: existing.Id })
+        )
+      )
+        scope.begin('bridge', name).refuse('reused-or-foreign', 'bridge-name-preexisted');
       this.logger.debug({ network: name, podId }, 'Pod network already exists');
       return name;
-    } catch {
-      // not found — create it
     }
     this.logger.info({ network: name, podId }, 'Creating pod network');
     const networkConfig = {
@@ -293,12 +320,54 @@ export class DockerNetworkManager {
         'com.docker.network.bridge.enable_icc': 'true',
       },
     };
-    try {
-      await boundedDockerCall(this.docker.createNetwork(networkConfig), {
-        label: 'network.create',
-        timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
-        logger: this.logger,
+    const createBridge = async () => {
+      const before = scope ? await observeDockerEngine(this.docker, this.logger) : null;
+      const allocation = scope?.begin('bridge', name);
+      const network = await boundedDockerCall(
+        this.docker.createNetwork(
+          allocation
+            ? {
+                ...networkConfig,
+                Labels: { ...networkConfig.Labels, [ALLOCATION_LABEL]: allocation.id },
+              }
+            : networkConfig,
+        ),
+        {
+          label: 'network.create',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
+          logger: this.logger,
+        },
+      ).catch((err: unknown) => {
+        if (isExpectedDockerError(err, [409]))
+          allocation?.refuse('reused-or-foreign', 'bridge-create-conflict');
+        throw err;
       });
+      if (!allocation) return;
+      const id = network.id;
+      if (isDockerNativeId(id)) allocation.createReply({ engineId: before, id });
+      const observed =
+        before && isDockerNativeId(id)
+          ? await boundedDockerCall(this.docker.getNetwork(id).inspect(), {
+              label: 'network.inspect (allocation identity)',
+              timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
+              logger: this.logger,
+            }).catch(() => null)
+          : null;
+      if (
+        before &&
+        observed?.Id === id &&
+        observed.Name === name &&
+        observed.Driver === 'bridge' &&
+        observed.Labels?.[ALLOCATION_LABEL] === allocation.id &&
+        (await observeDockerEngine(this.docker, this.logger)) === before
+      ) {
+        allocation.owned({ engineId: before, id });
+      } else {
+        allocation.refuse('unverified', 'bridge-create-identity-unavailable');
+      }
+    };
+    try {
+      await createBridge();
     } catch (err: unknown) {
       if (isSubnetExhausted(err)) {
         // Docker's default subnet pool is exhausted by orphaned autopod networks.
@@ -361,11 +430,7 @@ export class DockerNetworkManager {
         );
         const create = async (): Promise<boolean> => {
           try {
-            await boundedDockerCall(this.docker.createNetwork(networkConfig), {
-              label: 'network.create',
-              timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
-              logger: this.logger,
-            });
+            await createBridge();
             return true;
           } catch (retryErr) {
             if (!isSubnetExhausted(retryErr)) throw retryErr;
@@ -817,11 +882,12 @@ export class DockerNetworkManager {
     extraAllowedHosts: string[] = [],
     daemonGatewayPort = 3100,
     includeDaemonGateway = true,
+    allocation?: AllocationScope,
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
     const networkName = podId
-      ? await this.ensureNetworkForPod(podId)
+      ? await this.ensureNetworkForPod(podId, allocation)
       : // Legacy / refresh path — caller didn't pass a podId. Fall back to
         // the default per-pod name format using a synthetic `shared` tag so
         // existing tests that don't thread podId still get a valid string.

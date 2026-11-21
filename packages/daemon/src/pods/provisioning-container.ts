@@ -19,6 +19,7 @@ import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { ensureCodexStateDir } from '../runtimes/codex-state-store.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { gitWorktreeIdentity } from '../worktrees/allocation-identity.js';
 import { mergeMcpServers } from './injection-merger.js';
 import { resolvePodSpawnImage, verifySandboxWarmImageAccess } from './provisioning-image-policy.js';
 import {
@@ -83,6 +84,7 @@ export function createProvisioningContainer(
     const { pod, launchConfig, profile, providerPreflight, podId, worktreePath, bareRepoPath } =
       input;
     const { emitStatus, stagedReferenceArchivePaths } = input.run;
+    const { allocation } = input;
     const resourceIdentity =
       pod.executionTarget === 'local'
         ? (podRepo.retainedCheckpoints?.providerIdentity?.(podId, pod.lifecycleGeneration) ?? podId)
@@ -151,6 +153,7 @@ export function createProvisioningContainer(
         [],
         [hostnameFromUrl(mcpBaseUrl)],
         portFromUrl(mcpBaseUrl),
+        ...(allocation ? ([true, allocation] as const) : []),
       );
       if (netConfig) {
         networkName = netConfig.networkName;
@@ -433,11 +436,26 @@ export function createProvisioningContainer(
         'REPAIR_IMAGE_UNVERIFIED',
         409,
       );
+    if (allocation) {
+      const source =
+        worktreePath && bareRepoPath
+          ? await gitWorktreeIdentity(
+              worktreePath,
+              allocation.recoveryId ? 'private-prepared' : 'shared-cache',
+              bareRepoPath,
+            ).catch(() => null)
+          : null;
+      if (!source || !allocation.matchesWorktree(source))
+        allocation
+          .begin('unsupported', worktreePath ?? 'workspace')
+          .refuse('unverified', 'workspace-mount-does-not-match-producer');
+    }
     if (podRepo.retainedCoding?.isOwner(podId)) podRepo.retainedCoding.assertOwned(podId);
     let containerId: string;
     try {
       containerId = await containerManager.spawn({
         image: spawnImage,
+        ...(allocation ? { allocation } : {}),
         podId,
         ...(resourceIdentity !== podId ? { resourceIdentity } : {}),
         env: containerEnv,

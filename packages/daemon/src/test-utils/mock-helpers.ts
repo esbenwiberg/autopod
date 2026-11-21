@@ -147,7 +147,7 @@ export function createTestDb(): Database.Database {
 }
 
 /** Uncached migration path, also used to verify template/schema equivalence. */
-export function createMigratedTestDb(): Database.Database {
+export function createMigratedTestDb(throughVersion = Number.POSITIVE_INFINITY): Database.Database {
   const db = new Database(':memory:');
   registerRetainedPathFunctions(db);
   db.pragma('foreign_keys = ON');
@@ -155,7 +155,7 @@ export function createMigratedTestDb(): Database.Database {
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
   const files = fs
     .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql') && Number(f.split('_')[0]) <= throughVersion)
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');

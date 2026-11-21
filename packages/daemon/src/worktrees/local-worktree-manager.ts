@@ -34,6 +34,12 @@ import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
+import {
+  gitWorktreeIdentity,
+  pathVacant,
+  physicalIdentity,
+  samePhysical,
+} from './allocation-identity.js';
 import { authenticatedGitEnvironment } from './authenticated-git-environment.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
 import { inspectContractBase } from './contract-base-preflight.js';
@@ -899,6 +905,10 @@ export class LocalWorktreeManager implements WorktreeManager {
           }
         }
 
+        const allocation = config.allocation?.begin('original-worktree', worktreePath);
+        const vacant = allocation ? await pathVacant(worktreePath).catch(() => null) : null;
+        if (vacant === false) allocation?.refuse('reused-or-foreign', 'worktree-path-preexisted');
+        if (vacant === null) allocation?.refuse('unverified', 'worktree-path-unobservable');
         // Clean up stale worktree registration if a previous pod left one behind
         // (e.g. killed pod whose cleanup didn't fully complete).
         // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
@@ -912,12 +922,30 @@ export class LocalWorktreeManager implements WorktreeManager {
 
         // -B force-creates branch to handle retry scenarios
         this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
+        let reservation: Awaited<ReturnType<typeof physicalIdentity>> | undefined;
+        if (allocation && vacant) {
+          try {
+            this.assertPathMutable(worktreePath);
+            // Git accepts an existing empty directory. Reserve that exact object
+            // ourselves so a successful add cannot bless a competing checkout.
+            await fs.mkdir(worktreePath);
+            reservation = await physicalIdentity(worktreePath, 'directory');
+          } catch (err) {
+            const conflict = (err as NodeJS.ErrnoException).code === 'EEXIST';
+            allocation.refuse(
+              conflict ? 'reused-or-foreign' : 'unverified',
+              'worktree-reservation-unproven',
+            );
+          }
+        }
         try {
           this.assertPathMutable(worktreePath);
           await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
             cwd: bareRepoPath,
           });
         } catch (addErr: unknown) {
+          if (reservation) allocation?.refuse('unverified', 'git-add-did-not-confirm-reservation');
+          reservation = undefined;
           // Handle "branch already used by worktree at X" — stale/orphaned worktree from a
           // previous pod run (e.g. old branch-name-derived paths before sessionId naming).
           const msg = addErr instanceof Error ? addErr.message : String(addErr);
@@ -941,6 +969,16 @@ export class LocalWorktreeManager implements WorktreeManager {
           } else {
             throw addErr;
           }
+        }
+
+        if (allocation && reservation) {
+          const identity = await gitWorktreeIdentity(
+            worktreePath,
+            'shared-cache',
+            bareRepoPath,
+          ).catch(() => null);
+          if (identity && samePhysical(reservation, identity.worktree)) allocation.owned(identity);
+          else allocation.refuse('unverified', 'git-registration-unproven');
         }
 
         // Defense-in-depth against daemon-injected tooling artifacts leaking into PRs.

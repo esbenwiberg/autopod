@@ -82,6 +82,7 @@ import {
   createRecoveryForkRepository,
   type RecoveryForkRepository,
 } from './recovery-fork-repository.js';
+import { createRetainedAllocationInventory } from './retained-allocation-inventory.js';
 import {
   checkpointError,
   createRetainedCheckpointRepository,
@@ -372,6 +373,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   sourceAdoptions?: SourceAdoptionRepository;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
+  retainedAllocations?: ReturnType<typeof createRetainedAllocationInventory>;
   deletionOwnership?: DeletionOwnership;
   fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
@@ -921,6 +923,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     retainedFinalizations: createRetainedFinalizationRepository(db),
     stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
+    retainedAllocations: createRetainedAllocationInventory(db),
     retainedCoding: createRetainedCodingRepository(db),
     recoveryForks: createRecoveryForkRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
