@@ -2,7 +2,13 @@
 
 This builds the actual desktop entry point under the isolated `com.autopod.acceptance112` app/test identity. It uses a synthetic loopback proxy and fixture child; no production daemon, provider or paid work is involved. Run on an unlocked Mac with Xcode, xcodegen and existing desktop test permissions. Do not run alongside another native acceptance session using this identity.
 
-From the worktree root, prepare a new task-owned directory:
+This is a historical fixture, not a test suite for current `main`. For example,
+`testIntentionalRerunRetainsRequest` requires the desktop Dispatch preflight card,
+which has since been removed. To reproduce that behavior, use a worktree at
+`f93dd4d9a66bcf0a4ad174d0efc378d931239faf`, where the card and fixture coexist.
+For current desktop coverage, use `./scripts/test-desktop.sh`.
+
+From the historical worktree root, prepare a new task-owned directory:
 
 ```sh
 python3 docs/analysis/2026-09-07/execution/fixtures/native-matrix/prepare.py /private/tmp/autopod-native-next
