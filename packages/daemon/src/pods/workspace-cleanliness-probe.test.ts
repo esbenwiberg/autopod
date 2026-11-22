@@ -54,15 +54,21 @@ describe('probeWorkspaceCleanliness (real Git)', () => {
   it('separates visible leftovers from paths hidden only by .git/info/exclude', async () => {
     await fs.writeFile(path.join(directory, 'app.ts'), 'export const changed = 1;\n');
     await fs.writeFile(path.join(directory, 'notes.md'), 'scratch\n');
+    // A visible file must not hide a locally excluded sibling with the same prefix.
+    await fs.mkdir(path.join(directory, 'notes.md.d'));
+    await fs.writeFile(path.join(directory, 'notes.md.d', 'draft.md'), 'scratch\n');
     await fs.mkdir(path.join(directory, 'thoughts'));
     await fs.writeFile(path.join(directory, 'thoughts', 'plan.md'), 'scratch\n');
     await fs.mkdir(path.join(directory, '.autopod'));
     await fs.writeFile(path.join(directory, '.autopod', 'provider-failover.md'), 'handoff\n');
-    await fs.appendFile(path.join(directory, '.git', 'info', 'exclude'), 'thoughts/\n.autopod/\n');
+    await fs.appendFile(
+      path.join(directory, '.git', 'info', 'exclude'),
+      'thoughts/\n.autopod/\nnotes.md.d/\n',
+    );
     expect(await probeWorkspaceCleanliness(local, { includeLocallyExcluded: true })).toEqual({
       untracked: ['notes.md'],
       changed: ['app.ts'],
-      hiddenByLocalExclude: ['thoughts/'],
+      hiddenByLocalExclude: ['notes.md.d/', 'thoughts/'],
     });
     expect(
       (await probeWorkspaceCleanliness(local, { includeLocallyExcluded: false }))

@@ -19,6 +19,10 @@ const DAEMON_OWNED = /(^|\/)(\.autopod|node_modules|\.serena|\.roslyn-codelens)(
 const MAX_HIDDEN = 200;
 const GIT = ['git', '-c', 'core.fsmonitor=false', '-C', '/workspace'];
 
+// Git reports collapsed untracked directories with a trailing slash.
+const contains = (directory: string, path: string) =>
+  directory.endsWith('/') && path.startsWith(directory);
+
 /**
  * Observe the live container workspace while its worker can still act. Its
  * `.git/info/exclude` is container-local, so paths it alone hides are listed
@@ -57,7 +61,7 @@ export async function probeWorkspaceCleanliness(
       const visible = new Set(untracked);
       for (const entry of others.stdout.split('\0')) {
         if (!entry || visible.has(entry) || DAEMON_OWNED.test(entry)) continue;
-        if (untracked.some((path) => path.startsWith(entry) || entry.startsWith(path))) continue;
+        if (untracked.some((path) => contains(path, entry) || contains(entry, path))) continue;
         if (hiddenByLocalExclude.length < MAX_HIDDEN) hiddenByLocalExclude.push(entry);
       }
     }
