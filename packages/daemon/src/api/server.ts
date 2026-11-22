@@ -38,6 +38,10 @@ import type {
   PodRepository,
   QualityScoreRepository,
 } from '../pods/index.js';
+import {
+  assertRetainedCleanupAvailable,
+  assertRetainedCleanupResourceAvailable,
+} from '../pods/retained-cleanup-repository.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { TokenTelemetryRepair } from '../pods/token-telemetry-repair.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
@@ -359,6 +363,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
       deps.containerManagerFactory,
       deps.authModule,
       deps.docker,
+      (podId, containerId) => {
+        if (!deps.db) return;
+        assertRetainedCleanupAvailable(deps.db, podId);
+        if (containerId) assertRetainedCleanupResourceAvailable(deps.db, containerId);
+      },
     );
   }
 

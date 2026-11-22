@@ -26,6 +26,7 @@ export function terminalRoutes(
   containerManagerFactory: ContainerManagerFactory,
   authModule: AuthModule,
   docker: Dockerode,
+  assertTransportAvailable?: (podId: string, containerId?: string) => void,
 ): void {
   // Track active terminal connections per pod. Multiple simultaneous tmux
   // clients cause duplicated/amplified output — "last writer wins" evicts the
@@ -78,6 +79,7 @@ export function terminalRoutes(
       const sourceHeld = () => {
         try {
           ownership.assertCurrent();
+          assertTransportAvailable?.(podId, pod.containerId ?? undefined);
           const validation = podManager.getValidationExecutionRecovery?.(podId);
           return (
             Boolean(podManager.getSourceAdoptions?.(podId).length) ||

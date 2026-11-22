@@ -48,6 +48,7 @@ export interface PodFacadeOwners {
     typeof import('./artifact-checks-recovery.js').createArtifactChecksRecovery
   >;
   recoveryFork?: ReturnType<typeof import('./recovery-fork.js').createRecoveryFork>;
+  retainedCleanup?: ReturnType<typeof import('./retained-cleanup.js').createRetainedCleanup>;
   retainedFinalization?: ReturnType<
     typeof import('./retained-finalization.js').createRetainedFinalization
   >;

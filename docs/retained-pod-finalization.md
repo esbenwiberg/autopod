@@ -94,8 +94,11 @@ paths already unavailable at admission. A custody refusal skips pruning without
 entering a deletion fallback. Daemon Git commands also disable automatic
 worktree-metadata pruning during GC; object repacking remains available. This
 protects daemon-controlled operations, not external filesystem deletion or
-operator-run Git commands. There is intentionally no release/delete operation;
-retained sandboxes may continue to incur storage charges.
+operator-run Git commands. Finalization itself never releases or deletes resources;
+retained sandboxes may continue to incur storage charges. The separate
+[Delete & free resources protocol](retained-cleanup.md) qualifies only exact,
+settled v1-recorded ordinary local Docker continuations. A completed Stop is
+a prerequisite for its killed slice, not cleanup authority by itself.
 
 ## CLI and desktop
 

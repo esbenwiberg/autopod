@@ -34,6 +34,8 @@ export function createControlOperationRegistry(
           key === 'previewRecoveryFork' ||
           key === 'createRecoveryFork' ||
           key === 'finalizeRetained' ||
+          key === 'submitRetainedCleanup' ||
+          key === 'observeRetainedCleanup' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||
           key === 'prepareRewriteRepair' ||

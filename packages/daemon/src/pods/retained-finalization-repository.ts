@@ -13,6 +13,11 @@ import {
   assertRecoveryForkPathAvailable,
   assertRecoveryForkResourceAvailable,
 } from './recovery-fork-repository.js';
+import {
+  assertRetainedCleanupAvailable,
+  assertRetainedCleanupPathAvailable,
+  assertRetainedCleanupResourceAvailable,
+} from './retained-cleanup-repository.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 import {
   assertSavedDraftPathAvailable,
@@ -79,6 +84,7 @@ export function ownsRetainedFinalizationStop(
   );
 }
 export function assertFinalizationResourceAvailable(db: Database.Database, id: string) {
+  assertRetainedCleanupResourceAvailable(db, id);
   assertSavedDraftResourceAvailable(db, id);
   assertRecoveryForkResourceAvailable(db, id);
   if (db.prepare('SELECT 1 FROM retained_finalization_resources WHERE container_id=?').get(id))
@@ -118,6 +124,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertRetainedCleanupPathAvailable(db, location);
   assertRewriteAbandonmentPathAvailable(db, location);
   assertSavedDraftPathAvailable(db, location);
   assertArtifactChecksPathAvailable(db, location);
@@ -165,6 +172,7 @@ export function createRetainedFinalizationRepository(db: Database.Database) {
       : null;
   };
   const assertAvailable = (podId: string) => {
+    assertRetainedCleanupAvailable(db, podId);
     if (ownsRetainedFinalization(db, podId)) return;
     const held = db
       .prepare(`SELECT 1 FROM retained_finalizations f WHERE f.pod_id=?

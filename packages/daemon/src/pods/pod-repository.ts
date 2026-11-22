@@ -337,6 +337,11 @@ import {
 } from './external-delivery-repository.js';
 import { createMergeJournal, type MergeJournal } from './merge-journal.js';
 import {
+  createRetainedCleanupRepository,
+  hasRetainedCleanupSchema,
+  type RetainedCleanupRepository,
+} from './retained-cleanup-repository.js';
+import {
   createSavedWorkDraftRepository,
   type SavedWorkDraftRepository,
 } from './saved-work-draft-repository.js';
@@ -353,6 +358,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
   retainedFinalizations?: RetainedFinalizationRepository;
+  retainedCleanup?: RetainedCleanupRepository;
   stalledRecoveries?: StalledWorkerRecoveryRepository;
   retainedCheckpoints?: RetainedCheckpointRepository;
   retainedCoding?: RetainedCodingRepository;
@@ -921,6 +927,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     savedWorkDrafts: createSavedWorkDraftRepository(db),
     savedWorkspaceCheckpoints: createWorkspaceCheckpointRepository(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
+    retainedCleanup: hasRetainedCleanupSchema(db) ? createRetainedCleanupRepository(db) : undefined,
     stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
     retainedAllocations: createRetainedAllocationInventory(db),

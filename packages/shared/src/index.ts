@@ -544,6 +544,7 @@ export type {
   RetainedNetworkReleaseTrigger,
   RetainedNetworkSource,
 } from './types/release.js';
+export * from './types/retained-cleanup.js';
 export type {
   RetainedFinalizationMode,
   RetainedFinalizationReceipt,

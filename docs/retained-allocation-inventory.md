@@ -27,4 +27,8 @@ AUTOPOD_ALLOCATION_FIXTURE_IMAGE='sha256:<exact local image ID>' \
 npx pnpm --filter @autopod/daemon test retained-allocation-inventory.docker.test.ts
 ```
 
+Before construction the fixture refuses Docker transport overrides
+(`DOCKER_HOST`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`, `DOCKER_PATH_PREFIX`).
+The cleanup case requires Linux so it can verify host mount identity.
+
 The fixture verifies the socket, engine marker/ID, empty isolation and exact image; it creates uniquely labeled objects, detaches the original bridge and checks that its exact ID survives in the ledger. It then creates a different bridge at the same name and verifies refusal to adopt it. Teardown inspects exact full IDs/labels on the pinned engine before removal. A lost reply without verifiable exact fixture identity can leave a disposable fixture object behind; do not use global prune.

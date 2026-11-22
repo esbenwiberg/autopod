@@ -6,8 +6,13 @@ import {
   SIDECAR_LABEL_TYPE,
   type SidecarSpec,
 } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import {
+  assertRetainedCleanupResourceAvailable,
+  withCleanupAllocationFence,
+} from '../pods/retained-cleanup-repository.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
 import {
   alignMemoryToPageSize,
@@ -56,19 +61,32 @@ export interface SidecarManager {
 
 interface DockerSidecarManagerOptions {
   docker?: Dockerode;
+  managedDatabase?: Database.Database;
   logger: Logger;
 }
 
 export class DockerSidecarManager implements SidecarManager {
   private docker: Dockerode;
   private logger: Logger;
+  private managedDatabase?: Database.Database;
 
-  constructor({ docker, logger }: DockerSidecarManagerOptions) {
+  constructor({ docker, logger, managedDatabase }: DockerSidecarManagerOptions) {
+    this.managedDatabase = managedDatabase;
     this.docker = docker ?? new Dockerode();
     this.logger = logger;
   }
 
   async spawn(options: SpawnSidecarOptions): Promise<SidecarHandle> {
+    if (!this.managedDatabase) return this.spawnOwned(options);
+    return withCleanupAllocationFence(
+      this.managedDatabase,
+      options.podId,
+      { network: options.networkName, sources: [] },
+      () => this.spawnOwned(options),
+    );
+  }
+
+  private async spawnOwned(options: SpawnSidecarOptions): Promise<SidecarHandle> {
     const { spec, podId, networkName } = options;
     const containerName = buildSidecarName(podId, spec.name);
 
@@ -272,6 +290,11 @@ export class DockerSidecarManager implements SidecarManager {
   }
 
   async kill(containerId: string): Promise<void> {
+    const assertAvailable = () => {
+      if (this.managedDatabase)
+        assertRetainedCleanupResourceAvailable(this.managedDatabase, containerId);
+    };
+    assertAvailable();
     try {
       const container = this.docker.getContainer(containerId);
       try {
@@ -285,6 +308,7 @@ export class DockerSidecarManager implements SidecarManager {
         if (!isExpectedDockerError(err, [304, 404])) throw err;
       }
       try {
+        assertAvailable();
         await boundedDockerCall(container.remove({ force: true }), {
           label: 'sidecar.remove',
           timeoutMs: DOCKER_CALL_TIMEOUTS.remove,

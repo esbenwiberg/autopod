@@ -13,6 +13,7 @@ import {
   checkpointResourceIdentity,
   createRetainedCheckpointRepository,
 } from '../pods/retained-checkpoint-repository.js';
+import { hasRetainedCleanupSchema } from '../pods/retained-cleanup-repository.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
 
 /**
@@ -96,6 +97,11 @@ export function retainedNetworkReleaseScope(db: Database.Database): RetainedNetw
     ...(
       db.prepare('SELECT pod_id AS id FROM retained_finalizations').all() as { id: string }[]
     ).map((row) => row.id),
+    ...(hasRetainedCleanupSchema(db)
+      ? (
+          db.prepare('SELECT pod_id AS id FROM retained_cleanup_requests').all() as { id: string }[]
+        ).map((row) => row.id)
+      : []),
     ...(db.prepare('SELECT parent_pod_id AS id FROM recovery_forks').all() as { id: string }[]).map(
       (row) => row.id,
     ),

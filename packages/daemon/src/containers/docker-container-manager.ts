@@ -44,6 +44,13 @@ import {
   assertCheckpointResourceNotRetained,
   ownsInfrastructureRecoveryStop,
 } from '../pods/retained-checkpoint-repository.js';
+import {
+  assertRetainedCleanupAvailable,
+  assertRetainedCleanupBridgeAvailable,
+  assertRetainedCleanupPathAvailable,
+  assertRetainedCleanupResourceAvailable,
+  withCleanupAllocationFence,
+} from '../pods/retained-cleanup-repository.js';
 import { ownsRetainedFinalizationStop } from '../pods/retained-finalization-repository.js';
 import {
   ownsStalledWorkerArchive,
@@ -253,6 +260,19 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
+    if (!this.managedDatabase) return this.spawnOwned(config);
+    return withCleanupAllocationFence(
+      this.managedDatabase,
+      config.podId,
+      {
+        network: config.networkName,
+        sources: (config.volumes ?? []).map((v) => v.host),
+      },
+      () => this.spawnOwned(config),
+    );
+  }
+
+  private async spawnOwned(config: ContainerSpawnConfig): Promise<string> {
     const identity = config.resourceIdentity ?? config.podId;
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$/.test(identity))
       throw new Error('Invalid Docker provider identity');
@@ -355,10 +375,20 @@ export class DockerContainerManager implements ContainerManager {
       allocation: ReturnType<AllocationScope['begin']>;
       engineId: string | null;
     }[] = [];
+    const assertAllocationAvailable = () => {
+      if (!this.managedDatabase) return;
+      assertRetainedCleanupAvailable(this.managedDatabase, config.podId);
+      if (config.networkName)
+        assertRetainedCleanupBridgeAvailable(this.managedDatabase, config.networkName);
+      for (const mount of config.volumes ?? [])
+        assertRetainedCleanupPathAvailable(this.managedDatabase, mount.host);
+    };
     const createOnce = async (options: Dockerode.ContainerCreateOptions) => {
+      assertAllocationAvailable();
       if (!scope) return this.docker.createContainer(options);
       const allocation = scope.begin('container', containerName);
       const engineId = await observeDockerEngine(this.docker, this.logger);
+      assertAllocationAvailable();
       const created = await this.docker
         .createContainer({
           ...options,
@@ -418,6 +448,7 @@ export class DockerContainerManager implements ContainerManager {
     );
 
     try {
+      assertAllocationAvailable();
       config.onCreated?.(container.id);
       this.assertNotRetained(container.id);
       await boundedDockerCall(container.start(), {
@@ -540,6 +571,8 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async stop(containerId: string): Promise<void> {
+    if (this.managedDatabase)
+      assertRetainedCleanupResourceAvailable(this.managedDatabase, containerId);
     if (
       !this.managedDatabase ||
       (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
@@ -871,6 +904,10 @@ export class DockerContainerManager implements ContainerManager {
     });
 
     assertDirectoryExtractionCurrent(options);
+    if (this.managedDatabase) {
+      assertRetainedCleanupResourceAvailable(this.managedDatabase, containerId);
+      assertRetainedCleanupPathAvailable(this.managedDatabase, hostPath);
+    }
     mkdirSync(hostPath, { recursive: true });
     if (!options) removeStaleSyncStagingDirs(hostPath);
     const stagingBase = `.autopod-extract-${process.pid}-${Date.now()}`;

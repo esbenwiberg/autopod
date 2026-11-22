@@ -61,6 +61,7 @@ import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
 import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
+import { retainedCleanupRoutes } from './retained-cleanup.js';
 import { retainedFinalizationRoutes } from './retained-finalization.js';
 import { reworkRoutes } from './rework.js';
 import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
@@ -871,6 +872,7 @@ export function podRoutes(
   artifactChecksRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
+  retainedCleanupRoutes(app, podManager);
   savedWorkDraftRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);

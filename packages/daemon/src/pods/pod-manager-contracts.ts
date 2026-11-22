@@ -123,6 +123,7 @@ export interface PodManagerDependencies {
   providerCatalog?: PublicProviderCatalog;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
+  retainedCleanupDocker?: import('../containers/retained-cleanup-docker.js').RetainedCleanupDocker;
   worktreeManager: WorktreeManager;
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
@@ -210,6 +211,18 @@ export interface PodManager {
     request: import('@autopod/shared').StalledWorkerRecoveryRequest,
     actor: OperatorActor,
   ): Promise<import('@autopod/shared').StalledWorkerRecoveryReceipt>;
+  inspectRetainedCleanup(
+    podId: string,
+  ): Promise<import('@autopod/shared').RetainedCleanupInspection>;
+  observeRetainedCleanup(
+    podId: string,
+    requestId: string,
+  ): import('@autopod/shared').RetainedCleanupReceipt;
+  submitRetainedCleanup(
+    podId: string,
+    request: import('@autopod/shared').RetainedCleanupRequest,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').RetainedCleanupSubmission>;
   inspectRetainedFinalization(podId: string): import('@autopod/shared').RetainedFinalizationView;
   cancelSavedWorkDraftPreparation(
     podId: string,

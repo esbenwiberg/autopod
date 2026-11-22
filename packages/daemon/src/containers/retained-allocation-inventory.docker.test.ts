@@ -1,61 +1,79 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import Dockerode from 'dockerode';
 import pino from 'pino';
 import { expect, it, vi } from 'vitest';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { isDockerNativeId } from '../pods/retained-allocation-inventory.js';
+import { createRetainedCleanup } from '../pods/retained-cleanup.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { retainedCleanupFixture } from '../test-utils/retained-cleanup-fixture.js';
 import { ALLOCATION_LABEL } from './docker-allocation-evidence.js';
 import { DockerContainerManager } from './docker-container-manager.js';
 import { DockerNetworkManager } from './docker-network-manager.js';
+import { createRetainedCleanupDocker } from './retained-cleanup-docker.js';
+
+async function isolatedFixtureEngine() {
+  const socket = process.env.AUTOPOD_ALLOCATION_FIXTURE_SOCKET;
+  const engine = process.env.AUTOPOD_ALLOCATION_FIXTURE_ENGINE;
+  const image = process.env.AUTOPOD_ALLOCATION_FIXTURE_IMAGE;
+  if (
+    !socket ||
+    !path.isAbsolute(socket) ||
+    path.basename(socket) !== 'retained-allocation-fixture.sock' ||
+    !engine ||
+    !image ||
+    !/^sha256:[a-f0-9]{64}$/.test(image)
+  )
+    throw new Error(
+      'An explicit isolated fixture Unix socket, engine ID and exact local image ID are required',
+    );
+  const parent = path.dirname(socket);
+  const parentStat = await lstat(parent);
+  const socketStat = await lstat(socket);
+  if (
+    !parentStat.isDirectory() ||
+    (parentStat.mode & 0o077) !== 0 ||
+    parentStat.uid !== process.getuid?.() ||
+    !socketStat.isSocket() ||
+    (await realpath(socket)) !== socket
+  )
+    throw new Error('Fixture socket must be under an owned, private, canonical directory');
+  // docker-modem merges environment defaults even when an explicit socket is passed.
+  // Refuse those settings before construction (including credential file paths).
+  if (
+    ['DOCKER_HOST', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY', 'DOCKER_PATH_PREFIX'].some((key) =>
+      Object.hasOwn(process.env, key),
+    )
+  )
+    throw new Error(
+      'Unset Docker transport environment overrides before running the isolated fixture',
+    );
+  const docker = new Dockerode({ socketPath: socket, timeout: 5000 });
+  const info = await docker.info();
+  if (
+    info.ID !== engine ||
+    !info.Labels?.includes('com.autopod.engine=retained-allocation-fixture')
+  )
+    throw new Error('Wrong engine or no dedicated fixture-engine label');
+  if (
+    (await docker.listContainers({ all: true })).length > 0 ||
+    (await docker.listNetworks()).some((net) => !['bridge', 'host', 'none'].includes(net.Name))
+  )
+    throw new Error('Not an empty isolated fixture engine');
+  expect((await docker.getImage(image).inspect()).Id).toBe(image);
+  vi.spyOn(docker, 'pull').mockImplementation(() => {
+    throw new Error('Fixture forbids image pulls');
+  });
+  return { docker, engine, image };
+}
 
 it.runIf(process.env.AUTOPOD_ALLOCATION_NATIVE_FIXTURE === '1')(
   'records native engine/IDs before detachment and never adopts a different bridge at the same name',
   async () => {
-    const socket = process.env.AUTOPOD_ALLOCATION_FIXTURE_SOCKET;
-    const engine = process.env.AUTOPOD_ALLOCATION_FIXTURE_ENGINE;
-    const image = process.env.AUTOPOD_ALLOCATION_FIXTURE_IMAGE;
-    if (
-      !socket ||
-      !path.isAbsolute(socket) ||
-      path.basename(socket) !== 'retained-allocation-fixture.sock' ||
-      !engine ||
-      !image ||
-      !/^sha256:[a-f0-9]{64}$/.test(image)
-    )
-      throw new Error(
-        'An explicit isolated fixture Unix socket, engine ID and exact local image ID are required',
-      );
-    const parent = path.dirname(socket);
-    const parentStat = await lstat(parent);
-    const socketStat = await lstat(socket);
-    if (
-      !parentStat.isDirectory() ||
-      (parentStat.mode & 0o077) !== 0 ||
-      parentStat.uid !== process.getuid?.() ||
-      !socketStat.isSocket() ||
-      (await realpath(socket)) !== socket
-    )
-      throw new Error('Fixture socket must be under an owned, private, canonical directory');
-    // Never select a context or accept DOCKER_HOST/TLS config from the environment.
-    const docker = new Dockerode({ socketPath: socket, timeout: 5000 });
-    const info = await docker.info();
-    if (
-      info.ID !== engine ||
-      !info.Labels?.includes('com.autopod.engine=retained-allocation-fixture')
-    )
-      throw new Error('Wrong engine or no dedicated fixture-engine label');
-    if (
-      (await docker.listContainers({ all: true })).length > 0 ||
-      (await docker.listNetworks()).some((net) => !['bridge', 'host', 'none'].includes(net.Name))
-    )
-      throw new Error('Not an empty isolated fixture engine');
-    expect((await docker.getImage(image).inspect()).Id).toBe(image);
-    vi.spyOn(docker, 'pull').mockImplementation(() => {
-      throw new Error('Fixture forbids image pulls');
-    });
+    const { docker, engine, image } = await isolatedFixtureEngine();
 
     const podId = `allocation-native-${randomUUID()}`;
     const logger = pino({ level: 'silent' });
@@ -187,4 +205,129 @@ it.runIf(process.env.AUTOPOD_ALLOCATION_NATIVE_FIXTURE === '1')(
     if (errors.length) throw new AggregateError(errors, 'Fixture or exact-ID teardown incomplete');
   },
   60_000,
+);
+
+it.runIf(process.env.AUTOPOD_ALLOCATION_NATIVE_FIXTURE === '1')(
+  'deletes exact stopped guest and bridge closure and refuses an unrelated endpoint',
+  async () => {
+    if (process.platform !== 'linux')
+      throw new Error('Cleanup fixture requires Linux mount identity');
+    const { docker, engine, image } = await isolatedFixtureEngine();
+    const logger = pino({ level: 'silent' });
+    const db = createTestDb();
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'retained-cleanup-docker-')));
+    const podId = 'cleanup-native-' + randomUUID();
+    const net = new DockerNetworkManager({ docker, logger });
+    const cm = new DockerContainerManager({ docker, logger });
+    const extra: { id: string; label: string; role: 'container' }[] = [];
+    const assertEngine = async () => expect((await docker.info()).ID).toBe(engine);
+    const inspect = async (kind: 'container' | 'bridge', id: string) => {
+      await assertEngine();
+      const target = kind === 'container' ? docker.getContainer(id) : docker.getNetwork(id);
+      return target.inspect().catch((e: { statusCode?: number }) => {
+        if (e.statusCode === 404) return null;
+        throw e;
+      });
+    };
+    const remove = async (t: { role: 'container' | 'bridge'; id: string; label: string }) => {
+      expect(isDockerNativeId(t.id)).toBe(true);
+      const found = await inspect(t.role, t.id);
+      if (!found) return;
+      const labels = 'Config' in found ? found.Config.Labels : found.Labels;
+      expect(found.Id).toBe(t.id);
+      expect(labels?.[ALLOCATION_LABEL]).toBe(t.label);
+      if (t.role === 'container') await docker.getContainer(t.id).remove({ force: true, v: false });
+      else await docker.getNetwork(t.id).remove();
+    };
+    try {
+      const f = await retainedCleanupFixture({
+        db,
+        root,
+        podId,
+        engine,
+        spawn: async (scope, identity, source, common) => {
+          await assertEngine();
+          const networkName = await net.ensureNetworkForPod(identity, scope);
+          const id = await cm.spawn({
+            podId,
+            resourceIdentity: identity === podId ? undefined : identity,
+            allocation: scope,
+            networkName,
+            image,
+            env: {},
+            exposeHostGateway: false,
+            volumes: [
+              { host: source, container: '/mnt/worktree' },
+              { host: common, container: common },
+            ],
+          });
+          await assertEngine();
+          await cm.stop(id);
+          return id;
+        },
+      });
+      const api = createRetainedCleanup({
+        pods: f.repo,
+        docker: createRetainedCleanupDocker(docker, true),
+        isIdle: () => true,
+        isGoal: () => false,
+      });
+      const bridge = f.repo
+        .retainedAllocations!.readTask(f.taskId)
+        .allocations.find((a) => a.role === 'bridge');
+      if (bridge?.state !== 'owned') throw new Error('Missing fixture bridge');
+      const preview = await api.inspect(podId);
+      if (preview.state !== 'eligible') throw new Error(JSON.stringify(preview));
+      const body = {
+        id: 'native-cleanup',
+        expectedBinding: preview.plan.binding,
+        expectedGeneration: preview.plan.generation,
+        expectedSessionId: preview.plan.sessionId,
+        acknowledgeDataLoss: true as const,
+        reason: 'Discard only this isolated native cleanup fixture',
+      };
+      const actor = { type: 'human', userId: 'fixture-human' } as const;
+      await assertEngine();
+      const label = randomUUID();
+      const foreign = await docker.createContainer({
+        Image: image,
+        Cmd: ['sleep', 'infinity'],
+        Labels: { [ALLOCATION_LABEL]: label },
+        HostConfig: { NetworkMode: bridge.locator },
+      });
+      const t = { id: foreign.id, label, role: 'container' as const };
+      extra.push(t);
+      await foreign.start();
+      expect(await api.submit(podId, body, actor)).toMatchObject({
+        state: 'blocked',
+        blockers: [{ code: 'FOREIGN_ATTACHMENT' }],
+      });
+      expect(await inspect('container', f.originalId)).not.toBeNull();
+      expect(await inspect('container', f.replacement)).not.toBeNull();
+      expect(await inspect('container', foreign.id)).not.toBeNull();
+      await remove(t);
+      expect(await api.submit(podId, body, actor)).toMatchObject({ state: 'deleted' });
+      for (const target of preview.plan.resources) {
+        if (target.kind === 'docker_container')
+          expect(await inspect('container', target.id)).toBeNull();
+        if (target.kind === 'docker_bridge') expect(await inspect('bridge', target.id)).toBeNull();
+        if (target.kind.startsWith('host_'))
+          await expect(lstat(target.id)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    } finally {
+      try {
+        const allocated = db
+          .prepare(`SELECT a.role,a.id AS label,json_extract(f.evidence,'$.id') AS id
+          FROM retained_allocation_attempts a JOIN retained_allocation_facts f ON f.attempt_id=a.id
+          WHERE a.pod_id=? AND f.kind='create-reply' AND json_extract(f.evidence,'$.engineId')=?
+          ORDER BY CASE a.role WHEN 'container' THEN 0 ELSE 1 END`)
+          .all(podId, engine) as { role: 'container' | 'bridge'; id: string; label: string }[];
+        for (const target of [...extra, ...allocated]) await remove(target);
+      } finally {
+        db.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  },
+  90_000,
 );

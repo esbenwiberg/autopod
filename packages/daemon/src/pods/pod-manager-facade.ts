@@ -232,6 +232,28 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')
       ).operation(podId, requestId);
     },
+    inspectRetainedCleanup(podId: string) {
+      return (captured.retainedCleanup ?? checkpointError('Retained cleanup unavailable')).inspect(
+        podId,
+      );
+    },
+    observeRetainedCleanup(podId: string, requestId: string) {
+      return (captured.retainedCleanup ?? checkpointError('Retained cleanup unavailable')).receipt(
+        podId,
+        requestId,
+      );
+    },
+    submitRetainedCleanup(
+      podId: string,
+      request: import('@autopod/shared').RetainedCleanupRequest,
+      actor: OperatorActor,
+    ) {
+      return (captured.retainedCleanup ?? checkpointError('Retained cleanup unavailable')).submit(
+        podId,
+        request,
+        actor,
+      );
+    },
     inspectRetainedFinalization(podId: string) {
       return (
         captured.retainedFinalization ?? checkpointError('Retained finalization unavailable')

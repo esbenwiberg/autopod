@@ -19,6 +19,7 @@ import {
   checkpointError,
   retainedCheckpointNetworkIdentities,
 } from '../pods/retained-checkpoint-repository.js';
+import { assertRetainedCleanupBridgeAvailable } from '../pods/retained-cleanup-repository.js';
 import { ALLOCATION_LABEL, observeDockerEngine } from './docker-allocation-evidence.js';
 import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
 import { isExpectedDockerError } from './docker-helpers.js';
@@ -230,6 +231,7 @@ export class DockerNetworkManager {
 
   private assertNetworkMutable(name: string, containerIds: string[] = []) {
     if (!this.managedDatabase) return;
+    assertRetainedCleanupBridgeAvailable(this.managedDatabase, name);
     const held = retainedCheckpointNetworkIdentities(this.managedDatabase);
     if ([...held].some((id) => networkNameForPod(id) === name))
       checkpointError(
@@ -294,6 +296,7 @@ export class DockerNetworkManager {
       // Preserve ordinary provisioning's create fallback.
     }
     if (existing) {
+      if (this.managedDatabase) assertRetainedCleanupBridgeAvailable(this.managedDatabase, name);
       if (
         scope &&
         !(
@@ -322,6 +325,7 @@ export class DockerNetworkManager {
     };
     const createBridge = async () => {
       const before = scope ? await observeDockerEngine(this.docker, this.logger) : null;
+      if (this.managedDatabase) assertRetainedCleanupBridgeAvailable(this.managedDatabase, name);
       const allocation = scope?.begin('bridge', name);
       const network = await boundedDockerCall(
         this.docker.createNetwork(
