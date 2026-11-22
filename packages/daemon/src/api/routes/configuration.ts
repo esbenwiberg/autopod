@@ -2,6 +2,7 @@ import {
   type ConfigurationKind,
   configurationIdSchema,
   configurationKindSchema,
+  type DispatchPreview,
   type EffectiveLaunchConfig,
   type JwtPayload,
   type OperatorActor,
@@ -23,6 +24,7 @@ import {
   saveLaunchProfile,
 } from '../../configuration/save-launch-profile.js';
 import type { ConfigurationSecurityPolicyStore } from '../../configuration/security-policy.js';
+import type { DispatchPreflightLedger } from '../../pods/dispatch-preflight-ledger.js';
 import type { ReviewerRunRecord } from '../../validation/reviewer-run-repository.js';
 
 export interface ConfigurationRouteDependencies {
@@ -50,6 +52,8 @@ export interface ConfigurationRouteDependencies {
   series?: import('../../configuration/series-launches.js').SeriesLaunches;
   watchers?: import('../../issue-watcher/watcher-binding-repository.js').WatcherBindingRepository;
   resolution: LaunchResolutionServices;
+  /** Read-only equivalent-work check; never records dispatch evidence. */
+  dispatchPreview?: DispatchPreflightLedger['preview'];
   inputBundles?: import('../../inputs/input-bundle-store.js').InputBundleStore;
   referencePreviews?: import('../../inputs/reference-preview-service.js').ReferencePreviewService;
   db: Database.Database;
@@ -346,6 +350,31 @@ export function configurationRoutes(
     async (request): Promise<EffectiveLaunchConfig> =>
       resolveLaunch(request.body, deps.resolution, request.user.oid),
   );
+  app.post('/launch/dispatch-preview', async (request): Promise<DispatchPreview> => {
+    const config = await resolveLaunch(request.body, deps.resolution, request.user.oid);
+    const notApplicable: DispatchPreview = {
+      status: 'not_applicable',
+      repository: null,
+      baseBranch: null,
+      conflicts: [],
+      suggestedActions: [],
+    };
+    // Mirrors the provisioning guard: interactive workspaces and empty workspaces skip it.
+    if (!config.repository || config.workflow.agentMode === 'interactive') return notApplicable;
+    if (!deps.dispatchPreview)
+      configurationError(
+        'Equivalent-work preview is unavailable',
+        'DISPATCH_PREVIEW_UNAVAILABLE',
+        503,
+      );
+    return deps.dispatchPreview({
+      repository: config.repository.config.remote,
+      baseBranch: config.work.baseBranch ?? config.repository.setup.defaultBranch ?? 'main',
+      task: config.task,
+      contract: config.work.contract ?? null,
+      intentionalRerun: config.work.intentionalRerun ?? null,
+    });
+  });
   app.post('/profiles/from-launch', async (request) => {
     const input = z
       .object({
