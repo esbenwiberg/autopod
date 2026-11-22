@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { EffectiveLaunchConfig, LaunchRequest } from '@autopod/shared';
+import type { DispatchPreview, EffectiveLaunchConfig, LaunchRequest } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -35,6 +35,24 @@ function summarize(config: EffectiveLaunchConfig): string {
         ]
       : []),
     `Configuration: ${config.digest}`,
+  ].join('\n');
+}
+/** Human report for an equivalent-work preview; `null` when nothing needs attention. */
+export function describeDispatchPreview(preview: DispatchPreview): string | null {
+  if (preview.status === 'clear' || preview.status === 'not_applicable') return null;
+  const lines = preview.conflicts.map((conflict) => {
+    const assessment = conflict.assessment
+      ? ` — ${conflict.assessment.classification}: ${conflict.assessment.reasons.join(', ')}`
+      : '';
+    return `  ${conflict.podId} (${conflict.status})${assessment}`;
+  });
+  if (preview.status === 'authorized')
+    return ['Equivalent work: authorized as an intentional rerun of', ...lines].join('\n');
+  return [
+    `Equivalent active work requires review on ${[preview.repository, preview.baseBranch].filter(Boolean).join(' ')}:`,
+    ...lines,
+    'Fix:',
+    ...preview.suggestedActions.map((action) => `  ${action}`),
   ].join('\n');
 }
 export function registerLaunchCommand(
@@ -86,6 +104,11 @@ export function registerLaunchCommand(
       'Optional task token limit; off removes a preset limit',
       parseTokenBudgetOption,
     )
+    .option(
+      '--rerun-of <pod-id>',
+      'Intentionally repeat equivalent work held by this pod (requires --rerun-reason)',
+    )
+    .option('--rerun-reason <text>', 'Recorded human reason for the intentional rerun')
     .option('--preview', 'Resolve and display effective configuration without launching')
     .option('--json', 'Output the full preview or created pod as JSON');
   addLaunchPresetOptions(command);
@@ -103,6 +126,8 @@ export function registerLaunchCommand(
         LaunchTaskFlags &
         AttachmentFlags & {
           config?: string;
+          rerunOf?: string;
+          rerunReason?: string;
           preview?: boolean;
           json?: boolean;
           fromPod?: string;
@@ -273,6 +298,20 @@ export function registerLaunchCommand(
         Reflect.deleteProperty(request, 'expectedDigest');
         if (!opts.requestId) Reflect.deleteProperty(request, 'requestId');
       }
+      if (opts.rerunOf !== undefined || opts.rerunReason !== undefined) {
+        const reason = opts.rerunReason?.trim();
+        if (!opts.rerunOf || !reason)
+          throw new Error('--rerun-of and --rerun-reason must be given together.');
+        if (request.work?.intentionalRerun)
+          throw new Error('The request already records an intentional rerun.');
+        const requestKey = request.requestId ?? opts.requestId ?? randomUUID();
+        request.requestId = requestKey;
+        request.work = {
+          ...request.work,
+          intentionalRerun: { ofPodId: opts.rerunOf, reason, requestKey },
+        };
+        Reflect.deleteProperty(request, 'expectedDigest');
+      }
       if (opts.preview || !request.expectedDigest) validateLaunchSources(request.work);
       // An exact saved retry reaches admission before mutable preset/discovery reads.
       const effective =
@@ -287,11 +326,21 @@ export function registerLaunchCommand(
         throw new Error(
           'The frozen source does not use artifact output. Choose --source-config current for research.',
         );
+      // Read-only equivalent-work check, so a duplicate is reported before admission
+      // instead of failing at provisioning. The daemon guard remains authoritative.
+      const dispatch = effective ? await client.previewDispatch(request) : undefined;
+      const dispatchReport = dispatch ? describeDispatchPreview(dispatch) : null;
       if (opts.preview) {
         if (!effective) throw new Error('Launch preview is unavailable.');
         console.log(opts.json ? JSON.stringify(effective, null, 2) : summarize(effective));
+        if (dispatch === null)
+          console.error('Equivalent-work check unavailable on this daemon; not verified.');
+        if (dispatchReport) (opts.json ? console.error : console.log)(dispatchReport);
+        if (dispatch?.status === 'review_required') process.exitCode = 2;
         return;
       }
+      if (dispatch?.status === 'review_required')
+        throw new Error(`${dispatchReport}\nNo pod was created.`);
       const admitted: LaunchRequest = {
         ...request,
         expectedDigest: request.expectedDigest ?? effective?.digest,

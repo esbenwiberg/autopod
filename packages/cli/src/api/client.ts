@@ -10,6 +10,7 @@ import type {
   DaemonHealthSummary,
   DiffResponse,
   DispatchPreflightEvidence,
+  DispatchPreview,
   EffectiveLaunchConfig,
   ExecutionProvenance,
   IssueWatcherBinding,
@@ -316,6 +317,21 @@ export class AutopodClient {
 
   async resolveLaunch(request: LaunchRequest): Promise<EffectiveLaunchConfig> {
     return this.request('POST', '/launch/resolve', request);
+  }
+
+  /** Read-only equivalent-work check. `null` when the daemon lacks or disables the check. */
+  async previewDispatch(request: LaunchRequest): Promise<DispatchPreview | null> {
+    try {
+      return await this.request('POST', '/launch/dispatch-preview', request);
+    } catch (error) {
+      if (
+        error instanceof AutopodError &&
+        (error.statusCode === 404 ||
+          (error.statusCode === 503 && error.code === 'DISPATCH_PREVIEW_UNAVAILABLE'))
+      )
+        return null;
+      throw error;
+    }
   }
 
   async launchPod(request: LaunchRequest): Promise<Pod> {

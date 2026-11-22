@@ -43,6 +43,7 @@ import {
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
+import { selectRerunBranch } from '../../pods/rerun-branch.js';
 import {
   computeSafetyAnalytics,
   runAndPersistAuditChainVerification,
@@ -904,6 +905,15 @@ export function podRoutes(
           );
         configuration.inputBundles.assert(source.work.inputBundle, request.user.oid);
       }
+      // Keep the requested output branch unless another unfinished pod holds it.
+      const { branch } = podRepo
+        ? selectRerunBranch({
+            sourcePodId: podId,
+            requested: source.work.branch,
+            baseBranch: source.work.baseBranch ?? source.repository?.setup.defaultBranch ?? 'main',
+            unfinished: podRepo.listNonTerminal(),
+          })
+        : { branch: undefined };
       return {
         ...(source.repository
           ? { repositoryId: source.repository.id, repositorySetupId: source.repository.setup.id }
@@ -919,6 +929,7 @@ export function podRoutes(
           inputBundle: source.work.inputBundle,
           baseBranch: source.work.baseBranch,
           startBranch: source.work.startBranch,
+          ...(branch ? { branch } : {}),
           touches: source.work.touches,
           doesNotTouch: source.work.doesNotTouch,
         },

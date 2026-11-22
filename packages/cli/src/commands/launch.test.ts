@@ -5,6 +5,7 @@ import {
   type ConfigurationEntity,
   type CreateInputBundleRequest,
   configurationPayloadSchemas,
+  type DispatchPreview,
   type EffectiveLaunchConfig,
   type InputFile,
   type LaunchRequest,
@@ -82,6 +83,7 @@ describe('shared launch request CLI', () => {
         files: uploadedFiles,
         status: 'sealed',
       })),
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async () => ({ digest: 'a'.repeat(64) })),
       launchPod: vi
         .fn()
@@ -160,6 +162,7 @@ describe('shared launch request CLI', () => {
         for (const fileInput of [false, true]) {
           const client = {
             listConfigurations: lookup,
+            previewDispatch: vi.fn(async () => null),
             resolveLaunch: vi.fn(),
             launchPod: vi.fn(),
           };
@@ -201,6 +204,7 @@ describe('shared launch request CLI', () => {
         task: 'Task',
         repository: { id: 'repo', setup: { id: 'web' } },
       })),
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async () => ({ work: { startBranch: 'a'.repeat(40) } })),
       launchPod: vi.fn(),
     };
@@ -233,6 +237,7 @@ describe('shared launch request CLI', () => {
     const original = JSON.stringify(request);
     writeFileSync(file, original);
     const client = {
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(),
       listConfigurations: vi.fn(),
       launchPod: vi.fn(async () => ({ id: 'test-pod' })),
@@ -260,6 +265,7 @@ describe('shared launch request CLI', () => {
     const sha = 'a'.repeat(40);
     const client = {
       listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
         ...request,
         digest: 'b'.repeat(64),
@@ -307,6 +313,7 @@ describe('shared launch request CLI', () => {
         repository: { id: 'repo', setup: { id: 'web' } },
       })),
       listConfigurations: vi.fn(),
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async (request: LaunchRequest) => request),
       launchPod: vi.fn(),
     };
@@ -337,6 +344,7 @@ describe('shared launch request CLI', () => {
   it('resolves research through the same configuration preview with artifact output', async () => {
     const client = {
       listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async () => ({
         workflow: { output: 'artifact', completion: 'accept-findings' },
       })),
@@ -370,6 +378,7 @@ describe('shared launch request CLI', () => {
   it('builds an explicit repository history workspace through the shared schema', async () => {
     const client = {
       listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async (request: LaunchRequest) => launchRequestSchema.parse(request)),
       launchPod: vi.fn(),
     };
@@ -487,6 +496,7 @@ describe('shared launch request CLI', () => {
   it('parses repeated tool pack flags without implicit defaults and never admits a preview', async () => {
     const client = {
       listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
         digest: 'a'.repeat(64),
         ...request,
@@ -593,6 +603,7 @@ describe('shared launch request CLI', () => {
       throw new Error('Lost response');
     });
     const client = {
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: resolve,
       launchPod: launch,
       listConfigurations: vi.fn(),
@@ -647,5 +658,128 @@ describe('shared launch request CLI', () => {
     expect(() => saveLaunchReceipt({ ...request, task: 'Different' }, dir)).toThrow(
       'different request',
     );
+  });
+});
+
+describe('equivalent-work launch preflight (#647)', () => {
+  const conflict: DispatchPreview = {
+    status: 'review_required',
+    repository: 'github.com/owner/project',
+    baseBranch: 'main',
+    conflicts: [
+      {
+        podId: 'pod-a',
+        executionId: 'exec-a',
+        status: 'paused',
+        evidence: 'dispatch_receipt',
+        assessment: {
+          classification: 'stale',
+          reasons: ['paused (provider_limit); no worker running', 'no source changes'],
+        },
+      },
+    ],
+    suggestedActions: [
+      'Stop the existing execution if it should not continue: ap kill pod-a',
+      'Or launch this request as an intentional rerun: ap run … --rerun-of pod-a --rerun-reason "<why>"',
+    ],
+  };
+  function setup(preview: DispatchPreview | null) {
+    const client = {
+      listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => preview),
+      resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
+        ...request,
+        digest: 'b'.repeat(64),
+      })),
+      launchPod: vi.fn(async () => ({ id: 'pod-b' })),
+    };
+    const program = new Command().exitOverride();
+    const save = vi.fn(() => 'receipt.json');
+    registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const output = () => [...log.mock.calls, ...error.mock.calls].flat().join('\n');
+    return { client, program, save, output };
+  }
+  const base = ['node', 'ap', 'run', '--repo', 'Project', '--task', 'Implement'];
+  afterEach(() => {
+    process.exitCode = undefined;
+  });
+
+  it('preview reports the conflict, its assessment and the direct fix instead of passing', async () => {
+    const { client, program, output } = setup(conflict);
+    await program.parseAsync([...base, '--preview', '--json']);
+    expect(client.previewDispatch).toHaveBeenCalledOnce();
+    expect(client.launchPod).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    expect(output()).toContain('Equivalent active work requires review');
+    expect(output()).toContain('pod-a (paused) — stale: paused (provider_limit)');
+    expect(output()).toContain('ap kill pod-a');
+    expect(output()).toContain('--rerun-of pod-a');
+  });
+
+  it('a fresh launch is refused before admission when review is required', async () => {
+    const { client, program, save } = setup(conflict);
+    await expect(program.parseAsync([...base, '--json'])).rejects.toThrow(
+      /Equivalent active work requires review[\s\S]*--rerun-of pod-a[\s\S]*No pod was created/,
+    );
+    expect(save).not.toHaveBeenCalled();
+    expect(client.launchPod).not.toHaveBeenCalled();
+  });
+
+  it('--rerun-of records the intentional rerun on the original launch', async () => {
+    const { client, program } = setup({ ...conflict, status: 'authorized', suggestedActions: [] });
+    await program.parseAsync([
+      ...base,
+      '--rerun-of',
+      'pod-a',
+      '--rerun-reason',
+      'Prior pod paused without output',
+      '--request-id',
+      'relaunch-1',
+      '--json',
+    ]);
+    const expected = {
+      requestId: 'relaunch-1',
+      work: expect.objectContaining({
+        intentionalRerun: {
+          ofPodId: 'pod-a',
+          reason: 'Prior pod paused without output',
+          requestKey: 'relaunch-1',
+        },
+      }),
+    };
+    expect(client.previewDispatch).toHaveBeenCalledWith(expect.objectContaining(expected));
+    expect(client.launchPod).toHaveBeenCalledWith(expect.objectContaining(expected));
+  });
+
+  it('requires both rerun flags', async () => {
+    const { program } = setup(null);
+    await expect(program.parseAsync([...base, '--rerun-of', 'pod-a'])).rejects.toThrow(
+      '--rerun-of and --rerun-reason must be given together.',
+    );
+  });
+
+  it('tolerates a daemon without the preview route', async () => {
+    const { client, program, output } = setup(null);
+    await program.parseAsync([...base, '--preview', '--json']);
+    expect(process.exitCode).toBeUndefined();
+    expect(output()).toContain('Equivalent-work check unavailable');
+    expect(client.launchPod).not.toHaveBeenCalled();
+    const launch = setup(null);
+    await launch.program.parseAsync([...base, '--json']);
+    expect(launch.client.launchPod).toHaveBeenCalledOnce();
+  });
+
+  it('launches when the check is clear', async () => {
+    const { client, program } = setup({
+      status: 'clear',
+      repository: 'github.com/owner/project',
+      baseBranch: 'main',
+      conflicts: [],
+      suggestedActions: [],
+    });
+    await program.parseAsync([...base, '--json']);
+    expect(client.launchPod).toHaveBeenCalledOnce();
   });
 });
