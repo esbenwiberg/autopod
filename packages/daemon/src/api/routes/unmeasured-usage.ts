@@ -26,7 +26,8 @@ export function unmeasuredUsageRoutes(
       if (!parsed.success) {
         reply.status(400);
         return {
-          error: 'A reason of 10 to 2000 characters is required; attempt must be a positive integer',
+          error:
+            'A reason of 10 to 2000 characters is required; attempt must be a positive integer',
           code: 'INVALID_REQUEST',
         };
       }

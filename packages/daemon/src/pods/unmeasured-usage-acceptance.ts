@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 
 /** Prefix of the ledger reason this owner decision can reconcile (#646). */
@@ -82,7 +82,10 @@ export function createUnmeasuredUsageAcceptance(deps: {
       if (ledger.hasActiveRun(podId))
         throw conflict('A worker run is still active for this pod', 'TASK_AGENT_RUN_ACTIVE');
       if (deps.providerAttemptRepo.getActive(podId))
-        throw conflict('A provider attempt is still active for this pod', 'PROVIDER_ATTEMPT_ACTIVE');
+        throw conflict(
+          'A provider attempt is still active for this pod',
+          'PROVIDER_ATTEMPT_ACTIVE',
+        );
       if (deps.podRepo.hasInfrastructureBlocker?.(podId))
         throw conflict('Infrastructure blocked; resolve the recorded blocker first');
       if (pod.status !== 'paused' && pod.status !== 'failed')
