@@ -4,6 +4,7 @@ import path from 'node:path';
 import { expect, it } from 'vitest';
 import {
   createHistoricalDiskDatabase,
+  latestMigrationVersion,
   MIGRATIONS_DIR,
   openTestDiskDatabase,
 } from '../test-utils/disk-database.js';
@@ -48,7 +49,9 @@ it('upgrades applied v253 without skipping draft tables or changing reviewer/pub
       db.prepare("SELECT 1 FROM sqlite_master WHERE name='saved_work_draft_pr_operations'").get(),
     ).toBeUndefined();
     runMigrations(db, MIGRATIONS_DIR, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 272 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({
+      v: latestMigrationVersion(),
+    });
     expect(
       db.prepare('SELECT * FROM schema_version WHERE version<=253 ORDER BY version').all(),
     ).toEqual(previousVersions);

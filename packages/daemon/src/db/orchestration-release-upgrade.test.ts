@@ -5,6 +5,7 @@ import { expect, it } from 'vitest';
 import {
   createHistoricalDiskDatabase,
   MIGRATIONS_DIR,
+  migrationVersions,
   openTestDiskDatabase,
 } from '../test-utils/disk-database.js';
 import { logger } from '../test-utils/mock-helpers.js';
@@ -16,6 +17,9 @@ import {
 } from './backup-verification.js';
 import { snapshotBeforeCutover } from './cutover-backup.js';
 import { runMigrationsWithBackups } from './migrate.js';
+
+// Every shipped migration from the orchestration chain (262) onward must be applied, none skipped.
+const orchestrationTail = () => migrationVersions().filter((version) => version >= 262);
 
 it.each([
   255, 256,
@@ -55,7 +59,7 @@ it.each([
           .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
           .pluck()
           .all(),
-      ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272]);
+      ).toEqual(orchestrationTail());
       expect(
         db.prepare('SELECT * FROM schema_version WHERE version<=? ORDER BY version').all(release),
       ).toEqual(prior);
@@ -132,7 +136,7 @@ it('resumes a valid partially applied orchestration prefix', async () => {
         .prepare('SELECT version FROM schema_version WHERE version>=262 ORDER BY version')
         .pluck()
         .all(),
-    ).toEqual([262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272]);
+    ).toEqual(orchestrationTail());
     assertBackupIntegrity(db);
   } finally {
     db.close();

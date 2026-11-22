@@ -4,6 +4,7 @@ import path from 'node:path';
 import { expect, it } from 'vitest';
 import {
   createHistoricalDiskDatabase,
+  latestMigrationVersion,
   MIGRATIONS_DIR as migrations,
   openTestDiskDatabase,
 } from '../test-utils/disk-database.js';
@@ -48,7 +49,9 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = openTestDiskDatabase(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 272 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({
+      v: latestMigrationVersion(migrations),
+    });
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_operations').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_preparation_cancellations').all()).toEqual(
       [],
