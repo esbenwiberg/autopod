@@ -1,8 +1,20 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
+import { assertBoundedHeadPack } from './bounded-head-pack.js';
+import { MAX_PRIVATE_HEAD_BYTES } from './private-head-export.js';
 import { managedGit, managedGitBytes } from './source-git.js';
 
 // Validate the committed tree without checking out files. Shared by offline
@@ -109,13 +121,113 @@ export async function withSandboxProjection<T>(
   }
 }
 
+/** Fresh Git metadata derived from the accepted commit, not copied from a checkout.
+ * Like report projection, this narrow lane refuses executable blobs and links. */
+export async function withSandboxCodingProjection<T>(
+  workspace: string,
+  commit: string,
+  use: (dir: string, manifest: string) => Promise<T>,
+) {
+  const source = await realpath(workspace);
+  const entries = await sandboxTreeEntries(source, commit);
+  const header = Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`);
+  // Build a capped pack from only the selected revision. No fetch or clone can
+  // write an oversized pack to the staging filesystem.
+  const pack = await managedGitBytes(
+    source,
+    [
+      '-c',
+      'pack.threads=1',
+      'pack-objects',
+      '--revs',
+      '--stdout',
+      '--window=0',
+      '--no-reuse-object',
+      '--no-reuse-delta',
+      '--no-use-bitmap-index',
+    ],
+    undefined,
+    [],
+    { input: commit + '\n', maxBuffer: MAX_PRIVATE_HEAD_BYTES - header.length, timeout: 12_000 },
+  );
+  const bundle = Buffer.concat([header, pack]);
+  await assertBoundedHeadPack(bundle, commit);
+  const dir = await mkdtemp(path.join(path.dirname(source), '.sandbox-coding-'));
+  try {
+    const input = path.join(dir, 'seed.bundle');
+    await writeFile(input, bundle, { flag: 'wx', mode: 0o600 });
+    await managedGit(dir, ['init', '--quiet', '--template=', '--object-format=sha1', '-b', 'main']);
+    if ((await managedGit(dir, ['bundle', 'unbundle', input])) !== commit + ' HEAD')
+      throw new Error('sandbox-coding-checkout-mismatch');
+    await rm(input);
+    await managedGit(dir, ['update-ref', '--no-deref', 'HEAD', commit]);
+    await managedGit(dir, ['read-tree', commit]);
+
+    const files: Record<string, string> = Object.create(null);
+    for (const { name, oid, size } of entries) {
+      const bytes = await managedGitBytes(dir, ['cat-file', 'blob', oid]);
+      if (bytes.length !== size) throw new Error('sandbox-coding-checkout-mismatch');
+      const file = path.join(dir, name);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, bytes, { flag: 'wx', mode: 0o600 });
+      files[name] = createHash('sha256').update(bytes).digest('hex');
+    }
+    for (const name of ['.agents', '.codex']) await mkdir(path.join(dir, name));
+    const dirs = new Set(['.agents', '.codex', '.git']);
+    for (const name of Object.keys(files)) {
+      for (
+        let parent = path.posix.dirname(name);
+        parent !== '.';
+        parent = path.posix.dirname(parent)
+      )
+        dirs.add(parent);
+    }
+    const maxMetadataFiles = 128;
+    let total = 0;
+    let count = 0;
+    const visit = async (relative: string): Promise<void> => {
+      for (const name of await readdir(path.join(dir, relative))) {
+        const entry = relative + '/' + name;
+        const file = path.join(dir, entry);
+        const info = await lstat(file);
+        if (++count > maxMetadataFiles) throw new Error('sandbox-coding-metadata-bound');
+        if (info.isDirectory()) {
+          dirs.add(entry);
+          await visit(entry);
+        } else {
+          if (!info.isFile() || info.nlink !== 1 || info.size > MAX_PRIVATE_HEAD_BYTES - total)
+            throw new Error('sandbox-coding-metadata-bound');
+          total += info.size;
+          files[entry] = createHash('sha256')
+            .update(await readFile(file))
+            .digest('hex');
+        }
+      }
+    };
+    await visit('.git');
+    if (
+      (await managedGit(dir, ['remote'])) !== '' ||
+      (await managedGit(dir, ['for-each-ref'])) !== '' ||
+      (await managedGit(dir, ['rev-parse', 'HEAD'])) !== commit
+    )
+      throw new Error('sandbox-coding-checkout-mismatch');
+    const manifest = JSON.stringify({ files, dirs: [...dirs].sort() });
+    if (Buffer.byteLength(manifest) > 64 * 1024) throw new Error('sandbox-coding-metadata-bound');
+    return await use(dir, manifest);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 // Runs as the unprivileged worker before the supervisor/provider is attached.
 export const VERIFY_SANDBOX_PROJECTION = `import hashlib,json,os,stat,sys
-root,raw=sys.argv[1:]
-want=json.loads(raw);seen=set()
+root,raw,*mode=sys.argv[1:]
+manifest=json.loads(raw)
+want=manifest["files"] if mode==["coding"] else manifest
+seen=set()
 def check(ok):
  if not ok: raise ValueError("sandbox checkpoint verification failed")
-dirs={".agents",".codex"}
+dirs=set(manifest["dirs"]) if mode==["coding"] else {".agents",".codex"}
 for name in want:
  parent=os.path.dirname(name)
  while parent: dirs.add(parent);parent=os.path.dirname(parent)
@@ -137,12 +249,12 @@ print(hashlib.sha256(raw.encode()).hexdigest())`;
 export async function allocateSandboxCheckpoint(
   manager: ContainerManager,
   config: ContainerSpawnConfig,
-  cp: { repository: string; commit: string },
+  cp: { repository: string; commit: string; coding?: true },
   beforeAllocate?: () => void,
 ) {
   const volumes = config.volumes ?? [],
     root = '/repositories/' + cp.repository;
-  const inputs = volumes.filter((v) => v.container === root && v.readOnly);
+  const inputs = volumes.filter((v) => v.container === root && v.readOnly === !cp.coding);
   if (
     inputs.length !== 1 ||
     volumes.length !== 2 ||
@@ -150,19 +262,33 @@ export async function allocateSandboxCheckpoint(
     config.networkPolicyMode !== 'deny-all'
   )
     throw new Error('sandbox-checkpoint-scope');
-  return withSandboxProjection(inputs[0]!.host, cp.commit, async (dir, manifest) => {
+  const project = cp.coding ? withSandboxCodingProjection : withSandboxProjection;
+  return project(inputs[0]!.host, cp.commit, async (dir, manifest) => {
     beforeAllocate?.();
     const id = await manager.ensureManagedContainer!({
       ...config,
-      volumes: volumes.map((v) => (v === inputs[0] ? { ...v, host: dir } : v)),
+      // Lock the upload as root-owned read-only until the exact manifest is verified.
+      // Only the runtime's subsequent writable preparation grants the worker ownership.
+      volumes: volumes.map((v) => (v === inputs[0] ? { ...v, host: dir, readOnly: true } : v)),
     });
     const receipt = await manager.execInContainer(
       id,
-      ['python3', '-c', VERIFY_SANDBOX_PROJECTION, root, manifest],
-      { user: 'autopod' },
+      [
+        'python3',
+        ...(cp.coding ? ['-I'] : []),
+        '-c',
+        VERIFY_SANDBOX_PROJECTION,
+        root,
+        manifest,
+        ...(cp.coding ? ['coding'] : []),
+      ],
+      cp.coding
+        ? { user: 'autopod', timeout: 15_000, maxOutputBytes: 256, requireObservedExit: true }
+        : { user: 'autopod' },
     );
     if (
       receipt.exitCode !== 0 ||
+      (cp.coding && receipt.stderr !== '') ||
       receipt.stdout.trim() !== createHash('sha256').update(manifest).digest('hex')
     )
       throw new Error('sandbox-checkpoint-upload-unverified');

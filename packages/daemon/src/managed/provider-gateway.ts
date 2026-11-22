@@ -12,6 +12,13 @@ import { ManagedQuotaBroker } from './quota-broker.js';
 const MAXIMUM_PROVIDER_PROMPT_BYTES = 8 * 1024 * 1024;
 const MAXIMUM_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024;
 
+/** Deliberate pre-admission stop, distinct from a provider or transport failure. */
+export class ManagedProviderRequestLimit extends Error {
+  constructor() {
+    super('managed-provider-request-limit');
+  }
+}
+
 /** Trusted host-side entrypoint, never an unscoped public provider proxy. */
 export class ManagedProviderGateway {
   private closed = false;
@@ -171,7 +178,7 @@ export class ManagedProviderGateway {
             'mode' in budget ? budget.maxProviderRequests : this.maximumRequests,
           )
         )
-          throw new Error('managed-provider-request-limit');
+          throw new ManagedProviderRequestLimit();
         // The detached supervisor treats fully reserved quota as exhausted. Keep one
         // token unreserved so an in-flight request cannot stop its own worker.
         if ('maxTokens' in budget && current.consumed_tokens + maximumTokens >= budget.maxTokens)

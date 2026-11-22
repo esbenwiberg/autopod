@@ -8,6 +8,7 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import { collectPrivateHead } from '../managed/private-head-export.js';
 import { createSessionBridge, type SessionBridgeDependencies } from '../pods/pod-bridge-impl.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
@@ -929,6 +930,110 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('uses only the exact ready disk image in qualification mode, without cache writes or discovery', async () => {
+    const sourceDigest = `sha256:${'1'.repeat(64)}`;
+    const image = `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}`;
+    const disk = {
+      id: 'exact-disk',
+      image: { base: image },
+      status: { state: 'Ready' },
+      labels: diskImageLabelsFor(image, sourceDigest),
+    };
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: disk },
+        { status: 200, body: disk },
+        { status: 200, body: { id: 'sandbox', state: 'Running' } },
+        { status: 200, body: { id: 'sandbox', state: 'Running' } },
+      ],
+      { assumeGroupExists: true, readyDiskImageId: disk.id },
+    );
+    expect(await client.prepareManagedImage(image)).toBe(disk.id);
+    await expect(
+      client.createSandbox({
+        image,
+        tier: 'S',
+        podId: 'isolated',
+        env: {},
+        egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+      }),
+    ).resolves.toBe('sandbox');
+    expect(
+      requests.map(({ url, init }) => [
+        init?.method,
+        new URL(url).pathname.split('/').slice(-2).join('/'),
+      ]),
+    ).toEqual([
+      ['GET', 'diskimages/exact-disk'],
+      ['GET', 'diskimages/exact-disk'],
+      ['PUT', 'autopod-spike/sandboxes'],
+      ['GET', 'sandboxes/sandbox'],
+    ]);
+    expect(jsonBody(requests[2] ?? failRequest())).toMatchObject({
+      sourcesRef: { diskImage: { id: disk.id } },
+    });
+  });
+
+  it.each([
+    'not-ready',
+    'mismatched-base',
+    'mismatched-id',
+    'missing',
+  ])('refuses an invalid pinned disk image (%s) without creating or deleting anything', async (caseName) => {
+    const sourceDigest = `sha256:${'1'.repeat(64)}`;
+    const image = `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}`;
+    const disk = {
+      id: caseName === 'mismatched-id' ? 'unexpected' : 'exact-disk',
+      image: {
+        base: caseName === 'mismatched-base' ? 'ewiacr.azurecr.io/autopod/test-app:mutable' : image,
+      },
+      status: { state: caseName === 'not-ready' ? 'Failed' : 'Ready' },
+      labels: diskImageLabelsFor(image, sourceDigest),
+    };
+    const { client, requests } = makeClient(
+      [caseName === 'missing' ? { status: 404 } : { status: 200, body: disk }],
+      { assumeGroupExists: true, readyDiskImageId: 'exact-disk' },
+    );
+    await expect(
+      client.createSandbox({
+        image,
+        tier: 'S',
+        podId: 'isolated',
+        egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+      }),
+    ).rejects.toThrow();
+    expect(requests.map(({ init }) => init?.method)).toEqual(['GET']);
+  });
+
+  it('does not retry sandbox allocation in exact ready disk image mode', async () => {
+    const sourceDigest = `sha256:${'1'.repeat(64)}`;
+    const image = `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}`;
+    const { client, requests } = makeClient(
+      [
+        {
+          status: 200,
+          body: {
+            id: 'exact-disk',
+            image: { base: image },
+            status: { state: 'Ready' },
+            labels: diskImageLabelsFor(image, sourceDigest),
+          },
+        },
+        { status: 429 },
+      ],
+      { assumeGroupExists: true, readyDiskImageId: 'exact-disk' },
+    );
+    await expect(
+      client.createSandbox({
+        image,
+        tier: 'S',
+        podId: 'isolated',
+        egressPolicy: { defaultAction: 'Deny', hostRules: [] },
+      }),
+    ).rejects.toThrow();
+    expect(requests.map(({ init }) => init?.method)).toEqual(['GET', 'PUT']);
+  });
+
   it('garbage-collects stale disk images after the source digest changes', async () => {
     const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
     const oldDiskImage = {
@@ -1245,6 +1350,112 @@ describe('AzureSandboxApiClient', () => {
       workingDirectory: '/workspace',
       user: 'root',
     });
+  });
+
+  it('uses one bounded Azure execution for the private collector, with the exact worker user and no redirect', async () => {
+    const commit = 'a'.repeat(40);
+    const tree = 'b'.repeat(40);
+    // Test the transport handoff only; real PACK verification is a separate gate.
+    const bundle = Buffer.from('private transport fixture');
+    const { client, requests } = makeClient([
+      {
+        status: 200,
+        body: { output: `${commit}\n${tree}\n${bundle.toString('base64')}\n`, exit_code: 0 },
+      },
+    ]);
+    const manager = new SandboxContainerManager(client, logger);
+    const assertCurrent = vi.fn();
+    await expect(
+      collectPrivateHead(manager, 'sbx-1', 'fixture-repo', 1024, assertCurrent),
+    ).resolves.toEqual({ commit, tree, bundle });
+    expect(requests).toHaveLength(1);
+    const request = requests[0] ?? failRequest();
+    expect(request.url).toContain('/sandboxes/sbx-1/executeShellCommand');
+    expect(request.init?.redirect).toBe('error');
+    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(jsonBody(request)).toMatchObject({
+      user: 'autopod',
+      command: expect.stringContaining('/repositories/fixture-repo'),
+    });
+    expect(assertCurrent).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { stdout: 'éé', stderr: 'bar', exitCode: 0 },
+    { stdout: 'OK' },
+    { stdout: 'OK', exitCode: -1 },
+    { stdout: 'OK', exitCode: 0, exit_code: 1 },
+    { stdout: {}, exitCode: 0 },
+  ])('rejects decoded byte overrun or malformed exit evidence without retry', async (body) => {
+    const { client, requests } = makeClient([{ status: 200, body }]);
+    await expect(client.exec('sbx-1', ['true'], { maxOutputBytes: 6 })).rejects.toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each([
+    302, 403, 429, 503,
+  ])('refuses bounded exec HTTP %s without reading body or retrying', async (status) => {
+    const cancelled = vi.fn();
+    const fetch = vi.fn(
+      async () => new Response(new ReadableStream({ cancel: cancelled }), { status }),
+    );
+    const { client } = makeClient([], { fetch });
+    await expect(client.exec('sbx-1', ['true'], { maxOutputBytes: 64 })).rejects.toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it('cancels the response stream as soon as the wire envelope exceeds its cap', async () => {
+    const cancelled = vi.fn();
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(8192));
+            },
+            cancel: cancelled,
+          }),
+          { status: 200 },
+        ),
+    );
+    const { client } = makeClient([], { fetch });
+    await expect(client.exec('sbx-1', ['true'], { maxOutputBytes: 64 })).rejects.toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the deadline active until the complete response body arrives', async () => {
+    let keepEventLoopAlive: ReturnType<typeof setTimeout> | undefined;
+    const fetch = vi.fn(
+      async (_url: string | URL, init?: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(Buffer.from('{"exitCode":0,"stdout":"'));
+              init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), {
+                once: true,
+              });
+              keepEventLoopAlive = setTimeout(() => controller.close(), 1000);
+            },
+          }),
+        ),
+    );
+    const { client } = makeClient([], { fetch });
+    try {
+      await expect(
+        client.exec('sbx-1', ['true'], { maxOutputBytes: 64, timeoutMs: 30 }),
+      ).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+    } finally {
+      clearTimeout(keepEventLoopAlive);
+    }
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('retains an unknown buffered execution outcome after fetch failure without replay', async () => {

@@ -25,7 +25,7 @@ public struct DesktopManagedPodsWorkspace: View {
             if let artifact, let api {
                 ManagedArtifactViewer(artifact: artifact, api: api, onClose: { self.artifact = nil })
             } else {
-                DesktopInsightsHeader(title: "Managed pods", subtitle: "Follow a managed attempt from provider route to committed output.") {
+                DesktopInsightsHeader(title: "Dispatcher attempts", subtitle: "For workers delegated by a Task, open that Task’s Overview → Delegated workers.") {
                     HStack(spacing: 14) {
                         Label("Read-only inventory", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
                         Button { Task { await refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(isLoading || !isConnected)

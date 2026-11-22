@@ -1,3 +1,4 @@
+import type { KeyObject } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,11 +7,16 @@ import { z } from 'zod';
 import type { ManagedAcceptanceRuntime } from '../managed/acceptance-config.js';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedCliConfig } from '../managed/cli-config.js';
+import type { ManagedContainerRuntime } from '../managed/container-runtime.js';
 import {
   admitManagedRequest,
   REQUIRED_ENFORCEMENT,
   validateManagedRequest,
 } from '../managed/grants.js';
+import {
+  assertPrivateParentCommit,
+  isPrivateParentCommit,
+} from '../managed/private-commit-policy.js';
 import {
   type ManagedProfileSetConfig,
   profileSetRequestPolicy,
@@ -19,6 +25,7 @@ import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import type { ProfileLlmClient } from '../providers/llm-client.js';
 import {
   combinedPolicyDigest,
+  gatePinsSchema,
   gatePolicySchema,
   signedGateSchema,
   verifyGateReceipt,
@@ -28,7 +35,13 @@ import type { MainProfilePin } from './hosted-controller-profile.js';
 import { type bindInspectionCodex, inspectionCodexPin } from './inspection-codex.js';
 import { LocalCheckpointHost } from './local-checkpoints.js';
 import { type OperatorRunsConfig, operatorRunId } from './operator-runs.js';
+import { createParentEvaluatorClient } from './parent-evaluator-client.js';
+import { createEvaluatorDispatchSigner } from './parent-evaluator-dispatch.js';
+import { composeParentHostGates, type ParentHostGatePorts } from './parent-host-gates.js';
+import type { ParentIntegrationGates } from './parent-integration-qualified.js';
 import { parentLaunchPolicySchema } from './parent-managed-launch.js';
+import { parentPrivateCompletion } from './parent-private-completion.js';
+import { parentQualificationJob } from './parent-qualification-job.js';
 
 const id = z.string().min(1).max(160),
   alias = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
@@ -101,6 +114,8 @@ const enrollmentSchema = z.discriminatedUnion('version', [schema, ownerInspectio
 type Draft = Omit<z.infer<typeof operatorDraftSchema>, 'version'>;
 type Envelope = z.infer<typeof enrollmentSchema>;
 type Runtime = ManagedAcceptanceRuntime & {
+  privateRuntime?: ManagedContainerRuntime;
+  sandboxCoding?: { resourceScopeDigest: string; readyDiskImageId: string };
   withCheckpoint<T>(
     cp: Readonly<ContinuationCheckpoint>,
     mirror: string,
@@ -160,8 +175,44 @@ export function confinedCatalog(e: Draft, profiles: ManagedProfileSetConfig) {
   );
   if (!Object.keys(catalog).length || Object.keys(catalog).length > 16)
     throw new Error('invalid-operator-catalog');
-  for (const r of Object.values(catalog)) {
+  const coding = e.parent?.coding;
+  const codingStages = profiles.profiles.filter((stage) => stage.privateCommit);
+  const paths = [...(coding?.paths ?? []), ...(coding?.sandbox?.secondPaths ?? [])];
+  const lower = paths.map((name) => name.toLowerCase());
+  if (
+    coding
+      ? codingStages.length !== 1 ||
+        !Object.hasOwn(catalog, coding.recipe) ||
+        profiles.source ||
+        profiles.githubRead ||
+        profiles.mirror.dependencyCachePath ||
+        (target === 'sandbox') !== Boolean(coding.sandbox) ||
+        (coding.sandbox &&
+          (Boolean(coding.evaluation) === Boolean(coding.sandbox.hostQualification) ||
+            (coding.sandbox.hostQualification && coding.sandbox.authorizeEvaluatorDispatch) ||
+            (coding.sandbox.singleOwnerReceipts && !coding.sandbox.hostQualification) ||
+            e.budget.workers < 2 ||
+            lower.some((name, index) =>
+              lower.some(
+                (other, j) => j !== index && (name === other || name.startsWith(other + '/')),
+              ),
+            ))) ||
+        paths.some((name) => name.split('/').some((part) => part.endsWith('.')))
+      : codingStages.length !== 0
+  )
+    throw new Error('parent-coding-policy-mismatch');
+  for (const [alias, r] of Object.entries(catalog)) {
     profileSetRequestPolicy(profiles)(r);
+    if (alias === coding?.recipe) {
+      assertPrivateParentCommit(
+        r,
+        profiles.mirror.enrollmentId,
+        e.source.commit,
+        coding.sandbox ? 'sandbox' : 'local',
+      );
+      continue;
+    }
+    if (isPrivateParentCommit(r)) throw new Error('parent-coding-policy-mismatch');
     const scope = r.effectiveGrant.scope;
     if (
       r.route.executionTarget !== target ||
@@ -270,6 +321,12 @@ export function composeOperatorEnrollment(
     profiles: ManagedProfileSetConfig | undefined;
     cli: ManagedCliConfig | undefined;
     runtime: Runtime | undefined;
+    /** Private role-scoped TLS for dynamic dispatch; harnesses may inject a local test port. */
+    evaluatorFetch?: typeof fetch;
+    trustedEvaluatorPins?: unknown;
+    /** Explicit trusted host composition. Never loaded from worker JSON or a provider response. */
+    parentHostGates?: ParentHostGatePorts;
+    evaluatorDispatchKeys?: Readonly<Record<'checks' | 'independentReview', KeyObject>>;
     bind: (pin: MainProfilePin) => ProfileLlmClient;
     bindCodex?: (pin: z.infer<typeof inspectionCodexPin>) => ReturnType<typeof bindInspectionCodex>;
   },
@@ -293,6 +350,42 @@ export function composeOperatorEnrollment(
   const cases = profiles.profiles.some((stage) => stage.caseDirectory);
   if (cases && e.version !== 2) throw new Error('inspection-case-owner-required');
   const catalog = e.version === 2 ? inspectionPolicy(e, profiles, 0) : confinedCatalog(e, profiles);
+  if (e.parent?.coding && (!runtime.privateRuntime || !deps.isolatedArtifacts))
+    throw new Error('parent-private-runtime-partition-required');
+  const sandboxCoding = e.parent?.coding?.sandbox;
+  if (sandboxCoding) {
+    if (
+      e.version !== 1 ||
+      runtime.sandboxCoding?.resourceScopeDigest !== sandboxCoding.resourceScopeDigest ||
+      runtime.sandboxCoding.readyDiskImageId !== sandboxCoding.readyDiskImageId
+    )
+      throw new Error('parent-sandbox-coding-runtime-mismatch');
+    const pins = gatePinsSchema.safeParse(deps.trustedEvaluatorPins);
+    if (
+      !pins.success ||
+      canonical(pins.data.checks) !== canonical(e.authorities.checks) ||
+      canonical(pins.data.independentReview) !== canonical(e.authorities.independentReview)
+    )
+      throw new Error('independently-provisioned-public-policy-required');
+  }
+  const hostQualification = sandboxCoding?.hostQualification === true;
+  if (hostQualification !== Boolean(deps.parentHostGates))
+    throw new Error('parent-host-qualification-binding-required');
+  if (
+    Boolean(sandboxCoding?.singleOwnerReceipts) !==
+    (deps.parentHostGates?.receiptTrust === 'single-owner-local')
+  )
+    throw new Error('parent-host-receipt-mode-mismatch');
+  if (hostQualification && deps.evaluatorDispatchKeys)
+    throw new Error('parent-host-qualification-remote-dispatch-refused');
+  const requireDispatch = sandboxCoding?.authorizeEvaluatorDispatch === true;
+  const dispatch =
+    requireDispatch && e.version === 1 && deps.evaluatorDispatchKeys
+      ? createEvaluatorDispatchSigner(deps.evaluatorDispatchKeys, e.authorities)
+      : undefined;
+  if (requireDispatch && !dispatch) throw new Error('parent-evaluator-dispatch-key-required');
+  if (requireDispatch && !deps.evaluatorFetch)
+    throw new Error('parent-evaluator-tls-credentials-required');
   const base = operatorBasePolicy(e, profiles, deps.isolatedArtifacts);
   if (e.version === 2 && (run !== e.expectedRun || base !== e.expectedBasePolicy))
     throw new Error('inspection-preflight-binding-mismatch');
@@ -405,12 +498,73 @@ export function composeOperatorEnrollment(
       if (retained.evidenceDigest !== checkpoint.evidenceDigest)
         throw new Error('operator-custody-changed');
     }
+    if (e.parent?.coding) {
+      if (
+        !runtime.privateRuntime ||
+        !runtime.components.service.ownsInstallation('native.' + run) ||
+        runtime.components.service.privateCommit
+      )
+        throw new Error('parent-private-runtime-partition-required');
+      runtime.components.service.privateCommit = parentPrivateCompletion(
+        runtime.components.service,
+        runtime.privateRuntime,
+        path.join(path.dirname(deps.databasePath), 'managed', 'parent-private-candidates'),
+        checkpoint,
+        e.parent.coding.paths,
+        qualification?.reserve,
+        sandboxCoding?.secondPaths,
+      );
+    }
     await runtime.resume();
   };
+  const coding = e.parent?.coding;
+  const scratch = path.join(
+    path.dirname(path.resolve(deps.databasePath)),
+    'managed',
+    'parent-qualification',
+  );
+  let gates: ParentIntegrationGates | undefined;
+  if (e.version === 1 && coding) {
+    if (hostQualification && deps.parentHostGates) {
+      gates = composeParentHostGates(
+        {
+          db,
+          scratch,
+          run,
+          policy: e.authorities,
+          // Deny these accounts for review; a recipe never grants reviewer access.
+          excludedReviewerAccounts: Object.values(catalog).map(
+            (recipe) => recipe.route.providerAccountId,
+          ),
+        },
+        deps.parentHostGates,
+      );
+    } else if (coding.evaluation) {
+      gates = createParentEvaluatorClient(
+        coding.evaluation,
+        e.authorities,
+        deps.evaluatorFetch,
+        dispatch,
+      );
+    }
+  }
+  const qualification =
+    coding && gates
+      ? parentQualificationJob(
+          db,
+          host,
+          scratch,
+          run,
+          coding.paths,
+          gates,
+          sandboxCoding?.secondPaths,
+        )
+      : undefined;
   return {
     host,
     db,
     prepare,
+    qualification,
     cleanup: async (id) => {
       if (
         id !== run ||

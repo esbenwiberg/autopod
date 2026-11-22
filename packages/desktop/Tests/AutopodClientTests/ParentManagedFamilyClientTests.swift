@@ -10,6 +10,7 @@ struct ParentManagedFamilyClientTests {
       from: Data(Self.familyFixture.utf8)
     )
 
+    #expect(family.review == nil) // Older daemons omit the optional projection.
     #expect(family.parent == "parent-one")
     #expect(family.run == "run-one")
     #expect(family.children.map(\.requestKey) == ["reserved-key", "started-key", "exited-key", "future-key"])

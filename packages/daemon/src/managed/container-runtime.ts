@@ -4,6 +4,13 @@ import type { ArtifactOutput, FollowUpEnvelope, ManagedPodRequest, Route } from 
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { canonical } from './canonical.js';
 import type { ManagedRuntimePort } from './managed-service.js';
+import {
+  assertPrivateParentCommit,
+  isPrivateParentCommit,
+  isPrivateSubmission,
+  PRIVATE_SUBMISSION_FILE,
+} from './private-commit-policy.js';
+import { collectPrivateHead } from './private-head-export.js';
 import { allocateSandboxCheckpoint } from './sandbox-checkpoint.js';
 
 export interface ReviewedContainerBoundary {
@@ -12,6 +19,8 @@ export interface ReviewedContainerBoundary {
   identityBinding?: { alias: string; bindingDigest: string };
   manager: ContainerManager;
   image: string;
+  /** Explicitly enabled by the trusted sandbox composition, never by a worker. */
+  sandboxCodingCheckpoints?: boolean;
   /** Literal reviewed command including the exact model/reasoning; no user-selected executable. */
   command: readonly string[];
   /** Exact dependency cache expected behind the repository's node_modules link. */
@@ -23,7 +32,11 @@ export interface ReviewedContainerBoundary {
   prepare(
     podId: string,
     request: ManagedPodRequest,
-  ): Promise<ContainerSpawnConfig & { sandboxCheckpoint?: { repository: string; commit: string } }>;
+  ): Promise<
+    ContainerSpawnConfig & {
+      sandboxCheckpoint?: { repository: string; commit: string; coding?: true };
+    }
+  >;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
   sendMessage?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
   quotaReady(request: ManagedPodRequest): Promise<boolean>;
@@ -141,6 +154,12 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
   async preflight(request: ManagedPodRequest): Promise<void> {
     const boundary = this.boundary(request);
     if (
+      request.route.executionTarget === 'sandbox' &&
+      isPrivateParentCommit(request) &&
+      !boundary.sandboxCodingCheckpoints
+    )
+      throw new Error('managed-sandbox-coding-checkpoint-required');
+    if (
       !boundary.manager.ensureManagedContainer ||
       !boundary.manager.extractManagedOutput ||
       !boundary.command.includes(request.route.model) ||
@@ -231,6 +250,18 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     const allocate = boundary.manager.ensureManagedContainer;
     if (!allocate) throw new Error('managed-allocation-unavailable');
     const { sandboxCheckpoint, ...spawn } = config;
+    if (request.route.executionTarget === 'sandbox' && isPrivateParentCommit(request)) {
+      if (!boundary.sandboxCodingCheckpoints || !sandboxCheckpoint?.coding)
+        throw new Error('managed-sandbox-coding-checkpoint-required');
+      assertPrivateParentCommit(
+        request,
+        sandboxCheckpoint.repository,
+        sandboxCheckpoint.commit,
+        'sandbox',
+      );
+    } else if (sandboxCheckpoint?.coding) {
+      throw new Error('managed-sandbox-coding-checkpoint-required');
+    }
     const launch = {
       ...spawn,
       managedSpecDigest: request.executionSpecDigest,
@@ -388,6 +419,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     exitCode?: number;
     limitation?:
       | 'agent-request-limit-reached'
+      | 'agent-provider-request-limit-reached'
       | 'agent-quota-feed-unavailable'
       | 'agent-auto-compaction-unsupported'
       | 'agent-context-window-exceeded'
@@ -440,6 +472,7 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         throw new Error('binding');
       let limitation:
         | 'agent-request-limit-reached'
+        | 'agent-provider-request-limit-reached'
         | 'agent-quota-feed-unavailable'
         | 'agent-auto-compaction-unsupported'
         | 'agent-context-window-exceeded'
@@ -473,6 +506,13 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
           try {
             const failure = JSON.parse(diagnostic.stdout) as Record<string, unknown>;
             if (
+              failure.phase === 'provider' &&
+              failure.reason === 'request-limit' &&
+              receipt.exitCode !== undefined &&
+              receipt.exitCode !== 0
+            )
+              limitation = 'agent-provider-request-limit-reached';
+            else if (
               failure.phase === 'request' &&
               failure.reason === 'request-limit' &&
               Number.isSafeInteger(failure.actualBytes) &&
@@ -536,6 +576,177 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     if (!boundary.manager.extractManagedOutput) throw new Error('managed-output-unavailable');
     await boundary.manager.extractManagedOutput(ref, staging, output);
   }
+  /** Read only the opted-in final response, never the repository or unsubmitted edits. */
+  async readPrivateSubmission(
+    ref: string,
+    podId: string,
+    spec: string,
+    assertAuthority: () => void,
+  ) {
+    const assertCurrent = () => {
+      assertAuthority();
+      const row = this.resolve(ref);
+      if (
+        !row.observedExit ||
+        row.podId !== podId ||
+        row.request.executionSpecDigest !== spec ||
+        !row.boundary.sandboxCodingCheckpoints ||
+        !isPrivateSubmission(row.request)
+      )
+        throw new Error('parent-private-submission-binding');
+      return row;
+    };
+    const { boundary, request } = assertCurrent();
+    const base = request.effectiveGrant.scope.repositories[0]?.baseRevision;
+    if (!base || request.outputs.source.mode !== 'commit')
+      throw new Error('parent-private-submission-binding');
+    assertPrivateParentCommit(request, request.outputs.source.repository, base, 'sandbox');
+    await this.provePrivateSandboxExit(boundary.manager, ref, podId, spec, assertCurrent);
+    const limit = Math.min(
+      request.outputs.artifacts.limits.maxFileBytes,
+      request.outputs.artifacts.limits.maxTotalBytes,
+    );
+    const cap = Math.ceil(limit / 3) * 4;
+    const result = await boundary.manager.execInContainer(
+      ref,
+      [
+        'python3',
+        '-I',
+        '-c',
+        `import base64,os,stat,sys
+limit=int(sys.argv[2])
+try:
+ if os.geteuid()!=1000: sys.exit(1)
+ root=os.open('/output',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW,dir_fd=root)
+ with os.fdopen(fd,'rb') as f:
+  st=os.fstat(f.fileno())
+  if not stat.S_ISREG(st.st_mode) or st.st_nlink!=1 or st.st_uid!=1000 or not 0<st.st_size<=limit: sys.exit(1)
+  data=f.read(limit+1)
+  if len(data)!=st.st_size: sys.exit(1)
+ sys.stdout.buffer.write(base64.b64encode(data))
+except OSError:sys.exit(1)`,
+        PRIVATE_SUBMISSION_FILE,
+        String(limit),
+      ],
+      {
+        user: 'autopod',
+        timeout: 10_000,
+        maxOutputBytes: cap,
+        requireObservedExit: true,
+        assertCurrent,
+      },
+    );
+    assertCurrent();
+    if (result.exitCode !== 0 || result.stderr || !result.stdout || result.stdout.length > cap)
+      throw new Error('parent-private-submission-unavailable');
+    const bytes = Buffer.from(result.stdout, 'base64');
+    if (!bytes.length || bytes.length > limit || bytes.toString('base64') !== result.stdout)
+      throw new Error('parent-private-submission-unavailable');
+    return bytes;
+  }
+
+  private async provePrivateSandboxExit(
+    manager: ContainerManager,
+    ref: string,
+    podId: string,
+    specDigest: string,
+    assertCurrent: () => void,
+  ) {
+    const proof = await manager.execInContainer(
+      ref,
+      [
+        'python3',
+        '-I',
+        '-c',
+        'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
+        `/run/dispatcher-${podId}/execution.json`,
+      ],
+      {
+        user: 'root',
+        timeout: 10_000,
+        maxOutputBytes: 2048,
+        requireObservedExit: true,
+        assertCurrent,
+      },
+    );
+    assertCurrent();
+    if (proof.exitCode !== 0 || proof.stderr)
+      throw new Error('parent-private-export-runtime-not-successful');
+    const receipt = JSON.parse(proof.stdout);
+    if (
+      receipt?.specDigest !== specDigest ||
+      receipt.observedExit !== true ||
+      receipt.state !== 'exited' ||
+      receipt.exitCode !== 0
+    )
+      throw new Error('parent-private-export-runtime-not-successful');
+  }
+
+  async exportPrivateHead(
+    ref: string,
+    binding: {
+      podId: string;
+      specDigest: string;
+      repository: string;
+      base: string;
+      maxBytes: number;
+    },
+    assertAuthority: () => void,
+  ) {
+    const { podId, specDigest, repository, base, maxBytes } = binding;
+    const assertCurrent = () => {
+      assertAuthority();
+      const record = this.resolve(ref);
+      const { request } = record;
+      const scope = request.effectiveGrant.scope;
+      const privateCommit = isPrivateParentCommit(request);
+      if (privateCommit) {
+        const target =
+          request.route.executionTarget === 'sandbox' && record.boundary.sandboxCodingCheckpoints
+            ? 'sandbox'
+            : 'local';
+        assertPrivateParentCommit(request, repository, base, target);
+      }
+      if (
+        !record.observedExit ||
+        record.podId !== podId ||
+        request.executionSpecDigest !== specDigest ||
+        request.outputs.source.mode !== 'commit' ||
+        request.outputs.source.repository !== repository ||
+        request.outputs.source.remote !== 'private' ||
+        scope.network.destinations.length !== 0 ||
+        scope.identityBindings.length !== 0 ||
+        scope.repositories.length !== 1 ||
+        scope.repositories[0]?.enrollmentId !== repository ||
+        scope.repositories[0]?.access !== 'write' ||
+        scope.repositories[0]?.baseRevision !== base ||
+        (!privateCommit &&
+          scope.allowedEffects.some(
+            (effect) => effect !== 'repository.read' && effect !== 'repository.write',
+          ))
+      )
+        throw new Error('parent-private-export-runtime-binding');
+    };
+    assertCurrent();
+    const { boundary, request } = this.resolve(ref);
+    if (isPrivateSubmission(request)) throw new Error('parent-private-submission-required');
+    if (request.route.executionTarget === 'sandbox') {
+      if (!boundary.sandboxCodingCheckpoints || !isPrivateParentCommit(request))
+        throw new Error('parent-private-export-bounded-transport-unavailable');
+      // Use only the bound, root-owned supervisor observation.
+      await this.provePrivateSandboxExit(boundary.manager, ref, podId, specDigest, assertCurrent);
+      return collectPrivateHead(boundary.manager, ref, repository, maxBytes, assertCurrent);
+    }
+    if (request.route.executionTarget !== 'local')
+      throw new Error('parent-private-export-bounded-transport-unavailable');
+    const observed = await this.observe(ref);
+    assertCurrent();
+    if (observed.state !== 'stopped' || observed.exitCode !== 0)
+      throw new Error('parent-private-export-runtime-not-successful');
+    return collectPrivateHead(boundary.manager, ref, repository, maxBytes, assertCurrent);
+  }
+
   async extractSource(ref: string, repositoryId: string): Promise<void> {
     const { boundary, podId, request } = this.resolve(ref);
     const repository = request.effectiveGrant.scope.repositories.find(

@@ -109,6 +109,7 @@ export interface SandboxContainerManagerConfig {
   sandboxGroup?: string;
   /** Skip ARM group read/create; use when the group is managed out-of-band. */
   assumeGroupExists?: boolean;
+  readyDiskImageId?: string;
   /** User-assigned managed identity used by the sandbox group to pull private ACR images. */
   imagePullIdentityResourceId?: string;
   /** Transient registry credentials used for disk-image creation. Prefer managed identity. */
@@ -172,6 +173,10 @@ export class SandboxContainerManager implements ContainerManager {
 
   get executionResourceScope(): string | undefined {
     return this.client.executionResourceScope;
+  }
+
+  get readyDiskImageId(): string | undefined {
+    return this.client.readyDiskImageId;
   }
 
   get supportsStreamingExec(): boolean {
@@ -247,6 +252,7 @@ export class SandboxContainerManager implements ContainerManager {
         location: config.location,
         sandboxGroup: config.sandboxGroup,
         assumeGroupExists: config.assumeGroupExists,
+        readyDiskImageId: config.readyDiskImageId,
         imagePullIdentityResourceId: config.imagePullIdentityResourceId,
         registryCredentials: config.registryCredentials,
         resolveImageDigest: config.resolveImageDigest,
@@ -818,13 +824,20 @@ for root in sys.argv[1:]:
   ): Promise<ExecResult> {
     if (this.managedDatabase)
       assertFinalizationResourceAvailable(this.managedDatabase, containerId);
-    if (options?.maxOutputBytes !== undefined)
+    if (options?.maxOutputBytes !== undefined && this.client.supportsBoundedExec !== true)
       throw new AutopodError(
         'Bounded buffered exec output is unavailable on this backend',
         'EXEC_OUTPUT_BOUND_UNSUPPORTED',
         409,
       );
-    const result = await this.client.exec(containerId, command, toSandboxExecOptions(options));
+    const native = toSandboxExecOptions(options);
+    const result = await this.client.exec(
+      containerId,
+      command,
+      options?.maxOutputBytes === undefined
+        ? native
+        : { ...native, maxOutputBytes: options.maxOutputBytes },
+    );
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
   }
 

@@ -7,7 +7,12 @@ import { managedGit } from '../managed/source-git.js';
 import { LocalCheckpointHost } from '../orchestration/local-checkpoints.js';
 import { requestTimeFixture, resign } from './managed-fixture.js';
 
-export async function setupOrchestrationRun(workerRequests = 2, maxActive = 1, run = 'example') {
+export async function setupOrchestrationRun(
+  workerRequests = 2,
+  maxActive = 1,
+  run = 'example',
+  policyDigest = digest('fixture-policy'),
+) {
   const f = requestTimeFixture(2);
   const root = await mkdtemp(path.join(await realpath(tmpdir()), 'native-run-'));
   onTestFinished(async () => {
@@ -75,7 +80,7 @@ export async function setupOrchestrationRun(workerRequests = 2, maxActive = 1, r
     commit: sha,
     tree: await managedGit(source, ['rev-parse', 'HEAD^{tree}']),
     repository: 'fixture-repo',
-    policyDigest: digest('fixture-policy'),
+    policyDigest,
   };
   const request = f.request;
   request.outputs.artifacts.mode = 'none';

@@ -18,9 +18,9 @@ struct ParentFamilyCard: View {
           .foregroundStyle(.secondary)
           .frame(width: 20)
         VStack(alignment: .leading, spacing: 2) {
-          Text("Parent-managed family")
+          Text("Delegated workers")
             .font(.subheadline.weight(.semibold))
-          Text("Run \(family.run) · \(family.children.count) child\(family.children.count == 1 ? "" : "ren")")
+          Text("\(family.children.count) worker\(family.children.count == 1 ? "" : "s") · \(family.children.filter { $0.status == .exited }.count) exited")
             .font(.caption)
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
@@ -46,6 +46,17 @@ struct ParentFamilyCard: View {
           .accessibilityIdentifier("parent-family-stale")
       }
 
+      if let review = family.review {
+        reviewSection(ParentReviewPresentation(review, isStale: isStale))
+      }
+
+      DisclosureGroup("Run details") {
+        Text(family.run)
+          .font(.system(.caption2, design: .monospaced))
+          .textSelection(.enabled)
+      }
+      .font(.caption)
+
       if family.children.isEmpty {
         Text("No child requests were recorded for this run.")
           .font(.caption)
@@ -63,6 +74,26 @@ struct ParentFamilyCard: View {
     .clipShape(RoundedRectangle(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.14), lineWidth: 1))
     .accessibilityIdentifier("parent-family-card")
+  }
+
+  private func reviewSection(_ review: ParentReviewPresentation) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(review.title)
+        .font(.caption.weight(.semibold))
+      Text(review.detail)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      if let commit = review.commit, let evidence = review.evidence {
+        Text("Commit: \(commit)")
+        Text("Evidence: \(evidence)")
+      }
+    }
+    .font(.system(.caption2, design: .monospaced))
+    .textSelection(.enabled)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(9)
+    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    .accessibilityIdentifier("parent-family-review")
   }
 
   private func childRow(_ child: ParentManagedChild) -> some View {
@@ -87,28 +118,36 @@ struct ParentFamilyCard: View {
         Text(presentation.detail)
           .font(.caption2)
           .foregroundStyle(.secondary)
-        Text("Parent attempt \(child.parentAttempt)")
-          .font(.system(.caption2, design: .monospaced))
-          .foregroundStyle(.tertiary)
-        if let childID = child.child, !childID.isEmpty {
-          HStack(spacing: 5) {
-            Text(childID)
-              .font(.system(.caption, design: .monospaced))
-              .lineLimit(1)
-              .truncationMode(.middle)
-              .textSelection(.enabled)
-            Button {
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(childID, forType: .string)
-            } label: {
-              Image(systemName: "doc.on.doc")
-                .font(.system(size: 10))
+        if let collection = presentation.collection {
+          Text(collection)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+        DisclosureGroup("Worker details") {
+          Text("Parent attempt \(child.parentAttempt)")
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(.secondary)
+          if let childID = child.child, !childID.isEmpty {
+            HStack(spacing: 5) {
+              Text(childID)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+              Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(childID, forType: .string)
+              } label: {
+                Image(systemName: "doc.on.doc")
+                  .font(.system(size: 10))
+              }
+              .buttonStyle(.plain)
+              .help("Copy child task ID")
+              .accessibilityLabel("Copy child task ID \(childID)")
             }
-            .buttonStyle(.plain)
-            .help("Copy child task ID")
-            .accessibilityLabel("Copy child task ID \(childID)")
           }
         }
+        .font(.caption2)
       }
       Spacer(minLength: 0)
     }
@@ -122,7 +161,7 @@ struct ParentFamilyCard: View {
     case .reserved: .secondary
     case .started: .blue
     case .exited: .secondary
-    case .unknown: .orange
+    case .limited, .unknown: .orange
     }
   }
 }

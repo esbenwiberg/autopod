@@ -174,6 +174,7 @@ export interface ContainerExecutionMetadata {
 export interface ContainerManager {
   /** Credential-free exact provider namespace; required for durable sandbox recovery. */
   readonly executionResourceScope?: string;
+  readonly readyDiskImageId?: string;
   /** Available only when an exec can be recorded before start and inspected after daemon restart. */
   readonly supportsExecRecovery?: boolean;
   /** Exact backend/engine/region/group/resource namespace, never an owner label. */

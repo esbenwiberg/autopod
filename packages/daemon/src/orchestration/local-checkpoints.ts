@@ -152,6 +152,7 @@ export class LocalCheckpointHost {
     verify: Verify | null,
     operatorSeed?: { requests: number; active: number },
     assertCurrentAuthority?: () => void,
+    onRetained?: (evidenceDigest: string) => void,
   ): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
     if (!bytes.length || bytes.length > MAX_CANDIDATE_BYTES)
@@ -214,6 +215,7 @@ export class LocalCheckpointHost {
             `INSERT INTO orchestration_checkpoint_custody(run_id,evidence_digest,manifest,bundle) VALUES(?,?,?,?) ON CONFLICT(run_id,evidence_digest) DO NOTHING`,
           )
           .run(subject.run, evidenceDigest, manifest, bundle);
+        onRetained?.(evidenceDigest);
       })
       .immediate();
     return { ...subject, evidenceDigest };

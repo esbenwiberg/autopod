@@ -534,6 +534,7 @@ describe('shared launch request CLI', () => {
   ] as const)('sends %s --token-budget %s as %s in the previewed overrides', async (name, value, expected) => {
     const client = {
       listConfigurations: lookup,
+      previewDispatch: vi.fn(async () => null),
       resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
         digest: 'a'.repeat(64),
         ...request,

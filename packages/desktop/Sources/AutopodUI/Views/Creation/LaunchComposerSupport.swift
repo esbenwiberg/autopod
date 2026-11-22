@@ -30,18 +30,19 @@ internal enum LaunchConfigurationSection: String, CaseIterable, Identifiable {
 }
 
 internal enum LaunchComposerJSON {
+  private static let runFields: Set<String> = ["task", "work", "requestId", "expectedDigest", "origin", "requireParentEnrollment"]
   static func value<T: Encodable>(_ request: T) -> ConfigurationJSON {
     (try? JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(request))) ?? .null
   }
   static func value(_ request: ComposableLaunchRequest, selectionOnly: Bool) -> ConfigurationJSON {
     guard var fields = value(request).object else { return .null }
-    if selectionOnly { for key in ["task", "work", "requestId", "expectedDigest", "origin"] { fields.removeValue(forKey: key) } }
+    if selectionOnly { for key in runFields { fields.removeValue(forKey: key) } }
     return .object(fields)
   }
   static func decode(_ text: String, selectionOnly: Bool, task: String) throws -> ComposableLaunchRequest {
     var value = try JSONDecoder().decode(ConfigurationJSON.self, from: Data(text.utf8))
     if selectionOnly {
-      guard var fields = value.object, Set(fields.keys).isDisjoint(with: ["task", "work", "requestId", "expectedDigest", "origin"]) else {
+      guard var fields = value.object, Set(fields.keys).isDisjoint(with: runFields) else {
         throw LaunchJSONError.invalid("Task, work and request identity are supplied by the series.")
       }
       fields["task"] = .string(task); value = .object(fields)
@@ -49,6 +50,31 @@ internal enum LaunchComposerJSON {
     let request = try ComposableLaunchRequest.decodeJSON(Data(value.formatted().utf8))
     guard self.value(request) == value else { throw LaunchJSONError.invalid("This desktop cannot preserve every JSON field. No changes were applied.") }
     return request
+  }
+
+  static func applyTaskEdit(_ edited: ComposableLaunchRequest, preserving current: ComposableLaunchRequest) throws -> ComposableLaunchRequest {
+    if current.requireParentEnrollment == true {
+      guard edited.requireParentEnrollment == true, edited.requestId == current.requestId,
+        edited.expectedDigest == current.expectedDigest else {
+        throw LaunchJSONError.invalid("This draft is bound to its enrolled Task. Close it before opening a different launch.")
+      }
+    }
+    return edited
+  }
+
+  static func submission(_ request: ComposableLaunchRequest, preview: EffectiveLaunchPreview) throws -> ComposableLaunchRequest {
+    try request.validateParentEnrollment()
+    guard !preview.digest.isEmpty else { throw LaunchJSONError.invalid("A fresh launch preview is required.") }
+    if request.requireParentEnrollment == true {
+      guard preview.digest == request.expectedDigest, preview.intent == "task" else {
+        throw LaunchJSONError.invalid("The preview does not match the enrolled Task. Nothing was sent.")
+      }
+      return request
+    }
+    var ordinary = request
+    ordinary.requestId = UUID().uuidString
+    ordinary.expectedDigest = preview.digest
+    return ordinary
   }
 }
 

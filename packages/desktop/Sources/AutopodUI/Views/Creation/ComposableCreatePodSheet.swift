@@ -16,6 +16,7 @@ public struct ComposableCreatePodSheet: View {
   @State private var referenceFiles: [InputAttachment] = []
   @State private var preview: EffectiveLaunchPreview?
   @State private var previewRequest: ComposableLaunchRequest?
+  @State private var previewConnection: String?
   @State private var pendingRequest: ComposableLaunchRequest?
   @State private var busy = false
   @State private var error: String?
@@ -34,6 +35,7 @@ public struct ComposableCreatePodSheet: View {
     self._request = State(initialValue: initialRequest); self._stage = State(initialValue: stage)
     self._preview = State(initialValue: preview); self._previewRequest = State(initialValue: preview == nil ? nil : initialRequest)
     self._pendingRequest = State(initialValue: pending)
+    self._previewConnection = State(initialValue: preview == nil ? nil : actions.connectionID)
   }
   private var repository: ConfigurationDocument? { actions.list(.repository).first { $0.id == request.repositoryId } }
   private var profileID: String? { request.profileId ?? repository?.payload["usualProfileId"]?.string }
@@ -54,12 +56,26 @@ public struct ComposableCreatePodSheet: View {
     return actions.capabilities["nativeGoals"]?.array?.contains { $0["available"]?.bool == true && $0["runtime"]?.string == main?["runtime"]?.string && $0["accountId"]?.string == main?["providerAccountId"]?.string && $0["backend"]?.string == executionTarget } ?? false
   }
   private var canPreview: Bool { !request.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (request.repositoryId != nil || request.emptyWorkspace == true) && (profileID != nil) }
+  private var enrolled: Bool { request.requireParentEnrollment == true }
+  private var enrolledSubmission: Bool { pendingRequest?.requireParentEnrollment == true }
+  private var previewMatches: Bool {
+    preview != nil && previewRequest == request && previewConnection == actions.connectionID && !jsonDirty
+  }
   public var body: some View {
     Group { if redesign { composer } else { legacyBody } }
+      .onChange(of: actions.connectionID) { _, _ in invalidatePreview() }
+  }
+  private var enrollmentSummary: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text("Enrolled Task · no ordinary fallback").font(.headline)
+      Text("Request: \(request.requestId ?? "")")
+      Text("Digest: \(request.expectedDigest ?? "")")
+    }.font(.caption.monospaced()).textSelection(.enabled)
+      .accessibilityIdentifier("launch-parent-enrollment")
   }
   private var composer: some View {
     LaunchComposerLayout(series: false, stage: $stage, locked: pendingRequest != nil, busy: busy,
-      ready: preview != nil && previewRequest == request && !jsonDirty, close: close) {
+      ready: previewMatches, close: close) {
       if let loadError = actions.loadError {
         Text(loadError).foregroundStyle(.red).textSelection(.enabled)
         Button("Reload configuration") { Task { await actions.reload() } }.disabled(busy)
@@ -74,6 +90,7 @@ public struct ComposableCreatePodSheet: View {
           case .review:
             if let preview, previewRequest == request, !jsonDirty {
               LaunchResolvedReview(preview: preview)
+              if enrolled { enrollmentSummary }
               Text(request.task).font(.body).textSelection(.enabled)
             } else {
               Text("Inspect before you launch.").font(.title2.weight(.semibold))
@@ -97,7 +114,7 @@ public struct ComposableCreatePodSheet: View {
     .confirmationDialog("Leave this launch draft?", isPresented: $confirmClose) {
       Button("Leave draft", role: .destructive) { isPresented = false }
       Button("Keep working", role: .cancel) {}
-    } message: { Text(pendingRequest == nil ? "Unsaved choices will be discarded." : "The request’s result is still unconfirmed. Keep this composer open to retry its exact identity.") }
+    } message: { Text(pendingRequest == nil ? "Unsaved choices will be discarded." : enrolledSubmission ? "The exact request is recorded. Check the original daemon; do not resend it." : "The request’s result is still unconfirmed. Keep this composer open to retry its exact identity.") }
     .confirmationDialog("Start a different launch?", isPresented: $confirmDifferent) {
       Button("Edit a different launch", role: .destructive) { pendingRequest = nil; preview = nil; previewRequest = nil; stage = .compose }
       Button("Keep saved request", role: .cancel) {}
@@ -110,7 +127,7 @@ public struct ComposableCreatePodSheet: View {
       }
     }
   }
-  private func invalidatePreview() { preview = nil; previewRequest = nil; previewGeneration += 1 }
+  private func invalidatePreview() { preview = nil; previewRequest = nil; previewConnection = nil; previewGeneration += 1 }
   private func close() { if dirty || jsonDirty || pendingRequest != nil { confirmClose = true } else { isPresented = false } }
   private var composerFooter: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -131,16 +148,18 @@ public struct ComposableCreatePodSheet: View {
   }
   @ViewBuilder private var composerButtons: some View {
     if pendingRequest != nil {
-      Button("Start a different launch") { confirmDifferent = true }.disabled(busy)
-      Button("Retry saved launch") { Task { await submit() } }.buttonStyle(.borderedProminent).disabled(busy)
-        .accessibilityIdentifier("launch-retry")
+      if !enrolledSubmission {
+        Button("Start a different launch") { confirmDifferent = true }.disabled(busy)
+        Button("Retry saved launch") { Task { await submit() } }.buttonStyle(.borderedProminent).disabled(busy)
+          .accessibilityIdentifier("launch-retry")
+      }
     } else {
       if stage == .compose { Button("Inspect configuration →") { stage = .configure }.disabled(busy) }
-      if preview != nil { Button("Save as profile…") { showSaveProfile = true }.disabled(busy || jsonDirty || previewRequest != request) }
+      if preview != nil && !enrolled { Button("Save as profile…") { showSaveProfile = true }.disabled(busy || jsonDirty || previewRequest != request) }
       Button(preview == nil ? "Preview launch" : "Refresh preview") { Task { await resolve() } }
         .disabled(busy || !canPreview || jsonDirty).accessibilityIdentifier("launch-preview")
       Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent)
-        .disabled(busy || jsonDirty || preview == nil || previewRequest != request || !launchAvailable)
+        .disabled(busy || !previewMatches || !launchAvailable)
         .accessibilityIdentifier("launch-submit")
     }
   }
@@ -250,10 +269,17 @@ public struct ComposableCreatePodSheet: View {
           DisclosureGroup("Full launch configuration", isExpanded: $showAdvanced) {
             VStack(alignment: .leading) {
               Text("Includes reference repositories, sidecar allocations, complete access rules and all preset overrides.").font(.caption).foregroundStyle(.secondary)
-              TextEditor(text: $advanced).font(.system(.caption, design: .monospaced)).frame(minHeight: 200)
+              TextEditor(text: Binding(get: { advanced }, set: { advanced = $0; jsonDirty = true }))
+                .font(.system(.caption, design: .monospaced)).frame(minHeight: 200)
               HStack {
-                Button("Load current values") { updateAdvanced() }
-                Button("Apply JSON") { do { request = try ComposableLaunchRequest.decodeJSON(Data(advanced.utf8)); error = nil } catch { self.error = error.localizedDescription } }
+                Button("Load current values") { updateAdvanced(); jsonDirty = false }
+                Button("Apply JSON") {
+                  do {
+                    let edited = try LaunchComposerJSON.decode(advanced, selectionOnly: false, task: request.task)
+                    request = try LaunchComposerJSON.applyTaskEdit(edited, preserving: request)
+                    jsonDirty = false; error = nil
+                  } catch { self.error = error.localizedDescription }
+                }
               }
             }
           }.onChange(of: showAdvanced) { _, expanded in if expanded { updateAdvanced() } }
@@ -264,6 +290,7 @@ public struct ComposableCreatePodSheet: View {
         if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
         if let preview {
           Text("\(preview.mainModel) · \(preview.executionTarget) · \(preview.memoryGb.map { String($0) } ?? "default") GB · \(preview.intent.capitalized)")
+          if enrolled { enrollmentSummary }
           DisclosureGroup("Resolved settings and value sources") { ScrollView { Text(ConfigurationJSON.object(preview.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 170) }
         }
         if !launchAvailable { Text(actions.capabilities["launchUnavailableReason"]?.string ?? "Launch is unavailable until daemon configuration migration and execution checks are complete.").font(.caption).foregroundStyle(.secondary) }
@@ -271,12 +298,17 @@ public struct ComposableCreatePodSheet: View {
           if busy { ProgressView().controlSize(.small) }
           Spacer()
           if pendingRequest != nil {
-            Button("Edit a different launch") { pendingRequest = nil; preview = nil; previewRequest = nil }
-            Button("Retry saved launch") { Task { await submit() } }.disabled(busy)
+            if !enrolledSubmission {
+              Button("Edit a different launch") { pendingRequest = nil; invalidatePreview() }
+              Button("Retry saved launch") { Task { await submit() } }.disabled(busy)
+            }
           } else {
-            Button("Save as profile") { showSaveProfile = true }.disabled(busy || preview == nil || previewRequest != request)
-            Button("Preview") { Task { await resolve() } }.disabled(busy || !canPreview)
-            Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent).disabled(busy || preview == nil || previewRequest != request || !launchAvailable)
+            if !enrolled { Button("Save as profile") { showSaveProfile = true }.disabled(busy || !previewMatches) }
+            Button("Preview") { Task { await resolve() } }.disabled(busy || !canPreview || jsonDirty)
+              .accessibilityIdentifier("launch-preview")
+            Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent)
+              .disabled(busy || !previewMatches || !launchAvailable)
+              .accessibilityIdentifier("launch-submit")
           }
         }
       }.padding()
@@ -449,7 +481,13 @@ public struct ComposableCreatePodSheet: View {
   private func resolve() async {
     guard !busy, !jsonDirty, canPreview else { return }
     if request.intent == "goal" && !nativeGoalAvailable { error = "Native Goal is not verified for this account and execution backend."; return }
+    if enrolled && !referenceFiles.isEmpty {
+      error = "Use the enrolled input references as supplied. This draft cannot upload new attachments."
+      return
+    }
+    if enrolled { invalidatePreview() }
     busy = true; error = nil; let source = request; let generation = previewGeneration; let files = referenceFiles
+    let connection = actions.connectionID
     defer { busy = false }
     do {
       var candidate = source
@@ -461,20 +499,31 @@ public struct ComposableCreatePodSheet: View {
       guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
       let resolved = try await actions.resolve(candidate)
       guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
-      request = candidate; preview = resolved; previewRequest = candidate; stage = .review
-    } catch { self.error = error.localizedDescription }
+      if candidate.requireParentEnrollment == true {
+        _ = try LaunchComposerJSON.submission(candidate, preview: resolved)
+      }
+      request = candidate; preview = resolved; previewRequest = candidate; previewConnection = connection; stage = .review
+    } catch {
+      guard previewGeneration == generation else { return }
+      self.error = error.localizedDescription
+    }
   }
   private func submit() async {
     guard !busy else { return }
+    guard !enrolledSubmission else { return }
     if pendingRequest == nil {
-      guard !jsonDirty, launchAvailable else { return }
-      guard let preview, previewRequest == request, !preview.digest.isEmpty else { return }
-      var candidate = request; candidate.expectedDigest = preview.digest; candidate.requestId = UUID().uuidString
-      pendingRequest = candidate
+      guard previewMatches, launchAvailable, let preview else { return }
+      do { pendingRequest = try LaunchComposerJSON.submission(request, preview: preview) }
+      catch { self.error = error.localizedDescription; return }
     }
     guard let candidate = pendingRequest else { return }
     busy = true; error = nil; defer { busy = false }
     do { let id = try await actions.launch(candidate); isPresented = false; onCreated?(id) }
-    catch { self.error = "\(error.localizedDescription)\nThe launch request is retained. Retry it to avoid creating a duplicate pod." }
+    catch {
+      let guidance = candidate.requireParentEnrollment == true
+        ? "Check the original daemon for this request UUID. Do not resend it."
+        : "The launch request is retained. Retry it to avoid creating a duplicate pod."
+      self.error = "\(error.localizedDescription)\n\(guidance)"
+    }
   }
 }

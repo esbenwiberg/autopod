@@ -24,7 +24,9 @@
     "test": "NODE_OPTIONS=\"${NODE_OPTIONS:---max-old-space-size=4096}\" vitest run",
     "predev": "[ -n \"$TURBO_HASH\" ] || pnpm --filter @autopod/shared build",
     "dev": "AUTOPOD_ALLOW_DEV_AUTH=${AUTOPOD_ALLOW_DEV_AUTH:-1} tsup --watch src --watch ../shared/dist/index.js --watch ../validator/dist/index.js --watch ../escalation-mcp/dist/index.js --no-dts --onSuccess 'cp -r src/db/migrations dist/db/ && mkdir -p dist/actions && cp -r src/actions/defaults dist/actions/ && node dist/index.js'",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "start:parent-candidate": "node dist/index.js --parent-candidate",
+    "start:parent-evaluator": "node dist/orchestration/parent-evaluator-service-cli.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

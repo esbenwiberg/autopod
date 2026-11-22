@@ -12,6 +12,7 @@ import type { LocalCheckpointHost } from './local-checkpoints.js';
 import { attachLocalController } from './local-controller-loop.js';
 import { tryOperatorDaemonOwner } from './local-recovery-claim.js';
 import type { parentLaunchPolicySchema } from './parent-managed-launch.js';
+import type { ParentQualificationJob } from './parent-qualification-job.js';
 
 // One configured slot is one run lifetime. No caller-supplied grant, source, profile,
 // mission, run owner or budget. Rebinding the operator creates a DIFFERENT run ID.
@@ -31,6 +32,7 @@ export interface OperatorRunsConfig {
   /** Called with exclusive operator ownership, before any scheduler is attached. */
   lifetimeOwner?: { owns: (db: Database.Database) => boolean };
   prepare?: () => Promise<void>;
+  qualification?: ParentQualificationJob;
   watchdog?: Pick<ManagedPodApiDeps, 'service' | 'finishOutputs'>;
   cleanup?: (run: string) => Promise<{ run: string; cleaned: number }>;
   host: LocalCheckpointHost;
@@ -107,9 +109,13 @@ export function registerOperatorRuns(
   }
   const kicked = (run: string) =>
     !!db.prepare('SELECT 1 FROM orchestration_kickoffs WHERE run_id=?').get(run);
+  let qualificationTimer: ReturnType<typeof setInterval> | undefined;
+  let qualifying: Promise<void> | undefined;
   let releaseOwner: (() => void) | undefined;
   const drain = async () => {
     closed = true;
+    if (qualificationTimer) clearInterval(qualificationTimer);
+    if (qualifying) await Promise.allSettled([qualifying]);
     await Promise.allSettled(pending.values());
     await Promise.all([...loops.values()].map((l) => l.close()));
     await Promise.all([...parents.values()].map((l) => l.close()));
@@ -125,6 +131,20 @@ export function registerOperatorRuns(
     }
     try {
       await config.prepare?.();
+      const qualification = config.qualification;
+      if (qualification) {
+        qualification.recover();
+        qualificationTimer = setInterval(() => {
+          if (closed || qualifying) return;
+          qualifying = Promise.resolve()
+            .then(() => qualification.tick())
+            .catch(() => app.log.error('parent-qualification-tick-failed'))
+            .finally(() => {
+              qualifying = undefined;
+            });
+        }, 1000);
+        qualificationTimer.unref();
+      }
       // Check every enrollment before waking any run. A boot with a stale catalog
       // must not charge a different slot and then fail halfway through startup.
       const active = [...slots].filter(

@@ -13,6 +13,7 @@ import { canonical, digest } from './canonical.js';
 import { requireSubset } from './grants.js';
 import { signalLocalRun } from './local-run-signals.js';
 import type { ManagedPodRow, ManagedPodService } from './managed-service.js';
+import { isPrivateSubmission } from './private-commit-policy.js';
 
 export class ManagedControls {
   constructor(readonly service: ManagedPodService) {
@@ -274,7 +275,14 @@ export class ManagedControls {
           )
             throw new Error('managed-cleanup-unavailable');
           const spec = JSON.parse(row.request_json) as ManagedPodRequest;
+          const privateSubmission = isPrivateSubmission(spec);
+          if (privateSubmission) {
+            if (!this.service.privateCommit)
+              throw new Error('parent-private-cleanup-custody-required');
+            this.service.privateCommit.assertSubmittedCleanup(installation, podId);
+          }
           if (
+            !privateSubmission &&
             row.runtime_ref &&
             spec.outputs.artifacts.mode === 'required' &&
             !this.artifactExportImpossible(podId) &&
@@ -285,6 +293,7 @@ export class ManagedControls {
             throw new Error('managed-artifact-export-pending');
           }
           if (
+            !privateSubmission &&
             row.runtime_ref &&
             !this.workerNeverStarted(podId) &&
             spec.outputs.source.mode !== 'none'

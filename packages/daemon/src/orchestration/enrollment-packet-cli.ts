@@ -9,6 +9,7 @@ import {
   evaluatorStatement,
   signingPacket,
 } from './enrollment-packet.js';
+import { readEvaluatorPublicPins } from './evaluator-public-pins.js';
 
 // Read fixed names only; bundlePath in a draft refers to the eventual daemon,
 // not a path to open on an evaluator machine.
@@ -79,10 +80,7 @@ async function main() {
   const trustFile = process.env.AUTOPOD_EVALUATOR_PUBLIC_POLICY;
   if (!trustFile || !path.isAbsolute(trustFile))
     throw new Error('independently-provisioned-public-policy-required');
-  const packet = signingPacket(
-    checked,
-    JSON.parse(String(await read(path.dirname(trustFile), path.basename(trustFile)))),
-  );
+  const packet = signingPacket(checked, await readEvaluatorPublicPins(trustFile));
   if (mode === 'packet') return packet;
   if (role === 'checks' || role === 'independentReview') {
     const { statement, bytes } = evaluatorStatement(

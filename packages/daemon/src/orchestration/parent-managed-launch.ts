@@ -16,13 +16,45 @@ import { canonical, digest } from '../managed/canonical.js';
 import { managedUserAuthenticator } from '../managed/user-auth.js';
 import { projectManagedRecipe } from './controller-turns.js';
 import type { OperatorRunSlot, OperatorRunsConfig } from './operator-runs.js';
+import { parentEvaluatorEndpointsSchema } from './parent-evaluator-client.js';
 import { bindParentReportBrief } from './parent-report-brief.js';
 import { ParentReportResults } from './parent-report-results.js';
+import { ParentReviewHandoff, registerParentReviewRoutes } from './parent-review-handoff.js';
+
+const codingPaths = z
+  .array(
+    z
+      .string()
+      .max(160)
+      .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/),
+  )
+  .min(1)
+  .max(16)
+  .refine((paths) => new Set(paths.map((name) => name.toLowerCase())).size === paths.length);
 
 export const parentLaunchPolicySchema = z
   .object({
     requestId: z.string().uuid(),
     launchDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    coding: z
+      .object({
+        recipe: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+        evaluation: parentEvaluatorEndpointsSchema.optional(),
+        paths: codingPaths,
+        sandbox: z
+          .object({
+            resourceScopeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+            readyDiskImageId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+            secondPaths: codingPaths,
+            authorizeEvaluatorDispatch: z.literal(true).optional(),
+            hostQualification: z.literal(true).optional(),
+            singleOwnerReceipts: z.literal(true).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const requestSchema = z
@@ -108,6 +140,20 @@ export class ParentManagedLaunch {
       throw new Error('parent-policy-unavailable');
     return slot;
   }
+  /** No admission, claims, raw identifiers or database writes. */
+  inspectLaunchOwner(
+    requestId: string | undefined,
+    principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'> | undefined,
+  ) {
+    const candidates = requestId ? this.slots.filter((s) => s.parent?.requestId === requestId) : [];
+    const owner = candidates.length === 1 ? candidates[0]?.operator : undefined;
+    return {
+      uniqueSlot: !!owner,
+      objectMatches: !!owner && principal?.oid === owner.objectId,
+      issuerMatches: !!owner && principal?.iss === owner.issuer,
+      audienceMatches: !!owner && principal?.aud === owner.audience,
+    };
+  }
   /** Only the authenticated ordinary-launch route may reserve this parent identity. */
   authorizeLaunch(
     requestId: string | undefined,
@@ -179,7 +225,11 @@ export class ParentManagedLaunch {
           .run(attempt, podId);
       })
       .immediate();
-    await this.config.host.ledger.kickoff(slot.checkpoint, slot.catalog);
+    await this.config.host.ledger.kickoff(
+      slot.checkpoint,
+      slot.catalog,
+      slot.parent?.coding ? true : undefined,
+    );
     return this.issuer.generateAttempt(podId, attempt);
   }
   async withIngress(podId: string, token: string | undefined, run: () => Promise<void>) {
@@ -254,45 +304,79 @@ export class ParentManagedLaunch {
           input.brief,
           reports,
         );
-        const request = projectManagedRecipe(template, brief, key);
-        await this.config.host.ledger.spawnWave(slot.checkpoint, [request], () => {
-          this.active(podId);
-          if (replay()) return;
-          const count = Number(
-            this.db
-              .prepare('SELECT count(*) FROM orchestration_continuations WHERE run_id=?')
-              .pluck()
-              .get(binding.run_id),
-          );
-          const active = Number(
+        const coding = slot.parent?.coding;
+        const countPrivate = () =>
+          Number(
             this.db
               .prepare(
-                `SELECT count(*) FROM orchestration_continuations c LEFT JOIN managed_pods p ON p.dispatcher_installation_id='native.'||c.run_id AND p.managed_start_key=c.start_key WHERE c.run_id=? AND coalesce(p.observed_exit,0)=0`,
+                'SELECT count(*) FROM parent_managed_requests WHERE run_id=? AND private_scope_json IS NOT NULL',
               )
               .pluck()
               .get(binding.run_id),
           );
-          const capacity = Number(
-            this.db
-              .prepare('SELECT max_active FROM orchestration_runs WHERE id=?')
-              .pluck()
-              .get(binding.run_id),
-          );
-          if (count >= slot.policy.limits!.workers || active >= capacity)
-            throw new Error('parent-capacity-exhausted');
-          this.db
-            .prepare(
-              'INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest,report_dependencies_json) VALUES(?,?,?,?,?,?)',
-            )
-            .run(
-              binding.run_id,
-              key,
-              input.requestKey,
-              this.scope.getStore()!.attempt,
-              inputDigest,
-              JSON.stringify(dependencies),
+        const ordinal = coding?.recipe === input.recipe && coding.sandbox ? countPrivate() : null;
+        if (ordinal !== null && ordinal >= 2) throw new Error('parent-qualification-pair-full');
+        const paths =
+          coding?.recipe === input.recipe
+            ? ordinal === 1
+              ? coding.sandbox!.secondPaths
+              : coding.paths
+            : null;
+        const scope = paths?.map((path) => ({ kind: 'file' as const, path })) ?? null;
+        const scopeInstruction = scope
+          ? `\n\nCommit only these host-enrolled paths: ${JSON.stringify(paths)}.`
+          : '';
+        const request = projectManagedRecipe(template, brief + scopeInstruction, key);
+        await this.config.host.ledger.spawnWave(
+          slot.checkpoint,
+          [request],
+          () => {
+            this.active(podId);
+            if (replay()) return;
+            const count = Number(
+              this.db
+                .prepare('SELECT count(*) FROM orchestration_continuations WHERE run_id=?')
+                .pluck()
+                .get(binding.run_id),
             );
-        });
+            const active = Number(
+              this.db
+                .prepare(
+                  `SELECT count(*) FROM orchestration_continuations c LEFT JOIN managed_pods p ON p.dispatcher_installation_id='native.'||c.run_id AND p.managed_start_key=c.start_key WHERE c.run_id=? AND coalesce(p.observed_exit,0)=0`,
+                )
+                .pluck()
+                .get(binding.run_id),
+            );
+            const capacity = Number(
+              this.db
+                .prepare('SELECT max_active FROM orchestration_runs WHERE id=?')
+                .pluck()
+                .get(binding.run_id),
+            );
+            if (count >= slot.policy.limits!.workers || active >= capacity)
+              throw new Error('parent-capacity-exhausted');
+            if (scope && (coding?.evaluation || coding?.sandbox?.hostQualification)) {
+              const reserved = countPrivate();
+              if (reserved >= 2) throw new Error('parent-qualification-pair-full');
+              if (ordinal !== null && reserved !== ordinal)
+                throw new Error('parent-coding-scope-changed');
+            }
+            this.db
+              .prepare(
+                'INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest,report_dependencies_json,private_scope_json) VALUES(?,?,?,?,?,?,?)',
+              )
+              .run(
+                binding.run_id,
+                key,
+                input.requestKey,
+                this.scope.getStore()!.attempt,
+                inputDigest,
+                JSON.stringify(dependencies),
+                scope ? canonical(scope) : null,
+              );
+          },
+          scope ? true : undefined,
+        );
         return recoverFamily();
       },
       managedFamily: async () => {
@@ -312,18 +396,44 @@ export class ParentManagedLaunch {
         installationId: s.checkpoint.run,
       })),
     );
+    const review = new ParentReviewHandoff(this.db);
+    const reviewOwner = (actor: string, podId: string, binding: Binding) => {
+      if (binding.run_id !== actor) return null;
+      try {
+        const slot = this.slot(binding);
+        if (!slot.parent?.coding || this.pod(podId).userId !== slot.operator.objectId) return null;
+        return {
+          run: actor,
+          podId,
+          actorDigest: digest(['parent-review-owner/v1', slot.operator]),
+          automatic: Boolean(
+            slot.parent.coding.evaluation || slot.parent.coding.sandbox?.hostQualification,
+          ),
+        };
+      } catch {
+        return null;
+      }
+    };
     app.get('/orchestration/parents/:podId/family', async (req, reply) => {
+      reply.header('cache-control', 'no-store');
       const actor = await authorize(req);
       if (!actor) return reply.code(401).send({ code: 'parent-owner-required' });
       const { podId } = req.params as { podId: string };
       const binding = this.binding(podId);
       if (!binding || binding.run_id !== actor)
         return reply.code(404).send({ code: 'parent-family-not-found' });
-      return this.family(podId);
+      const family = this.family(podId, true);
+      const owner = reviewOwner(actor, podId, binding);
+      return owner ? { ...family, review: review.familyReview(owner, owner.automatic) } : family;
+    });
+    registerParentReviewRoutes(app, review, async (request, podId) => {
+      const actor = await authorize(request);
+      const binding = actor && this.binding(podId);
+      return actor && binding ? reviewOwner(actor, podId, binding) : null;
     });
   }
   /** Caller must independently authorize the selected parent; returns no request, grants or credentials. */
-  family(podId: string) {
+  family(podId: string, ownerDetails = false) {
     const binding = this.binding(podId);
     if (!binding) throw new Error('parent-family-not-found');
     return {
@@ -335,12 +445,34 @@ export class ParentManagedLaunch {
       CASE WHEN p.pod_id IS NULL AND c.pod_id IS NOT NULL THEN 'unknown'
         WHEN p.observed_exit=1 THEN 'exited'
         WHEN p.state='running' AND coalesce(p.last_runtime_observation,'running')<>'unknown' THEN 'started'
-        WHEN p.allocation_attempted=1 THEN 'unknown' ELSE 'reserved' END AS status
+        WHEN p.allocation_attempted=1 THEN 'unknown' ELSE 'reserved' END AS status,
+      CASE WHEN p.observed_exit=1 AND p.exit_code<>0 AND EXISTS (
+        SELECT 1 FROM json_each(r.limitations_json)
+        WHERE value='agent-provider-request-limit-reached'
+      ) THEN 'provider-request-limit' END AS exitReason
+      ${
+        ownerDetails
+          ? `,
+      CASE WHEN p.observed_exit=1 THEN p.exit_code END AS exitCode,
+      CASE WHEN q.private_scope_json IS NOT NULL AND p.observed_exit=1 AND p.exit_code=0 THEN
+        CASE
+          WHEN EXISTS (SELECT 1 FROM parent_private_candidates pc WHERE pc.pod_id=p.pod_id)
+            THEN 'collected'
+          WHEN EXISTS (
+            SELECT 1 FROM json_each(r.limitations_json)
+            WHERE value IN ('private-collection-incomplete','private-collection-uncertain')
+          ) THEN 'unavailable'
+          WHEN p.state='validating' THEN 'pending'
+        END
+      END AS collectionStatus`
+          : ''
+      }
       FROM orchestration_continuations c JOIN parent_managed_requests q ON q.run_id=c.run_id AND q.start_key=c.start_key LEFT JOIN managed_pods p
         ON p.dispatcher_installation_id='native.'||c.run_id AND p.managed_start_key=c.start_key
         AND p.execution_spec_digest=json_extract(c.request_json,'$.executionSpecDigest')
         AND p.dispatcher_attempt_id=c.attempt_id
         AND (c.pod_id IS NULL OR c.pod_id=p.pod_id)
+      LEFT JOIN managed_results r ON r.pod_id=p.pod_id
       WHERE c.run_id=? ORDER BY c.rowid`)
         .all(binding.run_id),
     };

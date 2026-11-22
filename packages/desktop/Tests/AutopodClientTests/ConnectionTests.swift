@@ -50,6 +50,46 @@ import Testing
   #expect(url?.absoluteString == "http://localhost:3100")
 }
 
+@Test func previewOwnerRequiresExplicitConnectedPreviewAndAnExactPrivateOrigin() {
+  let valid = "--preview-owner-url=http://127.0.0.1:43144"
+  #expect(DesktopIdentity.previewOwnerURL(isConnectedPreview: true, arguments: ["app", valid])?.port == 43144)
+  #expect(DesktopIdentity.previewOwnerURL(isConnectedPreview: false, arguments: ["app", valid]) == nil)
+  #expect(DesktopIdentity.previewOwnerURL(isConnectedPreview: true, arguments: ["app", valid, valid]) == nil)
+  for origin in [
+    "http://127.0.0.1:3100", "http://127.0.0.1", "https://127.0.0.1:43144",
+    "http://localhost:43144", "http://127.0.0.1.example.com:43144",
+    "http://user@127.0.0.1:43144", "http://127.0.0.1:43144/other",
+    "http://127.0.0.1:43144?next=remote", "http://127.0.0.1:43144#fragment",
+  ] {
+    #expect(DesktopIdentity.previewOwnerURL(isConnectedPreview: true, arguments: ["--preview-owner-url=" + origin]) == nil)
+  }
+}
+
+@Test func previewOwnerMicrosoftCacheDoesNotReuseOrdinaryOrOtherPortAccounts() {
+  let ordinary = EntraDesktopAuthConfiguration()
+  let first = EntraDesktopAuthConfiguration(previewOwnerPort: 43144)
+  let second = EntraDesktopAuthConfiguration(previewOwnerPort: 43145)
+  #expect(Set([ordinary.cacheAccount, first.cacheAccount, second.cacheAccount]).count == 3)
+  #expect(first.redirectURI == ordinary.redirectURI)
+  #expect(first.scope == ordinary.scope)
+}
+
+@MainActor
+@Test func ordinaryConnectionManagerRejectsPreviewOwnerAuth() async {
+  let manager = ConnectionManager(restoreConnection: false)
+  let url = URL(string: "http://127.0.0.1:43144")!
+  let result = await manager.testConnection(url: url, token: "not-used", authKind: .previewOwner)
+  guard case .failure(.badRequest) = result else {
+    Issue.record("Ordinary app accepted Preview-only credentials")
+    return
+  }
+  await #expect(throws: DaemonError.self) { try await manager.signInPreviewOwner(at: url) }
+  await #expect(throws: DaemonError.self) {
+    try await manager.addAndConnect(name: "Candidate", url: url, token: "not-used", authKind: .previewOwner)
+  }
+  #expect(manager.connection == nil)
+}
+
 @Test func entraCachedTokenHonorsRefreshBuffer() {
   let token = EntraCachedToken(
     accessToken: "access",

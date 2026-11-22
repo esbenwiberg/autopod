@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
@@ -9,6 +10,7 @@ import { canonical } from './canonical.js';
 import { ManagedContainerRuntime } from './container-runtime.js';
 import { type ManagedGitHubReadConfig, ManagedGitHubReadGateway } from './github-read-gateway.js';
 import type { ManagedPodRow } from './managed-service.js';
+import { isPrivateParentCommit } from './private-commit-policy.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedPublicReadGateway } from './public-read-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
@@ -74,6 +76,8 @@ export interface ManagedRuntimeBinding {
 export interface ManagedRuntimeCompositionConfig extends Omit<ManagedComponentsConfig, 'runtime'> {
   mirrors: readonly ManagedRepositoryMirror[];
   sandboxCheckpoints?: boolean;
+  /** Qualification-only opt-in; no hosted caller enables this yet. */
+  sandboxCodingCheckpoints?: boolean;
   bindings: readonly ManagedRuntimeBinding[];
 }
 
@@ -132,7 +136,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         !(
           request.route.executionTarget === 'sandbox' &&
           config.sandboxCheckpoints &&
-          repo?.access === 'read'
+          (repo?.access === 'read' ||
+            (config.sandboxCodingCheckpoints && isPrivateParentCommit(request)))
         )) ||
       request.effectiveGrant.scope.repositories.length !== 1 ||
       !repo ||
@@ -142,6 +147,16 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       enrolled[0]?.remote !== repo.remote
     )
       throw new Error('managed-checkpoint-workspace-binding');
+    if (request.route.executionTarget === 'sandbox' && isPrivateParentCommit(request)) {
+      if (!/^managed-[A-Za-z0-9-]+$/.test(podId)) throw new Error('managed-workspace-pod-invalid');
+      const output = path.join(workspaces.root, podId, 'output');
+      await mkdir(output, { recursive: true, mode: 0o700 });
+      // This path is consumed by the bounded projector, not uploaded as a volume.
+      return [
+        { host: cp.mirror, container: '/repositories/' + cp.repository, readOnly: false },
+        { host: output, container: '/output', readOnly: false },
+      ];
+    }
     const source = { ...enrolled[0]!, path: cp.mirror, baseRevision: cp.commit };
     return new ManagedWorkspaces(config.db, workspaces.root, [source]).prepare(podId, request);
   };
@@ -242,6 +257,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         : undefined,
       manager: binding.manager,
       image: binding.image,
+      sandboxCodingCheckpoints: config.sandboxCheckpoints && config.sandboxCodingCheckpoints,
       command: binding.command,
       dependencyCache: binding.dependencyCache,
       cleanupNetwork: binding.cleanupNetwork,
@@ -260,7 +276,13 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
         return {
           ...(cp && request.route.executionTarget === 'sandbox'
-            ? { sandboxCheckpoint: { repository: cp.repository, commit: cp.commit } }
+            ? {
+                sandboxCheckpoint: {
+                  repository: cp.repository,
+                  commit: cp.commit,
+                  ...(isPrivateParentCommit(request) ? { coding: true as const } : {}),
+                },
+              }
             : {}),
           ...(await binding.network(request, podId)),
           podId,

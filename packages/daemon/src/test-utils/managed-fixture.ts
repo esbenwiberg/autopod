@@ -63,6 +63,11 @@ export function fixture(): ManagedFixture {
     '206_managed_validations.sql',
     '264_managed_allocation_attempted.sql',
     '271_parent_managed_runs.sql',
+    '272_parent_report_dependencies.sql',
+    '277_parent_private_candidates.sql',
+    '278_parent_review_approvals.sql',
+    '279_parent_qualification_jobs.sql',
+    '280_parent_qualification_input_digest.sql',
   ]) {
     db.exec(readFileSync(new URL(`../db/migrations/${migration}`, import.meta.url), 'utf8'));
   }

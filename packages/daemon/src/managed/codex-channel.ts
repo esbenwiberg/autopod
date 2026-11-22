@@ -3,6 +3,7 @@ import type { FollowUpEnvelope, ManagedPodRequest, Route } from '@autopod/shared
 import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { canonical, sha256 } from './canonical.js';
 import { codexInput } from './codex-wire.js';
+import { ManagedProviderRequestLimit } from './provider-gateway.js';
 import type { ManagedWorkerProviderChannel } from './runtime-composition.js';
 
 const INSTALL = `import hashlib,json,os,pathlib,subprocess,sys
@@ -415,13 +416,22 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
           response.state === 'observed' ? response.value : '',
           request.ticket,
         );
-      } catch {
+      } catch (error) {
         // Never forward provider errors or worker payloads into logs.
         stopped = true;
         clearInterval(timer);
+        const diagnostic =
+          failurePhase === 'provider-invoke' && error instanceof ManagedProviderRequestLimit
+            ? { phase: 'provider', reason: 'request-limit' }
+            : {
+                phase: 'agent',
+                reason: 'channel-unavailable',
+                exitCode: 1,
+                channelPhase: failurePhase,
+              };
         await exec(
-          "import json,pathlib,sys; root=pathlib.Path(sys.argv[1]); (root/'channel-failure.json').write_text(json.dumps({'phase':'agent','reason':'channel-unavailable','exitCode':1,'channelPhase':sys.argv[2]})); (root/'channel-closed').touch()",
-          failurePhase,
+          "import os,pathlib,sys; root=pathlib.Path(sys.argv[1]); temp=root/'channel-failure.host.tmp'; temp.write_text(sys.argv[2]); os.replace(temp,root/'channel-failure.json'); (root/'channel-closed').touch()",
+          JSON.stringify(diagnostic),
         ).catch(() => {});
       } finally {
         activeProvider = false;
