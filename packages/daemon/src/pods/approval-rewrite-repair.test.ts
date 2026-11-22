@@ -864,7 +864,8 @@ it.each([
     );
     await repairGit(seed, 'push', remote, 'HEAD:refs/heads/main');
     f.worktrees.prepareApprovalRebase = vi.fn(real.prepareApprovalRebase.bind(real));
-    const status = provider.getPrStatus.getMockImplementation()!;
+    const status = provider.getPrStatus.getMockImplementation();
+    if (!status) throw new Error('Missing provider status fixture');
     provider.getPrStatus.mockImplementation(async () => ({
       ...(await status()),
       mergeBlocked: true,

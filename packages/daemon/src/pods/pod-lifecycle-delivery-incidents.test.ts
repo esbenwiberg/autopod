@@ -28,7 +28,9 @@ afterEach(async () => {
 
 function fixture(prProvider: 'github' | 'ado' = 'github') {
   const ctx = createTestContext();
-  ctx.db.prepare('UPDATE profiles SET pr_provider = ? WHERE name = ?').run(prProvider, 'test-profile');
+  ctx.db
+    .prepare('UPDATE profiles SET pr_provider = ? WHERE name = ?')
+    .run(prProvider, 'test-profile');
   let disposition: 'open' | 'merged' = 'open';
   const status = (): PrMergeStatus => ({
     merged: disposition === 'merged',
