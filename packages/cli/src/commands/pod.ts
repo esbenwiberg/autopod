@@ -250,7 +250,13 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         );
         console.log(`Execution ${latest.executionId}; checked ${latest.checkedAt}`);
         for (const conflict of latest.conflicts)
-          console.log(`${conflict.podId}: ${conflict.status} (${conflict.evidence})`);
+          console.log(
+            `${conflict.podId}: ${conflict.status} (${conflict.evidence})${
+              conflict.assessment
+                ? ` — ${conflict.assessment.classification}: ${conflict.assessment.reasons.join(', ')}`
+                : ''
+            }`,
+          );
         if (latest.rerun)
           console.log(`Intentional rerun of ${latest.rerun.ofPodId}: ${latest.rerun.reason}`);
       });
