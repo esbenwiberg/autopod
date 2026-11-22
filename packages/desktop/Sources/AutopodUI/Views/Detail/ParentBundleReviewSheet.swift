@@ -97,7 +97,7 @@ struct ParentBundleReviewSheet: View {
   }
 
   private var readyForAction: Bool {
-    operation == nil && handoff.work == nil && actions.isCurrent() && isCurrent()
+    operation == nil && handoff.work == nil && actions.isCurrent(target.selection) && isCurrent()
   }
 
   private func digest(_ title: String, _ value: String) -> some View {

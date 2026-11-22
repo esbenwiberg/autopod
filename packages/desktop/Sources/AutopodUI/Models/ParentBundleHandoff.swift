@@ -1,4 +1,5 @@
 import AutopodClient
+import Darwin
 import Foundation
 import Observation
 
@@ -9,13 +10,13 @@ public struct ParentBundleSendGuard: Sendable {
 
 /// Desktop binds these calls to one ActionHandler's connection lease.
 public struct ParentBundleActions: Sendable {
-  let isCurrent: @MainActor @Sendable () -> Bool
+  let isCurrent: @MainActor @Sendable (ParentBundleSelection) -> Bool
   let preview: @MainActor @Sendable (ParentBundleSelection, ParentBundleSendGuard) async throws -> ParentBundleReview
   let approve: @MainActor @Sendable (ParentBundleSelection, ParentBundleReview, ParentBundleSendGuard) async throws -> ParentBundleApproval
   let download: @MainActor @Sendable (ParentBundleSelection, ParentBundleApproval, ParentBundleSendGuard) async throws -> Data
 
   public init(
-    isCurrent: @escaping @MainActor @Sendable () -> Bool,
+    isCurrent: @escaping @MainActor @Sendable (ParentBundleSelection) -> Bool,
     preview: @escaping @MainActor @Sendable (ParentBundleSelection, ParentBundleSendGuard) async throws -> ParentBundleReview,
     approve: @escaping @MainActor @Sendable (ParentBundleSelection, ParentBundleReview, ParentBundleSendGuard) async throws -> ParentBundleApproval,
     download: @escaping @MainActor @Sendable (ParentBundleSelection, ParentBundleApproval, ParentBundleSendGuard) async throws -> Data
@@ -54,18 +55,18 @@ final class ParentBundleHandoff {
   }
 
   private func guardWork(
-    _ work: Work,
+    _ work: Work, selection: ParentBundleSelection,
     actions: ParentBundleActions,
     isCurrent: @escaping @MainActor @Sendable () -> Bool
   ) -> ParentBundleSendGuard? {
-    guard active, self.work == nil, actions.isCurrent(), isCurrent(), !Task.isCancelled else { return nil }
+    guard active, self.work == nil, actions.isCurrent(selection), isCurrent(), !Task.isCancelled else { return nil }
     let generation = UUID()
     self.generation = generation
     self.work = work
     notice = nil
     return ParentBundleSendGuard { [weak self] in
       try Task.checkCancellation()
-      guard let self, self.active, self.generation == generation, actions.isCurrent(), isCurrent() else {
+      guard let self, self.active, self.generation == generation, actions.isCurrent(selection), isCurrent() else {
         throw CancellationError()
       }
     }
@@ -75,7 +76,7 @@ final class ParentBundleHandoff {
     _ selection: ParentBundleSelection, actions: ParentBundleActions,
     isCurrent: @escaping @MainActor @Sendable () -> Bool
   ) async {
-    guard review == nil, let check = guardWork(.preview, actions: actions, isCurrent: isCurrent) else { return }
+    guard review == nil, let check = guardWork(.preview, selection: selection, actions: actions, isCurrent: isCurrent) else { return }
     defer { work = nil }
     do {
       let value = try await actions.preview(selection, check)
@@ -92,7 +93,7 @@ final class ParentBundleHandoff {
     isCurrent: @escaping @MainActor @Sendable () -> Bool
   ) async {
     guard let review, review.matches(selection), approval == nil,
-      let check = guardWork(.approve, actions: actions, isCurrent: isCurrent) else { return }
+      let check = guardWork(.approve, selection: selection, actions: actions, isCurrent: isCurrent) else { return }
     defer { work = nil }
     do {
       let value = try await actions.approve(selection, review, check)
@@ -113,17 +114,39 @@ final class ParentBundleHandoff {
     chooseDestination: @MainActor (String) async -> URL?
   ) async {
     guard let approval, approval.review.matches(selection),
-      let check = guardWork(.save, actions: actions, isCurrent: isCurrent) else { return }
+      let check = guardWork(.save, selection: selection, actions: actions, isCurrent: isCurrent) else { return }
     defer { work = nil }
     do {
       let bytes = try await actions.download(selection, approval, check)
       try check()
       guard let destination = await chooseDestination("parent-\(selection.commit).bundle") else { return }
       try check()
-      try bytes.write(to: destination, options: .atomic)
+      try Self.writePrivateBundle(bytes, to: destination)
       notice = "Verified bundle saved. Nothing was published."
     } catch {
       if (try? check()) != nil { notice = "Couldn’t verify or save the bundle. No bundle was saved by this attempt." }
+    }
+  }
+
+  /// Stage on the destination volume, then atomically install a mode-0600 file.
+  /// Never put bundle bytes at the visible destination with the default umask.
+  private static func writePrivateBundle(_ bytes: Data, to destination: URL) throws {
+    guard destination.isFileURL, !destination.hasDirectoryPath else { throw URLError(.badURL) }
+    let fm = FileManager.default
+    let staging = destination.deletingLastPathComponent()
+      .appendingPathComponent(".autopod-bundle-\(UUID().uuidString)", isDirectory: true)
+    try fm.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? fm.removeItem(at: staging) }
+    let file = staging.appendingPathComponent("bundle")
+    try bytes.write(to: file, options: .withoutOverwriting)
+    try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    try file.withUnsafeFileSystemRepresentation { source in
+      try destination.withUnsafeFileSystemRepresentation { target in
+        guard let source, let target else { throw URLError(.badURL) }
+        guard Darwin.rename(source, target) == 0 else {
+          throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+      }
     }
   }
 }

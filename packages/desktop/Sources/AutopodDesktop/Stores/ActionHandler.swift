@@ -60,6 +60,16 @@ public final class ActionHandler {
     }
   }
 
+  private func parentBundleSelectionIsCurrent(_ selection: ParentBundleSelection) -> Bool {
+    podStore.isCurrent(ownership) && podStore.selectedSessionId == selection.parentId
+  }
+
+  private func requireParentBundleSelection(_ selection: ParentBundleSelection) throws {
+    guard parentBundleSelectionIsCurrent(selection) else {
+      throw DaemonError.networkError("Task or connection changed. Reopen the review.")
+    }
+  }
+
   private func retainedCleanupOwnerIsCurrent() -> Bool {
     podStore.isCurrent(ownership)
   }
@@ -449,14 +459,15 @@ public final class ActionHandler {
       return try await self.perform { try await self.api.getParentManagedFamily(id) }
     }
     result.parentBundle = ParentBundleActions(
-      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      isCurrent: { [weak self] selection in self?.parentBundleSelectionIsCurrent(selection) ?? false },
       preview: { [weak self] selection, check in
         guard let self else { throw CancellationError() }
         return try await self.perform {
+          try self.requireParentBundleSelection(selection)
           try check()
           return try await self.api.previewParentBundle(selection) { [weak self] in
             guard let self else { throw CancellationError() }
-            try self.requireCurrent()
+            try self.requireParentBundleSelection(selection)
             try check()
           }
         }
@@ -464,10 +475,11 @@ public final class ActionHandler {
       approve: { [weak self] selection, review, check in
         guard let self else { throw CancellationError() }
         return try await self.perform {
+          try self.requireParentBundleSelection(selection)
           try check()
           return try await self.api.approveParentBundle(selection, review: review) { [weak self] in
             guard let self else { throw CancellationError() }
-            try self.requireCurrent()
+            try self.requireParentBundleSelection(selection)
             try check()
           }
         }
@@ -475,10 +487,11 @@ public final class ActionHandler {
       download: { [weak self] selection, approval, check in
         guard let self else { throw CancellationError() }
         return try await self.perform {
+          try self.requireParentBundleSelection(selection)
           try check()
           return try await self.api.downloadParentBundle(selection, approval: approval) { [weak self] in
             guard let self else { throw CancellationError() }
-            try self.requireCurrent()
+            try self.requireParentBundleSelection(selection)
             try check()
           }
         }

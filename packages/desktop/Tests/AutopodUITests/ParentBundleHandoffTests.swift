@@ -24,12 +24,17 @@ struct ParentBundleHandoffTests {
     await model.approve(f.selection, actions: f.actions, isCurrent: permitted)
     #expect(f.events == ["preview", "approve"])
     #expect(!FileManager.default.fileExists(atPath: url.path))
+    // The Save panel has accepted a replacement, but its old group/world mode must not carry over.
+    try Data("old".utf8).write(to: url)
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
     await model.save(f.selection, actions: f.actions, isCurrent: permitted) { name in
       #expect(name == "parent-\(f.selection.commit).bundle")
       return url
     }
     #expect(f.events == ["preview", "approve", "download"])
     #expect(try Data(contentsOf: url) == f.bytes)
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
   }
 
   @Test(arguments: ["account", "selection", "closed"])
@@ -110,7 +115,7 @@ struct ParentBundleHandoffTests {
     }
 
     var actions: ParentBundleActions {
-      ParentBundleActions(isCurrent: { self.accountCurrent }, preview: { selection, check in
+      ParentBundleActions(isCurrent: { selection in self.accountCurrent && selection == self.selection }, preview: { selection, check in
         try check()
         #expect(selection == self.selection)
         self.events.append("preview")

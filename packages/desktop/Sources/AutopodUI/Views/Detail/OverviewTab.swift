@@ -54,8 +54,9 @@ struct OverviewTab: View {
     }
 
     private var parentBundleTarget: ParentBundleTarget? {
-        guard actions.parentBundle?.isCurrent() == true else { return nil }
-        return parentFamilyModel.bundleTarget(for: parentFamilyScope)
+        guard let target = parentFamilyModel.bundleTarget(for: parentFamilyScope),
+              actions.parentBundle?.isCurrent(target.selection) == true else { return nil }
+        return target
     }
 
     private var parentFamilyLoadKey: String? {

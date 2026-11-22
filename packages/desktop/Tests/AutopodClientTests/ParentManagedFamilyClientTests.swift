@@ -2,6 +2,8 @@ import AutopodClient
 import CryptoKit
 import Foundation
 import Testing
+@testable import AutopodDesktop
+@testable import AutopodUI
 
 @Suite(.serialized)
 struct ParentManagedFamilyClientTests {
@@ -210,6 +212,25 @@ struct ParentManagedFamilyClientTests {
       try await api.approveParentBundle(Self.bundleSelection, review: review) {
         if !scope.current { throw CancellationError() }
       }
+    }
+  }
+
+  @MainActor @Test func actionHandlerRefusesOldTaskEvenBeforeTheReviewSheetDismisses() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      f.store.configure(api: f.apiA)
+      let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
+      let actions = try #require(handler.actions.parentBundle)
+      let selection = Self.bundleSelection
+      let review = try JSONDecoder().decode(ParentBundleReview.self, from: Data(Self.reviewFixture.utf8))
+      f.store.selectedSessionId = selection.parentId
+      #expect(actions.isCurrent(selection))
+
+      f.store.selectedSessionId = "new-selection"
+      #expect(!actions.isCurrent(selection))
+      await #expect(throws: DaemonError.self) {
+        try await actions.approve(selection, review, ParentBundleSendGuard(check: {}))
+      }
+      #expect(f.a.requests.isEmpty)
     }
   }
 

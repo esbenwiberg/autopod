@@ -402,7 +402,8 @@ workers → Review private bundle** when the tested change is ready. The preview
 shows the exact commit, tree, bundle digest and changed paths. Choose **Approve
 private download** to approve only that bundle, then **Save verified bundle**
 and select a destination. Desktop verifies SHA-256 against the approved preview
-before writing. Changing the Task or connection invalidates the open review.
+before installing the bundle atomically with owner-only file mode. Changing the
+Task or connection invalidates the open review.
 On reopening, you can confirm the same approval again without creating a new
 approval. This flow does not publish anything.
 
