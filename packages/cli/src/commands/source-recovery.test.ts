@@ -65,6 +65,14 @@ it('inspects by default without a source mutation or automatic retry', async () 
   expect(s.client.adoptSource).not.toHaveBeenCalled();
   expect(s.log.mock.calls.flat().join('\n')).toContain('Delivery NOT authorized');
 });
+it('shows the daemon rework hint instead of an empty operations message', async () => {
+  const s = setup();
+  const recoveryHint = 'Dirty worktree: run ap rework 12345678 after checking eligibility.';
+  s.client.getSourceAdoptions.mockResolvedValue({ operations: [], recoveryHint });
+  await s.parse();
+  expect(s.log.mock.calls.flat()).toEqual([recoveryHint]);
+  expect(s.client.adoptSource).not.toHaveBeenCalled();
+});
 it('shows read-only approval rewrite custody without authorizing adoption or delivery', async () => {
   const s = setup();
   s.client.getSourceAdoptions.mockResolvedValue({

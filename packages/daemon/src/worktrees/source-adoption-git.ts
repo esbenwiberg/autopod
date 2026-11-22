@@ -8,6 +8,28 @@ function sourceAdoptionError(message: string, code = 'SOURCE_ADOPTION_BLOCKED'):
   throw new AutopodError(message, code, 409);
 }
 
+// Disable even Git's implicit $XDG_CONFIG_HOME/git/ignore. Source evidence
+// must not depend on machine-local excludes; .gitignore and info/exclude remain.
+export const PORTABLE_GIT_EXCLUDES = 'core.excludesFile=/dev/null';
+const AUTO_COMMIT_IGNORE_REASONS = {
+  AUTO_COMMIT_IGNORE_MISMATCH:
+    'Automatic commit stopped: machine-local Git excludes disagree with finalization. Commit intended files explicitly and keep other files outside the workspace.',
+  AUTO_COMMIT_IGNORE_UNVERIFIED:
+    'Automatic commit stopped: Git could not verify agreement on which untracked files to stage. Inspect the preserved worktree before retrying.',
+} as const;
+
+export class AutoCommitIgnoreError extends AutopodError {
+  constructor(code: keyof typeof AUTO_COMMIT_IGNORE_REASONS) {
+    super(AUTO_COMMIT_IGNORE_REASONS[code], code, 409);
+  }
+}
+
+export function isAutoCommitIgnoreReason(reason: string | null): reason is string {
+  return (
+    reason !== null && Object.values(AUTO_COMMIT_IGNORE_REASONS).some((value) => value === reason)
+  );
+}
+
 export type AdoptionGit = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
 export function safeAdoptionGit(run: AdoptionGit): AdoptionGit {
   return (args) =>
@@ -47,6 +69,8 @@ async function inspectSourceGit(
     sourceAdoptionError('Submodules need recursive source custody');
   const dirty = (
     await git([
+      '-c',
+      PORTABLE_GIT_EXCLUDES,
       'status',
       '--porcelain=v1',
       '-z',

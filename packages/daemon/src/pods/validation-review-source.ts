@@ -1,6 +1,7 @@
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, type Pod } from '@autopod/shared';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
+import { isAutoCommitIgnoreReason } from '../worktrees/source-adoption-git.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 
 export interface ReviewSourceChanges {
@@ -66,6 +67,18 @@ export class ReviewSourceDirtyError extends TaskRetryBlockedError {
 
 export function isReviewSourceDirtyReason(reason: string | null | undefined): boolean {
   return reason?.startsWith(DIRTY_REASON_PREFIX) ?? false;
+}
+
+/** Explain the existing recovery path without admitting a retry. */
+export function dirtyReviewSourceRecoveryHint(pod: Pod | undefined): string | undefined {
+  if (
+    pod?.worktreePath &&
+    !pod.worktreeCompromised &&
+    ((pod.status === 'review_required' && isReviewSourceDirtyReason(pod.failureReason)) ||
+      (pod.status === 'failed' && isAutoCommitIgnoreReason(pod.failureReason)))
+  )
+    return `Finalization could not verify committed source. To ask the agent to inspect and clean the preserved worktree, run ap rework ${pod.id}. Normal rework eligibility and retry permissions still apply.`;
+  return undefined;
 }
 
 function listPaths(paths: string[]): string[] {
@@ -174,7 +187,7 @@ export async function captureReviewSource(
     }
     const cause = sanitizedCause(error);
     log?.warn(
-      { err: error, worktreePath, code: 'REVIEW_SOURCE_UNAVAILABLE', cause },
+      { worktreePath, code: 'REVIEW_SOURCE_UNAVAILABLE', cause },
       'Review source could not be read consistently',
     );
     throw new TaskRetryBlockedError(

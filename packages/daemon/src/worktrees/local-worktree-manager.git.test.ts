@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
@@ -92,6 +93,78 @@ describe('LocalWorktreeManager real Git regressions', () => {
     await git(result.worktreePath, ['commit', '-am', 'rewrite feature']);
     return result.worktreePath;
   }
+
+  it.each([
+    'configured',
+    'implicit',
+  ] as const)('refuses auto-commit when %s machine-local ignores hide files from staging', async (ignoreKind) => {
+    const config = path.join(root, 'daemon-gitconfig');
+    const xdg = path.join(root, 'xdg');
+    await mkdir(path.join(xdg, 'git'), { recursive: true });
+    const ignore = path.join(xdg, 'git', 'ignore');
+    await writeFile(ignore, 'notes/private.md\n');
+    await writeFile(
+      config,
+      ignoreKind === 'configured' ? `[core]\n  excludesFile = "${ignore}"\n` : '',
+    );
+    vi.stubEnv('GIT_CONFIG_GLOBAL', config);
+    vi.stubEnv('XDG_CONFIG_HOME', xdg);
+    vi.resetModules();
+    try {
+      const loaded = await import('./local-worktree-manager.js');
+      const daemon = new loaded.LocalWorktreeManager({ cacheDir, worktreeDir, logger });
+      const original = await git(seed, ['rev-parse', 'HEAD']);
+      await mkdir(path.join(seed, 'notes'));
+      const scratch = path.join(seed, 'notes/private.md');
+      await writeFile(scratch, 'local-only notes');
+      await writeFile(path.join(seed, 'notes/ship.md'), 'intended change');
+
+      // Both policies can collapse this directory to "notes/"; compare the
+      // actual candidate files before deciding that staging is consistent.
+      await expect(daemon.commitPendingChanges(seed, 'auto-commit')).rejects.toMatchObject({
+        code: 'AUTO_COMMIT_IGNORE_MISMATCH',
+      });
+      expect(await git(seed, ['rev-parse', 'HEAD'])).toBe(original);
+      expect(await git(seed, ['diff', '--cached', '--name-only'])).toBe('');
+      expect(await readFile(scratch, 'utf8')).toBe('local-only notes');
+
+      await rm(scratch);
+      await git(seed, ['config', 'user.name', 'test']);
+      await git(seed, ['config', 'user.email', 'test@example.invalid']);
+      expect(await daemon.commitPendingChanges(seed, 'auto-commit')).toBe(true);
+      expect(await daemon.inspectSourceAdoption(seed, 'main')).toMatchObject({
+        worktreeClean: true,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps the root provider handoff out of linked-worktree review without hiding other paths', async () => {
+    const worktree = path.join(root, 'handoff-wt');
+    await git(seed, ['worktree', 'add', '-b', 'handoff', worktree]);
+    await manager.ensureExcludes(worktree, [PROVIDER_FAILOVER_HANDOFF_PATH]);
+    await mkdir(path.join(worktree, '.autopod'));
+    const handoff = path.join(worktree, PROVIDER_FAILOVER_HANDOFF_PATH);
+    await writeFile(handoff, 'provider handoff');
+    expect(await manager.commitPendingChanges(worktree, 'auto-commit')).toBe(false);
+    expect(await manager.inspectSourceAdoption(worktree, 'handoff')).toMatchObject({
+      worktreeClean: true,
+    });
+    expect(await readFile(handoff, 'utf8')).toBe('provider handoff');
+
+    await mkdir(path.join(worktree, 'other/.autopod'), { recursive: true });
+    await writeFile(path.join(worktree, 'other', PROVIDER_FAILOVER_HANDOFF_PATH), 'worker file');
+    expect(await manager.inspectSourcePreservation(worktree, 'handoff')).toMatchObject({
+      worktreeClean: false,
+      changes: { untracked: ['other/'] },
+    });
+
+    await git(worktree, ['add', '-f', '--', PROVIDER_FAILOVER_HANDOFF_PATH]);
+    await expect(
+      manager.ensureExcludes(worktree, [PROVIDER_FAILOVER_HANDOFF_PATH]),
+    ).rejects.toThrow();
+  });
 
   it('inspects retained source and dirty edits without publishing or altering the remote', async () => {
     const worktree = await createRebasedFeature('source-inspection');

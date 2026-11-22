@@ -2,12 +2,14 @@ import { AutopodError } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PodManager } from '../../pods/pod-manager-contracts.js';
+import { dirtyReviewSourceRecoveryHint } from '../../pods/validation-review-source.js';
 
 const head = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 /** Durable status survives HTTP loss; repeating POST observes the original request, never relaunches. */
 export function sourceAdoptionRoutes(
   app: FastifyInstance,
-  manager: Pick<PodManager, 'adoptSource' | 'getSourceAdoptions' | 'getApprovalSourceRewrite'>,
+  manager: Pick<PodManager, 'adoptSource' | 'getSourceAdoptions' | 'getApprovalSourceRewrite'> &
+    Partial<Pick<PodManager, 'getSession'>>,
 ) {
   app.get('/pods/:podId/source-adoptions', async (request) => {
     if (!request.user?.oid)
@@ -16,9 +18,15 @@ export function sourceAdoptionRoutes(
       throw new AutopodError('Source recovery unavailable', 'SOURCE_RECOVERY_UNAVAILABLE', 503);
     const { podId } = request.params as { podId: string };
     const approvalRewrite = manager.getApprovalSourceRewrite?.(podId);
+    const operations = manager.getSourceAdoptions(podId);
+    const recoveryHint =
+      !operations.length && !approvalRewrite
+        ? dirtyReviewSourceRecoveryHint(manager.getSession?.(podId))
+        : undefined;
     return {
-      operations: manager.getSourceAdoptions(podId),
+      operations,
       ...(approvalRewrite ? { approvalRewrite } : {}),
+      ...(recoveryHint ? { recoveryHint } : {}),
     };
   });
   app.post('/pods/:podId/source-adoptions', async (request, reply) => {

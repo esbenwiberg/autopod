@@ -9,6 +9,14 @@ failed **local Docker** task whose worker has settled and whose exact clean Git
 source was preserved before a current-generation infrastructure report. It is
 not ordinary Resume/Rework, a waiver, a retry-budget reset, or completion.
 
+If finalization stopped because of uncommitted or untracked files, this is not
+a failed infrastructure execution. The read-only `ap recover-infrastructure`
+and `ap source-recovery` views can point to `ap rework <id>` instead. This hint
+is not permission; existing custody and retry checks still apply. Auto-commit
+refuses to stage when machine-local Git excludes disagree with the source
+check, so files a host marked private cannot silently enter a commit. Commit
+intended changes explicitly and move scratch files outside the workspace.
+
 After an owned `rework` has sealed its exact candidate and completed fresh checks
 with a recorded failure, a human may explicitly select a **new** operation against
 that failed result. This narrowly supported successor uses the prior immutable

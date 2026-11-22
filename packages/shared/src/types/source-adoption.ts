@@ -31,6 +31,8 @@ export interface SourceAdoptionState {
 }
 export interface SourceAdoptionList {
   operations: SourceAdoptionState[];
+  /** Read-only guidance; does not grant retry or mutation authority. */
+  recoveryHint?: string;
   /** Read-only approval rebase custody, separate from explicit source adoption. */
   approvalRewrite?: {
     id: string;
