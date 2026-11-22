@@ -39,6 +39,7 @@ import type {
   ReadinessStatus,
   RepairContinuationPreviewQueryV1,
   RepairContinuationRequestV1,
+  RetainedCleanupRequest,
   RetainedFinalizationReceipt,
   RetainedFinalizationRequest,
   RetainedFinalizationView,
@@ -82,6 +83,8 @@ import {
   ProfileNotFoundError,
   repairContinuationPreviewQueryV1Schema,
   repairContinuationRequestV1Schema,
+  retainedCleanupRequestIdSchema,
+  retainedCleanupRequestSchema,
   ValidationError,
 } from '@autopod/shared';
 
@@ -164,6 +167,12 @@ export interface UpdatePodsitterConfigurationRequest {
 
 import { fetch } from 'undici';
 import { repairInspection, repairOperation, repairPreview } from './repair-continuation.js';
+import {
+  cleanupInspection,
+  cleanupPodPath,
+  cleanupReceipt,
+  cleanupSubmission,
+} from './retained-cleanup.js';
 
 export class DaemonUnreachableError extends AutopodError {
   constructor(url: string) {
@@ -1418,6 +1427,60 @@ export class AutopodClient {
     return this.baseUrl.replace(/^http/, 'ws') + path;
   }
 
+  get cleanupDaemonIdentity(): string {
+    const url = new URL(this.baseUrl);
+    if (
+      !['https:', 'http:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      throw new Error('Invalid daemon endpoint for retained cleanup.');
+    return url.href.replace(/\/+$/, '');
+  }
+
+  async inspectRetainedCleanup(podId: string) {
+    return this.request(
+      'GET',
+      cleanupPodPath(podId),
+      undefined,
+      false,
+      'error',
+      (value, status) => {
+        if (status !== 200) throw new Error('Unexpected cleanup preview HTTP status.');
+        return cleanupInspection(value, podId);
+      },
+    );
+  }
+
+  async observeRetainedCleanup(podId: string, expected: string | RetainedCleanupRequest) {
+    const key = retainedCleanupRequestIdSchema.parse(
+      typeof expected === 'string' ? expected : expected.id,
+    );
+    return this.request(
+      'GET',
+      `${cleanupPodPath(podId)}/${key}`,
+      undefined,
+      false,
+      'error',
+      (value, status) => {
+        if (status !== 200) throw new Error('Unexpected cleanup observation HTTP status.');
+        return cleanupReceipt(value, podId, expected);
+      },
+    );
+  }
+
+  async submitRetainedCleanup(podId: string, input: RetainedCleanupRequest) {
+    const request = retainedCleanupRequestSchema.parse(input);
+    return this.request('POST', cleanupPodPath(podId), request, false, 'error', (value, status) => {
+      const result = cleanupSubmission(value, podId, request);
+      if (status !== (result.state === 'pending' || result.state === 'partial' ? 202 : 200))
+        throw new Error('Unexpected cleanup submission HTTP status.');
+      return result;
+    });
+  }
+
   // Internal
   private async request<T>(
     method: string,
@@ -1425,6 +1488,7 @@ export class AutopodClient {
     body?: unknown,
     retryAuth = true,
     redirect: 'follow' | 'error' = 'follow',
+    decode?: (value: unknown, status: number) => T,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const binary = Buffer.isBuffer(body);
@@ -1479,6 +1543,10 @@ export class AutopodClient {
       await this.handleError(response, path);
     }
 
+    if (decode) {
+      return decode(response.status === 204 ? undefined : await response.json(), response.status);
+    }
+
     if (response.status === 204) {
       return undefined as T;
     }
@@ -1516,6 +1584,9 @@ export class AutopodClient {
       case 403:
         throw new AutopodError(message, errorBody.code ?? 'FORBIDDEN', 403);
       case 404: {
+        if (/^\/pods\/[^/]+\/retained-cleanup(?:\/|$)/.test(path)) {
+          throw new AutopodError(message, errorBody.code ?? 'ROUTE_NOT_FOUND', 404);
+        }
         if (path.includes('/profiles/')) {
           const name = path.split('/profiles/')[1]?.split('/')[0] ?? 'unknown';
           throw new ProfileNotFoundError(name);
