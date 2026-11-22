@@ -16,13 +16,18 @@ const resource = z
     id: nonempty,
     namespace: nonempty,
   })
-  .refine(
-    ({ kind, role }) =>
-      (kind === 'docker_container' && role === 'guest_execution') ||
-      (kind === 'docker_bridge' && role === 'owned_bridge') ||
-      (kind === 'host_worktree' && ['original_checkout', 'prepared_checkout'].includes(role)) ||
-      (kind === 'host_prepared_root' && role === 'private_prepared_source'),
-  );
+  .refine(({ kind, role, id }) => {
+    switch (kind) {
+      case 'docker_container':
+        return role === 'guest_execution' && /^[a-f0-9]{64}$/.test(id);
+      case 'docker_bridge':
+        return role === 'owned_bridge' && /^[a-f0-9]{64}$/.test(id);
+      case 'host_worktree':
+        return ['original_checkout', 'prepared_checkout'].includes(role) && id.startsWith('/');
+      case 'host_prepared_root':
+        return role === 'private_prepared_source' && id.startsWith('/');
+    }
+  });
 const plan = z.object({
   version: z.literal(1),
   generation: retainedCleanupRequestSchema.shape.expectedGeneration,

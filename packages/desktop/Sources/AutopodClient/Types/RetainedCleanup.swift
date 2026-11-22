@@ -82,9 +82,11 @@ public struct RetainedCleanupResource: Codable, Sendable, Hashable {
   var valid: Bool {
     guard !id.isEmpty, !namespace.isEmpty else { return false }
     switch (kind, role) {
-    case (.dockerContainer, .guestExecution), (.dockerBridge, .ownedBridge),
-         (.hostWorktree, .originalCheckout), (.hostWorktree, .preparedCheckout),
-         (.hostPreparedRoot, .privatePreparedSource): return true
+    case (.dockerContainer, .guestExecution), (.dockerBridge, .ownedBridge):
+      return cleanupPattern(id, "^[a-f0-9]{64}$")
+    case (.hostWorktree, .originalCheckout), (.hostWorktree, .preparedCheckout),
+         (.hostPreparedRoot, .privatePreparedSource):
+      return id.hasPrefix("/")
     default: return false
     }
   }

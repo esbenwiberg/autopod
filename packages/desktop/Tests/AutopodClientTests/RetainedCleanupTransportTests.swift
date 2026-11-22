@@ -140,19 +140,28 @@ private func cleanupBody(_ request: URLRequest) throws -> Data {
 @MainActor @Test func retainedCleanupTransportDistinguishesOldDaemonAndUnknownExactReceipt() async throws {
   try await withConfirmedActionFixture(initial: .killed) { f in
     let actions = f.handler.actions.retainedCleanup
+    let plan = try JSONDecoder().decode(RetainedCleanupPlan.self, from: cleanupPlanData())
+    let input = RetainedCleanupRequest(id: "malformed", plan: plan, reason: "Discard the unpublished experiment")
+    let malformed = try cleanupReceipt(f.id, input, "deleted")
+      .replacingOccurrences(of: try #require(plan.resources.first?.id), with: "friendly-container")
     let task = f.start {
       do { _ = try await actions.inspect(f.id); Issue.record("Expected unsupported") }
       catch RetainedCleanupError.unsupported { } catch { Issue.record("Unexpected error \(error)") }
       do { _ = try await actions.observe(f.id, "exact-key"); Issue.record("Expected exact receipt not found") }
       catch RetainedCleanupError.notFound { } catch { Issue.record("Unexpected error \(error)") }
+      do { _ = try await actions.observe(f.id, input.id); Issue.record("A Docker name cannot prove exact absence") }
+      catch RetainedCleanupError.invalidReply { } catch { Issue.record("Unexpected error \(error)") }
     }
     let first = try await f.peer.next()
     first.respond(status: 404, body: #"{"message":"Route not found"}"#)
     let second = try await f.peer.next()
     #expect(second.request.url?.path == "/pods/\(f.id)/retained-cleanup/exact-key")
     second.respond(status: 404, body: #"{"code":"POD_NOT_FOUND"}"#)
+    let third = try await f.peer.next()
+    #expect(third.request.url?.path == "/pods/\(f.id)/retained-cleanup/malformed")
+    third.respond(body: malformed)
     await task.value
     f.expectState(.killed)
-    #expect(f.peer.requests.count == 2)
+    #expect(f.peer.requests.count == 3)
   }
 }

@@ -152,6 +152,14 @@ describe('retained cleanup command through its real client', () => {
     expect(fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET', 'GET', 'GET']);
   });
 
+  it('refuses a deleted receipt containing a Docker name instead of a full native ID', async () => {
+    const malformed = JSON.stringify(receipt).replaceAll(target.id, 'friendly-container');
+    fetch.mockResolvedValueOnce(new Response(malformed, { status: 200 }));
+    expect(await run(['--observe', '--request-id', id])).toMatchObject({ state: 'uncertain' });
+    expect(process.exitCode).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('requires exact reviewed v1 flags and consent, and binds replay to the saved daemon and pod', async () => {
     await expect(run(apply().slice(0, -1))).rejects.toThrow();
     await expect(run(apply(), 'https://other.invalid')).rejects.toThrow(
