@@ -84,23 +84,110 @@ export function escapeMd(text: string): string {
   );
 }
 
-export function buildPrTitle(
-  task: string,
-  seriesName?: string,
-  seriesDescription?: string,
-): string {
-  // For series PRs with a description, use the series name as a clean short title
-  if (seriesDescription && seriesName) {
-    const clean = seriesName.replace(/[-_]/g, ' ').trim();
-    const hasPrefix = /^(feat|fix|chore|refactor|docs|test|ci|style|perf)(\(.+\))?:/i.test(clean);
-    const titled = hasPrefix ? clean : `feat: ${clean}`;
-    return titled.length > 70 ? `${titled.slice(0, 67)}...` : titled;
+/** Maximum length of a template-fallback PR title, matching the LLM title limit. */
+const MAX_FALLBACK_PR_TITLE_LENGTH = 72;
+const EMPTY_FALLBACK_PR_TITLE = 'Autopod changes';
+
+interface PrTitleSource {
+  /** Task brief (or promoted-pod handoff instructions). Often raw Markdown. */
+  task: string;
+  /** Spec contract `title`, when the pod launched with a contract. */
+  contractTitle?: string | null;
+  /** Brief frontmatter title recorded at launch (`work.briefTitle`). */
+  briefTitle?: string | null;
+  seriesName?: string | null;
+  seriesDescription?: string | null;
+}
+
+/**
+ * Deterministic template-fallback PR title, used when the daemon-side LLM title
+ * generator is unavailable or fails.
+ *
+ * Prefers explicit titles (contract `title`, then brief title, then the series
+ * name for series PRs) over text derived from the brief. Brief text is reduced
+ * to its frontmatter `title` or first paragraph with leading Markdown syntax
+ * removed. Never invents a conventional-commit type prefix and truncates at a
+ * word boundary to {@link MAX_FALLBACK_PR_TITLE_LENGTH} characters.
+ */
+export function buildPrTitle(source: PrTitleSource): string {
+  const explicit = [source.contractTitle, source.briefTitle]
+    .map((title) => cleanTitleLine(title ?? ''))
+    .find((title) => title.length > 0);
+  const series =
+    source.seriesDescription && source.seriesName
+      ? cleanTitleLine(source.seriesName.replace(/[-_]/g, ' '))
+      : '';
+  const title = explicit || series || titleFromBrief(source.task);
+  return truncateTitle(title || EMPTY_FALLBACK_PR_TITLE, MAX_FALLBACK_PR_TITLE_LENGTH);
+}
+
+function titleFromBrief(task: string): string {
+  let lines = task.replace(/\r\n?/g, '\n').split('\n');
+
+  // YAML frontmatter: use its `title` when present, otherwise skip the block.
+  const firstContent = lines.findIndex((line) => line.trim() !== '');
+  if (firstContent >= 0 && lines[firstContent]?.trim() === '---') {
+    const close = lines.findIndex((line, i) => i > firstContent && line.trim() === '---');
+    if (close > firstContent) {
+      for (const line of lines.slice(firstContent + 1, close)) {
+        const match = /^title\s*:\s*(.+)$/i.exec(line.trim());
+        const value = match?.[1] ? cleanTitleLine(match[1].replace(/^(['"])(.*)\1$/, '$2')) : '';
+        if (value) return value;
+      }
+      lines = lines.slice(close + 1);
+    }
   }
-  // Truncate at 70 chars, prefix with "feat:" if not already prefixed
-  const clean = task.replace(/\n/g, ' ').trim();
-  const hasPrefix = /^(feat|fix|chore|refactor|docs|test|ci|style|perf)(\(.+\))?:/i.test(clean);
-  const titled = hasPrefix ? clean : `feat: ${clean}`;
-  return titled.length > 70 ? `${titled.slice(0, 67)}...` : titled;
+
+  // First paragraph with content; a heading is a paragraph of its own and a
+  // new block (heading, list item, quote, fence, rule) ends the paragraph.
+  const paragraph: string[] = [];
+  for (const line of lines) {
+    const cleaned = cleanTitleLine(line);
+    if (paragraph.length === 0) {
+      if (!cleaned) continue;
+      paragraph.push(cleaned);
+      if (/^\s{0,3}#{1,6}(\s|$)/.test(line)) break;
+      continue;
+    }
+    if (!cleaned || /^\s*(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|```|~~~)/.test(line)) break;
+    paragraph.push(cleaned);
+  }
+  return paragraph.join(' ');
+}
+
+/** Strip block-level and inline Markdown syntax from a single line. */
+function cleanTitleLine(line: string): string {
+  let text = line.trim();
+  if (/^([-*_=~`])\1{2,}$/.test(text.replace(/\s/g, ''))) return ''; // rules, fences, setext
+  let previous: string;
+  do {
+    previous = text;
+    text = text
+      .replace(/^#{1,6}(?=\s|$)/, '') // ATX heading marker
+      .replace(/^>+/, '') // blockquote
+      .replace(/^[-*+](?=\s)/, '') // bullet
+      .replace(/^\d+[.)](?=\s)/, '') // ordered list
+      .replace(/^\[[ xX]\](?=\s)/, '') // task checkbox
+      .trim();
+  } while (text !== previous);
+  return text
+    .replace(/\s+#+$/, '') // closing ATX hashes
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // links / images -> text
+    .replace(/`+/g, '') // inline code
+    .replace(/(\*\*|__)(.+?)\1/g, '$2') // strong
+    .replace(/(^|[\s(])([*_])(\S(?:.*?\S)?)\2(?=[\s).,:;!?]|$)/g, '$1$3') // emphasis
+    .replace(/~~(.+?)~~/g, '$1') // strikethrough
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function truncateTitle(title: string, max: number): string {
+  if (title.length <= max) return title;
+  const limit = max - 1; // room for the ellipsis
+  const slice = title.slice(0, limit + 1);
+  const boundary = slice.lastIndexOf(' ');
+  const cut = boundary >= limit / 2 ? slice.slice(0, boundary) : title.slice(0, limit);
+  return `${cut.replace(/[\s,;:—–-]+$/, '')}…`;
 }
 
 export function buildPrBody(config: PrBodyConfig): string {

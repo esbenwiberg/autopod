@@ -21,6 +21,10 @@ export interface CreatePrConfig {
   podId: string;
   /** Task description from the pod */
   task: string;
+  /** Brief frontmatter title (`pod.briefTitle`); preferred for template-fallback titles. */
+  briefTitle?: string;
+  /** Spec contract title (`pod.contract.title`); preferred over the brief title. */
+  contractTitle?: string;
   /** Profile name */
   profileName: string;
   /** Resolved profile — drives daemon-side LLM auth for title/narrative generation. */

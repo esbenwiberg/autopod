@@ -5,6 +5,7 @@ import { reconcilePublication } from '../worktrees/durable-source-publication.js
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { DeliveryPrCaptured } from './delivery-contracts.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
+import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { publishValidatedSource } from './validated-source-publication.js';
 import { validationSourceError } from './validation-source-evidence.js';
@@ -165,6 +166,8 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         baseBranch,
         podId,
         task: pod.task,
+        briefTitle: pod.briefTitle ?? undefined,
+        contractTitle: pod.contract?.title ?? undefined,
         profileName: pod.profileName,
         profile,
         podModel: pod.model,
@@ -182,28 +185,14 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
         securityFindings: getLatestPushFindings(podId),
       });
       assertCurrent();
-      if (result.usedFallback) {
-        const which = result.narrativeUsedFallback
-          ? result.titleUsedFallback
-            ? 'title + body'
-            : 'body'
-          : 'title';
-        const reason = result.fallbackReason ?? 'unknown';
-        logger.error(
-          {
-            podId,
-            callerLabel,
-            profile: profile.name,
-            modelProvider: profile.modelProvider,
-            fallbackReason: reason,
-            fallbackDetail: result.fallbackDetail,
-            titleUsedFallback: result.titleUsedFallback,
-            narrativeUsedFallback: result.narrativeUsedFallback,
-          },
-          'PR description used template fallback — daemon-side LLM helper failed',
-        );
-        emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-      }
+      reportPrDescriptionFallback({
+        result,
+        podId,
+        context: callerLabel,
+        profile,
+        logger,
+        emitActivityStatus,
+      });
       return result.url;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

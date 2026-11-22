@@ -24,6 +24,7 @@ import type {
   OperatorMessagesCaptured,
 } from './operator-contracts.js';
 import { buildDetachedMcpFallbackMessage } from './operator-policy.js';
+import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { canReceiveMessage, isTerminalState } from './state-machine.js';
 import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
@@ -393,6 +394,8 @@ export function createOperatorMessages(
                 baseBranch,
                 podId,
                 task: refreshed.task,
+                briefTitle: refreshed.briefTitle ?? undefined,
+                contractTitle: refreshed.contract?.title ?? undefined,
                 profileName: refreshed.profileName,
                 profile,
                 podModel: refreshed.model,
@@ -410,6 +413,14 @@ export function createOperatorMessages(
                 securityFindings: getLatestPushFindings(podId),
               });
               assertDelivery();
+              reportPrDescriptionFallback({
+                result: createResult,
+                podId,
+                context: 'host_push_retry',
+                profile,
+                logger,
+                emitActivityStatus,
+              });
               newPrUrl = createResult.url ?? null;
               if (newPrUrl) {
                 emitActivityStatus(podId, `PR created: ${newPrUrl}`);

@@ -4,6 +4,7 @@ import {
   needsApprovalReportSnapshot,
   preserveApprovalReportSnapshot,
 } from './approval-report-snapshot.js';
+import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { isTerminalState } from './state-machine.js';
 import { publishValidatedSource } from './validated-source-publication.js';
 import { ValidationSupersededError } from './validation-ownership.js';
@@ -162,6 +163,8 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
             baseBranch,
             podId,
             task: s2.task,
+            briefTitle: s2.briefTitle ?? undefined,
+            contractTitle: s2.contract?.title ?? undefined,
             profileName: s2.profileName,
             profile,
             podModel: s2.model,
@@ -179,25 +182,14 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
             securityFindings: getLatestPushFindings(podId),
           });
           prUrl = createResult.url;
-          if (createResult.usedFallback) {
-            const which = createResult.narrativeUsedFallback
-              ? createResult.titleUsedFallback
-                ? 'title + body'
-                : 'body'
-              : 'title';
-            const reason = createResult.fallbackReason ?? 'unknown';
-            logger.error(
-              {
-                podId,
-                profile: profile.name,
-                modelProvider: profile.modelProvider,
-                fallbackReason: reason,
-                fallbackDetail: createResult.fallbackDetail,
-              },
-              'PR description used template fallback during revalidation',
-            );
-            emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-          }
+          reportPrDescriptionFallback({
+            result: createResult,
+            podId,
+            context: 'revalidation',
+            profile,
+            logger,
+            emitActivityStatus,
+          });
           if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
