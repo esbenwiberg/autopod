@@ -150,6 +150,11 @@ import AutopodDesktop
       ["accessibilityLabel", "accessibilityValue"].compactMap { ax(node, $0) as? String }
     }.joined(separator: "\n")
   }
+  func height(_ identifier: String) -> CGFloat? {
+    rootView.layoutSubtreeIfNeeded()
+    let node = nodes(rootView).first { ax($0, "accessibilityIdentifier") as? String == identifier }
+    return node.flatMap { (ax($0, "accessibilityFrame") as? NSValue)?.rectValue.height }
+  }
   func press(_ identifier: String) async throws {
     try await wait("button \(identifier)") {
       self.rootView.layoutSubtreeIfNeeded()
@@ -395,6 +400,34 @@ struct DecisionReplyDraftRenderingTests {
       try view.capture("choice-\(choice)-unconfirmed")
       #expect(view.handler.actions.decisionReply.snapshot("decision", "A").text == answer)
       #expect(f.a.requests.count == 3)
+    }
+  }
+
+  // #649: long options and replies must wrap instead of clipping to one line.
+  @Test(arguments: ["overview", "sheet"])
+  func longOptionsAndRepliesWrapInsteadOfClipping(surface: String) async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let long = String(repeating: "Approve the read-only runtime line and keep the card under the agreed height budget. ", count: 4)
+        + "END-OF-OPTION"
+      var pod = try decisionPod("A")
+      pod.escalationOptions = ["A first", long]
+      f.store.upsertSession(pod); f.store.selectedSessionId = "decision"
+      let sheet = surface == "sheet"
+      let view = ReplyDraftWindow(f, width: sheet ? 560 : 600, directSheet: sheet)
+      defer { view.close() }
+      let prefix = "decision-\(surface)-option-"
+      try await view.wait("options mounted") {
+        (view.height(prefix + "A first") ?? 0) > 0 && (view.height(prefix + long) ?? 0) > 0
+      }
+      let short = try #require(view.height(prefix + "A first"))
+      let wrapped = try #require(view.height(prefix + long))
+      #expect(wrapped >= short * 2.5, "long option \(wrapped)pt vs short \(short)pt")
+      try await view.type("one line")
+      let single = try #require(view.field?.frame.height)
+      try await view.type(long)
+      try await view.wait("reply field grows") { (view.field?.frame.height ?? 0) > single * 2 }
+      #expect(view.field?.stringValue == long)
+      try view.capture("long-\(surface)-wrapped")
     }
   }
 

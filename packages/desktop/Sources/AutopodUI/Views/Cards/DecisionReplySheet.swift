@@ -38,16 +38,9 @@ struct DecisionReplySheet: View {
           } else if let options = pod?.escalationOptions, !options.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
               ForEach(options, id: \.self) { option in
-                Button { submit(interaction, selected: option) } label: {
-                  HStack(spacing: 8) {
-                    Image(systemName: "circle").font(.system(size: 11))
-                    Text(option).frame(maxWidth: .infinity, alignment: .leading)
-                      .multilineTextAlignment(.leading)
-                  }.padding(.horizontal, 10).padding(.vertical, 7)
-                }
-                .buttonStyle(.bordered).tint(.orange)
-                .disabled(!snapshot.canSubmit)
-                .accessibilityIdentifier("decision-sheet-option-\(option)")
+                DecisionOptionButton(option: option) { submit(interaction, selected: option) }
+                  .disabled(!snapshot.canSubmit)
+                  .accessibilityIdentifier("decision-sheet-option-\(option)")
               }
             }
             Divider()
@@ -59,8 +52,9 @@ struct DecisionReplySheet: View {
       Divider()
       VStack(alignment: .leading, spacing: 10) {
         if pod?.escalationType != "action_approval" {
-          HStack(spacing: 8) {
-            TextField("Type your reply…", text: Binding(get: { interaction.snapshot.text }, set: { interaction.edit($0) }))
+          HStack(alignment: .bottom, spacing: 8) {
+            TextField("Type your reply…", text: Binding(get: { interaction.snapshot.text }, set: { interaction.edit($0) }), axis: .vertical)
+              .lineLimit(1...8)
               .textFieldStyle(.roundedBorder).disabled(!snapshot.canEdit)
               .onSubmit { submit(interaction) }
             Button { submit(interaction) } label: { Image(systemName: "paperplane.fill") }
