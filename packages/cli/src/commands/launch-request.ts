@@ -28,7 +28,8 @@ export interface LaunchFlags {
   execution?: 'local' | 'sandbox';
   memoryGb?: number;
   cpus?: number;
-  tokenBudget?: number | null;
+  /** `off` (from the CLI flag) and `null` both remove a preset task token limit. */
+  tokenBudget?: number | null | 'off';
   requestId?: string;
   overrideConfig?: boolean;
 }
@@ -132,7 +133,10 @@ export async function buildLaunchRequest(
   if (flags.output !== undefined)
     overrides.workflow = { ...overrides.workflow, output: flags.output };
   if (flags.tokenBudget !== undefined)
-    overrides.workflow = { ...overrides.workflow, tokenBudget: flags.tokenBudget };
+    overrides.workflow = {
+      ...overrides.workflow,
+      tokenBudget: flags.tokenBudget === 'off' ? null : flags.tokenBudget,
+    };
   if (flags.githubAccess !== undefined) Reflect.deleteProperty(overrides, 'githubAccess');
   if (flags.githubAccess === false) selections.githubAccessId = null;
   else if (flags.githubAccess !== undefined)

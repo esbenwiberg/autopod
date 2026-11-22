@@ -516,6 +516,57 @@ describe('shared launch request CLI', () => {
     expect(client.launchPod).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
   });
+  it.each([
+    ['run', 'off', null],
+    ['run', '250000', 250000],
+    ['start', 'off', null],
+    ['start', '250000', 250000],
+  ] as const)('sends %s --token-budget %s as %s in the previewed overrides', async (name, value, expected) => {
+    const client = {
+      listConfigurations: lookup,
+      resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
+        digest: 'a'.repeat(64),
+        ...request,
+      })),
+      launchPod: vi.fn(),
+    };
+    const program = new Command().exitOverride();
+    registerLaunchCommand(program, () => client as unknown as AutopodClient, vi.fn(), { name });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await program.parseAsync([
+      'node',
+      'ap',
+      name,
+      '--repo',
+      'Project',
+      '--task',
+      'Preview only',
+      '--token-budget',
+      value,
+      '--preview',
+      '--json',
+    ]);
+    expect(client.resolveLaunch).toHaveBeenCalledOnce();
+    expect(client.resolveLaunch.mock.calls[0]?.[0].overrides?.workflow).toEqual({
+      tokenBudget: expected,
+    });
+    expect(client.launchPod).not.toHaveBeenCalled();
+  });
+  it.each([
+    '0',
+    '-5',
+    '1.5',
+    'none',
+    '',
+  ])('rejects --token-budget %j before contacting the daemon', async (value) => {
+    const getClient = vi.fn();
+    const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+    registerLaunchCommand(program, getClient);
+    await expect(
+      program.parseAsync(['node', 'ap', 'run', '--repo', 'Project', '--token-budget', value]),
+    ).rejects.toThrow('Token budget must be a positive integer or off.');
+    expect(getClient).not.toHaveBeenCalled();
+  });
   it('rejects removed profile-first syntax before contacting the daemon', async () => {
     const getClient = vi.fn();
     const program = new Command().exitOverride();

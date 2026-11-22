@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
-import { parseTokenBudget } from './budget.js';
+import { parseTokenBudgetOption } from './budget.js';
 import { type AttachmentFlags, collectInputs, uploadInputs } from './input-attachments.js';
 import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
 import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
@@ -84,7 +84,7 @@ export function registerLaunchCommand(
     .option(
       '--token-budget <tokens-or-off>',
       'Optional task token limit; off removes a preset limit',
-      parseTokenBudget,
+      parseTokenBudgetOption,
     )
     .option('--preview', 'Resolve and display effective configuration without launching')
     .option('--json', 'Output the full preview or created pod as JSON');
