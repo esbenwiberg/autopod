@@ -21,6 +21,7 @@ async function input(
 describe('approval delivery stages', () => {
   it.each([
     'permitted',
+    'default-provider',
     'blocked',
     'moved-head',
     'wrong-base',
@@ -71,7 +72,7 @@ describe('approval delivery stages', () => {
       ...f.mainCaptured,
       executionForPod: (pod: typeof original) => ({
         ...f.mainCaptured.executionForPod(pod),
-        prProvider: 'github' as const,
+        prProvider: gate === 'default-provider' ? null : ('github' as const),
       }),
       prManagerFactory: () => f.provider,
     };
@@ -88,14 +89,14 @@ describe('approval delivery stages', () => {
       expect(f.pod().status).toBe('validated');
     } else {
       await approval;
-      expect(f.pod().status).toBe(gate === 'permitted' ? 'complete' : 'merge_pending');
+      expect(f.pod().status).toBe(gate === 'blocked' ? 'merge_pending' : 'complete');
     }
     expect(f.pod().lifecycleGeneration).toBe(original.lifecycleGeneration);
     expect(rebase).not.toHaveBeenCalled();
     expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
     expect(captured.enqueueSession).not.toHaveBeenCalled();
     expect(f.podRepo.approvalRewrites?.latest(f.pod())).toBeNull();
-    if (gate === 'permitted') {
+    if (gate === 'permitted' || gate === 'default-provider') {
       expect(f.provider.mergePr).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           expectedHeadSha: publication.commitSha,

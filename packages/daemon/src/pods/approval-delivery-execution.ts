@@ -325,7 +325,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           // candidate. An already prepared selection still needs its recovery path.
           const savedRewrite = podRepo.approvalRewrites?.latest(mergingAnchor);
           const prepareRewrite =
-            approveProfile.prProvider !== 'github' ||
+            approveProfile.prProvider === 'ado' ||
             (savedRewrite?.prepared && !savedRewrite.activated);
           if (prepareRewrite)
             emitActivityStatus(podId, `Checking latest origin/${mergeBaseBranch}…`);
@@ -374,7 +374,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
               };
             // Base drift does not invalidate an exact GitHub source approval.
             // Provider gates apply only after confirming the published binding.
-            if (approveProfile.prProvider === 'github')
+            if (approveProfile.prProvider !== 'ado')
               assertPublishedPr(prStatus, mergeBaseBranch, publishedSource.commitSha);
             if (prStatus.squashRequired && mergeSquash === undefined) mergeSquash = true;
             planApprovalSource(publishedSource, prUrl, mergeBaseBranch);

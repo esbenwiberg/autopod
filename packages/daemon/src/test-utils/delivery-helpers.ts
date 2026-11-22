@@ -48,6 +48,11 @@ export function pendingStatus(overrides: Partial<PrMergeStatus> = {}): PrMergeSt
 
 export function createDeliveryFixture(disk = false) {
   const f = createApprovalFixture(disk);
+  // The synthetic provider retains the ADO-style approval rewrite path by
+  // default. GitHub workflow tests select GitHub explicitly (including null,
+  // which the production provider factory also resolves to GitHub).
+  const executionForPod = f.mainCaptured.executionForPod;
+  f.mainCaptured.executionForPod = (pod) => ({ ...executionForPod(pod), prProvider: 'ado' });
   f.validated();
   // PR retry unit fixtures start from actual checked-source evidence. Composed
   // lifecycle tests produce this through the real validation owner instead.
