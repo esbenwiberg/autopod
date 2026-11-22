@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { launchRequestSchema, savedLaunchSelectionSchema } from '@autopod/shared';
 import { expect, it, vi } from 'vitest';
+import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { configurationDigest, resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
+import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
 import { runMigrationsWithBackups } from '../db/migrate.js';
+import { digest, sha256 } from '../managed/canonical.js';
+import { ManagedPodService } from '../managed/managed-service.js';
 import {
   createTestConfiguration,
   insertConfigurationTestPod,
@@ -16,7 +21,17 @@ import {
   MIGRATIONS_DIR,
   openTestDiskDatabase,
 } from '../test-utils/disk-database.js';
+import { resign } from '../test-utils/managed-fixture.js';
 import { createTestDb, logger } from '../test-utils/mock-helpers.js';
+import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
+import { OrchestrationContinuations } from './continuations.js';
+import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
+import { ParentReportResults } from './parent-report-results.js';
+import {
+  admitSavedDelegationLaunch,
+  readSavedDelegationAdmission,
+  savedDelegationAttemptRun,
+} from './saved-delegation-admission.js';
 import { prepareSavedDelegationLaunch } from './saved-delegation-launch.js';
 import {
   createSavedDelegationPolicyStore,
@@ -94,6 +109,7 @@ function fixture(db = createTestDb()) {
       source: {
         repositoryDigest: configurationDigest(config.repository?.config),
         ref: 'refs/heads/main',
+        predecessor: '0'.repeat(40),
         commit: '1'.repeat(40),
         tree: '2'.repeat(40),
         bundleDigest: pin('3'),
@@ -356,3 +372,292 @@ it('cannot run as an ordinary Task even if the delegated option has a valid prev
     f.db.close();
   }
 });
+
+async function admissionFixture(db = createTestDb()) {
+  const f = fixture(db);
+  const source = await setupOrchestrationRun();
+  const original = f.pins.getMockImplementation()!;
+  f.pins.mockImplementation(async (policy, config) => {
+    const pins = await original(policy, config);
+    const { predecessor, commit, tree } = source.cp;
+    return {
+      ...pins,
+      source: { ...pins.source, predecessor, commit, tree, bundleDigest: sha256(source.bytes) },
+    };
+  });
+  const readSeedBundle = vi.fn(async () => Buffer.from(source.bytes));
+  const insertPod = vi.fn(() => {
+    const pod = insertConfigurationTestPod(db, randomUUID());
+    db.prepare('UPDATE pods SET user_id=? WHERE id=?').run(owner.oid, pod);
+    return pod;
+  });
+  const submit = (raw: unknown) =>
+    admitSavedDelegationLaunch({
+      request: raw,
+      principal: owner,
+      db,
+      policies: f.policies,
+      launch: f.services,
+      readVerifiedPins: f.pins,
+      scratch: path.join(source.root, 'admissions'),
+      readSeedBundle,
+      insertPod,
+    });
+  const reviewed = async (requestId = id) => {
+    const request = { ...f.request, requestId };
+    const { plan } = await f.preview(request);
+    return { ...request, expectedDigest: plan.digest };
+  };
+  return { ...f, source, readSeedBundle, insertPod, submit, reviewed };
+}
+
+it('requires the reviewed digest and atomically retains exactly one admission across concurrent replay and policy edits', async () => {
+  const f = await admissionFixture();
+  try {
+    await expect(f.submit(f.request)).rejects.toMatchObject({
+      code: 'DELEGATION_PREVIEW_REQUIRED',
+    });
+    expect(f.pins).not.toHaveBeenCalled();
+    const request = await f.reviewed();
+    const [a, b] = await Promise.all([f.submit(request), f.submit(request)]);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    expect(a.podId).toBe(b.podId);
+    expect(f.insertPod).toHaveBeenCalledOnce();
+    expect(
+      f.db
+        .prepare('SELECT remaining FROM orchestration_request_balances WHERE id=?')
+        .pluck()
+        .get(a.plan.runId),
+    ).toBe(12);
+    expect(f.db.prepare('SELECT count(*) FROM orchestration_kickoffs').pluck().get()).toBe(0);
+    expect(readSavedDelegationAdmission(f.db, a.podId, owner)).toEqual({
+      plan: a.plan,
+      checkpoint: a.checkpoint,
+      bundle: f.source.bytes,
+    });
+    expect(() =>
+      readSavedDelegationAdmission(f.db, a.podId, { ...owner, iss: 'another-tenant' }),
+    ).toThrow(expect.objectContaining({ code: 'DELEGATION_ADMISSION_NOT_FOUND' }));
+    f.policies.revise(owner, f.saved.policyId, 1, { ...seed, name: 'New revision' });
+    f.pins.mockClear();
+    f.readSeedBundle.mockClear();
+    expect(await f.submit(request)).toEqual({ ...a, created: false });
+    expect(f.pins).not.toHaveBeenCalled();
+    expect(f.readSeedBundle).not.toHaveBeenCalled();
+    await expect(f.submit({ ...request, task: 'Different task' })).rejects.toMatchObject({
+      code: 'REQUEST_CONFLICT',
+    });
+  } finally {
+    f.db.close();
+  }
+}, 15_000);
+
+it('verifies the bytes and Git tree before insertion and rolls back every admission row on final binding failure', async () => {
+  const f = await admissionFixture();
+  try {
+    const request = await f.reviewed();
+    f.readSeedBundle.mockResolvedValueOnce(Buffer.from('different bytes'));
+    await expect(f.submit(request)).rejects.toMatchObject({ code: 'DELEGATION_SEED_INVALID' });
+    const { plan, config } = await f.preview();
+    const wrong = await f.pins(plan.policy, config);
+    wrong.source.tree = 'd'.repeat(40);
+    f.pins.mockResolvedValueOnce(wrong);
+    const changed = await f.reviewed();
+    f.pins.mockResolvedValueOnce(wrong);
+    await expect(f.submit(changed)).rejects.toThrow('checkpoint-source-mismatch');
+    expect(f.insertPod).not.toHaveBeenCalled();
+    f.db.exec(`CREATE TRIGGER test_fail_saved_binding BEFORE INSERT ON saved_delegation_admissions
+      BEGIN SELECT RAISE(ABORT, 'fixture-binding-failure'); END;`);
+    await expect(f.submit(request)).rejects.toThrow('fixture-binding-failure');
+    for (const table of [
+      'pods',
+      'pod_launch_snapshots',
+      'orchestration_runs',
+      'orchestration_checkpoint_custody',
+      'parent_managed_runs',
+      'saved_delegation_admissions',
+    ])
+      expect(f.db.prepare(`SELECT count(*) FROM ${table}`).pluck().get()).toBe(0);
+  } finally {
+    f.db.close();
+  }
+}, 15_000);
+
+it('reopens the exact admission after restart without reading mutable policy or touching the runtime', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-admission-restart-'));
+  const file = path.join(root, 'state.db');
+  let db = createHistoricalDiskDatabase(file, [{ dir: MIGRATIONS_DIR, through: 281 }]);
+  try {
+    await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
+    const f = await admissionFixture(db);
+    const request = await f.reviewed();
+    const admitted = await f.submit(request);
+    db.close();
+    db = openTestDiskDatabase(file);
+    const fail = vi.fn(() => {
+      throw new Error('restart must not rerun admission');
+    });
+    const replay = await admitSavedDelegationLaunch({
+      request,
+      principal: owner,
+      db,
+      policies: createSavedDelegationPolicyStore(db),
+      launch: { ...f.services, store: createConfigurationStore(db) },
+      scratch: root,
+      readVerifiedPins: fail,
+      readSeedBundle: fail,
+      insertPod: fail,
+    });
+    expect(replay).toEqual({ ...admitted, created: false });
+    expect(fail).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT count(*) FROM managed_pods').pluck().get()).toBe(0);
+    db.prepare('UPDATE orchestration_checkpoint_custody SET bundle=? WHERE run_id=?').run(
+      Buffer.from('corrupted fixture'),
+      admitted.plan.runId,
+    );
+    expect(() => readSavedDelegationAdmission(db, admitted.podId, owner)).toThrow(
+      expect.objectContaining({ code: 'DELEGATION_ADMISSION_CORRUPT' }),
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
+it('isolates two admitted parent attempts, real worker reservations, and result cursors even for the same owner', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-delegation-isolation-'));
+  const f = await admissionFixture(
+    createHistoricalDiskDatabase(path.join(root, 'state.db'), [
+      { dir: MIGRATIONS_DIR, through: 282 },
+    ]),
+  );
+  try {
+    const a = await f.submit(await f.reviewed());
+    const b = await f.submit(await f.reviewed(secondId));
+    const secret = path.join(f.source.root, 'pod-key');
+    writeFileSync(secret, Buffer.alloc(32, 59), { mode: 0o600, flag: 'wx' });
+    const issuer = createPodTokenIssuer(secret);
+    const session = (parent: typeof a) => {
+      const attempt = randomUUID();
+      f.db
+        .prepare("UPDATE pods SET status='running',container_id=? WHERE id=?")
+        .run(parent.podId, parent.podId);
+      f.db
+        .prepare(
+          'INSERT INTO parent_managed_sessions(attempt,run_id,generation,container_id) VALUES(?,?,1,?)',
+        )
+        .run(attempt, parent.plan.runId, parent.podId);
+      f.db
+        .prepare('UPDATE parent_managed_runs SET current_attempt=? WHERE run_id=?')
+        .run(attempt, parent.plan.runId);
+      const token = issuer.generateAttempt!(parent.podId, attempt);
+      return {
+        attempt,
+        token,
+        run: () => savedDelegationAttemptRun(f.db, issuer, parent.podId, token),
+      };
+    };
+    const sessionA = session(a);
+    const sessionB = session(b);
+    expect(() => savedDelegationAttemptRun(f.db, issuer, b.podId, sessionA.token)).toThrow(
+      'parent-session-required',
+    );
+    const template = structuredClone(f.source.request);
+    template.profileSnapshot.scope.repositories[0]!.enrollmentId = a.checkpoint.repository;
+    template.effectiveGrant.scope = structuredClone(template.profileSnapshot.scope);
+    for (const budget of [template.profileSnapshot.budget, template.effectiveGrant.budget]) {
+      if (!('maxProviderRequests' in budget)) throw new Error('fixture budget');
+      budget.maxProviderRequests = 6;
+    }
+    const { snapshotDigest: _, ...body } = template.profileSnapshot;
+    template.profileSnapshot.snapshotDigest = template.effectiveGrant.profileSnapshotDigest =
+      digest(body);
+    resign(template);
+    const scope = template.profileSnapshot.scope;
+    const service = new ManagedPodService(
+      f.db,
+      {
+        ...f.source.f.admission,
+        profiles: new Map([[template.profileSnapshot.snapshotDigest, template.profileSnapshot]]),
+        enrollmentCeiling: scope,
+        identityCeiling: scope,
+        backendCeiling: scope,
+      },
+      f.source.f.runtime,
+      () => 100,
+      true,
+    );
+    const ledger = new OrchestrationContinuations(f.db, async (cp, use) => {
+      const parent = [a, b].find((parent) => parent.plan.runId === cp.run);
+      if (!parent) throw new Error('fixture-run-mismatch');
+      const stored = readSavedDelegationAdmission(f.db, parent.podId, owner);
+      expect(cp).toEqual(stored.checkpoint);
+      return withVerifiedCheckpointMirror(
+        path.join(f.source.root, 'worker-read'),
+        cp,
+        stored.bundle,
+        () => use(service),
+      );
+    });
+    for (const admission of [a, b])
+      await ledger.kickoff(admission.checkpoint, { implement: template });
+    const balance = (run: string) =>
+      f.db
+        .prepare('SELECT remaining FROM orchestration_request_balances WHERE id=?')
+        .pluck()
+        .get(run);
+    const reserve = async (parent: typeof a, identity: typeof sessionA, key: string) => {
+      const assertScope = () => {
+        if (identity.run() !== parent.plan.runId) throw new Error('parent-session-run-mismatch');
+      };
+      assertScope();
+      const request = structuredClone(template);
+      request.dispatcherAttemptId = request.effectiveGrant.dispatcherAttemptId = randomUUID();
+      request.startKey = key;
+      return ledger.spawnWave(parent.checkpoint, [resign(request)], () => {
+        assertScope();
+        f.db
+          .prepare(`INSERT INTO parent_managed_requests(run_id,start_key,request_key,parent_attempt,input_digest)
+          VALUES(?,?,?,?,?)`)
+          .run(parent.plan.runId, key, key, identity.attempt, digest(key));
+      });
+    };
+    await expect(reserve(b, sessionA, 'attempted-cross-run')).rejects.toThrow(
+      'parent-session-run-mismatch',
+    );
+    expect(balance(b.plan.runId)).toBe(12);
+    await reserve(a, sessionA, 'same-child-key');
+    await reserve(a, sessionA, 'second-child');
+    await expect(reserve(a, sessionA, 'third-child')).rejects.toThrow(
+      'continuation-budget-exhausted',
+    );
+    expect(balance(a.plan.runId)).toBe(0);
+    expect(balance(b.plan.runId)).toBe(12);
+    await reserve(b, sessionB, 'same-child-key');
+    expect(balance(b.plan.runId)).toBe(6);
+
+    expect(await ledger.recover(a.plan.runId)).toEqual({ blocked: [] });
+    expect(await ledger.recover(b.plan.runId)).toEqual({ blocked: [] });
+    const failed = f.db.prepare(
+      "UPDATE managed_pods SET observed_exit=1,state='failed',exit_code=1 WHERE dispatcher_installation_id=?",
+    );
+    expect(failed.run('native.' + a.plan.runId).changes).toBe(2);
+    expect(failed.run('native.' + b.plan.runId).changes).toBe(1);
+    const results = new ParentReportResults(f.db);
+    const first = await results.results({}, sessionA.run);
+    const second = await results.results({}, sessionB.run);
+    expect(first.results).toHaveLength(2);
+    expect(second.results).toHaveLength(1);
+    expect(second.results[0]?.childId).not.toBe(first.results[0]?.childId);
+    await expect(results.results({ after: first.nextCursor }, sessionB.run)).rejects.toThrow(
+      'parent-result-cursor-refused',
+    );
+    f.db
+      .prepare('UPDATE pods SET lifecycle_generation=lifecycle_generation+1 WHERE id=?')
+      .run(a.podId);
+    await expect(results.results({}, sessionA.run)).rejects.toThrow('parent-session-stale');
+  } finally {
+    f.db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 25_000);

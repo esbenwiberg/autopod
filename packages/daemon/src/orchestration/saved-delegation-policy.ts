@@ -147,6 +147,9 @@ export function createSavedDelegationPolicyStore(db: Database.Database) {
     return { policyId: id, revision, policyDigest, policy };
   }
   return {
+    usesDatabase(candidate: Database.Database) {
+      return db === candidate;
+    },
     create(principal: DelegationPrincipal, raw: unknown) {
       const owner = delegationOwnerDigest(principal);
       return put(owner, randomUUID(), 1, raw);

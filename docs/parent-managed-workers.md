@@ -435,12 +435,22 @@ trusted host observations of the exact source commit, tree and bundle digest,
 recipe pins and runtime. Its review digest binds all those inputs. Changes to the
 source, runtime pins, Task configuration or saved policy require a new preview.
 
-This does not yet enable runtime admission. The public ordinary launch paths
-reject a saved-policy opt-in with `SAVED_DELEGATION_UNAVAILABLE`, rather than
-starting a nondelegated Task. Before enabling it, wire verified source custody
-and the per-run parent runtime into one admission transaction and prove exact
-request replay, recovery, and cross-run worker-ledger isolation. No public
-policy editor or new evaluator permission is enabled by this foundation.
+The trusted, internal admission entrypoint requires the reviewed digest. It
+validates a bounded Git bundle against the pinned predecessor, commit and tree
+before atomically inserting the Task, launch snapshot, request ledger, parent
+binding and private source custody. The retained seed records source identity
+only; it is not a passing check or independent-review receipt. Exact replay
+reads the retained admission, even after policy edits or daemon restart. An
+attempt-scoped lookup binds worker operations to the running Task and its
+current lifecycle generation. Fixture tests cover sibling-run cursor and budget
+isolation using the real continuation ledger.
+
+The public ordinary launch paths still reject saved-policy opt-in with
+`SAVED_DELEGATION_UNAVAILABLE` rather than starting a nondelegated Task. The
+internal write path does not dispatch anything. Before enabling it, compose a
+per-run runtime that consumes the retained plan and seed, provisions only the
+reviewed recipes and scoped credentials, and restores watchdogs after restart.
+No public policy editor or new evaluator permission is enabled here.
 
 ## Evidence and remaining milestones
 

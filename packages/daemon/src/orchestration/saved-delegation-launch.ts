@@ -31,6 +31,7 @@ const verifiedPinsSchema = z
       .object({
         repositoryDigest: z.string().regex(/^[a-f0-9]{64}$/),
         ref: z.string().min(1).max(172),
+        predecessor: oid,
         commit: oid,
         tree: oid,
         bundleDigest: delegationPin,
@@ -45,6 +46,8 @@ const verifiedPinsSchema = z
   .strict();
 
 type VerifiedPins = z.infer<typeof verifiedPinsSchema>;
+export const savedDelegationRunId = (owner: string, requestId: string) =>
+  digest(['saved-delegation-run/v1', owner, requestId]).slice(7);
 
 function assertParent(config: EffectiveLaunchConfig, policy: SavedDelegationPolicy) {
   const reviewer = config.ai.reviewer;
@@ -168,7 +171,7 @@ export async function prepareSavedDelegationLaunch(input: {
 
   // Different owner/UUID pairs never share a worker ledger. The same pair must
   // be checked against its frozen binding, not minted a second budget on retry.
-  const runId = digest(['saved-delegation-run/v1', owner, ordinary.requestId]).slice(7);
+  const runId = savedDelegationRunId(owner, ordinary.requestId);
   const body = {
     version: 1 as const,
     runId,
