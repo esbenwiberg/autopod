@@ -126,6 +126,26 @@ export interface ReviewerRun {
   requiresReconciliation: boolean;
 }
 
+/** Receipt of the pod owner's decision to count failed-attempt usage as unmeasured. */
+export interface UnmeasuredUsageAcceptanceResponse {
+  receipt: {
+    id: string;
+    podId: string;
+    providerAttemptOrdinal: number;
+    taskId: string;
+    acceptedBy: string;
+    authorizationBasis: 'pod_owner';
+    reason: string;
+    priorAccuracy: string;
+    recordedInputTokens: number;
+    recordedOutputTokens: number;
+    recordedCostUsd: number;
+    acceptedAt: string;
+  };
+  continuation: 'queued' | 'not_applicable' | 'unavailable';
+  message?: string;
+}
+
 export interface FirewallDenial {
   eventId: number;
   timestamp: string;
@@ -919,6 +939,18 @@ export class AutopodClient {
       ok: boolean;
       action: 'same-provider' | 'alternate-provider' | 'primary-provider';
     }>('POST', `/pods/${id}/continue-provider`, options?.primary ? { primary: true } : undefined);
+  }
+
+  /** Pod owner only: count the latest failed provider attempt's usage as unmeasured. */
+  async acceptUnmeasuredUsage(
+    id: string,
+    input: { reason: string; attempt?: number },
+  ): Promise<UnmeasuredUsageAcceptanceResponse> {
+    return this.request<UnmeasuredUsageAcceptanceResponse>(
+      'POST',
+      `/pods/${id}/accept-unmeasured-usage`,
+      input.attempt === undefined ? { reason: input.reason } : input,
+    );
   }
 
   async updateFromBase(id: string): Promise<UpdateFromBaseResponse> {

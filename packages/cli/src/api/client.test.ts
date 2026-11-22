@@ -516,6 +516,43 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('acceptUnmeasuredUsage', () => {
+    it('posts the owner reason and optional expected attempt', async () => {
+      const response = {
+        receipt: { id: 'receipt-1', providerAttemptOrdinal: 1 },
+        continuation: 'queued',
+      };
+      mockFetch.mockResolvedValueOnce(jsonResponse(response));
+
+      const result = await client.acceptUnmeasuredUsage('paused-pod', {
+        reason: 'Codex refused before any output',
+        attempt: 1,
+      });
+
+      expect(result).toEqual(response);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/paused-pod/accept-unmeasured-usage',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ reason: 'Codex refused before any output', attempt: 1 }),
+        }),
+      );
+    });
+
+    it('omits the attempt when not supplied', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ receipt: { id: 'r', providerAttemptOrdinal: 2 }, continuation: 'queued' }),
+      );
+
+      await client.acceptUnmeasuredUsage('paused-pod', { reason: 'Refused before usage' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/paused-pod/accept-unmeasured-usage',
+        expect.objectContaining({ body: JSON.stringify({ reason: 'Refused before usage' }) }),
+      );
+    });
+  });
+
   describe('error mapping', () => {
     it('maps 401 to AuthError', async () => {
       mockFetch.mockResolvedValue(errorResponse(401, { message: 'unauthorized' }));
