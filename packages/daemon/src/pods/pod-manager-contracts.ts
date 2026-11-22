@@ -622,6 +622,14 @@ export interface PodManager {
     actor?: OperatorActor,
   ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }>;
   /**
+   * Queue the configured provider failover for a provider-limit pause after the
+   * pod owner accepted the failed attempt's usage as unmeasured. Re-checks the
+   * task budget gate; never bypasses it.
+   */
+  continueAfterAcceptedUsage(
+    podId: string,
+  ): Promise<{ continuation: 'queued' | 'not_applicable' | 'unavailable'; message?: string }>;
+  /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
    * skipping push, PR creation, and validation. Persists `forceCompletedAt`
    * + reason on the pod row for audit.

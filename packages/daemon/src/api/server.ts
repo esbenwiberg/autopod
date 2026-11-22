@@ -44,6 +44,7 @@ import {
 } from '../pods/retained-cleanup-repository.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { TokenTelemetryRepair } from '../pods/token-telemetry-repair.js';
+import type { UnmeasuredUsageAcceptance } from '../pods/unmeasured-usage-acceptance.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { PodsitterService } from '../podsitter/podsitter-service.js';
@@ -91,6 +92,7 @@ import { seriesRoutes } from './routes/series.js';
 import { skillRoutes } from './routes/skills.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { tokenTelemetryRoutes } from './routes/token-telemetry.js';
+import { unmeasuredUsageRoutes } from './routes/unmeasured-usage.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
 
@@ -148,6 +150,7 @@ export interface ServerDependencies {
   issueWatcherRepo?: IssueWatcherRepository;
   screenshotStore?: ScreenshotStore;
   tokenTelemetryRepair?: TokenTelemetryRepair;
+  unmeasuredUsageAcceptance?: UnmeasuredUsageAcceptance;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -266,6 +269,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   historyRoutes(app, deps.podManager, Boolean(deps.configuration));
   if (deps.tokenTelemetryRepair) {
     tokenTelemetryRoutes(app, deps.tokenTelemetryRepair);
+  }
+  if (deps.unmeasuredUsageAcceptance) {
+    unmeasuredUsageRoutes(app, deps.unmeasuredUsageAcceptance);
   }
   memoryWorkspaceRoutes(app, deps.podManager, Boolean(deps.configuration));
   modelProviderRoutes(app);

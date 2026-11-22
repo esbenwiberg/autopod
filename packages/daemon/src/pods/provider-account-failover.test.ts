@@ -10,6 +10,7 @@ import { createTestContext } from '../test-utils/mock-helpers.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodManager } from './pod-manager.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
+import { createUnmeasuredUsageAcceptance } from './unmeasured-usage-acceptance.js';
 
 const OUT_OF_CREDITS = 'Credit balance is too low';
 const worktrees: string[] = [];
@@ -256,5 +257,124 @@ describe('provider account refusal failover', () => {
       containerId: 'source-container',
     });
     expect(f.ctx.deps.requeueSessionAfterCurrent).not.toHaveBeenCalled();
+  });
+});
+
+describe('owner acceptance of unmeasured usage (#646)', () => {
+  const toolUse: AgentEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool: 'Bash',
+    input: { command: 'ls' },
+  };
+  async function blocked() {
+    const f = fixture(['target'], { tokenBudget: 1_000_000 });
+    await f.refuse([toolUse]);
+    const acceptance = createUnmeasuredUsageAcceptance({
+      db: f.ctx.db,
+      podRepo: f.ctx.podRepo,
+      providerAttemptRepo: f.attempts,
+      continueAfterAcceptance: (podId) => f.manager.continueAfterAcceptedUsage(podId),
+    });
+    const receipts = () => f.ctx.db.prepare('SELECT * FROM unmeasured_usage_acceptances').all();
+    return { ...f, acceptance, receipts };
+  }
+  const REASON = 'Codex refused the account before doing useful work';
+
+  it('records an audited receipt, reconciles accounting and queues the failover', async () => {
+    const f = await blocked();
+
+    const result = await f.acceptance.accept(
+      f.podId,
+      { reason: REASON, attemptOrdinal: 1 },
+      { oid: 'user-1' },
+    );
+
+    expect(result).toMatchObject({
+      continuation: 'queued',
+      receipt: {
+        podId: f.podId,
+        providerAttemptOrdinal: 1,
+        acceptedBy: 'user-1',
+        authorizationBasis: 'pod_owner',
+        reason: REASON,
+        priorAccuracy: 'partial',
+        recordedInputTokens: 0,
+        recordedOutputTokens: 0,
+      },
+    });
+    expect(f.receipts()).toHaveLength(1);
+    expect(f.manager.getSession(f.podId)).toMatchObject({
+      status: 'queued',
+      providerAccountIdSnapshot: 'target',
+      tokenTelemetryAccuracy: 'repaired',
+      failureReason: null,
+    });
+    const task = f.ctx.podRepo.taskExecutions?.snapshot(f.podId);
+    expect(task?.budgetCheck?.status).toBe('below_recorded_limit');
+    expect(task?.diagnostics).toContain(
+      `${f.podId}: provider attempt #1 usage accepted as unmeasured by pod owner`,
+    );
+    expect(f.attempts.list(f.podId)).toMatchObject([
+      { providerAccountId: 'source', outcome: 'failed' },
+      { providerAccountId: 'target', outcome: null },
+    ]);
+    expect(f.ctx.enqueuedSessions).toContain(f.podId);
+    // The receipt is append-only audit evidence.
+    expect(() =>
+      f.ctx.db.prepare("UPDATE unmeasured_usage_acceptances SET reason = 'changed reason'").run(),
+    ).toThrow('append-only');
+    expect(() => f.ctx.db.prepare('DELETE FROM unmeasured_usage_acceptances').run()).toThrow(
+      'append-only',
+    );
+    // The pod now has an active target attempt and reconciled accounting: no second acceptance.
+    await expect(
+      f.acceptance.accept(f.podId, { reason: REASON }, { oid: 'user-1' }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it.each([
+    ['another user', 'user-2'],
+    ['an admin/operator identity', 'admin'],
+    ['an unauthenticated caller', ' '],
+  ])('rejects %s with 403 and records nothing', async (_name, oid) => {
+    const f = await blocked();
+
+    await expect(f.acceptance.accept(f.podId, { reason: REASON }, { oid })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+
+    expect(f.receipts()).toEqual([]);
+    expect(f.manager.getSession(f.podId)).toMatchObject({
+      status: 'paused',
+      tokenTelemetryAccuracy: 'partial',
+    });
+  });
+
+  it('rejects a mismatched attempt or a short reason without recording', async () => {
+    const f = await blocked();
+
+    await expect(
+      f.acceptance.accept(f.podId, { reason: REASON, attemptOrdinal: 2 }, { oid: 'user-1' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'PROVIDER_ATTEMPT_MISMATCH' });
+    await expect(
+      f.acceptance.accept(f.podId, { reason: 'too short' }, { oid: 'user-1' }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(f.receipts()).toEqual([]);
+  });
+
+  it('refuses when accounting is already settled', async () => {
+    const f = fixture(['target'], { tokenBudget: 1_000_000 });
+    await f.refuse();
+    const acceptance = createUnmeasuredUsageAcceptance({
+      db: f.ctx.db,
+      podRepo: f.ctx.podRepo,
+      providerAttemptRepo: f.attempts,
+    });
+    // Zero-usage refusal already settled and queued the failover.
+    await expect(
+      acceptance.accept(f.podId, { reason: REASON }, { oid: 'user-1' }),
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 });

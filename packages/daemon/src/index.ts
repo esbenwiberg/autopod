@@ -94,6 +94,7 @@ import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
+import { createUnmeasuredUsageAcceptance } from './pods/unmeasured-usage-acceptance.js';
 import { captureValidationMutationGuard } from './pods/validation-recovery-policy.js';
 import { WorkspaceCheckpointController } from './pods/workspace-checkpoint-controller.js';
 import { createWorkspaceCheckpointRepository } from './pods/workspace-checkpoint-repository.js';
@@ -322,6 +323,12 @@ const tokenTelemetryRepair = createTokenTelemetryRepair({
   podRepo,
   providerAttemptRepo,
   getContainerManager: () => containerManager,
+});
+const unmeasuredUsageAcceptance = createUnmeasuredUsageAcceptance({
+  db,
+  podRepo,
+  providerAttemptRepo,
+  continueAfterAcceptance: (podId) => podManager.continueAfterAcceptedUsage(podId),
 });
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
@@ -1339,6 +1346,7 @@ const app = await createServer({
   issueWatcherRepo,
   screenshotStore,
   tokenTelemetryRepair,
+  unmeasuredUsageAcceptance,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

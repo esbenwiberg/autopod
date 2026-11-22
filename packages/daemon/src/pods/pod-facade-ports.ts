@@ -180,7 +180,10 @@ export interface PodFacadeOwners {
     ReturnType<typeof createWorkspaceArtifactObservation>,
     'getArtifactResumeObservation'
   >;
-  providerContinuation: Pick<ReturnType<typeof createProviderContinuation>, 'continueProvider'>;
+  providerContinuation: Pick<
+    ReturnType<typeof createProviderContinuation>,
+    'continueProvider' | 'continueAfterAcceptedUsage'
+  >;
   terminationReconciliation: ReturnType<typeof createTerminationReconciliation>;
   stalledWorkerRecovery?: ReturnType<
     typeof import('./stalled-worker-recovery.js').createStalledWorkerRecovery

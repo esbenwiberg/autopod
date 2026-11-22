@@ -969,6 +969,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }> {
       return providerContinuation.continueProvider(podId, requestedTarget, actor);
     },
+    continueAfterAcceptedUsage(podId: string) {
+      return providerContinuation.continueAfterAcceptedUsage(podId);
+    },
 
     forceComplete(
       podId: string,
