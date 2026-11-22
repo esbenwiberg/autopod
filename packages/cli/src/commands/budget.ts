@@ -11,6 +11,14 @@ export function parseTokenBudget(value: string): number | null {
   return Number(value);
 }
 
+/**
+ * Commander option parser for `--token-budget`. Commander replaces a `null` parse result with an
+ * empty string, so `off` stays a literal marker here and becomes `null` in the launch request.
+ */
+export function parseTokenBudgetOption(value: string): number | 'off' {
+  return parseTokenBudget(value) ?? 'off';
+}
+
 /** Printed once a budget pause is approved; validation then runs in the background. */
 export function budgetContinuedMessage(podId: string): string {
   return `Budget extension approved; validation started in the background. Follow with: ap status ${podId} or ap logs ${podId} -f`;

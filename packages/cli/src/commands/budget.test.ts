@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
-import { parseTokenBudget, registerBudgetCommand } from './budget.js';
+import { parseTokenBudget, parseTokenBudgetOption, registerBudgetCommand } from './budget.js';
 import { buildLaunchRequest } from './launch-request.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -17,6 +17,18 @@ it('keeps budgets absent by default and honors an explicit off override', async 
       })
     ).overrides?.workflow?.tokenBudget,
   ).toBeNull();
+  expect(
+    (
+      await buildLaunchRequest({ tokenBudget: 'off', overrideConfig: true }, lookup, {
+        repositoryId: 'repo-a',
+        task: 'Work',
+        overrides: { workflow: { tokenBudget: 5000 } },
+      })
+    ).overrides?.workflow?.tokenBudget,
+  ).toBeNull();
+  expect(parseTokenBudgetOption('off')).toBe('off');
+  expect(parseTokenBudgetOption('100')).toBe(100);
+  expect(() => parseTokenBudgetOption('wat')).toThrow();
   expect(parseTokenBudget('off')).toBeNull();
   expect(parseTokenBudget('100')).toBe(100);
   for (const bad of ['0', '-1', '1.5', 'wat', '9007199254740992'])
