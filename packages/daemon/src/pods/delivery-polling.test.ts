@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture, pendingStatus } from '../test-utils/delivery-helpers.js';
+import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
 import { createDeliveryPolling } from './delivery-polling.js';
+import { buildActionableFailureSummary } from './fix-policy.js';
 
 describe('owned merge polling', () => {
   it('resumes only merge_pending rows with the bound profile interval and stops a missing history', async () => {
@@ -116,6 +118,86 @@ describe('owned merge polling', () => {
     expect(f.pod().status).toBe('merge_pending');
   });
 
+  it('admits one linked conflict repair with base-specific feedback across repeated polls', async () => {
+    vi.useFakeTimers();
+    const f = createFixCycleFixture();
+    const { entry } = await f.planMerge();
+    f.pollingCaptured.prManagerFactory.mockReturnValue(f.provider);
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        mergeBlocked: true,
+        reviewDecision: 'APPROVED',
+        blockReason: 'GitHub merge gate: DIRTY',
+        mergeConflict: true,
+        headSha: entry.request.config.expectedHeadSha,
+        sourceTarget: entry.request.config.expectedTarget,
+      }),
+    );
+    const poller = createDeliveryPolling({
+      ...f.pollingCaptured,
+      buildActionableFailureSummary,
+      maybeSpawnFixSession: f.admission().maybeSpawnFixSession,
+    });
+    const enqueue = vi.spyOn(f.deps.fixFeedbackRepo, 'enqueue');
+    poller.startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(0);
+    const fixId = f.pod().fixPodId;
+    expect(fixId).toBeTruthy();
+    expect(f.podRepo.getOrThrow(fixId ?? '').linkedPodId).toBe('prepare');
+    expect(f.deps.fixFeedbackRepo.peekLatest('prepare')?.message).toContain(
+      'git merge origin/main',
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(f.admissionCaptured.enqueueSession).toHaveBeenCalledExactlyOnceWith(fixId);
+    expect(f.pod()).toMatchObject({ status: 'merge_pending', fixPodId: fixId, prFixAttempts: 1 });
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch a conflict repair without matching provider source and base evidence', async () => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    const { entry } = await f.planMerge();
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        mergeBlocked: true,
+        mergeConflict: true,
+        headSha: entry.request.config.expectedHeadSha,
+      }),
+    );
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.pollingCaptured.maybeSpawnFixSession).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toContain('reconciliation');
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        mergeBlocked: true,
+        mergeConflict: true,
+        headSha: entry.request.config.expectedHeadSha,
+        sourceTarget: { ...entry.request.config.expectedTarget, baseBranch: 'other' },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.pollingCaptured.maybeSpawnFixSession).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toContain('does not match the admitted delivery target');
+  });
+
+  it.each([
+    'GitHub merge gate: UNKNOWN',
+    'GitHub merge gate: BEHIND',
+  ])('waits without a repair for a non-conflict merge gate (%s)', async (blockReason) => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    await f.planMerge();
+    f.provider.getPrStatus.mockResolvedValue(pendingStatus({ mergeBlocked: true, blockReason }));
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.pollingCaptured.maybeSpawnFixSession).not.toHaveBeenCalled();
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toBe(blockReason);
+  });
+
   it('does not dispatch a source-changing repair over an unresolved admitted merge', async () => {
     vi.useFakeTimers();
     const f = createDeliveryFixture();
@@ -129,6 +211,9 @@ describe('owned merge polling', () => {
     f.provider.getPrStatus.mockResolvedValue(
       pendingStatus({
         mergeBlocked: true,
+        mergeConflict: true,
+        headSha: planned.entry.request.config.expectedHeadSha,
+        sourceTarget: planned.entry.request.config.expectedTarget,
         ciFailures: [{ name: 'Build', conclusion: 'failure', detailsUrl: null, annotations: [] }],
       }),
     );

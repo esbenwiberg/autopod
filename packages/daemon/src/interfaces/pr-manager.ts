@@ -176,6 +176,12 @@ export interface PrMergeStatus {
    * ADO / platforms without a unified review decision: undefined.
    */
   reviewDecision?: string;
+  /**
+   * Provider reports the PR source conflicts with its base (GitHub `DIRTY`, ADO
+   * `conflicts`). Actionable: a fix pod resolves it. Transitional states such as
+   * GitHub `UNKNOWN`/`BEHIND` never set this.
+   */
+  mergeConflict?: true;
   /** Failed CI checks with detail — populated only when there are actionable failures */
   ciFailures: CiFailureDetail[];
   /** Review comments from CHANGES_REQUESTED reviews — populated only when actionable */
