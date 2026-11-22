@@ -418,6 +418,30 @@ be made by a child token, reused on different evidence, or used after the run
 or source authority has changed. It is not permission to push, open a PR,
 merge, or advance accepted source.
 
+## Saved delegation policy contract (daemon foundation)
+
+Delegation is off when the launch omits `delegation`. The explicit selector is
+`{policyId, revision}` and is valid only for a fresh repository Task with its own
+request UUID. It is not inherited by follow-ups or available in scheduled
+presets, Native Goals, or the isolated signed-trial path.
+
+The daemon foundation stores immutable policy revisions under the full verified
+human principal (subject, issuer, audience). A policy pins a repository revision
+and branch, two coding roles with disjoint file scopes, worker recipe and account
+pins, worker ceilings, and separate checks/reviewer policy pins. These values are
+constraints, not credentials or permission to launch an arbitrary recipe. The
+internal read-only planner resolves the ordinary Task configuration and requires
+trusted host observations of the exact source commit, tree and bundle digest,
+recipe pins and runtime. Its review digest binds all those inputs. Changes to the
+source, runtime pins, Task configuration or saved policy require a new preview.
+
+This does not yet enable runtime admission. The public ordinary launch paths
+reject a saved-policy opt-in with `SAVED_DELEGATION_UNAVAILABLE`, rather than
+starting a nondelegated Task. Before enabling it, wire verified source custody
+and the per-run parent runtime into one admission transaction and prove exact
+request replay, recovery, and cross-run worker-ledger isolation. No public
+policy editor or new evaluator permission is enabled by this foundation.
+
 ## Evidence and remaining milestones
 
 Run the offline contract:

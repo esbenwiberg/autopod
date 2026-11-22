@@ -528,6 +528,10 @@ const launchOptions = z
     expectedDigest: digest.optional(),
     requestId: id.optional(),
     requireParentEnrollment: z.literal(true).optional(),
+    delegation: z
+      .object({ policyId: z.uuid(), revision: z.number().int().positive() })
+      .strict()
+      .optional(),
   })
   .strict();
 /** Reusable selection for scheduled callers. Task and retry identity belong to each run. */
@@ -538,6 +542,7 @@ const savedLaunchOptions = launchOptions.omit({
   expectedDigest: true,
   requestId: true,
   requireParentEnrollment: true,
+  delegation: true,
 });
 // Name the exact object shapes at union boundaries. Otherwise declaration emit
 // repeatedly serializes the full overrides/work graph in each arm and consumer.
@@ -594,6 +599,23 @@ export const launchRequestSchema: LaunchRequestSchema = z
           code: 'custom',
           path: ['expectedDigest'],
           message: 'Parent enrollment requires the reviewed launch digest',
+        });
+      }
+    }
+    if (v.delegation) {
+      if (!('repositoryId' in v) || v.intent === 'goal' || v.source || v.requireParentEnrollment) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['delegation'],
+          message:
+            'Saved delegation is only for a new repository Task, not a signed enrollment or continuation',
+        });
+      }
+      if (!z.uuid().safeParse(v.requestId).success) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['requestId'],
+          message: 'Saved delegation requires a request UUID',
         });
       }
     }

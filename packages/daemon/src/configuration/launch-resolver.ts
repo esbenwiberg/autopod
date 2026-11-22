@@ -108,11 +108,21 @@ export async function resolveLaunch(
   return config;
 }
 
+/** No ordinary/batch route may strip an opt-in or provision an unbound parent. */
+export function refuseUnboundSavedDelegation(): never {
+  configurationError(
+    'Saved delegation requires an attached parent runtime; no ordinary Task was created',
+    'SAVED_DELEGATION_UNAVAILABLE',
+    503,
+  );
+}
+
 async function resolveLaunchRequest(
   raw: unknown,
   services: LaunchResolutionServices,
 ): Promise<EffectiveLaunchConfig> {
   const request = launchRequestSchema.parse(raw);
+  if (request.delegation) refuseUnboundSavedDelegation();
   if (!request.source) return resolve(request, services, []);
   const parent = services.readLaunch?.(request.source.podId);
   if (!parent)

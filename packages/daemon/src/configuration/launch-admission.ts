@@ -7,6 +7,7 @@ import { configurationError } from './configuration-store.js';
 import {
   configurationDigest,
   type LaunchResolutionServices,
+  refuseUnboundSavedDelegation,
   resolveLaunch,
 } from './launch-resolver.js';
 import type { LaunchSnapshotRepository } from './launch-snapshot.js';
@@ -30,6 +31,7 @@ export async function admitLaunch(input: {
   preparePod?: (config: EffectiveLaunchConfig) => Promise<() => string>;
 }): Promise<{ podId: string; created: boolean; config: EffectiveLaunchConfig }> {
   const request = launchRequestSchema.parse(input.request);
+  if (request.delegation) refuseUnboundSavedDelegation();
   input.assertRequest?.(request);
   const bind = input.authorize?.(request.requestId);
   if (request.requireParentEnrollment && !bind) {
