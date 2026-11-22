@@ -7,7 +7,13 @@ import { AutopodClient } from '../api/client.js';
 import { registerRetainedCleanupCommand } from './retained-cleanup.js';
 
 const fetch = vi.hoisted(() => vi.fn());
-vi.mock('undici', () => ({ fetch: (...args: unknown[]) => fetch(...args) }));
+vi.mock('undici', () => ({
+  fetch: (...args: unknown[]) => fetch(...args),
+  request: async (...args: unknown[]) => {
+    const response: Response = await fetch(...args);
+    return { statusCode: response.status, body: { json: () => response.json() } };
+  },
+}));
 const daemon = 'https://fixture.invalid';
 const podId = 'retained-pod';
 const id = 'exact-human-decision';
@@ -209,9 +215,13 @@ describe('retained cleanup command through its real client', () => {
     expect(await run(['--observe', '--request-file', path])).toMatchObject(partial);
     fetch.mockResolvedValueOnce(json(receipt));
     expect(await run(['--reconcile', '--request-file', path])).toMatchObject(receipt);
-    expect(fetch.mock.calls[0]).toEqual(fetch.mock.calls[2]);
+    expect(fetch.mock.calls[2]?.[0]).toBe(fetch.mock.calls[0]?.[0]);
+    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+      body: fetch.mock.calls[0]?.[1].body,
+      headers: fetch.mock.calls[0]?.[1].headers,
+      idempotent: false,
+    });
     expect(fetch.mock.calls.map((call) => call[1].method)).toEqual(['POST', 'GET', 'POST']);
-    expect(fetch.mock.calls[0]?.[1].redirect).toBe('error');
   });
 
   it.each([401, 409, 503])('does not retry or replace the request on HTTP %i', async (status) => {

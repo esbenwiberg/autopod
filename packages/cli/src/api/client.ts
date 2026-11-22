@@ -165,7 +165,7 @@ export interface UpdatePodsitterConfigurationRequest {
   budgets: PodsitterBudgets;
 }
 
-import { fetch } from 'undici';
+import { fetch, request as sendHttp } from 'undici';
 import { repairInspection, repairOperation, repairPreview } from './repair-continuation.js';
 import {
   cleanupInspection,
@@ -1473,12 +1473,41 @@ export class AutopodClient {
 
   async submitRetainedCleanup(podId: string, input: RetainedCleanupRequest) {
     const request = retainedCleanupRequestSchema.parse(input);
-    return this.request('POST', cleanupPodPath(podId), request, false, 'error', (value, status) => {
-      const result = cleanupSubmission(value, podId, request);
-      if (status !== (result.state === 'pending' || result.state === 'partial' ? 202 : 200))
-        throw new Error('Unexpected cleanup submission HTTP status.');
-      return result;
-    });
+    const path = cleanupPodPath(podId);
+    const daemon = this.cleanupDaemonIdentity;
+    const payload = JSON.stringify(request);
+    let token: string;
+    try {
+      token = await this.getToken();
+    } catch {
+      throw new AuthError('Not authenticated. Try: ap login');
+    }
+
+    // Fetch can replay a buffered POST on HTTP 421, even with redirects off.
+    // A direct, non-idempotent dispatch has no Fetch, redirect or auth retry.
+    let response: Awaited<ReturnType<typeof sendHttp>>;
+    try {
+      response = await sendHttp(`${daemon}${path}`, {
+        method: 'POST',
+        idempotent: false,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: payload,
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch {
+      throw new DaemonUnreachableError(daemon);
+    }
+    const status = response.statusCode;
+    if (status < 200 || status >= 300) {
+      await this.handleError({ status, json: () => response.body.json() }, path);
+    }
+    const result = cleanupSubmission(await response.body.json(), podId, request);
+    if (status !== (result.state === 'pending' || result.state === 'partial' ? 202 : 200))
+      throw new Error('Unexpected cleanup submission HTTP status.');
+    return result;
   }
 
   // Internal
@@ -1560,7 +1589,7 @@ export class AutopodClient {
   }
 
   private async handleError(
-    response: Awaited<ReturnType<typeof fetch>>,
+    response: Pick<Awaited<ReturnType<typeof fetch>>, 'status' | 'json'>,
     path: string,
   ): Promise<never> {
     let errorBody: {
