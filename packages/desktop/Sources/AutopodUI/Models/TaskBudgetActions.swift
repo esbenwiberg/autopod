@@ -7,17 +7,25 @@ public struct TaskBudgetActions: Sendable {
   public var load: @MainActor @Sendable (String) async throws -> TaskExecutionSummary
   public var raise:
     @MainActor @Sendable (String, TaskBudgetChangeRequest) async throws -> TaskExecutionSummary
+  /// Approves one soft-budget extension for a budget-paused pod (`ap budget --continue`).
+  public var approvePause:
+    @MainActor @Sendable (String) async throws -> BudgetContinuationResponse
 
   public init(
     scope: String,
     load: @escaping @MainActor @Sendable (String) async throws -> TaskExecutionSummary,
     raise:
       @escaping @MainActor @Sendable (String, TaskBudgetChangeRequest) async throws ->
-      TaskExecutionSummary
+      TaskExecutionSummary,
+    approvePause:
+      @escaping @MainActor @Sendable (String) async throws -> BudgetContinuationResponse = { _ in
+        throw DaemonError.networkError("Budget-pause approval is unavailable on this connection.")
+      }
   ) {
     self.scope = scope
     self.load = load
     self.raise = raise
+    self.approvePause = approvePause
   }
 
   public static let unavailable = Self(
@@ -40,6 +48,9 @@ public struct TaskBudgetActions: Sendable {
   private(set) var requiresRefresh = false
   private(set) var error: String?
   private(set) var message: String?
+  /// Set once this model's approval was accepted, so the control is not offered twice
+  /// before the pod status catches up.
+  private(set) var pauseApproved = false
 
   init(podId: String, scope: String) {
     self.podId = podId
@@ -106,6 +117,29 @@ public struct TaskBudgetActions: Sendable {
     } catch {
       self.error =
         "\(error.localizedDescription) Refresh to check the current budget before retrying. No continuation was requested."
+      return false
+    }
+  }
+
+  /// Approves one budget extension for a budget-paused pod. It does not change the
+  /// limit; validation continues in the background once the daemon records approval.
+  func approvePause(_ actions: TaskBudgetActions) async -> Bool {
+    guard !busy, bind(actions) else { return false }
+    busy = true
+    error = nil
+    message = nil
+    defer { busy = false }
+    do {
+      let result = try await actions.approvePause(podId)
+      pauseApproved = true
+      let used = result.maxBudgetExtensions.map { "\(result.budgetExtensionsUsed)/\($0)" }
+        ?? "\(result.budgetExtensionsUsed)"
+      message =
+        "Budget extension approved (\(used) used); validation \(result.validation == "finished" ? "finished" : "started in the background")."
+      return true
+    } catch {
+      self.error =
+        "\(error.localizedDescription) Refresh to check the pod and task budget before retrying."
       return false
     }
   }

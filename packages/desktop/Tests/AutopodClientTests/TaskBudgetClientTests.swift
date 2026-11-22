@@ -115,3 +115,64 @@ private final class TaskBudgetFixtureProtocol: URLProtocol, @unchecked Sendable 
   }
   override func stopLoading() {}
 }
+
+@Test func continueBudgetPostsApprovalAndDecodesReceipt() async throws {
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [ContinueBudgetFixtureProtocol.self]
+  let session = URLSession(configuration: configuration)
+  defer { session.invalidateAndCancel() }
+  let api = DaemonAPI(
+    baseURL: URL(string: "https://continue-budget-fixture.invalid")!,
+    token: "synthetic", session: session)
+  let receipt = try await api.continueBudget("paused")
+  #expect(receipt == .init(budgetExtensionsUsed: 2, maxBudgetExtensions: nil))
+  do {
+    _ = try await api.continueBudget("running")
+    Issue.record("Expected NOT_BUDGET_PAUSED")
+  } catch {
+    #expect(error.localizedDescription.contains("not paused on its token budget"))
+  }
+}
+
+@Test func taskExecutionDecodesCacheReadsForBudgetDetail() throws {
+  let summary = try JSONDecoder().decode(
+    TaskExecutionSummary.self,
+    from: Data(
+      """
+      {"taskId":"task","executionId":"execution","rootPodId":"root","podCount":1,
+      "agentRunCount":1,"failedRunCount":0,"transientFailureCount":0,"providerAttemptCount":1,
+      "validationExecutionCount":0,"tokenBudget":5000,"recordedInputTokens":3000,
+      "recordedOutputTokens":1000,"recordedTotalTokens":4000,"recordedCachedInputTokens":2000,
+      "budgetCountedTokens":2200,"recordedCostUsd":1.28,"telemetry":"complete","diagnostics":[]}
+      """.utf8))
+  #expect(summary.tokensCountedForBudget == 2200)
+  #expect(summary.recordedCachedInputTokens == 2000)
+  #expect(summary.budgetUsageDetail?.contains("cache reads at 0.1×") == true)
+}
+
+private final class ContinueBudgetFixtureProtocol: URLProtocol, @unchecked Sendable {
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host == "continue-budget-fixture.invalid"
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let path = request.url!.path
+    #expect(request.httpMethod == "POST")
+    #expect(path.hasSuffix("/continue-budget"))
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic")
+    let paused = path.contains("/paused/")
+    let body =
+      paused
+      ? #"{"ok":true,"action":"continue-budget","budgetExtensionsUsed":2,"maxBudgetExtensions":null,"validation":"started"}"#
+      : #"{"error":"Pod running is not paused on its token budget (status: running)","code":"NOT_BUDGET_PAUSED"}"#
+    client?.urlProtocol(
+      self,
+      didReceive: HTTPURLResponse(
+        url: request.url!, statusCode: paused ? 200 : 409,
+        httpVersion: nil, headerFields: ["Content-Type": "application/json"])!,
+      cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(body.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}

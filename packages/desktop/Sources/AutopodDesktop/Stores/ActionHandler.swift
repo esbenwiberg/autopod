@@ -425,6 +425,11 @@ public final class ActionHandler {
     }, raise: { [weak self] id, input in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.raiseTaskBudget(id, request: input) }
+    }, approvePause: { [weak self] id in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      let result = try await self.perform { try await self.api.continueBudget(id) }
+      try? await self.perform { await self.podStore.refreshSession(id) }
+      return result
     })
     result.loadFindingsContent = { [weak self] id, findings, path in
       guard let self else { throw DaemonError.badRequest("Connection unavailable") }
