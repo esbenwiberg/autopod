@@ -7,6 +7,7 @@ export type {
   ScopedPodTools,
   ValidationPhaseName,
   ValidationPhaseResult,
+  WorkspaceCleanliness,
 } from './pod-bridge.js';
 export { createEscalationMcpServer, type EscalationMcpDeps } from './server.js';
 export { executeAction } from './tools/actions.js';

@@ -74,6 +74,7 @@ import {
   resolveReviewerModel,
   resolveReviewerProvider,
 } from './runtime-resolver.js';
+import { probeWorkspaceCleanliness } from './workspace-cleanliness-probe.js';
 
 // Validate direct bridge callers independently of the MCP schema.
 const deferredChecksSchema = z
@@ -1024,6 +1025,31 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       }
       const cm = containerManagerFactory.get(pod.executionTarget);
       return cm.execInContainer(pod.containerId, command, options);
+    },
+
+    async inspectWorkspaceCleanliness(podId: string) {
+      const pod = podManager.getSession(podId);
+      // Only Git delivery reads committed source; artifact/findings outputs may
+      // legitimately leave files in the workspace.
+      if (
+        !pod.containerId ||
+        (pod.options.output !== 'pr' && pod.options.output !== 'branch') ||
+        pod.options.agentMode === 'interactive' ||
+        pod.completionPolicy === 'accept-findings'
+      )
+        return null;
+      const containerId = pod.containerId;
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      try {
+        return await probeWorkspaceCleanliness(
+          (command, options) => cm.execInContainer(containerId, command, options),
+          // Recovery forks deliberately exclude server-selected supplemental files.
+          { includeLocallyExcluded: !podRepo.recoveryForks?.child(podId) },
+        );
+      } catch (err) {
+        logger.debug({ err, podId }, 'Workspace cleanliness probe unavailable');
+        return null;
+      }
     },
 
     getPreviewUrl(podId: string): string | null {

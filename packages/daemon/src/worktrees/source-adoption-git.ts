@@ -76,7 +76,32 @@ async function inspectSourceGit(
   const branchAfter = (await git(['symbolic-ref', '--short', 'HEAD'])).stdout.trim();
   if (after !== head || branchAfter !== name)
     sourceAdoptionError('Source identity changed during observation');
-  return { head, tree, worktreeClean: dirty.length === 0 };
+  return { head, tree, worktreeClean: dirty.length === 0, dirty };
+}
+
+export interface WorktreeChanges {
+  /** Untracked paths (directories are collapsed, as `git status` reports them). */
+  untracked: string[];
+  /** Staged or unstaged changes to tracked paths, including conflicts. */
+  changed: string[];
+}
+
+const MAX_REPORTED_CHANGES = 200;
+
+/** Parse `git status --porcelain=v1 -z` into bounded untracked/changed path lists. */
+export function parsePorcelainChanges(stdout: string): WorktreeChanges {
+  const changes: WorktreeChanges = { untracked: [], changed: [] };
+  const records = stdout.split('\0');
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] ?? '';
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    const target = status === '??' ? changes.untracked : changes.changed;
+    if (target.length < MAX_REPORTED_CHANGES) target.push(record.slice(3));
+    // Renames/copies carry their original path as the following record.
+    if (/[RC]/.test(status)) index++;
+  }
+  return changes;
 }
 export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
   const { head, tree } = await inspectSourceGit(run, branch, false);
@@ -89,7 +114,8 @@ export async function inspectSupplementalAdoptionGit(run: AdoptionGit, branch: s
 }
 /** Same executable-config/sparse/submodule safeguards, without claiming dirty source is clean. */
 export async function inspectPreservationGit(run: AdoptionGit, branch: string) {
-  return inspectSourceGit(run, branch, true);
+  const { dirty, ...source } = await inspectSourceGit(run, branch, true);
+  return { ...source, changes: parsePorcelainChanges(dirty) };
 }
 export async function preparePinnedAdoption(
   config: PrepareSourceAdoption,

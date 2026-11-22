@@ -8,6 +8,7 @@ import {
   applyPinnedAdoption,
   inspectAdoptionGit,
   inspectPreservationGit,
+  parsePorcelainChanges,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -72,6 +73,7 @@ describe('real Git exact-source adoption', () => {
     const source = await inspectPreservationGit(f.git, 'repair');
     expect(source.head).toBe(f.old);
     expect(source.worktreeClean).toBe(false);
+    expect(source.changes).toEqual({ untracked: [], changed: ['code.txt'] });
     await expect(inspectAdoptionGit(f.git, 'repair')).rejects.toThrow('cleanliness');
     await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
     await f.git(['config', 'filter.unsafe.clean', `touch ${sentinel}`]);
@@ -176,5 +178,18 @@ describe('real Git exact-source adoption', () => {
       }),
     ).rejects.toThrow('Superseded');
     expect((await inspectAdoptionGit(f.git, 'repair')).head).toBe(f.old);
+  });
+});
+
+describe('parsePorcelainChanges', () => {
+  it('separates untracked paths from tracked changes and skips rename origins', () => {
+    expect(
+      parsePorcelainChanges(
+        ['?? thoughts/', ' M src/a.ts', 'R  src/new.ts', 'src/old.ts', 'A  staged.md', ''].join(
+          '\0',
+        ),
+      ),
+    ).toEqual({ untracked: ['thoughts/'], changed: ['src/a.ts', 'src/new.ts', 'staged.md'] });
+    expect(parsePorcelainChanges('')).toEqual({ untracked: [], changed: [] });
   });
 });

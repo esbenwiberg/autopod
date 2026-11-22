@@ -7,6 +7,7 @@ import {
   renderPiHandoffFile,
   sanitizeSecurityReworkValue,
 } from './continuation-policy.js';
+import { ReviewSourceDirtyError } from './validation-review-source.js';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -48,6 +49,21 @@ describe('continuation policy', () => {
             ? 'previous pod was killed'
             : 'previous work needs revision',
     );
+  });
+  it('carries a dirty review-source cause into manual rework', () => {
+    const failureReason = new ReviewSourceDirtyError({
+      untracked: ['thoughts/'],
+      changed: [],
+    }).message;
+    const text = buildManualReworkReason({
+      ...fixture(),
+      status: 'review_required',
+      failureReason,
+    });
+    expect(text).toContain('finalization stopped before any checks ran');
+    expect(text).toContain('untracked: 1 path under thoughts/');
+    expect(text).toContain('.git/info/exclude');
+    expect(text).not.toContain('exhausted its validation attempts');
   });
   it('prioritizes validation feedback over scanner metadata and retains the original task', () => {
     const pod = fixture();

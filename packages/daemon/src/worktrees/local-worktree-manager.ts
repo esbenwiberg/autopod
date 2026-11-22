@@ -605,6 +605,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       commitSha: source.head,
       treeSha: source.tree,
       worktreeClean: source.worktreeClean,
+      changes: source.changes,
     };
   }
 
