@@ -21,6 +21,7 @@ function createMockClient() {
     listConfigurations: vi
       .fn()
       .mockResolvedValue([{ id: 'repo', name: 'Repo', kind: 'repository', archived: false }]),
+    previewDispatch: vi.fn().mockResolvedValue(null),
     resolveLaunch: vi.fn().mockResolvedValue({ digest: 'a'.repeat(64) }),
     createSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',

@@ -593,6 +593,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
   const routes: ConfigurationRouteDependencies = {
     inputBundles,
     referencePreviews,
+    // The ledger closure does not depend on `this`; absence keeps the route a 503.
+    dispatchPreview: options.pods.dispatchPreflight?.preview,
     reviewerBudget,
     reviewerRuns: {
       list: (podId) => reviewerRuns.list(podId),

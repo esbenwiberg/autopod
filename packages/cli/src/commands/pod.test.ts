@@ -927,6 +927,7 @@ it.each([
 
 it('sends the same explicit rerun decision through the actual CLI HTTP client and prints dispatch evidence', async () => {
   const requests: unknown[] = [];
+  let createdBranch = 'autopod/rerun-id';
   const server = createServer(async (request, response) => {
     response.setHeader('content-type', 'application/json');
     expect(request.headers.authorization).toBe('Bearer local-fixture-only');
@@ -934,8 +935,10 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       requests.push(JSON.parse(Buffer.concat(chunks).toString()));
-      response.end(JSON.stringify({ id: 'rerun-id', status: 'queued' }));
-    } else if (request.url?.endsWith('rerun-template'))
+      response.end(JSON.stringify({ id: 'rerun-id', status: 'queued', branch: createdBranch }));
+    } else if (request.url?.endsWith('/configuration'))
+      response.end(JSON.stringify({ work: { branch: 'feature/requested' } }));
+    else if (request.url?.endsWith('rerun-template'))
       response.end(
         JSON.stringify({
           repositoryId: 'repo',
@@ -954,7 +957,14 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
             baseCommitSha: 'a'.repeat(40),
             executionId: 'execution',
             checkedAt: 'today',
-            conflicts: [{ podId: 'other', status: 'running', evidence: 'dispatch_receipt' }],
+            conflicts: [
+              {
+                podId: 'other',
+                status: 'paused',
+                evidence: 'dispatch_receipt',
+                assessment: { classification: 'stale', reasons: ['no source changes'] },
+              },
+            ],
             rerun: null,
           },
         }),
@@ -998,9 +1008,28 @@ it('sends the same explicit rerun decision through the actual CLI HTTP client an
         },
       },
     });
+    const fallback =
+      "Requested branch 'feature/requested' is in use by another unfinished pod (or is the base branch); the rerun uses 'autopod/rerun-id'.";
+    expect(log.mock.calls.flat()).toContain(fallback);
+    log.mockClear();
+    createdBranch = 'feature/requested';
+    await command().parseAsync([
+      'node',
+      'ap',
+      'rerun',
+      'abcd1234',
+      '--reason',
+      'Reviewed independent repeat',
+      '--request-key',
+      'other-key',
+    ]);
+    expect(log.mock.calls.flat().join('\n')).toContain('on branch feature/requested');
+    expect(log.mock.calls.flat().join('\n')).not.toContain('Requested branch');
     await command().parseAsync(['node', 'ap', 'dispatch-preflight', 'abcd1234']);
     expect(log.mock.calls.flat().join('\n')).toContain('review_required: host/repo main');
-    expect(log.mock.calls.flat().join('\n')).toContain('other: running (dispatch_receipt)');
+    expect(log.mock.calls.flat().join('\n')).toContain(
+      'other: paused (dispatch_receipt) — stale: no source changes',
+    );
   } finally {
     log.mockRestore();
     await new Promise<void>((resolve) => server.close(() => resolve()));

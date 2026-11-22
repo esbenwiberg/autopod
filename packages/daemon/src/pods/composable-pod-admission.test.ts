@@ -163,4 +163,55 @@ describe('direct composed pod admission', () => {
       ctx.db.close();
     }
   });
+  it('an intentional rerun from the template keeps the requested branch, or auto-names it (#647)', async () => {
+    const ctx = createTestContext();
+    try {
+      const { services: base, store } = createTestConfiguration(ctx.db);
+      const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+      const services = { ...base, readLaunch: snapshots.get };
+      const admit = (config: Awaited<ReturnType<typeof resolveLaunch>>) =>
+        snapshots.admit({
+          config,
+          requestDigest: config.digest,
+          createPod: () =>
+            admitComposablePod({
+              config,
+              userId: 'owner',
+              actor: { type: 'human', userId: 'owner' },
+              pods: ctx.podRepo,
+              read: snapshots.get,
+              events: ctx.deps.eventBus,
+              enqueue: vi.fn(),
+            }).id,
+        }).podId;
+      const original = await resolveLaunch(
+        { repositoryId: 'repo-a', task: 'Same spec', work: { branch: 'feature/requested' } },
+        services,
+      );
+      const sourceId = admit(original);
+      ctx.db.prepare("UPDATE pods SET status='failed' WHERE id=?").run(sourceId);
+      const rerun = async (branch: string | undefined, key: string) =>
+        resolveLaunch(
+          {
+            repositoryId: 'repo-a',
+            task: original.task,
+            source: { podId: sourceId, digest: original.digest, configuration: 'original' },
+            work: {
+              ...(branch ? { branch } : {}),
+              intentionalRerun: { ofPodId: sourceId, reason: 'Relaunch', requestKey: key },
+            },
+          },
+          services,
+        );
+      const kept = admit(await rerun('feature/requested', 'rerun-kept'));
+      expect(ctx.podRepo.getOrThrow(kept).branch).toBe('feature/requested');
+      // The template omits a held branch; admission then names it deterministically.
+      const fallback = admit(await rerun(undefined, 'rerun-fallback'));
+      expect(ctx.podRepo.getOrThrow(fallback).branch).toBe(
+        `${original.workflow.branchPrefix}${fallback}`,
+      );
+    } finally {
+      ctx.db.close();
+    }
+  });
 });
