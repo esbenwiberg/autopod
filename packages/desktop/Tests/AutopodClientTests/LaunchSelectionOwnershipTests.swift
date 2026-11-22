@@ -3,6 +3,20 @@ import Testing
 import AutopodClient
 @testable import AutopodDesktop
 
+private func launchRequestBody(_ request: URLRequest) throws -> Data {
+  if let body = request.httpBody { return body }
+  let stream = try #require(request.httpBodyStream)
+  stream.open(); defer { stream.close() }
+  var bytes = Data()
+  var buffer = [UInt8](repeating: 0, count: 1024)
+  while true {
+    let count = stream.read(&buffer, maxLength: buffer.count)
+    if count == 0 { return bytes }
+    if count < 0 { throw URLError(.badServerResponse) }
+    bytes.append(contentsOf: buffer.prefix(count))
+  }
+}
+
 @Suite @MainActor struct LaunchSelectionOwnershipTests {
   @Test func staleFleetOwnerCannotSubmitOrWriteAJournal() async throws {
     try await withPrivateConnectionJournal { root in
@@ -17,6 +31,35 @@ import AutopodClient
         catch { #expect(error.localizedDescription.contains("Connection changed")) }
         #expect(f.a.requests.isEmpty && f.b.requests.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("launches").path))
+      }
+    }
+  }
+  @Test func enrolledRequestIsSentExactlyOnceEvenAfterLostReplyAndReopen() async throws {
+    try await withPrivateConnectionJournal { root in
+      try await withPodStoreLifetimeFixture { f in
+        let journal = root.appendingPathComponent("launches")
+        let configuration = LaunchConfigurationStore(journalDirectory: journal)
+        configuration.configure(api: f.apiA)
+        let actions = configuration.actions(selectingIn: f.store)
+        let request = try ComposableLaunchRequest.decodeJSON(Data(#"{"emptyWorkspace":true,"profileId":"fictional","task":"Fictional enrolled Task","intent":"task","requestId":"5ecff8d3-de82-48cb-961a-dc06dc506533","expectedDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requireParentEnrollment":true}"#.utf8))
+        let result = f.startResult {
+          do { return try await actions.launch(request) } catch { return nil }
+        }
+        let post = try await f.a.next()
+        #expect(post.request.httpMethod == "POST" && post.request.url?.path == "/pods")
+        let wired = try launchRequestBody(post.request)
+        #expect(try ComposableLaunchRequest.decodeJSON(wired) == request)
+        let saved = journal.appendingPathComponent("5ecff8d3-de82-48cb-961a-dc06dc506533.json")
+        #expect(try ComposableLaunchRequest.decodeJSON(Data(contentsOf: saved)) == request)
+        try expectPrivateConnectionJournal(saved)
+        post.respond(status: 503, body: #"{"error":"Launch result unavailable"}"#)
+        #expect(await result.value == nil)
+
+        let reopened = LaunchConfigurationStore(journalDirectory: journal)
+        reopened.configure(api: f.apiA)
+        do { _ = try await reopened.actions(selectingIn: f.store).launch(request); Issue.record("An enrolled launch was resent") }
+        catch { #expect(error.localizedDescription.contains("already recorded")) }
+        #expect(f.a.requests.count == 1 && f.b.requests.isEmpty)
       }
     }
   }

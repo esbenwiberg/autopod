@@ -119,6 +119,8 @@ export interface AzureSandboxApiClientConfig {
   sandboxGroup?: string;
   /** Skip ARM group read/create; use when the identity has data-plane-only RBAC. */
   assumeGroupExists?: boolean;
+  /** Use this exact ready disk image; never import, repair or prune the cache. */
+  readyDiskImageId?: string;
   /** User-assigned managed identity used by the sandbox group to pull private ACR images. */
   imagePullIdentityResourceId?: string;
   /** Transient registry credentials used for disk-image creation. Prefer managed identity. */
@@ -236,6 +238,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     >
   > & {
     imagePullIdentityResourceId?: string;
+    readyDiskImageId?: string;
     registryCredentials?: SandboxRegistryCredentials;
   };
   private readonly logger: Logger;
@@ -259,6 +262,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private groupReady: Promise<void> | null = null;
   /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
   private execStreamSeq = 0;
+  get readyDiskImageId(): string | undefined {
+    return this.config.readyDiskImageId;
+  }
+
   get executionResourceScope(): string {
     return JSON.stringify([
       this.dataEndpoint,
@@ -270,12 +277,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
     this.observeCompute = config.observeCompute;
+    if (
+      config.readyDiskImageId !== undefined &&
+      (!config.assumeGroupExists || !/^[A-Za-z0-9_-]{1,128}$/.test(config.readyDiskImageId))
+    )
+      throw new Error('sandbox-ready-disk-image-config-invalid');
     this.config = {
       subscriptionId: config.subscriptionId,
       resourceGroup: config.resourceGroup,
       location: config.location,
       sandboxGroup: config.sandboxGroup ?? 'autopod-spike',
       assumeGroupExists: config.assumeGroupExists ?? false,
+      readyDiskImageId: config.readyDiskImageId,
       imagePullIdentityResourceId: config.imagePullIdentityResourceId,
       registryCredentials: config.registryCredentials,
     };
@@ -313,13 +326,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   async prepareManagedImage(image: string): Promise<string> {
     if (!/@sha256:[a-f0-9]{64}$/.test(image)) throw new Error('managed-image-digest-required');
     await this.ensureSandboxGroup();
-    return requiredId(await this.ensureDiskImage(image), 'disk image');
+    const disk = this.config.readyDiskImageId
+      ? await this.requireReadyDiskImage(image, this.config.readyDiskImageId)
+      : await this.ensureDiskImage(image);
+    return requiredId(disk, 'disk image');
   }
 
   async createSandbox(options: CreateSandboxOptions): Promise<string> {
     if (options.managedSpecDigest) managedDigestLabel(options.managedSpecDigest);
     await this.ensureSandboxGroup();
-    const diskImage = await this.ensureDiskImage(options.image);
+    const diskImage = this.config.readyDiskImageId
+      ? await this.requireReadyDiskImage(options.image, this.config.readyDiskImageId)
+      : await this.ensureDiskImage(options.image);
     const diskImageId = requiredId(diskImage, 'disk image');
     const sandbox = await this.createSandboxFromDiskImage(diskImageId, options);
     return requiredId(sandbox, 'sandbox');
@@ -508,11 +526,26 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     return digest;
   }
 
+  readonly supportsBoundedExec = true;
+
   async exec(
     sandboxId: string,
     command: string[],
     options?: SandboxExecOptions,
   ): Promise<SandboxExecResult> {
+    const outputLimit = options?.maxOutputBytes;
+    const bounded = outputLimit !== undefined;
+    const boundedTimeout = options?.timeoutMs ?? 22_000;
+    if (
+      bounded &&
+      (!Number.isSafeInteger(outputLimit) ||
+        outputLimit < 1 ||
+        outputLimit > 2 * 1024 * 1024 ||
+        !Number.isSafeInteger(boundedTimeout) ||
+        boundedTimeout < 1 ||
+        boundedTimeout > 30_000)
+    )
+      throw new AutopodError('Invalid sandbox exec bound', 'EXEC_OUTPUT_BOUND_INVALID', 400);
     const commandText = commandToShell(command, options?.env);
     const body: { command: string; workingDirectory?: string; user?: string } = {
       command: commandText,
@@ -531,8 +564,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         `${this.sandboxPath(sandboxId)}/executeShellCommand`,
         {
           json: body,
-          timeoutMs: options?.timeoutMs,
-          singleAttempt: options?.singleAttempt,
+          timeoutMs: bounded ? undefined : options?.timeoutMs,
+          singleAttempt: bounded || options?.singleAttempt,
+          ...(bounded
+            ? {
+                signal: AbortSignal.timeout(boundedTimeout),
+                // JSON escaping can take six wire bytes per decoded byte.
+                boundedJsonBytes: 4096 + 6 * outputLimit,
+              }
+            : {}),
           beforeSend: () => {
             options?.beforeSend?.();
             dispatchAttempted = true;
@@ -576,6 +616,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         { transport },
       );
     }
+    if (bounded) return boundedExecResult(response, outputLimit);
     const rawExitCode = response.exitCode ?? response.exit_code;
     if (rawExitCode === undefined || !Number.isInteger(rawExitCode)) {
       throw new AutopodError(
@@ -1574,6 +1615,23 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     await this.pollArmOperation(created.response, path);
   }
 
+  private async requireReadyDiskImage(image: string, id: string): Promise<DiskImageResponse> {
+    if (!/@sha256:[a-f0-9]{64}$/.test(image)) throw new Error('managed-image-digest-required');
+    const key = await this.buildDiskImageKey(image);
+    const disk = await this.getDiskImage(id, { singleAttempt: true, timeoutMs: 10_000 });
+    const labels = diskImageLabels(disk);
+    if (
+      disk.id !== id ||
+      !readyStates.has(diskImageState(disk)) ||
+      disk.image?.base !== key.sourceReference ||
+      labels.managedBy !== 'autopod' ||
+      labels.sourceImageHash !== key.sourceImageHash ||
+      labels.sourceDigest !== key.sourceDigest
+    )
+      throw new Error('sandbox-ready-disk-image-mismatch');
+    return disk;
+  }
+
   private async ensureDiskImage(baseImage: string): Promise<DiskImageResponse> {
     const key = await this.buildDiskImageKey(baseImage);
     const existingImages = await this.listDiskImages();
@@ -1821,7 +1879,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
               : {}),
           },
         },
-        singleAttempt: Boolean(options.managedSpecDigest),
+        singleAttempt:
+          Boolean(options.managedSpecDigest) || this.config.readyDiskImageId !== undefined,
         timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
     );
@@ -1877,10 +1936,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     return `${this.dataEndpoint}${this.sandboxPath(sandboxId)}`.toLowerCase();
   }
 
-  private async getDiskImage(diskImageId: string): Promise<DiskImageResponse> {
+  private async getDiskImage(
+    diskImageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiskImageResponse> {
     return this.requestData<DiskImageResponse>(
       'GET',
       `${this.groupPath()}/diskimages/${seg(diskImageId)}`,
+      options,
     );
   }
 
@@ -1942,7 +2005,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       ...options,
       params: { 'api-version': API_VERSION, ...options.params },
     });
-    return readJsonOrEmpty(response) as Promise<T>;
+    return (
+      options.boundedJsonBytes === undefined
+        ? readJsonOrEmpty(response)
+        : readBoundedExecJson(response, options.boundedJsonBytes)
+    ) as Promise<T>;
   }
 
   private async requestDataBuffer(
@@ -1999,6 +2066,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           method,
           headers,
           body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
+          ...(options.boundedJsonBytes !== undefined ? { redirect: 'error' as const } : {}),
           signal:
             options.signal && controller
               ? AbortSignal.any([options.signal, controller.signal])
@@ -2018,6 +2086,20 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       }
 
       options.onResponse?.(response);
+
+      // Do not read or log an error body, inspect clones, follow redirects, or
+      // back off/retry a bounded collection. Its caller owns reconciliation.
+      if (options.boundedJsonBytes !== undefined) {
+        if (response.status !== 200 || response.redirected) {
+          void response.body?.cancel().catch(() => {});
+          throw new AutopodError(
+            'Bounded sandbox exec response unavailable',
+            'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+            502,
+          );
+        }
+        return response;
+      }
 
       if (response.status === 429 && !options.singleAttempt && attempt < this.retryMaxAttempts) {
         const waitMs = Math.min(
@@ -2209,6 +2291,56 @@ interface RequestOptions {
   timeoutMs?: number;
   raw?: boolean;
   rawUrl?: boolean;
+  boundedJsonBytes?: number;
+}
+
+function boundedExecResult(raw: unknown, limit: number): SandboxExecResult {
+  const invalid = () =>
+    new AutopodError('Bounded sandbox exec has no verified result', 'EXEC_EXIT_UNVERIFIED', 409);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw invalid();
+  const { stdout, stderr, output, exitCode, exit_code } = raw as Record<string, unknown>;
+  const code = exitCode ?? exit_code;
+  if (
+    !isObservedExitCode(code) ||
+    (exitCode !== undefined && exit_code !== undefined && exitCode !== exit_code) ||
+    (stdout !== undefined && output !== undefined && stdout !== output) ||
+    [stdout, stderr, output].some((value) => value !== undefined && typeof value !== 'string')
+  )
+    throw invalid();
+  const result = {
+    stdout: (stdout ?? output ?? '') as string,
+    stderr: (stderr ?? '') as string,
+    exitCode: code,
+  };
+  if (Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > limit) throw invalid();
+  return result;
+}
+
+async function readBoundedExecJson(response: Response, cap: number): Promise<unknown> {
+  if (!response.body) throw new Error('bounded-exec-body-missing');
+  const reader = response.body.getReader();
+  try {
+    let data = Buffer.allocUnsafe(Math.min(cap, 4096));
+    let size = 0;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const next = size + chunk.value.byteLength;
+      if (next > cap) throw new Error('bounded-exec-wire-limit');
+      if (next > data.length) {
+        const grown = Buffer.allocUnsafe(Math.min(cap, Math.max(next, 2 * data.length)));
+        data.copy(grown, 0, 0, size);
+        data = grown;
+      }
+      data.set(chunk.value, size);
+      size = next;
+    }
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data.subarray(0, size)));
+  } finally {
+    // Cancellation must not delay the caller if the peer withholds the tail.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 const readyStates = new Set(['Ready', 'Succeeded']);

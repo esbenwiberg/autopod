@@ -1,6 +1,13 @@
 import CryptoKit
 import Foundation
 
+private final class RefuseLaunchRedirect: NSObject, URLSessionTaskDelegate {
+  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+    completionHandler(nil)
+  }
+}
+
 /// Async REST client for the Autopod daemon API.
 /// Actor-isolated for thread safety — all methods are safe to call from any context.
 public actor DaemonAPI {
@@ -238,7 +245,8 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(podId)/configuration")
   }
   public func launchPod(_ body: ComposableLaunchRequest) async throws -> SessionResponse {
-    try await request("POST", "/pods", body: encode(body))
+    try body.validateParentEnrollment()
+    return try await request("POST", "/pods", body: encode(body), delegate: body.requireParentEnrollment == true ? RefuseLaunchRedirect() : nil)
   }
   public func discoverGitHubRepositories() async throws -> [ConfigurationJSON] {
     try await request("GET", "/configuration/github/repositories")
@@ -1495,7 +1503,8 @@ public actor DaemonAPI {
     body: Data? = nil,
     timeout: TimeInterval = 30,
     contentType: String = "application/json",
-    recoveryForkRejection: (podId: String, request: RecoveryForkRequest)? = nil
+    recoveryForkRejection: (podId: String, request: RecoveryForkRequest)? = nil,
+    delegate: (any URLSessionTaskDelegate)? = nil
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1513,7 +1522,7 @@ public actor DaemonAPI {
     let data: Data
     let response: URLResponse
     do {
-      (data, response) = try await pod.data(for: req)
+      (data, response) = try await pod.data(for: req, delegate: delegate)
     } catch {
       throw DaemonError.networkError(error.localizedDescription)
     }

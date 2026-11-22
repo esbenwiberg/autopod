@@ -53,7 +53,7 @@ import Testing
     #expect(request.overrides?.execution?["main"]?["memoryGb"] == .null)
     #expect(throws: (any Error).self) { try LaunchComposerJSON.decode(#"{"task":"A","futureField":true}"#, selectionOnly: false, task: "") }
     #expect(throws: (any Error).self) { try LaunchComposerJSON.decode(#"{"task":"A","referenceRepositories":[{"repositoryId":"r","ref":"main","access":"read","futureField":true}]}"#, selectionOnly: false, task: "") }
-    for key in ["task", "work", "requestId", "expectedDigest", "origin"] {
+    for key in ["task", "work", "requestId", "expectedDigest", "origin", "requireParentEnrollment"] {
       #expect(throws: (any Error).self) { try LaunchComposerJSON.decode("{\"\(key)\":\"unexpected\"}", selectionOnly: true, task: "Series") }
     }
     let selection = LaunchComposerJSON.value(request, selectionOnly: true)
@@ -128,6 +128,60 @@ import Testing
     #expect(createdIDs == ["created-pod"], "Navigate only after the retained launch is confirmed")
     #expect(fixture.launches[0] == fixture.launches[1])
     #expect(fixture.launches[0].requestId?.isEmpty == false)
+  }
+
+  @Test(arguments: [true, false]) func enrolledTaskSubmitsExactIdentityOnce(redesign: Bool) async throws {
+    let fixture = LaunchComposerFixture()
+    let request = try enrolledRequest(fixture)
+    let host = LaunchComposerHost(ComposableCreatePodSheet(isPresented: fixture.presentation, actions: fixture.actions,
+      initialRequest: request), width: 1280, redesign: redesign)
+    defer { host.close() }
+    try await host.wait { host.enabled("launch-preview") }
+    try host.press("launch-preview")
+    try await host.wait { host.enabled("launch-submit") && host.containsText("Enrolled Task · no ordinary fallback") }
+    #expect(fixture.resolutions == [request])
+    try host.press("launch-submit")
+    try await host.wait { host.containsText("Do not resend it.") }
+    #expect(fixture.launches == [request])
+    #expect(!host.enabled("launch-retry"))
+    #expect(!host.enabled("launch-submit"))
+    #expect(!fixture.dismissed)
+  }
+
+  @Test func enrolledTaskCannotSubmitDriftOrDiscardItsBinding() async throws {
+    let fixture = LaunchComposerFixture()
+    var request = try enrolledRequest(fixture)
+    request.expectedDigest = String(repeating: "b", count: 64)
+    var edited = request
+    edited.select(.ai, id: "alternative")
+    #expect(edited.requestId == request.requestId && edited.expectedDigest == request.expectedDigest)
+    edited.requireParentEnrollment = nil
+    #expect(throws: (any Error).self) { try LaunchComposerJSON.applyTaskEdit(edited, preserving: request) }
+    #expect(LaunchComposerJSON.value(request, selectionOnly: true)["requireParentEnrollment"] == nil)
+    #expect(throws: (any Error).self) { try FollowUpSelectionJSON.decode(#"{"requireParentEnrollment":true}"#, preserving: fixture.request) }
+
+    let host = LaunchComposerHost(ComposableCreatePodSheet(isPresented: fixture.presentation, actions: fixture.actions,
+      initialRequest: request), width: 1280)
+    defer { host.close() }
+    try await host.wait { host.enabled("launch-preview") }
+    try host.press("launch-preview")
+    try await host.wait { host.containsText("The preview does not match the enrolled Task.") }
+    #expect(fixture.resolutions == [request])
+    #expect(!host.enabled("launch-submit") && fixture.launches.isEmpty)
+  }
+
+  private func enrolledRequest(_ fixture: LaunchComposerFixture) throws -> ComposableLaunchRequest {
+    let text = #"{"repositoryId":"repo","task":"Fictional enrolled Task","intent":"task","requestId":"5ecff8d3-de82-48cb-961a-dc06dc506533","expectedDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requireParentEnrollment":true}"#
+    let request = try LaunchComposerJSON.decode(text, selectionOnly: false, task: "")
+    #expect(request.requestId == "5ecff8d3-de82-48cb-961a-dc06dc506533")
+    #expect(try LaunchComposerJSON.submission(request, preview: fixture.preview(request)) == request)
+    for intent in [nil, "goal", "unknown"] {
+      var invalid = request; invalid.intent = intent
+      #expect(throws: (any Error).self) { try invalid.validateParentEnrollment() }
+    }
+    var invalid = request; invalid.task = " \n "
+    #expect(throws: (any Error).self) { try invalid.validateParentEnrollment() }
+    return request
   }
 
   @Test func nativeSeriesReviewInheritsSidecarsAndRetryRetainsCompletePayload() async throws {

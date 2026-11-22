@@ -4,7 +4,7 @@ import Testing
 
 @MainActor
 @Test func managedPodsHaveASeparateSidebarDestination() {
-  #expect(SidebarItem.managedPods.label == "Managed Pods")
+  #expect(SidebarItem.managedPods.label == "Dispatcher attempts")
   #expect(MainView.filterPods([], for: .managedPods).isEmpty)
 }
 

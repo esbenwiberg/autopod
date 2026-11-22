@@ -67,7 +67,9 @@ export class ParentReportResults {
   private materialize(run: string) {
     this.db
       .prepare(`INSERT INTO orchestration_child_outcomes(run_id,start_key,pod_id,state,exit_code,artifact_id,candidate_digest)
-        SELECT c.run_id,c.start_key,p.pod_id,p.state,p.exit_code,a.artifact_id,NULL
+        SELECT c.run_id,c.start_key,p.pod_id,p.state,p.exit_code,
+          CASE WHEN q.private_scope_json IS NULL THEN a.artifact_id END,
+          json_extract(private.candidate_json,'$.candidateDigest')
         FROM orchestration_continuations c
         JOIN parent_managed_requests q ON q.run_id=c.run_id AND q.start_key=c.start_key
         JOIN managed_pods p ON p.pod_id=c.pod_id AND p.dispatcher_attempt_id=c.attempt_id
@@ -76,9 +78,11 @@ export class ParentReportResults {
         LEFT JOIN artifact_exports a ON a.pod_id=p.pod_id AND a.status='committed'
           AND a.dispatcher_attempt_id=p.dispatcher_attempt_id
           AND a.execution_spec_digest=p.execution_spec_digest
+        LEFT JOIN parent_private_candidates private ON private.pod_id=p.pod_id
         WHERE c.run_id=? AND p.dispatcher_installation_id=('native.' || c.run_id) AND p.observed_exit=1
           -- validating and review_required may still complete artifact custody.
-          AND p.state IN ('killed','failed','complete')
+          AND (p.state IN ('killed','failed','complete')
+              OR (q.private_scope_json IS NOT NULL AND p.state='review_required'))
           AND (p.state <> 'complete' OR a.artifact_id IS NOT NULL
             OR json_extract(c.request_json,'$.outputs.artifacts.mode') <> 'required')
           AND NOT EXISTS(SELECT 1 FROM orchestration_child_outcomes o WHERE o.run_id=c.run_id AND o.start_key=c.start_key)
@@ -101,7 +105,9 @@ export class ParentReportResults {
 
   private async page(run: string, after: number): Promise<ParentReportPage> {
     const rows = this.rows(run, after);
-    const successful = rows.filter((row) => row.state === 'complete' && row.exit_code === 0);
+    const successful = rows.filter(
+      (row) => row.state === 'complete' && row.exit_code === 0 && !row.candidate_digest,
+    );
     const reports = new Map<number, ParentReportResult['report']>();
     const successfulLast = successful.at(-1);
     if (successfulLast) {
@@ -128,7 +134,12 @@ export class ParentReportResults {
         childId: row.pod_id,
         exitCode: row.exit_code,
         report: reports.get(row.sequence) ?? {
-          status: row.state === 'complete' ? 'unverified-exit' : row.state,
+          status:
+            row.candidate_digest && row.state === 'complete'
+              ? 'private-candidate-retained'
+              : row.state === 'complete'
+                ? 'unverified-exit'
+                : row.state,
         },
       })),
     };

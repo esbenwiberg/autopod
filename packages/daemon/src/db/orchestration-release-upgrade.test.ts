@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -101,6 +102,144 @@ it.each([
     expect(await fileChecksum(backup.path)).toBe(verified.sha256);
   } finally {
     source.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('rehearses exactly 276 to 280 on a verified synthetic backup built from the released SQL prefix', async () => {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((name) => /^\d+_.+\.sql$/.test(name))
+    .sort();
+  const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+  const released = files.filter((name) => Number.parseInt(name, 10) <= 276);
+  const prefix = released
+    .map((name) => `${name}:${sha(readFileSync(path.join(MIGRATIONS_DIR, name)))}\n`)
+    .join('');
+  // Ordered path/hash manifest from main at 4f72f273, before parent migrations.
+  expect(sha(prefix)).toBe('1b76d8266c0f3549e07eaf61f4f12cd157fe381f21949effe7ad004588c74792');
+  const root = mkdtempSync(path.join(tmpdir(), 'orch-main-276-'));
+  let source: ReturnType<typeof createHistoricalDiskDatabase> | undefined;
+  try {
+    const exact = path.join(root, 'through-280');
+    mkdirSync(exact);
+    for (const name of files.filter((name) => Number.parseInt(name, 10) <= 280))
+      copyFileSync(path.join(MIGRATIONS_DIR, name), path.join(exact, name));
+    const releasedDb = createHistoricalDiskDatabase(path.join(root, 'released.db'), [
+      { dir: exact, through: 276 },
+    ]);
+    source = releasedDb;
+    releasedDb.exec(`
+      INSERT INTO orchestration_runs(id,repository,policy_digest,accepted_commit,accepted_evidence,worker_request_limit,canceled,operator_owned)
+        VALUES('retained','private','fixture-policy','fixture-commit','fixture-evidence',6,1,1);
+      INSERT INTO orchestration_checkpoint_custody VALUES('retained','fixture-evidence','{}',x'0102');
+      INSERT INTO managed_pods(pod_id,dispatcher_installation_id,dispatcher_attempt_id,managed_start_key,
+        execution_spec_digest,profile_snapshot_digest,grant_id,grant_revision,effective_grant_digest,
+        request_json,handle_json,created_at) VALUES('retained-worker','fixture-installation','a','k','spec','profile','grant',1,'digest','{}','{}',1);
+      INSERT INTO approval_rewrite_abandonments VALUES(
+        'fixture-disposition','archived-pod',1,'fixture-binding','fixture-request','fixture-user','synthetic rehearsal','{}','2026-01-01'
+      );
+      INSERT INTO approval_rewrite_abandonment_events VALUES('fixture-disposition','complete','','2026-01-01');
+    `);
+    const existing = () =>
+      [
+        'orchestration_runs',
+        'orchestration_checkpoint_custody',
+        'orchestration_request_balances',
+        'approval_rewrite_abandonments',
+        'approval_rewrite_abandonment_events',
+      ].map((table) => `SELECT * FROM ${table}`);
+    const before = existing().map((sql) => releasedDb.prepare(sql).all());
+    const catalog =
+      "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name";
+    type CatalogEntry = { name: string; sql: string | null };
+    const definitions = source.prepare(catalog).all() as CatalogEntry[];
+    const versionsBefore = source.prepare('SELECT * FROM schema_version ORDER BY version').all();
+    expect(versionsBefore.at(-1)).toMatchObject({ version: 276 });
+    const backup = await snapshotBeforeCutover(source, source.name, logger, 'synthetic-main-276');
+    if (!backup) throw new Error('missing backup');
+    const verified = await verifyBackupRestore(backup.path, {
+      expectedSourceIdentity: databaseIdentity(source.name),
+      maxAgeMs: 60_000,
+    });
+    const restored = path.join(root, 'scratch.db');
+    copyFileSync(backup.path, restored);
+    expect(await fileChecksum(restored)).toBe(verified.sha256);
+    const db = openTestDiskDatabase(restored);
+    try {
+      await runMigrationsWithBackups(db, exact, logger);
+      expect(
+        db
+          .prepare(
+            "SELECT type, dflt_value FROM pragma_table_info('managed_pods') WHERE name='last_runtime_observation'",
+          )
+          .get(),
+      ).toEqual({ type: 'TEXT', dflt_value: null });
+      expect(
+        db
+          .prepare(
+            "SELECT last_runtime_observation, execution_spec_digest FROM managed_pods WHERE pod_id='retained-worker'",
+          )
+          .get(),
+      ).toEqual({ last_runtime_observation: null, execution_spec_digest: 'spec' });
+      expect(
+        db
+          .prepare(
+            "SELECT type, dflt_value FROM pragma_table_info('parent_managed_requests') WHERE name='private_scope_json'",
+          )
+          .get(),
+      ).toEqual({ type: 'TEXT', dflt_value: null });
+      const previousNames = new Set(definitions.map(({ name }) => name));
+      expect(
+        (db.prepare(catalog).all() as CatalogEntry[])
+          .filter(({ name }) => previousNames.has(name))
+          // Migration 277 adds exactly one nullable column to an existing table.
+          .map((entry) =>
+            entry.name === 'parent_managed_requests'
+              ? { ...entry, sql: entry.sql?.replace(', private_scope_json TEXT', '') }
+              : entry,
+          ),
+      ).toEqual(definitions);
+      expect(
+        db
+          .prepare('SELECT version FROM schema_version WHERE version>276 ORDER BY version')
+          .pluck()
+          .all(),
+      ).toEqual([277, 278, 279, 280]);
+      expect(
+        db.prepare('SELECT * FROM schema_version WHERE version<=276 ORDER BY version').all(),
+      ).toEqual(versionsBefore);
+      expect(existing().map((sql) => db.prepare(sql).all())).toEqual(before);
+      for (const table of [
+        'parent_managed_runs',
+        'parent_managed_requests',
+        'parent_managed_sessions',
+        'parent_private_collection_claims',
+        'parent_private_candidates',
+        'parent_review_approvals',
+        'parent_qualification_jobs',
+      ])
+        expect(db.prepare(`SELECT count(*) FROM ${table}`).pluck().get()).toBe(0);
+      expect(() => db.exec('DELETE FROM approval_rewrite_abandonment_events')).toThrow(
+        'rewrite abandonment receipts are immutable',
+      );
+      assertBackupIntegrity(db);
+      const snapshot = db.serialize();
+      const schemaVersion = db.pragma('schema_version', { simple: true });
+      const diskEntries = readdirSync(root, { recursive: true }).sort();
+      await runMigrationsWithBackups(db, exact, logger);
+      expect(db.serialize().equals(snapshot)).toBe(true);
+      expect(db.pragma('schema_version', { simple: true })).toBe(schemaVersion);
+      expect(readdirSync(root, { recursive: true }).sort()).toEqual(diskEntries);
+    } finally {
+      db.close();
+    }
+    expect(source.prepare('SELECT * FROM schema_version ORDER BY version').all()).toEqual(
+      versionsBefore,
+    );
+    expect(existing().map((sql) => releasedDb.prepare(sql).all())).toEqual(before);
+    expect(await fileChecksum(backup.path)).toBe(verified.sha256);
+  } finally {
+    source?.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

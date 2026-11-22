@@ -29,7 +29,7 @@ struct DesktopInsightsHeader<Actions: View>: View {
     let subtitle: String
     @ViewBuilder let actions: () -> Actions
     private var context: String {
-        switch title { case "History": "PAST WORK"; case "Memory": "KNOWLEDGE"; case "Managed pods": "DISPATCHER"; default: "FLEET INSIGHTS" }
+        switch title { case "History": "PAST WORK"; case "Memory": "KNOWLEDGE"; case "Dispatcher attempts": "DISPATCHER"; default: "FLEET INSIGHTS" }
     }
     var body: some View {
         HStack(spacing: 20) {

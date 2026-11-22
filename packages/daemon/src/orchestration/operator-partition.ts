@@ -9,14 +9,18 @@ export function operatorPartition(
   cli: ManagedCliConfig | undefined,
   ordinary: ManagedProfileSetConfig | undefined,
   worker: ManagedProfileSetConfig | undefined,
+  candidateOnly = false,
 ) {
-  if (!worker) return undefined;
+  if (!worker && !candidateOnly) return undefined;
   const target = worker.profiles[0]?.profileSnapshot.route.executionTarget;
   if (
     !enrollment ||
     !cli ||
-    !ordinary ||
-    ordinary.profiles.some((p) => p.profileSnapshot.route.executionTarget !== 'sandbox') ||
+    !worker ||
+    (candidateOnly
+      ? ordinary || !enrollment.parent?.coding?.sandbox?.hostQualification || target !== 'sandbox'
+      : !ordinary ||
+        ordinary.profiles.some((p) => p.profileSnapshot.route.executionTarget !== 'sandbox')) ||
     (target !== 'local' && target !== 'sandbox') ||
     worker.profiles.some((p) => p.profileSnapshot.route.executionTarget !== target) ||
     worker.catalogArtifacts ||

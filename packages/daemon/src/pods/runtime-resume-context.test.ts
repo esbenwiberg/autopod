@@ -34,7 +34,11 @@ import {
   createTestDb,
   insertTestProfile,
 } from '../test-utils/mock-helpers.js';
-import { PARENT_DELEGATE_BIN, PARENT_DELEGATE_DESCRIPTOR } from './parent-delegate-materials.js';
+import {
+  PARENT_DELEGATE_COMMAND,
+  PARENT_DELEGATE_DESCRIPTOR,
+  PARENT_DELEGATE_INSTRUCTIONS,
+} from './parent-delegate-materials.js';
 import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 // @ts-expect-error The worker CLI is an independent JavaScript executable.
@@ -792,7 +796,7 @@ describe('runtime resume context local credential and token integration', () => 
     });
     expect(backend.writeFile).toHaveBeenCalledWith(
       'retained-parent-container',
-      `${PARENT_DELEGATE_BIN}/ap`,
+      PARENT_DELEGATE_COMMAND,
       expect.stringContaining('ap-delegate.mjs'),
       { mode: 0o500, preserveParentModes: true },
     );
@@ -820,11 +824,30 @@ describe('runtime resume context local credential and token integration', () => 
       }),
     ).toBe(0);
 
-    // Opt-in fixture: run the *installed* wrapper and fixed-path descriptor
+    for (const command of ['start', 'status', 'results', 'wait']) {
+      expect(PARENT_DELEGATE_INSTRUCTIONS).toContain(
+        `${PARENT_DELEGATE_COMMAND} delegate ${command}`,
+      );
+    }
+
+    // Opt-in fixture: run the *installed* wrapper from a Bash login shell with a reset PATH.
+    // Use the exact Status line from the generated parent instructions, not a second hardcoded command.
+    // Use the fixed-path descriptor
     // with synthetic loopback MCP, no mounts/host networking or image pulls.
     const image = process.env.AUTOPOD_PARENT_DELEGATE_DOCKER_IMAGE;
     if (image) {
       expect(image).toMatch(/^sha256:[a-f0-9]{64}$/);
+      const metadata = spawnSync(
+        'docker',
+        ['image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', image],
+        {
+          encoding: 'utf8',
+          timeout: 5_000,
+        },
+      );
+      expect(metadata.status).toBe(0);
+      const platform = metadata.stdout.trim();
+      expect(platform).toMatch(/^linux\/(amd64|arm64)$/);
       const files = vi.mocked(backend.writeFile).mock.calls.map(([, path, bytes, opts]) => ({
         path,
         content: String(bytes),
@@ -836,6 +859,10 @@ describe('runtime resume context local credential and token integration', () => 
           'run',
           '--rm',
           '--pull=never',
+          '--platform',
+          platform,
+          '--user',
+          '0:0',
           '--network',
           'none',
           '--read-only',
@@ -853,7 +880,7 @@ describe('runtime resume context local credential and token integration', () => 
           import { createServer } from 'node:http';
           import { execFile } from 'node:child_process';
           import assert from 'node:assert/strict';
-          const files = JSON.parse(readFileSync(0, 'utf8'));
+          const { files, command } = JSON.parse(readFileSync(0, 'utf8'));
           for (const {path,content,mode} of files) {
             mkdirSync(dirname(path), { recursive: true });
             writeFileSync(path, content);
@@ -869,7 +896,7 @@ describe('runtime resume context local credential and token integration', () => 
             res.writeHead(200, {'Content-Type':'application/json'});
             res.end(JSON.stringify({jsonrpc:'2.0',id:input.id,result:{content:[{type:'text',text:'{"children":[]}'}]}}));
           }).listen(18129, '127.0.0.1', () => {
-            execFile('/run/autopod/delegate-bin/ap', ['delegate','status'], {
+            execFile('/bin/bash', ['-lc', 'export PATH=/usr/local/bin:/usr/bin:/bin; if command -v ap >/dev/null; then exit 103; fi; exec ' + command], {
               uid:1000,gid:1000,timeout:3000
             }, (error, stdout) => {
               server.close();
@@ -881,7 +908,14 @@ describe('runtime resume context local credential and token integration', () => 
           });
         `,
         ],
-        { input: JSON.stringify(files), encoding: 'utf8', timeout: 12_000 },
+        {
+          input: JSON.stringify({
+            files,
+            command: PARENT_DELEGATE_INSTRUCTIONS.match(/^- Status: (.+)$/m)?.[1],
+          }),
+          encoding: 'utf8',
+          timeout: 12_000,
+        },
       );
       expect(result.stderr).toBe('');
       expect(result.status).toBe(0);

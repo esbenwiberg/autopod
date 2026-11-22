@@ -1,14 +1,17 @@
 import type Database from 'better-sqlite3';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createDevAuthModule } from '../../auth/dev-auth-module.js';
 import { createTestConfiguration } from '../../test-utils/configuration-helpers.js';
 import { createTestDb } from '../../test-utils/mock-helpers.js';
 import { errorHandler } from '../error-handler.js';
+import { authPlugin } from '../plugins/auth.js';
 import { configurationRoutes } from './configuration.js';
 
 describe('composable configuration API', () => {
   let db: Database.Database;
   let app: FastifyInstance;
+  let services: ReturnType<typeof createTestConfiguration>['services'];
   beforeEach(async () => {
     db = createTestDb();
     app = Fastify();
@@ -17,7 +20,7 @@ describe('composable configuration API', () => {
     app.addHook('preHandler', async (request) => {
       request.user = { oid: 'fixture-operator', name: 'Fixture Operator' };
     });
-    const { services } = createTestConfiguration(db);
+    services = createTestConfiguration(db).services;
     configurationRoutes(app, {
       db,
       resolution: services,
@@ -39,6 +42,37 @@ describe('composable configuration API', () => {
     expect(response.json().repository.id).toBe('repo-b');
     expect(db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 0 });
     expect((await app.inject('/configuration/capabilities')).json().creationEnabled).toBe(false);
+  });
+  it('observes only authenticated capability reads and tolerates diagnostic failure', async () => {
+    const diagnostic = Fastify();
+    try {
+      diagnostic.setErrorHandler(errorHandler);
+      authPlugin(
+        diagnostic,
+        createDevAuthModule({ allowDevAuth: true, isDev: true, devToken: 'fixture' }),
+      );
+      let calls = 0;
+      configurationRoutes(diagnostic, {
+        db,
+        resolution: services,
+        capabilities: () => ({ schemaVersion: 1 }),
+        candidateOwnerStatus: () => {
+          calls++;
+          throw new Error('diagnostic unavailable');
+        },
+      });
+      expect((await diagnostic.inject('/configuration/capabilities')).statusCode).toBe(401);
+      expect(calls).toBe(0);
+      const response = await diagnostic.inject({
+        url: '/configuration/capabilities',
+        headers: { authorization: 'Bearer fixture' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ schemaVersion: 1 });
+      expect(calls).toBe(1);
+    } finally {
+      await diagnostic.close();
+    }
   });
   it('requires revisions for updates and rejects legacy fields', async () => {
     const current = (await app.inject('/profiles/profile')).json();

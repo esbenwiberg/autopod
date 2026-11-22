@@ -17,6 +17,65 @@ import Testing
   #expect(family.children.map(\.child) == [nil, "child-start", "child-exit", "child-future"])
 }
 
+@Test(arguments: ["provider-request-limit", "future-reason"]) func parentFamilyExplainsOnlyKnownRequestStops(reason: String) throws {
+  let data = Data("""
+    {"requestKey":"work","parentAttempt":"attempt","child":"child","status":"exited","exitReason":"\(reason)"}
+    """.utf8)
+  let child = try JSONDecoder().decode(ParentManagedChild.self, from: data)
+  let view = ParentManagedChildPresentation(child)
+  #expect(view.title == "Exited")
+  #expect(view.tone == (reason == "provider-request-limit" ? .limited : .exited))
+  #expect(view.detail == (reason == "provider-request-limit"
+    ? "Child used all allowed model requests before finishing." : "Child task exited"))
+}
+
+@Test(arguments: ["pending", "collected", "unavailable", "future"]) func parentFamilySeparatesExitFromCommitCollection(status: String) throws {
+  let json = """
+    {"requestKey":"work","parentAttempt":"a","child":"child","status":"exited","exitCode":0,"collectionStatus":"\(status)"}
+    """
+  let presentation = ParentManagedChildPresentation(try JSONDecoder().decode(ParentManagedChild.self, from: Data(json.utf8)))
+  #expect(presentation.title == "Exited")
+  #expect(presentation.detail == "Exit code 0")
+  #expect(presentation.collection == [
+    "pending": "Collecting commit",
+    "collected": "Commit collected",
+    "unavailable": "No commit collected",
+  ][status])
+  let withoutExit = json.replacingOccurrences(of: "\"exited\"", with: "\"started\"")
+  #expect(ParentManagedChildPresentation(try JSONDecoder().decode(ParentManagedChild.self, from: Data(withoutExit.utf8))).collection == nil)
+}
+
+@Test func parentReviewShowsReadyEvidenceOnlyWhileCurrentAndWellFormed() throws {
+  let commit = String(repeating: "a", count: 40)
+  let evidence = "sha256:" + String(repeating: "b", count: 64)
+  let family = try decodeFamily(children: [], review: [
+    "status": "ready", "evidenceDigest": evidence, "commit": commit,
+  ])
+  let review = try #require(family.review)
+  let ready = ParentReviewPresentation(review, isStale: false)
+  #expect(ready.title == "Tested change ready for review")
+  #expect(ready.commit == commit)
+  #expect(ready.evidence == evidence)
+
+  let stale = ParentReviewPresentation(review, isStale: true)
+  #expect(stale.title == "Review status not current")
+  #expect(stale.evidence == nil)
+  let malformed = try decodeFamily(children: [], review: ["status": "ready", "evidenceDigest": evidence])
+  #expect(ParentReviewPresentation(try #require(malformed.review), isStale: false).title == "Review unavailable")
+}
+
+@Test(arguments: [
+  ["not-sent", "Evaluation not sent"],
+  ["unknown", "Evaluation outcome unknown"],
+  ["candidate-unavailable", "Coding result unavailable"],
+  ["future-status", "Review unavailable"],
+]) func parentReviewDistinguishesStoppedAndUnsupportedStates(testCase: [String]) throws {
+  let family = try decodeFamily(children: [], review: ["status": testCase[0]])
+  let view = ParentReviewPresentation(try #require(family.review), isStale: false)
+  #expect(view.title == testCase[1])
+  #expect(view.evidence == nil)
+}
+
 @MainActor @Test func parentFamilyScopeIsIndependentOfParentLifecycle() {
   let connectionID = UUID()
   // The same task can be inspected both while it runs and after it exits.
@@ -128,12 +187,43 @@ import Testing
   #expect(model.lastError != nil)
 }
 
+@MainActor @Test func parentFamilyRestoresReadyChangeOnlyAfterFreshReconnectResponse() async throws {
+  let model = ParentFamilyModel()
+  let old = ParentFamilyScope(connectionID: UUID(), parent: "parent")
+  let new = ParentFamilyScope(connectionID: UUID(), parent: "parent")
+  let commit = String(repeating: "a", count: 40)
+  let evidence = "sha256:" + String(repeating: "b", count: 64)
+  let ready = try decodeFamily(
+    children: [("left", "child-1", "exited"), ("right", "child-2", "exited")],
+    review: ["status": "ready", "commit": commit, "evidenceDigest": evidence]
+  )
+  await model.load(parent: old.parent, connectionID: old.connectionID) { _ in ready }
+  #expect(model.family(for: old) == ready)
+
+  await model.load(parent: new.parent, connectionID: new.connectionID) { _ in
+    #expect(model.family(for: old) == nil)
+    #expect(model.family(for: new) == nil)
+    return ready
+  }
+
+  let restored = try #require(model.family(for: new))
+  #expect(restored == ready)
+  let presentation = ParentReviewPresentation(try #require(restored.review), isStale: model.isStale)
+  #expect(presentation.title == "Tested change ready for review")
+  #expect(presentation.commit == commit)
+  #expect(presentation.evidence == evidence)
+}
+
 @MainActor @Test func parentFamilyRejectsLateResponsesAfterReconnect() async throws {
   let model = ParentFamilyModel()
   let pending = PendingFamilyLoad()
   let oldConnection = UUID()
   let newConnection = UUID()
-  let oldFamily = try decodeFamily(children: [("old", "old-child", "exited")], run: "old-run")
+  let oldFamily = try decodeFamily(
+    children: [("old", "old-child", "exited")],
+    run: "old-run",
+    review: ["status": "ready"]
+  )
   let newFamily = try decodeFamily(children: [("new", "new-child", "started")], run: "new-run")
 
   let oldTask = Task {
@@ -150,6 +240,7 @@ import Testing
   let newScope = ParentFamilyScope(connectionID: newConnection, parent: "parent")
   #expect(model.family(for: newScope) == newFamily)
   #expect(model.family?.run == "new-run")
+  #expect(model.family?.review == nil)
 }
 
 @MainActor @Test func parentFamilyRejectsLateResponsesAfterParentSelectionChanges() async throws {
@@ -203,7 +294,8 @@ private final class PendingFamilyLoad {
 private func decodeFamily(
   children: [(requestKey: String, child: String?, status: String)],
   run: String = "run-1",
-  parent: String = "parent"
+  parent: String = "parent",
+  review: [String: String]? = nil
 ) throws -> ParentManagedFamily {
   let childObjects = children.map { child in
     [
@@ -213,7 +305,8 @@ private func decodeFamily(
       "status": child.status,
     ] as [String: Any]
   }
-  let object: [String: Any] = ["parent": parent, "run": run, "children": childObjects]
+  var object: [String: Any] = ["parent": parent, "run": run, "children": childObjects]
+  if let review { object["review"] = review }
   let data = try JSONSerialization.data(withJSONObject: object)
   return try JSONDecoder().decode(ParentManagedFamily.self, from: data)
 }

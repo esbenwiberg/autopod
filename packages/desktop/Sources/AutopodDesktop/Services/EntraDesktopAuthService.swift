@@ -11,19 +11,22 @@ public struct EntraDesktopAuthConfiguration: Sendable {
   public let scope: String
   public let redirectURI: String
   public let callbackScheme: String
+  let previewOwnerPort: Int?
 
   public init(
     tenantId: String = "0d3aa8f9-8168-4bc2-bda1-c3972e6d9352",
     clientId: String = "3ccd604d-3887-4309-9988-739358fb5811",
     scope: String? = nil,
     redirectURI: String = "msauth.com.autopod.desktop://auth",
-    callbackScheme: String = "msauth.com.autopod.desktop"
+    callbackScheme: String = "msauth.com.autopod.desktop",
+    previewOwnerPort: Int? = nil
   ) {
     self.tenantId = tenantId
     self.clientId = clientId
     self.scope = scope ?? "openid profile offline_access api://\(clientId)/access_as_user"
     self.redirectURI = redirectURI
     self.callbackScheme = callbackScheme
+    self.previewOwnerPort = previewOwnerPort
   }
 
   var authorityBaseURL: URL {
@@ -31,7 +34,8 @@ public struct EntraDesktopAuthConfiguration: Sendable {
   }
 
   var cacheAccount: String {
-    "entra-token.\(tenantId).\(clientId)"
+    let base = "entra-token.\(tenantId).\(clientId)"
+    return previewOwnerPort.map { base + ".preview-owner.\($0)" } ?? base
   }
 }
 
@@ -170,7 +174,8 @@ public actor EntraDesktopAuthService {
       Task { @MainActor in
         AuthenticationPresentationContextProvider.shared.start(
           url: url,
-          callbackURLScheme: configuration.callbackScheme
+          callbackURLScheme: configuration.callbackScheme,
+          ephemeral: configuration.previewOwnerPort != nil
         ) { result in
           switch result {
           case .success(let callbackURL):
@@ -306,6 +311,7 @@ private final class AuthenticationPresentationContextProvider: NSObject,
   func start(
     url: URL,
     callbackURLScheme: String,
+    ephemeral: Bool,
     completion: @escaping @Sendable (Result<URL, Error>) -> Void
   ) {
     // On the main thread here: safe to resolve the anchor and start the session.
@@ -337,7 +343,7 @@ private final class AuthenticationPresentationContextProvider: NSObject,
       completionHandler: handler
     )
     session.presentationContextProvider = self
-    session.prefersEphemeralWebBrowserSession = false
+    session.prefersEphemeralWebBrowserSession = ephemeral
     activeSession = session
     session.start()
   }

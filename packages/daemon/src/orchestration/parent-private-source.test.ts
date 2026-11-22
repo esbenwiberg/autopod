@@ -82,6 +82,66 @@ it('binds an isolated HEAD export before awaits and returns only verified scoped
   expect(source.bundle).not.toBe(f.bundle);
 });
 
+it('rehearses explicit worker submission and a host-owned commit without scanning worker files', async () => {
+  const f = await fixture();
+  const worker = path.join(f.root, 'worker');
+  const host = path.join(f.root, 'host');
+  for (const repository of [worker, host]) {
+    await managedGit(f.root, [
+      'clone',
+      '--no-local',
+      '--no-checkout',
+      '--',
+      f.repository,
+      repository,
+    ]);
+    await managedGit(repository, ['checkout', '--detach', f.base]);
+    await mkdir(path.join(repository, 'src'));
+  }
+  const allowed = 'src/allowed.ts';
+  const bytes = Buffer.from('explicit submission\n');
+  await writeFile(path.join(worker, allowed), bytes);
+  // Illustrate a dirty change even on the assigned path *after* explicit submission.
+  const submission = { path: allowed, bytes: Buffer.from(bytes) };
+  await writeFile(path.join(worker, allowed), 'unsubmitted replacement\n');
+  await writeFile(path.join(worker, 'README.md'), 'unsubmitted modification\n');
+  await writeFile(path.join(worker, 'src/extra.ts'), 'unsubmitted addition\n');
+  expect(await managedGit(worker, ['rev-parse', 'HEAD'])).toBe(f.base);
+
+  // Fixture only: the host takes one bounded, exact-path file submission. There is
+  // deliberately no worker checkout parameter, raw patch parsing or live route.
+  const build = async (input: typeof submission | undefined) => {
+    if (!input || input.path !== allowed || input.bytes.length > 1024)
+      throw new Error('fixture-submission-refused');
+    await writeFile(path.join(host, allowed), input.bytes, { flag: 'wx' });
+    await managedGit(host, ['add', '--', allowed]);
+    await managedGit(host, [...identity, 'commit', '-m', 'Host-owned fixture commit']);
+  };
+  await expect(build(undefined)).rejects.toThrow('fixture-submission-refused');
+  await expect(build({ ...submission, path: 'src/extra.ts' })).rejects.toThrow(
+    'fixture-submission-refused',
+  );
+  expect(await managedGit(host, ['rev-parse', 'HEAD'])).toBe(f.base);
+  await build(submission);
+  const commit = await managedGit(host, ['rev-parse', 'HEAD']);
+  const tree = await managedGit(host, ['rev-parse', 'HEAD^{tree}']);
+  expect(await managedGit(host, ['rev-parse', 'HEAD^'])).toBe(f.base);
+  expect(await managedGit(host, ['show', `HEAD:${allowed}`])).toBe('explicit submission');
+  expect(await managedGit(host, ['show', 'HEAD:README.md'])).toBe('base');
+  const file = path.join(f.root, 'submitted.bundle');
+  await managedGit(host, ['-c', 'pack.window=0', 'bundle', 'create', file, 'HEAD']);
+  const bundle = await readFile(file);
+  await expect(
+    verifyParentPrivateSource(f.root, bundle, {
+      base: f.base,
+      commit,
+      tree,
+      allowlist: [{ kind: 'file', path: allowed }],
+      maxBundleBytes: 64 * 1024,
+    }),
+  ).resolves.toMatchObject({ base: f.base, commit, tree, paths: [allowed] });
+});
+
 it('rejects hostile bundles that do not match the exact HEAD, tree, or host path scope', async () => {
   const wrongHead = await fixture();
   await writeFile(path.join(wrongHead.repository, 'src', 'later.ts'), 'later\n');

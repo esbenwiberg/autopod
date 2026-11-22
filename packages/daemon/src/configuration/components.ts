@@ -3,6 +3,8 @@ import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   type EffectiveLaunchConfig,
   type JwtPayload,
+  type LaunchRequest,
+  launchRequestSchema,
   MAX_INPUT_BUNDLE_BYTES,
   MAX_INPUT_FILE_BYTES,
   MAX_INPUT_FILES,
@@ -100,6 +102,11 @@ export interface ConfigurationComponentsOptions {
   nativeGoalEvidence?: readonly unknown[];
   /** Bound after constructing PodManager, before admitting or recovering any launch. */
   podManager(): PodManager;
+  parentCandidate?: {
+    requireLaunch(request: LaunchRequest): void;
+    assertLaunch(config: EffectiveLaunchConfig): void;
+    assertNetworkHeadroom?(): Promise<void>;
+  };
   authorizeParentLaunch?: (
     requestId: string | undefined,
     principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'> | undefined,
@@ -644,6 +651,27 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     },
     db,
     resolution,
+    ...(options.parentCandidate?.assertNetworkHeadroom && {
+      async previewLaunch(raw: unknown, principal: JwtPayload) {
+        const request = launchRequestSchema.parse(raw);
+        const candidate = options.parentCandidate;
+        if (candidate && request.requireParentEnrollment) {
+          candidate.requireLaunch(request);
+          if (!options.authorizeParentLaunch?.(request.requestId, principal))
+            configurationError(
+              'Enrolled parent operator required',
+              'PARENT_OPERATOR_REQUIRED',
+              403,
+            );
+        }
+        const config = await resolveLaunch(request, resolution, principal.oid);
+        if (candidate && request.requireParentEnrollment) {
+          candidate.assertLaunch(config);
+          await candidate.assertNetworkHeadroom?.();
+        }
+        return config;
+      },
+    }),
     credentials: options.credentials,
     githubDiscovery: github,
     securityPolicy: policy,
@@ -704,6 +732,13 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
         request,
         actorId: identity.userId,
         authorize: (requestId) => options.authorizeParentLaunch?.(requestId, identity.principal),
+        assertRequest: options.parentCandidate?.requireLaunch,
+        assertResolved:
+          options.parentCandidate &&
+          (async (config) => {
+            options.parentCandidate?.assertLaunch(config);
+            await options.parentCandidate?.assertNetworkHeadroom?.();
+          }),
         services: resolution,
         snapshots,
         ...(prepareSession
@@ -771,6 +806,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     }),
     store,
     snapshots,
+    parentReviewer: reviewer,
     policy,
     resolution,
     routes,

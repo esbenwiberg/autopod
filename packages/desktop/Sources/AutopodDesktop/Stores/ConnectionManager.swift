@@ -1,6 +1,14 @@
 import Foundation
 import AutopodClient
 
+private final class PreviewOwnerNoRedirect: NSObject, URLSessionTaskDelegate {
+  func urlSession(_ session: URLSession, task: URLSessionTask,
+                  willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                  completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+    completionHandler(nil)
+  }
+}
+
 /// Manages daemon connection lifecycle — health polling, reconnect, state tracking.
 @Observable
 @MainActor
@@ -44,6 +52,10 @@ public final class ConnectionManager {
   private var healthTask: Task<Void, Never>?
   private var authenticationRecoveryTask: Task<Bool, Never>?
   private let entraAuthService = EntraDesktopAuthService()
+  public let previewOwnerURL: URL?
+  private let previewOwnerAuth: EntraDesktopAuthService?
+  private static let previewOwnerSession = URLSession(configuration: .ephemeral,
+    delegate: PreviewOwnerNoRedirect(), delegateQueue: nil)
 
   public private(set) var isRecoveringAuthentication = false
   public private(set) var authenticationRecoveryError: String?
@@ -52,7 +64,12 @@ public final class ConnectionManager {
 
   public init(restoreConnection: Bool = true, allowLiveConnections: Bool = true) {
     allowsLiveConnections = allowLiveConnections && !DesktopIdentity.usesDesignFixtures
-    guard restoreConnection, allowsLiveConnections else { return }
+    previewOwnerURL = allowsLiveConnections ? DesktopIdentity.previewOwnerURL : nil
+    previewOwnerAuth = previewOwnerURL?.port.map {
+      EntraDesktopAuthService(configuration: EntraDesktopAuthConfiguration(previewOwnerPort: $0))
+    }
+    // An isolated Preview starts disconnected, without restoring any ordinary connection.
+    guard restoreConnection, allowsLiveConnections, previewOwnerURL == nil else { return }
     // CLI launches should win over stale saved state. Restoring the previous
     // connection first can touch old Keychain items and block launch behind a
     // system prompt before the fresh `ap desktop` deep link is handled.
@@ -64,6 +81,7 @@ public final class ConnectionManager {
     let connections = ConnectionStore.loadAll()
     if let activeId = ConnectionStore.activeConnectionId(),
        let saved = connections.first(where: { $0.id == activeId }) {
+      guard saved.authKind != .previewOwner else { return }
       connection = saved
       if saved.authKind == .entra {
         if let token = Self.launchEntraToken(for: saved) {
@@ -106,6 +124,14 @@ public final class ConnectionManager {
     authKind: DaemonConnectionAuthKind = .manualToken
   ) async throws {
     try requireLiveConnections()
+    if let previewOwnerURL {
+      guard url == previewOwnerURL, authKind == .previewOwner else { throw previewOwnerConnectionError }
+      let existing = ConnectionStore.loadAll().first { $0.url == url }
+      let conn = DaemonConnection(id: existing?.id ?? UUID(), name: name, url: url, authKind: authKind)
+      try await connectPreviewOwner(conn)
+      return
+    }
+    guard authKind != .previewOwner else { throw previewOwnerConnectionError }
     let normalizedToken = Self.normalizeToken(token)
     let conn = DaemonConnection(name: name, url: url, authKind: authKind)
 
@@ -137,8 +163,14 @@ public final class ConnectionManager {
   ) async -> Result<Bool, DaemonError> {
     guard allowsLiveConnections else { return .failure(.badRequest(Self.fixtureConnectionMessage)) }
     let normalizedToken = Self.normalizeToken(token)
-    let testApi = makeAPI(baseURL: url, token: normalizedToken, authKind: authKind)
     do {
+      if previewOwnerURL != nil || authKind == .previewOwner {
+        guard authKind == .previewOwner else { throw previewOwnerConnectionError }
+        let (api, _) = try await previewOwnerAPI(for: url)
+        _ = try await api.configurationCapabilities()
+        return .success(true)
+      }
+      let testApi = makeAPI(baseURL: url, token: normalizedToken, authKind: authKind)
       _ = try await testApi.healthCheck()
       _ = try await testApi.getSessionStats()
       return .success(true)
@@ -157,6 +189,9 @@ public final class ConnectionManager {
       throw DaemonError.notFound("connection")
     }
 
+    guard previewOwnerURL == nil, conn.authKind != .previewOwner else {
+      throw previewOwnerConnectionError
+    }
     let token: String? = if conn.authKind == .entra {
       if let launchToken = Self.launchEntraToken(for: conn) {
         launchToken
@@ -255,7 +290,8 @@ public final class ConnectionManager {
   /// connections fall back to the on-disk dev token, and Entra connections sign in.
   public func handleDeepLink(_ deepLink: URL) {
     guard allowsLiveConnections else { state = .error(Self.fixtureConnectionMessage); return }
-    guard deepLink.scheme == DesktopIdentity.deepLinkScheme, deepLink.host == "connect",
+    guard previewOwnerURL == nil,
+      deepLink.scheme == DesktopIdentity.deepLinkScheme, deepLink.host == "connect",
       let comps = URLComponents(url: deepLink, resolvingAgainstBaseURL: false),
       let rawURL = comps.queryItems?.first(where: { $0.name == "url" })?.value,
       let url = DaemonConnection.normalizedURL(from: rawURL)
@@ -266,6 +302,7 @@ public final class ConnectionManager {
       DaemonConnectionAuthKind(
         rawValue: comps.queryItems?.first(where: { $0.name == "authKind" })?.value ?? "")
       ?? .manualToken
+    guard kind != .previewOwner else { return }
     let tokenParam = comps.queryItems?.first(where: { $0.name == "token" })?.value
 
     Task { @MainActor in
@@ -402,6 +439,7 @@ public final class ConnectionManager {
 
   public func signInWithMicrosoft() async throws -> String {
     try requireLiveConnections()
+    guard previewOwnerURL == nil else { throw previewOwnerConnectionError }
     let token = try await entraAuthService.signIn()
     let normalized = Self.normalizeToken(token)
     if let conn = connection {
@@ -412,7 +450,40 @@ public final class ConnectionManager {
     return activeToken ?? normalized
   }
 
+  private var previewOwnerConnectionError: DaemonError {
+    .badRequest("Use the isolated Preview with Microsoft sign-in for its configured loopback URL.")
+  }
+
+  public func signInPreviewOwner(at url: URL) async throws {
+    guard allowsLiveConnections, url == previewOwnerURL, let previewOwnerAuth else {
+      throw previewOwnerConnectionError
+    }
+    _ = try await previewOwnerAuth.signIn()
+  }
+
+  private func previewOwnerAPI(for url: URL) async throws -> (DaemonAPI, String) {
+    guard url == previewOwnerURL, let previewOwnerAuth else { throw previewOwnerConnectionError }
+    let token = Self.normalizeToken(try await previewOwnerAuth.accessToken())
+    guard !token.isEmpty else { throw previewOwnerConnectionError }
+    return (DaemonAPI(baseURL: url, initialToken: token, session: Self.previewOwnerSession,
+                      tokenProvider: { try await previewOwnerAuth.accessToken() }), token)
+  }
+
+  private func connectPreviewOwner(_ conn: DaemonConnection) async throws {
+    guard conn.authKind == .previewOwner else { throw previewOwnerConnectionError }
+    let (api, token) = try await previewOwnerAPI(for: conn.url)
+    _ = try await api.configurationCapabilities()
+    connection = conn
+    self.api = api
+    activeToken = token
+    state = .connected
+    startHealthPolling()
+  }
+
   public func makeAccessTokenProvider() -> DaemonAccessTokenProvider {
+    if let previewOwnerAuth {
+      return { try await previewOwnerAuth.accessToken() }
+    }
     let allowsLiveConnections = allowsLiveConnections
     let fallbackToken = activeToken ?? ""
     let entraAuthService = entraAuthService
@@ -499,7 +570,8 @@ public final class ConnectionManager {
       }
     } catch {
       // For local connections, try refreshing the dev token (daemon may have restarted)
-      if let conn = connection, conn.isLocal, await refreshDevToken(for: conn) {
+      if let conn = connection, conn.isLocal, conn.authKind != .previewOwner,
+         await refreshDevToken(for: conn) {
         return  // Refreshed — next poll will use the new token
       }
       if state == .connected {
@@ -613,6 +685,12 @@ public final class ConnectionManager {
   private func performAuthenticationRecovery() async throws {
     guard let conn = connection else {
       throw DaemonError.networkError("No daemon connection is active")
+    }
+
+    if conn.authKind == .previewOwner {
+      try await signInPreviewOwner(at: conn.url)
+      try await connectPreviewOwner(conn)
+      return
     }
 
     if conn.isLocal {

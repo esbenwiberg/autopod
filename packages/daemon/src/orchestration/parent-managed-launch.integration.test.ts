@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import Fastify from 'fastify';
 import pino from 'pino';
@@ -13,8 +13,16 @@ import { resolveLaunchExecutionSettings } from '../configuration/launch-executio
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
 import { ArtifactExports } from '../managed/artifact-exports.js';
+import { ManagedArtifactPipeline } from '../managed/artifact-pipeline.js';
 import { MemoryArtifactStore } from '../managed/artifact-store.js';
+import { canonical, digest, sha256 } from '../managed/canonical.js';
+import { ManagedControls } from '../managed/managed-controls.js';
 import { ManagedPodService } from '../managed/managed-service.js';
+import {
+  PRIVATE_COMMIT_EFFECTS,
+  PRIVATE_PARENT_VERIFIER,
+} from '../managed/private-commit-policy.js';
+import { managedGit, managedGitBytes } from '../managed/source-git.js';
 import {
   PARENT_DELEGATE_BIN,
   PARENT_DELEGATE_DESCRIPTOR,
@@ -24,11 +32,21 @@ import type { PodManagerDependencies } from '../pods/pod-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { runDelegate } from '../pods/runtime/ap-delegate.mjs';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
+import { fixtureSigner } from '../test-utils/gate-signer.js';
+import { resign } from '../test-utils/managed-fixture.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
-import { LocalCheckpointHost } from './local-checkpoints.js';
+import { combinedPolicyDigest } from './combined-attestation.js';
+import { LocalCheckpointHost, withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { type OperatorRunsConfig, operatorRunId, registerOperatorRuns } from './operator-runs.js';
+import { initializeParentCandidateKeys, openParentCandidateKeys } from './parent-candidate-keys.js';
+import { createParentEvaluatorClient } from './parent-evaluator-client.js';
+import { parentExactTreeEvaluator } from './parent-exact-tree-evaluator.js';
+import { composeParentHostGates } from './parent-host-gates.js';
 import { ParentManagedLaunch } from './parent-managed-launch.js';
+import { parentPrivateCompletion } from './parent-private-completion.js';
+import { parentQualificationJob } from './parent-qualification-job.js';
+import { ParentReportResults } from './parent-report-results.js';
 
 const logger = pino({ level: 'silent' });
 const operator = {
@@ -60,16 +78,203 @@ async function fixture(
   runtimeRequest = false,
   loseAllocation = false,
   restartBeforeProvision = false,
+  coding: boolean | 'sandbox' = false,
+  qualify: boolean | 'isolated-review' = false,
+  changeSubmission = false,
 ) {
-  // Real SQLite migrations, admission, source custody and parent provisioning; external execution is fake.
+  // Real provisioning, SQLite and custody; model/container and external HTTP are fixture ports.
+  const p = createProvisioningFixture(true, false);
+  onTestFinished(() => p.close());
+  const checks = fixtureSigner('checks', 'fixture-checks', digest('fixture-checks'));
+  const review = fixtureSigner('independentReview', 'fixture-review', digest('fixture-review'));
+  const localKeys =
+    qualify === 'isolated-review'
+      ? await (async () => {
+          const directory = path.join(await realpath(p.directory), 'receipt-custody');
+          await mkdir(directory, { mode: 0o700 });
+          await initializeParentCandidateKeys(directory);
+          return openParentCandidateKeys(
+            directory,
+            checks.authority.configurationDigest,
+            review.authority.configurationDigest,
+          );
+        })()
+      : undefined;
+  const policy = {
+    basePolicyDigest: digest('fixture-policy'),
+    ...(localKeys?.pins ?? { checks: checks.authority, independentReview: review.authority }),
+  };
+  const evaluation = {
+    checks: 'https://checks.fixture.example/verify',
+    independentReview: 'https://review.fixture.example/verify',
+  };
   const source = await setupOrchestrationRun(
     requests,
     active,
     operatorRunId(operator, 'parent-fixture'),
+    qualify ? combinedPolicyDigest(policy) : undefined,
   );
-  const p = createProvisioningFixture(true, false);
-  onTestFinished(() => p.close());
+  const recipe = structuredClone(source.request);
+  const paths = ['proof.txt'];
+  const sandbox =
+    coding === 'sandbox'
+      ? {
+          resourceScopeDigest: digest('fixture Azure scope'),
+          readyDiskImageId: 'fixture-disk',
+          secondPaths: ['other.txt'],
+        }
+      : undefined;
+  let writerExited = false;
+  let exposeFixtureExits = false;
+  const commitFixture = async (id: string, file: string, content: string) => {
+    const cwd = path.join(source.root, id);
+    const seedBundle = path.join(source.root, id + '-base.bundle');
+    await writeFile(seedBundle, source.bytes);
+    await managedGit(source.root, ['init', '-b', 'main', cwd]);
+    await managedGit(cwd, ['bundle', 'unbundle', seedBundle]);
+    await managedGit(cwd, ['checkout', '--detach', source.cp.commit]);
+    await writeFile(path.join(cwd, file), content);
+    await managedGit(cwd, ['add', '--', file]);
+    await managedGit(cwd, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'Fixture change',
+    ]);
+    const commit = await managedGit(cwd, ['rev-parse', 'HEAD']);
+    const tree = await managedGit(cwd, ['rev-parse', 'HEAD^{tree}']);
+    const bundle = path.join(source.root, id + '-output.bundle');
+    await managedGit(cwd, ['-c', 'pack.window=0', 'bundle', 'create', bundle, 'HEAD']);
+    await writeFile(path.join(cwd, file), 'dirty fixture edit\n');
+    return { commit, tree, bundle: await readFile(bundle) };
+  };
+  const exited = new Map<string, Awaited<ReturnType<typeof commitFixture>>>();
+  const exportPrivateHead = vi.fn(async (ref: string) => {
+    if (!qualify) return commitFixture('coding-output', 'proof.txt', 'coding child output\n');
+    const candidate = exited.get(ref);
+    if (!candidate) throw new Error('fixture exit required');
+    return candidate;
+  });
+  const readPrivateSubmission = vi.fn(
+    async (_ref: string, podId: string, _spec: string, assertCurrent: () => void) => {
+      assertCurrent();
+      const assigned = p.db
+        .prepare(`
+      SELECT q.private_scope_json FROM parent_managed_requests q
+      JOIN orchestration_continuations c ON c.run_id=q.run_id AND c.start_key=q.start_key
+      WHERE c.pod_id=?`)
+        .pluck()
+        .get(podId);
+      const [{ path: filename }] = JSON.parse(String(assigned));
+      return Buffer.from(
+        JSON.stringify({
+          version: 1,
+          files: [
+            { path: filename, content: filename === 'proof.txt' ? '24\n' : '24 is twice 12\n' },
+          ],
+        }),
+      );
+    },
+  );
+  const evaluatorFetch = vi.fn<typeof fetch>(async (url, init) => {
+    const role = url === evaluation.checks ? 'checks' : 'independentReview';
+    expect(url).toBe(evaluation[role]);
+    const { request, bundle } = JSON.parse(String(init?.body));
+    const signer = role === 'checks' ? checks : review;
+    const receipt = await parentExactTreeEvaluator(source.root, policy, role, {
+      async evaluate({ mirror, commit, tree, predecessor }) {
+        expect(predecessor).toBe(source.cp.commit);
+        const files = await managedGit(mirror, [
+          'diff-tree',
+          '-r',
+          '--name-status',
+          predecessor,
+          commit,
+        ]);
+        const passed =
+          role === 'checks'
+            ? (await managedGitBytes(mirror, ['show', commit + ':proof.txt'])).equals(
+                Buffer.from('24\n'),
+              ) &&
+              (await managedGitBytes(mirror, ['show', commit + ':other.txt'])).equals(
+                Buffer.from('24 is twice 12\n'),
+              )
+            : files === 'A\tother.txt\nM\tproof.txt';
+        return {
+          status: passed ? 'passed' : 'failed',
+          evidence: Buffer.from(JSON.stringify({ role, commit, tree, files, passed })),
+        };
+      },
+      async sign(statement) {
+        return signer.attest(statement);
+      },
+    })(request, Buffer.from(bundle, 'base64'));
+    return Response.json(receipt);
+  });
+  const gates = createParentEvaluatorClient(evaluation, policy, evaluatorFetch);
+  const admission = source.f.admission;
+  if (coding) {
+    recipe.task.kind = 'implementation';
+    const profile = recipe.profileSnapshot;
+    if (sandbox) {
+      admission.targets = ['sandbox'];
+      recipe.route.executionTarget =
+        profile.route.executionTarget =
+        recipe.effectiveGrant.route.executionTarget =
+          'sandbox';
+    }
+    profile.scope = {
+      ...profile.scope,
+      allowedEffects: [...PRIVATE_COMMIT_EFFECTS],
+      identityBindings: [],
+      network: { ...profile.scope.network, destinations: [] },
+      repositories: [
+        {
+          enrollmentId: source.cp.repository,
+          access: 'write',
+          baseRevision: source.cp.commit,
+          remote: 'private',
+          branchNamespace: 'autopod/',
+        },
+      ],
+    };
+    const { snapshotDigest: _, ...fields } = profile;
+    profile.snapshotDigest = digest(fields);
+    recipe.effectiveGrant.profileSnapshotDigest = profile.snapshotDigest;
+    recipe.effectiveGrant.scope = structuredClone(profile.scope);
+    recipe.outputs.source = {
+      mode: 'commit',
+      repository: source.cp.repository,
+      remote: 'private',
+      base: 'main',
+      head: 'autopod/fixture-private',
+    };
+    recipe.outputs.artifacts.mode = 'required';
+    recipe.outputs.artifacts.include = recipe.outputs.artifacts.requiredPaths = [
+      changeSubmission ? 'change-submission.json' : 'report.md',
+    ];
+    if (changeSubmission)
+      recipe.outputs.artifacts.limits = { maxFiles: 1, maxFileBytes: 16384, maxTotalBytes: 16384 };
+    recipe.validation.verifierPolicy = PRIVATE_PARENT_VERIFIER;
+    resign(recipe);
+    admission.profiles = new Map([[profile.snapshotDigest, profile]]);
+    admission.enrollmentCeiling =
+      admission.identityCeiling =
+      admission.backendCeiling =
+        profile.scope;
+  }
   const original = { id: 'prepare' };
+  if (qualify === 'isolated-review') {
+    p.accounts.create({
+      id: 'review-fixture',
+      name: 'Fixture reviewer',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'synthetic-fixture-review-key' },
+    });
+  }
   const { store, services } = createTestConfiguration(p.db);
   services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, p.accounts);
   const snapshots = createLaunchSnapshotRepository(p.db, store);
@@ -78,37 +283,168 @@ async function fixture(
   const { resolveLaunch } = await import('../configuration/launch-resolver.js');
   const launchRequest = {
     repositoryId: 'repo-a',
-    task: 'Commission a confined report worker',
+    task: qualify
+      ? 'Set the synthetic count to 24 and document why'
+      : 'Commission a confined report worker',
     requestId,
     overrides: {
       execution: { networkPolicy: { enabled: true, mode: 'restricted', allowedHosts: [] } },
+      ...(qualify === 'isolated-review'
+        ? {
+            ai: {
+              reviewer: {
+                mode: 'independent' as const,
+                route: {
+                  providerAccountId: 'review-fixture',
+                  runtime: 'claude' as const,
+                  model: 'claude-sonnet-4-6',
+                },
+              },
+            },
+          }
+        : {}),
     },
   };
   const preview = await resolveLaunch(launchRequest, services, 'operator');
   let boundaryCalls = 0;
   const stages: string[] = [];
-  const host = () =>
-    new LocalCheckpointHost(p.db, path.join(p.directory, 'scratch'), () => {
-      const service = new ManagedPodService(
-        p.db,
-        source.f.admission,
-        {
-          ...source.f.runtime,
-          ensure: async (...args) => {
-            boundaryCalls++;
-            if (loseAllocation) throw new Error('synthetic-external-allocation-reply-lost');
-            return source.f.runtime.ensure(...args);
-          },
+  const artifactStore = new MemoryArtifactStore();
+  const stagingRoot = path.join(await realpath(p.directory), 'artifacts');
+  const serviceForDb = () => {
+    const service = new ManagedPodService(
+      p.db,
+      source.f.admission,
+      {
+        ...source.f.runtime,
+        observe: async (ref) =>
+          writerExited || (exposeFixtureExits && (changeSubmission || exited.has(ref)))
+            ? { state: 'stopped', consumedTokens: 0, exitCode: 0 }
+            : source.f.runtime.observe(ref),
+        extractOutput: async (_ref, staging) => {
+          await mkdir(staging, { recursive: true });
+          await writeFile(path.join(staging, 'report.md'), 'Fixture implementation notes');
         },
-        () => 100,
-        true,
+        ensure: async (...args) => {
+          boundaryCalls++;
+          if (loseAllocation) throw new Error('synthetic-external-allocation-reply-lost');
+          const result = await source.f.runtime.ensure(...args);
+          if (qualify && !changeSubmission) {
+            const scope = p.db
+              .prepare(
+                'SELECT private_scope_json FROM parent_managed_requests WHERE run_id=? AND start_key=?',
+              )
+              .pluck()
+              .get(source.cp.run, args[1].startKey);
+            const left = canonical([{ kind: 'file', path: 'proof.txt' }]);
+            const right = canonical([{ kind: 'file', path: 'other.txt' }]);
+            expect([left, right]).toContain(scope);
+            const first = scope === left;
+            exited.set(
+              result.runtimeRef,
+              await commitFixture(
+                args[0],
+                first ? 'proof.txt' : 'other.txt',
+                first ? '24\n' : '24 is twice 12\n',
+              ),
+            );
+          }
+          return result;
+        },
+      },
+      () => 100,
+      true,
+    );
+    service.onTransition = () => {
+      const view = owner.family(original.id);
+      stages.push((view.children[0] as { status: string }).status);
+    };
+    if (coding) {
+      service.privateCommit = parentPrivateCompletion(
+        service,
+        { exportPrivateHead, readPrivateSubmission },
+        p.directory,
+        source.cp,
+        paths,
+        job?.reserve,
+        sandbox?.secondPaths,
       );
-      service.onTransition = () => {
-        const view = owner.family(original.id);
-        stages.push((view.children[0] as { status: string }).status);
-      };
-      return service;
+      new ManagedArtifactPipeline(
+        service,
+        new ArtifactExports(p.db, artifactStore),
+        stagingRoot,
+        new ManagedControls(service),
+      );
+    }
+    return service;
+  };
+  const host = () => new LocalCheckpointHost(p.db, path.join(p.directory, 'scratch'), serviceForDb);
+  const runReview = vi.fn(async (input: { prompt: string }) => {
+    expect(p.pod().status).toBe('failed');
+    const packet = JSON.parse(input.prompt.split('\n').at(-1)!);
+    expect(packet).toMatchObject({
+      base: source.cp.commit,
+      task: launchRequest.task,
+      paths: ['other.txt', 'proof.txt'],
     });
+    expect(packet.diff).toContain('+24 is twice 12');
+    expect(packet.diff).toContain('+24\n');
+    expect(packet.diff).not.toContain('dirty fixture edit');
+    return { stdout: JSON.stringify({ verdict: 'pass', reason: 'Fixture packet accepted' }) };
+  });
+  const runChecks = vi.fn(
+    async ({ mirror, commit, tree }: { mirror: string; commit: string; tree: string }) => {
+      // Execute Git checks on the verified mirror; no worker checkout or provider.
+      const count = await managedGitBytes(mirror, ['show', commit + ':proof.txt']);
+      const reason = await managedGitBytes(mirror, ['show', commit + ':other.txt']);
+      const passed =
+        count.equals(Buffer.from('24\n')) && reason.equals(Buffer.from('24 is twice 12\n'));
+      return {
+        status: passed ? ('passed' as const) : ('failed' as const),
+        evidence: Buffer.from(canonical({ commit, tree, passed })),
+      };
+    },
+  );
+  let job = makeJob();
+  function makeJob() {
+    const boundGates =
+      qualify === 'isolated-review'
+        ? composeParentHostGates(
+            {
+              db: p.db,
+              scratch: source.root,
+              policy,
+              run: source.cp.run,
+              excludedReviewerAccounts: [recipe.route.providerAccountId],
+            },
+            {
+              checks: { evaluate: runChecks, sign: localKeys!.bind(policy, 'checks') },
+              review: {
+                readPod: (id) => createPodRepository(p.db).getOrThrow(id),
+                readLaunch: (id) =>
+                  createLaunchSnapshotRepository(p.db, createConfigurationStore(p.db)).get(id),
+                reviewer: {
+                  parentQualification: (_pod, _config, _inputDigest, guard) => async (input) => {
+                    guard();
+                    return runReview(input);
+                  },
+                },
+                sign: localKeys!.bind(policy, 'independentReview'),
+              },
+            },
+          )
+        : gates;
+    return qualify
+      ? parentQualificationJob(
+          p.db,
+          host(),
+          p.directory,
+          source.cp.run,
+          paths,
+          boundGates,
+          sandbox?.secondPaths,
+        )
+      : undefined;
+  }
   host().ledger.open(
     source.cp.run,
     source.cp.repository,
@@ -124,13 +460,32 @@ async function fixture(
   const config = (): OperatorRunsConfig => ({
     db: p.db,
     host: host(),
+    qualification: job,
     slots: [
       {
         slot: 'parent-fixture',
         operator,
         checkpoint: source.cp,
-        catalog: { inspect: source.request },
-        parent: { requestId, launchDigest: preview.digest },
+        catalog: coding ? { implement: recipe } : { inspect: source.request },
+        parent: {
+          requestId,
+          launchDigest: preview.digest,
+          ...(coding
+            ? {
+                coding: {
+                  recipe: 'implement',
+                  paths,
+                  ...(sandbox
+                    ? {
+                        ...(qualify === 'isolated-review'
+                          ? { sandbox: { ...sandbox, hostQualification: true as const } }
+                          : { sandbox, evaluation }),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+        },
         policy: {
           mission: 'Fixture',
           routeId: 'unused',
@@ -153,6 +508,24 @@ async function fixture(
     },
   });
   const principal = { oid: operator.objectId, iss: operator.issuer, aud: operator.audience };
+  expect(owner.inspectLaunchOwner(requestId, principal)).toEqual({
+    uniqueSlot: true,
+    objectMatches: true,
+    issuerMatches: true,
+    audienceMatches: true,
+  });
+  expect(owner.inspectLaunchOwner(requestId, { ...principal, oid: 'other' })).toEqual({
+    uniqueSlot: true,
+    objectMatches: false,
+    issuerMatches: true,
+    audienceMatches: true,
+  });
+  expect(owner.inspectLaunchOwner(undefined, principal)).toEqual({
+    uniqueSlot: false,
+    objectMatches: false,
+    issuerMatches: false,
+    audienceMatches: false,
+  });
   for (const invalid of [
     undefined,
     { ...principal, oid: 'another-operator' },
@@ -201,9 +574,21 @@ async function fixture(
       reply.raw.setTimeout = () => reply.raw;
     });
     authPlugin(app, auth, issuer);
+    const watchdog = qualify ? serviceForDb() : undefined;
     scheduler = registerOperatorRuns(
       app,
-      { ...config(), lifetimeOwner: { owns: () => true } },
+      {
+        ...config(),
+        lifetimeOwner: { owns: () => true },
+        ...(watchdog
+          ? {
+              watchdog: {
+                service: watchdog,
+                finishOutputs: () => watchdog.artifactPipeline?.tick() ?? Promise.resolve(),
+              },
+            }
+          : {}),
+      },
       auth,
     );
     const bridge = createSessionBridge({
@@ -294,6 +679,7 @@ async function fixture(
   const restart = async () => {
     await app.close();
     p.reopen();
+    job = makeJob();
     live.launchConfiguration!.read = createLaunchSnapshotRepository(
       p.db,
       createConfigurationStore(p.db),
@@ -332,20 +718,33 @@ async function fixture(
         '--key',
         'model-turn-one',
         '--recipe',
-        'inspect',
+        coding ? 'implement' : 'inspect',
         '--brief',
-        'Read the pinned source',
+        coding ? 'Update the enrolled file' : 'Read the pinned source',
       ]);
       expect(commissioned).toMatchObject({
         exit: 0,
         stdout: { ok: true, result: { requestKey: 'model-turn-one' } },
         stderr: [],
       });
+      if (qualify) {
+        expect(
+          await delegate([
+            'start',
+            '--key',
+            'model-turn-two',
+            '--recipe',
+            'implement',
+            '--brief',
+            'Document the expected count',
+          ]),
+        ).toMatchObject({ exit: 0 });
+      }
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
         fatal: true,
-        message: 'Synthetic parent stops after proving commissioning; no delivery requested',
+        message: 'Synthetic parent exits after commissioning',
       };
     });
     await p.manager().processPod(original.id);
@@ -362,9 +761,29 @@ async function fixture(
     parentId: original.id,
     p,
     source,
+    recipe,
+    exportPrivateHead,
+    readPrivateSubmission,
+    serviceForDb,
+    exitWriter: () => {
+      writerExited = true;
+    },
+    exposeFixtureExits: () => {
+      exposeFixtureExits = true;
+    },
     call,
     delegate,
     family,
+    evaluatorFetch,
+    runChecks,
+    runReview,
+    review: (suffix: string, credential = 'operator', approval?: object) =>
+      app.inject({
+        method: approval ? 'POST' : 'GET',
+        url: '/orchestration/parents/' + original.id + '/review/' + suffix,
+        headers: { authorization: 'Bearer ' + credential },
+        payload: approval,
+      }),
     operatorStart: () =>
       app.inject({
         method: 'POST',
@@ -399,6 +818,292 @@ async function fixture(
 it.each([
   false,
   true,
+])('qualifies the exact tree and releases only after approval (explicit submission: %s)', async (explicit) => {
+  const f = await fixture(4, 2, 2, true, false, false, 'sandbox', true, explicit);
+  const during = (await f.family()).json();
+  expect(during.children).toMatchObject([
+    { requestKey: 'model-turn-one', status: 'started' },
+    { requestKey: 'model-turn-two', status: 'started' },
+  ]);
+  expect(f.p.pod().status).toBe('failed'); // The fixture parent exits before child custody.
+  expect(f.evaluatorFetch).not.toHaveBeenCalled();
+  f.exposeFixtureExits();
+  await vi.waitFor(
+    async () => {
+      expect((await f.review('status')).json().status).toBe('ready');
+    },
+    { timeout: 8000, interval: 100 },
+  );
+
+  const ready = (await f.family()).json();
+  expect(ready.children).toEqual(
+    during.children.map((child: object) => ({
+      ...child,
+      status: 'exited',
+      exitCode: 0,
+      collectionStatus: 'collected',
+    })),
+  );
+  expect(ready.review).toMatchObject({ status: 'ready' });
+  expect(f.readPrivateSubmission).toHaveBeenCalledTimes(explicit ? 2 : 0);
+  expect(f.exportPrivateHead).toHaveBeenCalledTimes(explicit ? 0 : 2);
+  const { evidenceDigest, commit } = ready.review;
+  const selector = encodeURIComponent(evidenceDigest);
+  expect((await f.review(selector + '/bundle')).statusCode).toBe(409);
+  expect((await f.review(selector + '/preview', 'other')).statusCode).toBe(404);
+  expect(f.evaluatorFetch.mock.calls.map(([url]) => url)).toEqual([
+    'https://checks.fixture.example/verify',
+    'https://review.fixture.example/verify',
+  ]);
+  expect(f.evaluatorFetch).toHaveBeenCalledTimes(2);
+  const evaluations = f.evaluatorFetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+  expect(evaluations[1]).toEqual(evaluations[0]);
+
+  await f.restart();
+  expect((await f.family()).json()).toEqual(ready);
+  expect((await f.review(selector + '/bundle')).statusCode).toBe(409);
+  const preview = await f.review(selector + '/preview');
+  expect(preview.statusCode).toBe(200);
+  const { tree, bundleDigest, reviewDigest, paths } = preview.json();
+  expect(paths).toEqual(['other.txt', 'proof.txt']);
+  const approval = { evidenceDigest, expectedReviewDigest: reviewDigest };
+  expect((await f.review(selector + '/approve', 'other', approval)).statusCode).toBe(404);
+  expect((await f.review(selector + '/approve', 'operator', approval)).statusCode).toBe(200);
+  const download = await f.review(selector + '/bundle');
+  expect(download.statusCode).toBe(200);
+  expect(sha256(download.rawPayload)).toBe(bundleDigest);
+  expect(download.rawPayload.equals(Buffer.from(evaluations[0].bundle, 'base64'))).toBe(true);
+  await withVerifiedCheckpointMirror(
+    f.source.root,
+    { commit, tree, predecessor: f.source.cp.commit },
+    download.rawPayload,
+    async (mirror) => {
+      expect(await managedGit(mirror, ['show', commit + ':proof.txt'])).toBe('24');
+      expect(await managedGit(mirror, ['show', commit + ':other.txt'])).toBe('24 is twice 12');
+    },
+  );
+  expect(f.evaluatorFetch).toHaveBeenCalledTimes(2);
+  expect(f.boundaryCalls()).toBe(2);
+  expect(f.p.db.prepare('SELECT count(*) FROM managed_source_operations').pluck().get()).toBe(0);
+  expect(f.p.db.prepare('SELECT accepted_commit FROM orchestration_runs').pluck().get()).toBe(
+    f.source.cp.commit,
+  );
+}, 15_000);
+
+it('uses the durable qualification claim for exact-tree packet review after the parent exits', async () => {
+  const f = await fixture(4, 2, 2, true, false, false, 'sandbox', 'isolated-review');
+  expect(f.p.pod().status).toBe('failed'); // The scripted runtime has exited.
+  expect(f.runReview).not.toHaveBeenCalled();
+  f.exposeFixtureExits();
+  await vi.waitFor(
+    async () => {
+      expect((await f.review('status')).json().status).toBe('ready');
+    },
+    { timeout: 8000, interval: 100 },
+  );
+  expect(f.evaluatorFetch).not.toHaveBeenCalled();
+  expect(f.runChecks).toHaveBeenCalledOnce();
+  expect(f.runReview).toHaveBeenCalledOnce();
+  expect(f.runChecks.mock.invocationCallOrder[0]).toBeLessThan(
+    f.runReview.mock.invocationCallOrder[0]!,
+  );
+  const ready = (await f.family()).json().review;
+  const received = JSON.parse(f.runReview.mock.calls[0]![0].prompt.split('\n').at(-1)!);
+  expect(ready.commit).toBe(received.commit);
+  expect(f.runChecks.mock.calls[0]?.[0]).toMatchObject({
+    commit: received.commit,
+    tree: received.tree,
+  });
+  await f.restart();
+  expect((await f.family()).json().review).toEqual(ready);
+  expect(f.runReview).toHaveBeenCalledOnce();
+}, 15_000);
+
+it('uses the parent reservation, then collects a private candidate only after exit', async () => {
+  const f = await fixture(2, 1, 1, true, false, false, true);
+  expect(f.boundaryCalls()).toBe(1);
+  expect(f.remaining()).toBe(0);
+  expect(
+    f.p.db.prepare('SELECT private_scope_json FROM parent_managed_requests').pluck().get(),
+  ).toBe(canonical([{ kind: 'file', path: 'proof.txt' }]));
+  const family = await f.family();
+  expect(family.headers['cache-control']).toBe('no-store');
+  expect(family.json().review).toEqual({ status: 'not-configured' });
+  expect((await f.family('other')).statusCode).not.toBe(200);
+  expect((await f.family(f.token)).statusCode).not.toBe(200);
+  expect(f.owner().family(f.parentId)).not.toHaveProperty('review'); // worker projection
+  const service = f.serviceForDb();
+  await service.artifactPipeline?.tick();
+  expect(f.exportPrivateHead).not.toHaveBeenCalled();
+  f.exitWriter();
+  await service.enforceExpiry();
+  expect(f.p.db.prepare('SELECT state, exit_code FROM managed_pods').get()).toEqual({
+    state: 'validating',
+    exit_code: 0,
+  });
+  await service.artifactPipeline?.tick();
+  expect(
+    f.p.db.prepare('SELECT limitations_json FROM managed_results').pluck().all(),
+  ).not.toContainEqual(expect.stringMatching(/incomplete/));
+  expect(f.exportPrivateHead).toHaveBeenCalledTimes(1);
+  expect(f.p.db.prepare('SELECT count(*) FROM parent_private_candidates').pluck().get()).toBe(1);
+  expect(f.p.db.prepare('SELECT count(*) FROM managed_source_candidates').pluck().get()).toBe(0);
+  await f.restart();
+  await f.serviceForDb().artifactPipeline?.tick();
+  expect(f.exportPrivateHead).toHaveBeenCalledTimes(1);
+  expect((await f.family()).json().children[0]).toMatchObject({
+    status: 'exited',
+    exitCode: 0,
+    collectionStatus: 'collected',
+  });
+  expect(f.owner().family(f.parentId).children[0]).not.toHaveProperty('collectionStatus');
+  expect(f.p.db.prepare('SELECT state FROM managed_pods').pluck().get()).toBe('complete');
+  const results = new ParentReportResults(f.p.db);
+  const authenticate = () => f.source.cp.run;
+  const page = await results.results({}, authenticate);
+  expect(page.results).toMatchObject([{ report: { status: 'private-candidate-retained' } }]);
+  await expect(results.dependencies([page.nextCursor], authenticate)).rejects.toThrow(
+    'parent-report-dependency-refused',
+  );
+});
+
+it('cleans a closed explicit-submission worker only after validating retained private custody', async () => {
+  const f = await fixture(4, 2, 2, false, false, false, 'sandbox', false, true);
+  expect(
+    await f.call({ requestKey: 'retained', recipe: 'implement', brief: 'Implement' }),
+  ).toMatchObject({ rejected: false });
+  f.exitWriter();
+  const service = f.serviceForDb();
+  await service.enforceExpiry();
+  await service.artifactPipeline?.tick();
+  const podId = (await f.family()).json().children[0].child;
+  const installation = `native.${f.source.cp.run}`;
+  const pod = service.row(installation, podId);
+  expect(pod.state).toBe('complete');
+  expect(f.p.db.prepare('SELECT count(*) FROM artifact_exports').pluck().get()).toBe(0);
+  const resource = vi.fn(async () => true);
+  service.runtime.cleanup = resource;
+  const controls = new ManagedControls(service);
+  const cleanup = () =>
+    controls.control(
+      installation,
+      podId,
+      {
+        schemaVersion: 1,
+        dispatcherAttemptId: pod.dispatcher_attempt_id,
+        grantId: pod.grant_id,
+        grantRevision: pod.grant_revision,
+        operation: 'cleanup',
+      },
+      'operator-cleanup-fixture',
+    );
+  await expect(cleanup()).rejects.toThrow('parent-private-cleanup-custody-required');
+  f.host().ledger.cancel(f.source.cp.run);
+  const original = f.p.db
+    .prepare('SELECT bundle FROM parent_private_candidates WHERE pod_id=?')
+    .pluck()
+    .get(podId);
+  expect(Buffer.isBuffer(original)).toBe(true);
+  const setBundle = f.p.db.prepare('UPDATE parent_private_candidates SET bundle=? WHERE pod_id=?');
+  setBundle.run(Buffer.from('corrupt fixture'), podId);
+  await expect(cleanup()).rejects.toThrow('parent-candidate-binding');
+  expect(resource).not.toHaveBeenCalled();
+  setBundle.run(original, podId);
+  await expect(cleanup()).resolves.toMatchObject({ cleanup: 'observed' });
+  await expect(cleanup()).resolves.toMatchObject({ cleanup: 'observed' });
+  expect(resource).toHaveBeenCalledTimes(1);
+  expect(
+    f.p.db
+      .prepare('SELECT bundle FROM parent_private_candidates WHERE pod_id=?')
+      .pluck()
+      .get(podId),
+  ).toEqual(original);
+});
+
+it('does not fall back to worker HEAD or retry an invalid explicit submission', async () => {
+  const f = await fixture(4, 2, 2, false, false, false, 'sandbox', false, true);
+  expect(
+    await f.call({ requestKey: 'invalid', recipe: 'implement', brief: 'Implement' }),
+  ).toMatchObject({ rejected: false });
+  f.readPrivateSubmission.mockResolvedValueOnce(
+    Buffer.from(
+      JSON.stringify({
+        version: 1,
+        files: [{ path: 'other.txt', content: 'not assigned' }],
+      }),
+    ),
+  );
+  f.exitWriter();
+  const service = f.serviceForDb();
+  await service.enforceExpiry();
+  await service.artifactPipeline?.tick();
+  await f.restart();
+  await f.serviceForDb().artifactPipeline?.tick();
+  expect(f.readPrivateSubmission).toHaveBeenCalledTimes(1);
+  expect(f.exportPrivateHead).not.toHaveBeenCalled();
+  expect(f.p.db.prepare('SELECT count(*) FROM parent_private_candidates').pluck().get()).toBe(0);
+  expect((await f.family()).json().children).toMatchObject([
+    { status: 'exited', exitCode: 0, collectionStatus: 'unavailable' },
+  ]);
+});
+
+it('reserves distinct signed scopes for sandbox coding in order; exact replay does not debit again', async () => {
+  const f = await fixture(8, 2, 3, false, false, false, 'sandbox');
+  // Fixture execution and provider are offline; real admission and reservation are used.
+  const child = (requestKey: string) => ({ requestKey, recipe: 'implement', brief: 'Implement' });
+  const first = await f.call(child('left'));
+  expect(first).toMatchObject({ rejected: false });
+  const afterFirst = f.remaining();
+  expect(await f.call(child('left'))).toMatchObject({ rejected: false });
+  expect(f.remaining()).toBe(afterFirst);
+  expect(await f.call(child('right'))).toMatchObject({ rejected: false });
+  const scopes = f.p.db
+    .prepare('SELECT request_key, private_scope_json FROM parent_managed_requests ORDER BY rowid')
+    .all();
+  expect(scopes).toEqual([
+    { request_key: 'left', private_scope_json: '[{"kind":"file","path":"proof.txt"}]' },
+    { request_key: 'right', private_scope_json: '[{"kind":"file","path":"other.txt"}]' },
+  ]);
+  expect(f.reservations()).toBe(2);
+  const remaining = f.remaining();
+  await f.restart();
+  expect(await f.call(child('left'))).toMatchObject({ rejected: false });
+  expect(await f.call(child('third'))).toMatchObject({ rejected: true });
+  expect(f.reservations()).toBe(2);
+  expect(f.remaining()).toBe(remaining);
+});
+
+it('stops on collection uncertainty across daemon restart without exporting again', async () => {
+  const f = await fixture(2, 1, 1, true, false, false, true);
+  f.exitWriter();
+  await f.serviceForDb().enforceExpiry();
+  expect((await f.family()).json().children[0]).toMatchObject({
+    status: 'exited',
+    exitCode: 0,
+    collectionStatus: 'pending',
+  });
+  // Simulate a crash at the durable pre-export claim, with no committed custody.
+  f.p.db
+    .prepare('INSERT INTO parent_private_collection_claims SELECT pod_id FROM managed_pods')
+    .run();
+  await f.restart();
+  await f.serviceForDb().artifactPipeline?.tick();
+  expect(f.p.db.prepare('SELECT state FROM managed_pods').pluck().get()).toBe('review_required');
+  expect(f.exportPrivateHead).not.toHaveBeenCalled();
+  expect(f.p.db.prepare('SELECT limitations_json FROM managed_results').pluck().get()).toBe(
+    '["private-collection-uncertain"]',
+  );
+  expect((await f.family()).json()).toMatchObject({
+    review: { status: 'not-configured' },
+    children: [{ status: 'exited', exitCode: 0, collectionStatus: 'unavailable' }],
+  });
+  await f.serviceForDb().artifactPipeline?.tick();
+  expect(f.exportPrivateHead).not.toHaveBeenCalled();
+});
+
+it.each([
+  false,
+  true,
 ])('production processPod provisions a parent and its runtime commissions a child (restart before provision: %s)', async (restartBeforeProvision) => {
   const f = await fixture(2, 1, 1, true, false, restartBeforeProvision);
   expect(f.source.f.launches()).toBe(1);
@@ -412,6 +1117,7 @@ it.each([
     parentAttempt: f.issuer.verifyAttempt!(f.token)?.attempt,
   });
   const history = (await f.family()).json();
+  expect(history).not.toHaveProperty('review');
   await f.restart();
   expect((await f.family()).json()).toEqual(history);
 });
@@ -470,6 +1176,25 @@ it('a real launched parent commissions through provisioned MCP ingress; lost rep
   expect(JSON.stringify((await f.family()).json())).not.toMatch(
     /grant|policy_json|runtime_ref|credential/,
   );
+});
+
+it('projects only a settled provider request-budget stop for the matching family', async () => {
+  const f = await fixture();
+  await f.call({ requestKey: 'limited', recipe: 'inspect', brief: 'Read the pinned source' });
+  const first = (await f.family()).json().children[0];
+  f.p.db
+    .prepare('INSERT INTO managed_results(pod_id,limitations_json) VALUES(?,?)')
+    .run(first.child, JSON.stringify(['agent-provider-request-limit-reached', 'private-evidence']));
+  expect((await f.family()).json().children[0].exitReason).toBeNull();
+  f.p.db
+    .prepare('UPDATE managed_pods SET observed_exit=1, exit_code=1 WHERE pod_id=?')
+    .run(first.child);
+  const family = (await f.family()).json();
+  expect(family.children).toMatchObject([
+    { status: 'exited', exitReason: 'provider-request-limit' },
+  ]);
+  expect(JSON.stringify(family)).not.toContain('private-evidence');
+  expect((await f.family('other')).statusCode).not.toBe(200);
 });
 
 it('reads the same durable outcome after reconnect and never charges a read or wait', async () => {

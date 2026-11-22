@@ -20,6 +20,8 @@ import { fixture } from '../test-utils/managed-fixture.js';
 import { sha256 } from './canonical.js';
 import { ContainerCodexChannel, codexAgentCommand, codexReportCommand } from './codex-channel.js';
 
+import { ManagedProviderRequestLimit } from './provider-gateway.js';
+
 const exec = promisify(execFile);
 function setup() {
   const f = fixture();
@@ -48,6 +50,52 @@ it.each([
   await expect(channel.preflight(request)).rejects.toThrow();
   expect(exec).not.toHaveBeenCalled();
 });
+it.each([
+  [new ManagedProviderRequestLimit(), { phase: 'provider', reason: 'request-limit' }],
+  [
+    new Error('managed-provider-request-limit'),
+    { phase: 'agent', reason: 'channel-unavailable', exitCode: 1, channelPhase: 'provider-invoke' },
+  ],
+] as const)('persists only a typed provider budget stop: %s', async (failure, diagnostic) => {
+  const { exec: control, channel, request } = setup();
+  const body = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fictional report' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  const result = (stdout: string) => ({ exitCode: 0, stdout, stderr: '' });
+  control.mockResolvedValueOnce(result('verified')).mockResolvedValueOnce(
+    result(
+      JSON.stringify({
+        digest: sha256(body).slice(7),
+        body,
+        ticket: '00000000-0000-4000-8000-000000000000',
+      }),
+    ),
+  );
+  let recorded: unknown;
+  control.mockImplementation(async (_ref, argv) => {
+    if (argv[2]?.includes('channel-failure.host.tmp')) recorded = JSON.parse(argv[4] ?? 'null');
+    return result('');
+  });
+  const invoke = vi.fn().mockRejectedValue(failure);
+  const close = await channel.attach({
+    podId: 'managed-one',
+    runtimeRef: 'ref',
+    stateRoot: '/run/dispatcher-managed-one',
+    existingOnly: true,
+    invoke,
+  });
+  try {
+    await vi.waitFor(() => expect(recorded).toEqual(diagnostic));
+    expect(invoke).toHaveBeenCalledOnce();
+  } finally {
+    close();
+  }
+});
+
 it('rejects an incompatible immutable-image Codex CLI before installing helpers', async () => {
   const { request, exec, channel } = setup();
   await channel.preflight(request);
@@ -966,6 +1014,28 @@ it('the Python loopback channel records only bounded metadata when a request exc
       actualBytes: Buffer.byteLength('private'.repeat(22 * 1024)),
       maximumBytes: 128 * 1024,
     });
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('a worker cannot write or overwrite the host provider-limit diagnostic', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-provider-limit-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const child = spawn('python3', [script, root, '0', '10'], { stdio: 'pipe' });
+  const diagnostic = { phase: 'provider', reason: 'request-limit' };
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const failure = `http://127.0.0.1:${ready.port as number}/failure`;
+    const post = (body: unknown) => fetch(failure, { method: 'POST', body: JSON.stringify(body) });
+    expect((await post({ ...diagnostic, exitCode: 1 })).status).toBe(400);
+    writeFileSync(join(root, 'channel-failure.json'), JSON.stringify(diagnostic));
+    expect(
+      (await post({ phase: 'agent', reason: 'channel-unavailable', exitCode: 1 })).status,
+    ).toBe(204);
+    expect(await waitForJson(join(root, 'channel-failure.json'))).toEqual(diagnostic);
   } finally {
     child.kill('SIGTERM');
     rmSync(root, { recursive: true, force: true });

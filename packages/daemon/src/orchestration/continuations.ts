@@ -122,6 +122,7 @@ export class OrchestrationContinuations {
   async kickoff(
     input: ContinuationCheckpoint,
     recipes: Readonly<Record<string, ManagedPodRequest>>,
+    parentProposal?: true,
   ) {
     const cp = { ...input };
     const entries = Object.entries(recipes);
@@ -145,7 +146,8 @@ export class OrchestrationContinuations {
     };
     if (replay()) return;
     await this.withExecutor(cp, async (service) => {
-      for (const req of Object.values(catalog)) await service.preflight(req, principal(cp.run));
+      for (const req of Object.values(catalog))
+        await service.preflight(req, principal(cp.run), parentProposal);
     });
     this.db
       .transaction(() => {
@@ -188,15 +190,17 @@ export class OrchestrationContinuations {
     input: ContinuationCheckpoint,
     requests: ManagedPodRequest[],
     assertOwnerActive?: () => void,
+    parentProposal?: true,
   ) {
     if (requests.length > 8) throw new Error('controller-wave-too-large');
-    await this.admitBatch('spawn', input, requests, assertOwnerActive);
+    await this.admitBatch('spawn', input, requests, assertOwnerActive, parentProposal);
   }
   private async admitBatch(
     kind: Kind,
     input: ContinuationCheckpoint,
     requests: ManagedPodRequest[],
     assertOwnerActive?: () => void,
+    parentProposal?: true,
   ) {
     const cp = { ...input };
     const pending: ManagedPodRequest[] = [];
@@ -205,7 +209,7 @@ export class OrchestrationContinuations {
     // independently preflight every fresh spec. Replayed intents need no new preflight.
     if (pending.length)
       await this.withExecutor(cp, async (service) => {
-        for (const req of pending) await service.preflight(req, principal(cp.run));
+        for (const req of pending) await service.preflight(req, principal(cp.run), parentProposal);
       });
     const changed = this.db
       .transaction(() => {

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 import time
@@ -87,7 +88,7 @@ def report_failure(endpoint, log, exit_code):
         pass
 
 
-def publish_output(endpoint, captured, output):
+def publish_output(endpoint, captured, output, private_submission=False):
     """Publish only after the agent exits successfully.
 
     Managed sandbox directories are uploaded filesystems rather than host bind
@@ -98,7 +99,17 @@ def publish_output(endpoint, captured, output):
     """
     try:
         content = captured.read_bytes()
-        with output.open('wb') as stream:
+        if private_submission:
+            fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            stream = os.fdopen(fd, 'wb')
+        else:
+            stream = output.open('wb')
+        with stream:
+            if private_submission:
+                observed = os.fstat(stream.fileno())
+                if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_uid != os.geteuid():
+                    raise OSError('invalid private submission destination')
+                stream.truncate(0)
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
@@ -114,6 +125,7 @@ parser.add_argument('--repository', required=True)
 parser.add_argument('--output', required=True)
 parser.add_argument('--sandbox', choices=('read-only', 'workspace-write'), required=True)
 parser.add_argument('--outer-container-sandbox', action='store_true')
+parser.add_argument('--private-change-submission', action='store_true')
 parser.add_argument('--endpoint', default='http://127.0.0.1:4187/v1')
 parser.add_argument('--input-root', action='append', default=[])
 parser.add_argument('--github-repository')
@@ -130,6 +142,8 @@ if repository.is_symlink() or not repository.is_dir() or not (str(repository).st
 output = Path(args.output)
 if output.is_absolute() is False or not str(output).startswith('/output/') or '..' in output.parts:
     raise RuntimeError('output-boundary-invalid')
+if args.private_change_submission and (args.sandbox != 'workspace-write' or args.outer_container_sandbox or str(output) != '/output/change-submission.json'):
+    raise RuntimeError('private-submission-boundary-invalid')
 if args.github_repository and not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.github_repository):
     raise RuntimeError('github-repository-invalid')
 inputs = []
@@ -146,7 +160,11 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     home = Path(temporary) / 'home'; home.mkdir()
     instructions = Path(temporary) / 'instructions.md'
     instructions.write_text(
-        'Work only in the supplied read-only repository mounts under /repositories, input mounts under /inputs, and output directory. Follow repository instructions. '
+        ('Work only on assigned paths in the supplied repository. Do not use git add or git commit. '
+         'Submit your change as the final response: exactly one JSON object {"version":1,"files":[{"path":"relative/path","content":"complete replacement text"}]}. '
+         'Include only assigned files you changed, with complete text and any trailing newline. Do not wrap the JSON in Markdown. '
+         if args.private_change_submission else
+         'Work only in the supplied read-only repository mounts under /repositories, input mounts under /inputs, and output directory. Follow repository instructions. ')
         + ('Network access is restricted to the reviewed outer allowlist. Do not attempt other destinations. '
            if args.network_enabled else 'Do not use network access. ')
         + 'Do not push, merge, publish, deploy, or access credentials. '
@@ -159,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
         + (f'For GitHub issue reads only, use the credential-free gh helper with --repo {args.github_repository}. '
            if args.github_repository else '')
         + ('Commit only the files you intentionally changed after required checks pass. '
-           if args.sandbox == 'workspace-write' else '')
+           if args.sandbox == 'workspace-write' and not args.private_change_submission else '')
     )
     config = {
         'model_provider': 'dispatcher-channel',
@@ -273,4 +291,10 @@ with tempfile.TemporaryDirectory(prefix='managed-codex-') as temporary:
     if not captured.is_file() or captured.is_symlink() or captured.stat().st_size > 1024 * 1024:
         send_failure(args.endpoint, 'output-invalid')
         raise RuntimeError('agent-output-invalid')
-    publish_output(args.endpoint, captured, output)
+    if args.private_change_submission and not 0 < captured.stat().st_size <= 16 * 1024:
+        send_failure(args.endpoint, 'output-invalid')
+        raise RuntimeError('private-submission-size')
+    if args.private_change_submission:
+        publish_output(args.endpoint, captured, output, private_submission=True)
+    else:
+        publish_output(args.endpoint, captured, output)
