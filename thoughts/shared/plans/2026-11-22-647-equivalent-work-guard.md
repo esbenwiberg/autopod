@@ -128,14 +128,14 @@ resolves the request exactly like `/launch/resolve`, and wire the CLI.
 
 ### Success Criteria
 #### Automated Verification
-- [ ] New ledger tests (`dispatch-preflight-ledger.test.ts` or a new
+- [x] New ledger tests (`dispatch-preflight-ledger.test.ts` or a new
   `dispatch-equivalent-work-preview.test.ts`): paused pod with zero changes →
   conflict with `assessment.classification === 'stale'` and still
   `review_required`; same pod with `filesChanged > 0` (or running status) →
   `active`; `preview()` reports the conflict and writes no row
   (`SELECT count(*) FROM execution_dispatch_preflights` unchanged); preview with
   `intentionalRerun.ofPodId` = conflicting pod → `authorized`.
-- [ ] Existing dispatch tests pass: `npx pnpm --filter @autopod/daemon exec vitest run src/pods/dispatch`.
+- [x] Existing dispatch tests pass: `npx pnpm --filter @autopod/daemon exec vitest run src/pods/dispatch`.
 
 ## Phase 2: Preview route + CLI preview/run reporting and `--rerun-of`
 
@@ -163,14 +163,14 @@ resolves the request exactly like `/launch/resolve`, and wire the CLI.
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Route test (`app.inject`): preview of a launch duplicating a paused,
+- [x] Route test (`app.inject`): preview of a launch duplicating a paused,
   unproductive pod returns `review_required` with a stale conflict and suggested
   actions; no receipt row written.
-- [ ] CLI tests (`launch.test.ts`): `--preview` with a conflicting dispatch
+- [x] CLI tests (`launch.test.ts`): `--preview` with a conflicting dispatch
   preview prints the conflict + fix and sets exit code 2; `ap run` refuses to
   call `launchPod`; `--rerun-of/--rerun-reason` sets `work.intentionalRerun` and
   launches; 404 tolerated.
-- [ ] `npx pnpm --filter @autopod/cli test`.
+- [x] `npx pnpm --filter @autopod/cli test`.
 
 ## Phase 3: Rerun keeps the requested branch
 
@@ -191,11 +191,11 @@ resolves the request exactly like `/launch/resolve`, and wire the CLI.
 
 ### Success Criteria
 #### Automated Verification
-- [ ] Daemon test (extend the rerun-template test near `pod-manager.test.ts:11945`
+- [x] Daemon test (extend the rerun-template test near `pod-manager.test.ts:11945`
   or a new focused test): template keeps `work.branch` when free; omits it when
   another active pod holds it; the resulting rerun pod has the requested branch /
   `${prefix}<id>` respectively.
-- [ ] CLI `pod.test.ts`: fallback message printed when branches differ.
+- [x] CLI `pod.test.ts`: fallback message printed when branches differ.
 
 ## Final checks
 - `npx pnpm --filter @autopod/shared build`, daemon + CLI `typecheck`
@@ -216,3 +216,12 @@ None (optional JSON field; new route; old daemons → CLI tolerates 404).
 
 ## References
 - Research: `thoughts/shared/research/2026-11-22-647-equivalent-work-guard.md`
+
+## Implementation status (2026-11-22)
+
+Approved with Option A (stale is advisory, still blocks). All phases implemented.
+Deviations: route test and helper test live in `api/routes/configuration.test.ts`,
+`pods/rerun-branch.test.ts`, `pods/composable-pod-admission.test.ts` and
+`pods/dispatch-equivalent-work-preview.test.ts` instead of `pod-manager.test.ts`.
+The CLI also tolerates `503 DISPATCH_PREVIEW_UNAVAILABLE` like a 404.
+Manual checks in "Testing Strategy — Manual" remain open (not run).
