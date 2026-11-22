@@ -17,6 +17,7 @@ import {
 import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js';
 import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
+import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { recoveryCheckHash } from './recovery-fork-checks.js';
 import { publishValidatedSource } from './validated-source-publication.js';
 export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecutionCaptured) {
@@ -611,6 +612,8 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             baseBranch,
             podId,
             task: pod.task,
+            briefTitle: pod.briefTitle ?? undefined,
+            contractTitle: pod.contract?.title ?? undefined,
             profileName: pod.profileName,
             profile: retryProfile,
             podModel: pod.model,
@@ -630,25 +633,14 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         );
         const newPrUrl = createResult.url;
         retryPrUrl = newPrUrl;
-        if (createResult.usedFallback) {
-          const which = createResult.narrativeUsedFallback
-            ? createResult.titleUsedFallback
-              ? 'title + body'
-              : 'body'
-            : 'title';
-          const reason = createResult.fallbackReason ?? 'unknown';
-          logger.error(
-            {
-              podId,
-              profile: retryProfile.name,
-              modelProvider: retryProfile.modelProvider,
-              fallbackReason: reason,
-              fallbackDetail: createResult.fallbackDetail,
-            },
-            'PR description used template fallback during approval retry',
-          );
-          emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-        }
+        reportPrDescriptionFallback({
+          result: createResult,
+          podId,
+          context: 'approval_retry',
+          profile: retryProfile,
+          logger,
+          emitActivityStatus,
+        });
         assertApprovalCurrent(mergingAnchor);
         podRepo.update(podId, { prUrl: newPrUrl });
         emitActivityStatus(podId, `PR created: ${newPrUrl}`);

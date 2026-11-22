@@ -93,8 +93,17 @@ function isMaxRefreshProviderCreds(
   return creds?.provider === 'max' && isMaxRefreshCredentials(creds);
 }
 
+/**
+ * Non-secret description of how a daemon-side LLM call is routed, for
+ * diagnostics only. Never carries credentials, endpoints or request bodies.
+ */
+export interface ProfileLlmClientRoute {
+  provider: 'anthropic' | 'max' | 'foundry';
+  auth: 'daemon_env_api_key' | 'oauth' | 'api_key' | 'entra_token';
+}
+
 export type ProfileLlmClientResult =
-  | { ok: true; client: Anthropic; model: string }
+  | { ok: true; client: Anthropic; model: string; route?: ProfileLlmClientRoute }
   | { ok: false; reason: ProfileLlmClientUnavailableReason };
 
 export async function createProviderAnthropicClient(
@@ -120,7 +129,12 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'no_anthropic_api_key' };
     }
-    return { ok: true, client: new Anthropic({ apiKey }), model };
+    return {
+      ok: true,
+      client: new Anthropic({ apiKey }),
+      model,
+      route: { provider: 'anthropic', auth: 'daemon_env_api_key' },
+    };
   }
 
   if (provider === 'anthropic') {
@@ -132,7 +146,12 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'no_anthropic_api_key' };
     }
-    return { ok: true, client: new Anthropic({ apiKey }), model };
+    return {
+      ok: true,
+      client: new Anthropic({ apiKey }),
+      model,
+      route: { provider: 'anthropic', auth: 'daemon_env_api_key' },
+    };
   }
 
   if (provider === 'max') {
@@ -176,6 +195,7 @@ export async function createProviderAnthropicClient(
         defaultHeaders: { 'anthropic-beta': MAX_OAUTH_BETA },
       }),
       model,
+      route: { provider: 'max', auth: 'oauth' },
     };
   }
 
@@ -215,6 +235,7 @@ export async function createProviderAnthropicClient(
       ok: true,
       client: new Anthropic({ ...auth, baseURL: foundryAnthropicBaseUrl(creds.endpoint) }),
       model,
+      route: { provider: 'foundry', auth: auth.apiKey ? 'api_key' : 'entra_token' },
     };
   }
 

@@ -12,6 +12,7 @@ import {
 import { verifyApprovalRewriteSource } from './approval-source-rewrite.js';
 import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
+import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
 import { publishValidatedSource } from './validated-source-publication.js';
@@ -240,6 +241,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
             baseBranch,
             podId,
             task: s2.task,
+            briefTitle: s2.briefTitle ?? undefined,
+            contractTitle: s2.contract?.title ?? undefined,
             profileName: s2.profileName,
             profile,
             podModel: s2.model,
@@ -258,25 +261,14 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
             securityFindings: getLatestPushFindings(podId),
           });
           prUrl = createResult.url;
-          if (createResult.usedFallback) {
-            const which = createResult.narrativeUsedFallback
-              ? createResult.titleUsedFallback
-                ? 'title + body'
-                : 'body'
-              : 'title';
-            const reason = createResult.fallbackReason ?? 'unknown';
-            logger.error(
-              {
-                podId,
-                profile: profile.name,
-                modelProvider: profile.modelProvider,
-                fallbackReason: reason,
-                fallbackDetail: createResult.fallbackDetail,
-              },
-              'PR description used template fallback during validation',
-            );
-            emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-          }
+          reportPrDescriptionFallback({
+            result: createResult,
+            podId,
+            context: 'validation',
+            profile,
+            logger,
+            emitActivityStatus,
+          });
           if (prUrl) {
             emitActivityStatus(podId, `PR created: ${prUrl}`);
           }

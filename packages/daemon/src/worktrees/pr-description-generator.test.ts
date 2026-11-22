@@ -107,7 +107,7 @@ describe('generatePrTitle', () => {
     setupDiffExec(SAMPLE_DIFF);
 
     const result = await generatePrTitle(baseInput, logger);
-    expect(result.title).toContain('feat:');
+    expect(result.title).toBe(baseInput.task);
     expect(result.usedFallback).toBe(true);
     expect(result.fallbackReason).toBe('no_anthropic_api_key');
     expect(anthropicCreateMock).not.toHaveBeenCalled();
@@ -161,10 +161,115 @@ describe('generatePrTitle', () => {
     anthropicCreateMock.mockRejectedValueOnce(new Error('503 service unavailable'));
 
     const result = await generatePrTitle(baseInput, logger);
-    expect(result.title).toContain('feat:');
+    expect(result.title).toBe(baseInput.task);
     expect(result.usedFallback).toBe(true);
     expect(result.fallbackReason).toBe('api_call_failed');
     expect(result.fallbackDetail).toContain('503');
+  });
+
+  it('cleans a Markdown-heading brief in the api_call_failed fallback title', async () => {
+    setupDiffExec(SAMPLE_DIFF);
+    anthropicCreateMock.mockRejectedValueOnce(new Error('Connection error.'));
+
+    const result = await generatePrTitle(
+      {
+        ...baseInput,
+        task:
+          '# Fix #646: provider failover blocked by "Task token accounting incomplete"\n\n' +
+          '## Problem\n\nDetails.',
+      },
+      logger,
+    );
+    expect(result.usedFallback).toBe(true);
+    expect(result.fallbackReason).toBe('api_call_failed');
+    expect(result.title).toBe('Fix #646: provider failover blocked by "Task token accounting…');
+  });
+
+  it('uses the spec briefTitle, then the contract title, for the fallback title', async () => {
+    createClientMock.mockResolvedValue({ ok: false, reason: 'no_credentials' });
+    setupDiffExec(SAMPLE_DIFF);
+    const task = '# Raw brief heading\n\nBody';
+
+    const fromBrief = await generatePrTitle(
+      { ...baseInput, task, briefTitle: 'Clean fallback PR titles' },
+      logger,
+    );
+    expect(fromBrief.title).toBe('Clean fallback PR titles');
+
+    const fromContract = await generatePrTitle(
+      { ...baseInput, task, briefTitle: 'Brief title', contractTitle: 'Contract title' },
+      logger,
+    );
+    expect(fromContract.title).toBe('Contract title');
+  });
+
+  it('passes the brief title to the LLM message body', async () => {
+    setupDiffExec(SAMPLE_DIFF);
+    anthropicCreateMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'fix(pr): clean fallback titles' }],
+    });
+
+    await generatePrTitle({ ...baseInput, briefTitle: 'Clean fallback PR titles' }, logger);
+    const callArgs = anthropicCreateMock.mock.calls[0]?.[0] as {
+      messages: Array<{ content: string }>;
+    };
+    expect(callArgs.messages[0]?.content).toContain('Title: Clean fallback PR titles');
+  });
+
+  it('makes api_call_failed diagnosable (provider, route, model, status) without secrets', async () => {
+    setupDiffExec(SAMPLE_DIFF);
+    createClientMock.mockResolvedValueOnce({
+      ok: true,
+      client: { messages: { create: anthropicCreateMock } },
+      model: 'claude-haiku-4-5',
+      route: { provider: 'max', auth: 'oauth' },
+    });
+    const apiError = Object.assign(
+      new Error(
+        '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key sk-ant-api03-SECRETSECRETSECRET Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"}}',
+      ),
+      {
+        name: 'AuthenticationError',
+        status: 401,
+        error: { type: 'error', error: { type: 'authentication_error' } },
+        requestID: 'req_011abc',
+        headers: { authorization: 'Bearer sk-ant-oat01-HEADERSECRET' },
+      },
+    );
+    anthropicCreateMock.mockRejectedValueOnce(apiError);
+    const lines: string[] = [];
+    const capture = pino({ level: 'info' }, { write: (line: string) => lines.push(line) });
+
+    const result = await generatePrTitle(baseInput, capture);
+
+    expect(result.fallbackReason).toBe('api_call_failed');
+    const detail = result.fallbackDetail ?? '';
+    expect(detail).toContain('provider=max');
+    expect(detail).toContain('route=oauth');
+    expect(detail).toContain('model=claude-haiku-4-5');
+    expect(detail).toContain('status=401');
+    expect(detail).toContain('type=authentication_error');
+    expect(detail).toContain('request_id=req_011abc');
+    expect(detail.length).toBeLessThanOrEqual(300);
+    const logged = lines.join('\n');
+    expect(logged).toContain('api_call_failed');
+    expect(logged).toContain('"provider":"max"');
+    expect(logged).toContain('"status":401');
+    for (const text of [detail, logged]) {
+      expect(text).not.toContain('SECRETSECRET');
+      expect(text).not.toContain('HEADERSECRET');
+      expect(text).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+      expect(text).not.toContain('sk-ant-');
+    }
+  });
+
+  it('falls back to the profile provider when the client reports no route', async () => {
+    setupDiffExec(SAMPLE_DIFF);
+    anthropicCreateMock.mockRejectedValueOnce(new Error('Connection error.'));
+
+    const result = await generatePrTitle(baseInput, logger);
+    expect(result.fallbackDetail).toContain('provider=max');
+    expect(result.fallbackDetail).toContain('Connection error.');
   });
 
   it('uses handoffInstructions over task in fallback for promoted pods', async () => {
