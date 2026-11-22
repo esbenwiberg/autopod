@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { PodOptions } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { deriveBareRepoPath } from '../worktrees/bare-push.js';
+import { describeEquivalentConflict, equivalentWorkFixes } from './dispatch-preflight-ledger.js';
 import type { PodUpdates } from './pod-repository.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
@@ -479,7 +480,10 @@ export function createProvisioningWorkspace(
           );
           if (dispatchEvidence?.status === 'review_required')
             throw new AutopodError(
-              `Equivalent active work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Review the existing execution or create an intentional rerun with a recorded reason.`,
+              `Equivalent active work requires review: ${dispatchEvidence.conflicts.map(describeEquivalentConflict).join('; ')}. ${[
+                ...equivalentWorkFixes(dispatchEvidence.conflicts),
+                `Or rerun this pod with a recorded reason: ap rerun ${podId} --reason "<why>" --request-key <key>`,
+              ].join('. ')}.`,
               'EQUIVALENT_WORK_REVIEW_REQUIRED',
               409,
             );

@@ -2,7 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   AutopodError,
   type CreatePodRequest,
+  type DispatchConflict,
+  type DispatchConflictAssessment,
   type DispatchPreflightEvidence,
+  type DispatchPreview,
   type IntentionalRerun,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -29,6 +32,36 @@ export interface DispatchPreflightLedger {
     baseCommitSha: string,
   ): DispatchPreflightEvidence;
   latest(podId: string): DispatchPreflightEvidence | null;
+  /**
+   * Read-only equivalent-work check for a launch that has not been admitted.
+   * Writes nothing; the provisioning-time `inspect` remains authoritative.
+   */
+  preview(input: {
+    repository: string;
+    baseBranch: string;
+    task: string;
+    contract: unknown;
+    intentionalRerun?: Pick<IntentionalRerun, 'ofPodId'> | null;
+  }): DispatchPreview;
+}
+/** Human-runnable fixes for an equivalent-work conflict, shared by preview and the guard. */
+export function equivalentWorkFixes(conflicts: DispatchConflict[]): string[] {
+  const actions = conflicts.map(
+    (conflict) =>
+      `Stop the existing execution if it should not continue: ap kill ${conflict.podId}`,
+  );
+  const [only] = conflicts;
+  if (conflicts.length === 1 && only)
+    actions.push(
+      `Or launch this request as an intentional rerun: ap run … --rerun-of ${only.podId} --rerun-reason "<why>"`,
+    );
+  return actions;
+}
+export function describeEquivalentConflict(conflict: DispatchConflict): string {
+  const assessment = conflict.assessment
+    ? `, ${conflict.assessment.classification}${conflict.assessment.reasons.length ? `: ${conflict.assessment.reasons.join(', ')}` : ''}`
+    : '';
+  return `${conflict.podId} (${conflict.status}${assessment})`;
 }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -282,6 +315,148 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
     createHash('sha256')
       .update(canonical({ kind: 'pr-repair-v1', pr, work }))
       .digest('hex');
+  function collectReceiptConflicts(
+    conflicts: Map<string, DispatchConflict>,
+    input: {
+      repository: string;
+      baseBranch: string;
+      workHash: string;
+      legacyWorkHash: string;
+      taskId: string;
+      unrelatedRepair: (prior: RepairRow) => boolean;
+    },
+  ): void {
+    const previous = db
+      .prepare(DISPATCH_CANDIDATES_SQL)
+      .all(
+        input.repository,
+        input.baseBranch,
+        input.workHash,
+        input.legacyWorkHash,
+        input.taskId,
+      ) as Array<{
+      podId: string;
+      executionId: string;
+      status: string | null;
+      checkedAt: string;
+      workHash: string;
+      taskId: string;
+    }>;
+    if (previous.length > 100)
+      throw new AutopodError(
+        'Equivalent work scope exceeds 100 receipts; reconcile prior executions',
+        'DISPATCH_SCOPE_TOO_LARGE',
+        409,
+      );
+    for (const prior of previous) {
+      const identity = retainedRepair(prior.podId);
+      const verified =
+        identity?.executionId === prior.executionId && identity.taskId === prior.taskId
+          ? identity
+          : undefined;
+      if (verified && prior.workHash === input.legacyWorkHash && input.unrelatedRepair(verified))
+        continue;
+      conflicts.set(prior.executionId, {
+        podId: prior.podId,
+        executionId: prior.executionId,
+        status: prior.status ?? 'deleted',
+        evidence: 'dispatch_receipt',
+      });
+    }
+  }
+  function collectLegacyConflicts(
+    conflicts: Map<string, DispatchConflict>,
+    input: {
+      repository: string;
+      baseBranch: string;
+      legacyWorkHash: string;
+      taskId: string;
+      task: string;
+      rowNumber: number;
+      unrelatedRepair: (prior: RepairRow) => boolean;
+    },
+  ): void {
+    // Only active requests can veto a launch. Finished/deleted history remains
+    // immutable evidence, not a duplicate-work veto. Execution and budget fences
+    // are independent of this status-based policy.
+    const legacy = db
+      .prepare(`${selectRequest} WHERE p.rowid < ? AND e.task_id <> ? AND p.task = ?
+        AND NOT EXISTS (SELECT 1 FROM execution_dispatch_preflights d WHERE d.execution_id = e.execution_id)
+        AND NOT EXISTS (SELECT 1 FROM pod_launch_snapshots s WHERE s.pod_id = p.id
+          AND json_type(CASE WHEN json_valid(s.payload) THEN s.payload ELSE NULL END, '$.repository') = 'null')
+        AND p.status NOT IN ('complete','failed','killed','rejected') ORDER BY p.rowid DESC LIMIT 101`)
+      .all(input.rowNumber, input.taskId, input.task) as RequestRow[];
+    if (legacy.length > 100)
+      throw new AutopodError(
+        'Equivalent work scope exceeds 100 legacy requests; reconcile prior executions',
+        'DISPATCH_SCOPE_TOO_LARGE',
+        409,
+      );
+    for (const prior of legacy) {
+      if (conflicts.has(prior.executionId) || hash(prior) !== input.legacyWorkHash) continue;
+      if (!prior.baseBranch)
+        throw new AutopodError(
+          'Historical base binding unavailable; reconcile before dispatch',
+          'DISPATCH_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      if (prior.baseBranch !== input.baseBranch) continue;
+      const priorRepository = requestRepository(prior);
+      if (priorRepository === input.repository && !input.unrelatedRepair(prior))
+        conflicts.set(prior.executionId, {
+          podId: prior.id,
+          executionId: prior.executionId,
+          status: prior.status,
+          evidence: 'legacy_request',
+        });
+    }
+  }
+  // Advisory only: a stale classification explains a conflict but never admits work.
+  // Every criterion must be positively evidenced by the live pod row.
+  const assess = (podId: string): DispatchConflictAssessment => {
+    const row = db
+      .prepare(
+        `SELECT status,pause_reason AS pauseReason,files_changed AS filesChanged,lines_added AS linesAdded,
+        lines_removed AS linesRemoved,commit_count AS commitCount,pr_url AS prUrl,
+        validation_attempts AS validationAttempts FROM pods WHERE id = ?`,
+      )
+      .get(podId) as
+      | {
+          status: string;
+          pauseReason: string | null;
+          filesChanged: number | null;
+          linesAdded: number | null;
+          linesRemoved: number | null;
+          commitCount: number | null;
+          prUrl: string | null;
+          validationAttempts: number | null;
+        }
+      | undefined;
+    if (!row) return { classification: 'active', reasons: ['live pod record unavailable'] };
+    const reasons: string[] = [];
+    const paused = row.status === 'paused';
+    reasons.push(
+      paused
+        ? `paused${row.pauseReason ? ` (${row.pauseReason})` : ''}; no worker running`
+        : `status ${row.status}`,
+    );
+    const noChanges = row.filesChanged === 0 && row.linesAdded === 0 && row.linesRemoved === 0;
+    reasons.push(noChanges ? 'no source changes' : 'has source changes');
+    const noCommits = row.commitCount === 0;
+    reasons.push(noCommits ? 'no commits' : 'has commits');
+    const noValidation = row.validationAttempts === 0;
+    reasons.push(noValidation ? 'no validation' : 'has validation attempts');
+    const noPr = !row.prUrl;
+    reasons.push(noPr ? 'no PR' : 'has PR');
+    return {
+      classification: paused && noChanges && noCommits && noValidation && noPr ? 'stale' : 'active',
+      reasons,
+    };
+  };
+  const assessAll = (conflicts: Map<string, DispatchConflict>): void => {
+    for (const [executionId, conflict] of conflicts)
+      conflicts.set(executionId, { ...conflict, assessment: assess(conflict.podId) });
+  };
   const decode = (row: Record<string, unknown>): DispatchPreflightEvidence => ({
     id: row.id as string,
     version: 1,
@@ -514,37 +689,15 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             return false;
           } // Missing/unreadable historical identity remains blocking.
         };
-        const conflicts = new Map<string, DispatchPreflightEvidence['conflicts'][number]>();
-        const previous = db
-          .prepare(DISPATCH_CANDIDATES_SQL)
-          .all(repository, baseBranch, workHash, legacyWorkHash, pod.taskId) as Array<{
-          podId: string;
-          executionId: string;
-          status: string | null;
-          checkedAt: string;
-          workHash: string;
-          taskId: string;
-        }>;
-        if (previous.length > 100)
-          throw new AutopodError(
-            'Equivalent work scope exceeds 100 receipts; reconcile prior executions',
-            'DISPATCH_SCOPE_TOO_LARGE',
-            409,
-          );
-        for (const prior of previous) {
-          const identity = retainedRepair(prior.podId);
-          const verified =
-            identity?.executionId === prior.executionId && identity.taskId === prior.taskId
-              ? identity
-              : undefined;
-          if (verified && prior.workHash === legacyWorkHash && unrelatedRepair(verified)) continue;
-          conflicts.set(prior.executionId, {
-            podId: prior.podId,
-            executionId: prior.executionId,
-            status: prior.status ?? 'deleted',
-            evidence: 'dispatch_receipt',
-          });
-        }
+        const conflicts = new Map<string, DispatchConflict>();
+        collectReceiptConflicts(conflicts, {
+          repository,
+          baseBranch,
+          workHash,
+          legacyWorkHash,
+          taskId: pod.taskId,
+          unrelatedRepair,
+        });
         if (!repairPr && pod.task === '[PR FIX] Awaiting queued feedback.') {
           // Every verified scoped admission has immutable execution parentage.
           // Its opaque hash cannot be found by the generic hash index alone.
@@ -594,40 +747,16 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             });
           }
         }
-        // Only active requests can veto a launch. Finished/deleted history remains
-        // immutable evidence, not a duplicate-work veto. Execution and budget fences
-        // are independent of this status-based policy.
-        const legacy = db
-          .prepare(`${selectRequest} WHERE p.rowid < ? AND e.task_id <> ? AND p.task = ?
-        AND NOT EXISTS (SELECT 1 FROM execution_dispatch_preflights d WHERE d.execution_id = e.execution_id)
-        AND NOT EXISTS (SELECT 1 FROM pod_launch_snapshots s WHERE s.pod_id = p.id
-          AND json_type(CASE WHEN json_valid(s.payload) THEN s.payload ELSE NULL END, '$.repository') = 'null')
-        AND p.status NOT IN ('complete','failed','killed','rejected') ORDER BY p.rowid DESC LIMIT 101`)
-          .all(pod.rowNumber, pod.taskId, pod.task) as RequestRow[];
-        if (legacy.length > 100)
-          throw new AutopodError(
-            'Equivalent work scope exceeds 100 legacy requests; reconcile prior executions',
-            'DISPATCH_SCOPE_TOO_LARGE',
-            409,
-          );
-        for (const prior of legacy) {
-          if (conflicts.has(prior.executionId) || hash(prior) !== legacyWorkHash) continue;
-          if (!prior.baseBranch)
-            throw new AutopodError(
-              'Historical base binding unavailable; reconcile before dispatch',
-              'DISPATCH_IDENTITY_UNAVAILABLE',
-              409,
-            );
-          if (prior.baseBranch !== baseBranch) continue;
-          const priorRepository = requestRepository(prior);
-          if (priorRepository === repository && !unrelatedRepair(prior))
-            conflicts.set(prior.executionId, {
-              podId: prior.id,
-              executionId: prior.executionId,
-              status: prior.status,
-              evidence: 'legacy_request',
-            });
-        }
+        collectLegacyConflicts(conflicts, {
+          repository,
+          baseBranch,
+          legacyWorkHash,
+          taskId: pod.taskId,
+          task: pod.task,
+          rowNumber: pod.rowNumber,
+          unrelatedRepair,
+        });
+        assessAll(conflicts);
         const rerun: DispatchPreflightEvidence['rerun'] = intent
           ? {
               ofPodId: intent.source_pod_id as string,
@@ -691,6 +820,54 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         );
       },
     ),
+    preview(input) {
+      const repository = repositoryIdentity(input.repository);
+      if (input.task.length > 50000)
+        throw new AutopodError(
+          'Launch task exceeds its evidence bound',
+          'DISPATCH_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      // Match the stored request exactly: contracts persist as JSON text.
+      const contract =
+        input.contract === undefined || input.contract === null
+          ? null
+          : JSON.stringify(input.contract);
+      const legacyWorkHash = hash({ task: input.task, contract });
+      const conflicts = new Map<string, DispatchConflict>();
+      // An unadmitted launch has no task id and is newer than every stored request.
+      const noTask = '';
+      collectReceiptConflicts(conflicts, {
+        repository,
+        baseBranch: input.baseBranch,
+        workHash: legacyWorkHash,
+        legacyWorkHash,
+        taskId: noTask,
+        unrelatedRepair: () => false,
+      });
+      collectLegacyConflicts(conflicts, {
+        repository,
+        baseBranch: input.baseBranch,
+        legacyWorkHash,
+        taskId: noTask,
+        task: input.task,
+        rowNumber: Number.MAX_SAFE_INTEGER,
+        unrelatedRepair: () => false,
+      });
+      assessAll(conflicts);
+      const list = [...conflicts.values()];
+      const [only] = list;
+      // Mirrors inspect(): a rerun naming the single conflicting execution is authorized.
+      const authorized =
+        list.length === 1 && only !== undefined && input.intentionalRerun?.ofPodId === only.podId;
+      return {
+        status: list.length === 0 ? 'clear' : authorized ? 'authorized' : 'review_required',
+        repository,
+        baseBranch: input.baseBranch,
+        conflicts: list,
+        suggestedActions: list.length === 0 || authorized ? [] : equivalentWorkFixes(list),
+      };
+    },
     latest(podId) {
       const row = db
         .prepare(

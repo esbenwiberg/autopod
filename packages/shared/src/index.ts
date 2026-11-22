@@ -271,7 +271,13 @@ export type {
   ValidationEvidenceManifest,
 } from './types/contract.js';
 export type { DiffCommit, DiffFile, DiffResponse, DiffStats } from './types/diff.js';
-export type { DispatchPreflightEvidence, IntentionalRerun } from './types/dispatch-preflight.js';
+export type {
+  DispatchConflict,
+  DispatchConflictAssessment,
+  DispatchPreflightEvidence,
+  DispatchPreview,
+  IntentionalRerun,
+} from './types/dispatch-preflight.js';
 export type {
   ActionApprovalPayload,
   AskAiPayload,
