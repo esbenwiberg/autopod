@@ -10,7 +10,7 @@ import { publishSource } from '../worktrees/durable-source-publication.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { reconcileApprovalRewritesOnStartup } from './approval-rewrite-reconciliation.js';
-import { prepareApprovalRewrite } from './approval-source-rewrite.js';
+import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
 import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
@@ -19,7 +19,7 @@ const head = 'c'.repeat(40);
 const tree = 'd'.repeat(40);
 const base = 'e'.repeat(40);
 afterEach(() => vi.unstubAllEnvs());
-function fixture() {
+function fixture(github = false) {
   const f = createDeliveryFixture(true);
   vi.stubEnv('DATA_DIR', path.join(f.directory, 'data'));
   f.podRepo.update('prepare', {
@@ -28,7 +28,14 @@ function fixture() {
     autoApprove: true,
     validationAttempts: 2,
   });
-  const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
+  const captured = {
+    ...f.mainCaptured,
+    executionForPod: (pod: ReturnType<typeof f.pod>) => ({
+      ...f.mainCaptured.executionForPod(pod),
+      ...(github ? { prProvider: 'github' as const } : {}),
+    }),
+    prManagerFactory: () => f.provider,
+  };
   const workflow = () =>
     createApprovalWorkflow({
       ...captured,
@@ -198,8 +205,19 @@ describe('approval source rewrite custody', () => {
   });
 
   it('returns to new human approval after source-bound checks, preserving the original lease across DB reopen', async () => {
-    const f = fixture();
-    await f.approve();
+    const f = fixture(true);
+    // Historical GitHub rewrite already admitted before the current policy.
+    f.podRepo.update('prepare', { status: 'merging' });
+    if (!f.podRepo.sourcePublications) throw new Error('Missing source ledger');
+    const publication = await publishSource(
+      f.podRepo.sourcePublications,
+      f.pod(),
+      f.captured.executionForPod(f.pod()).repoUrl,
+      f.worktreeManager,
+    );
+    const id = await prepareApprovalRewrite(f.captured, f.pod(), publication, 'main', undefined);
+    if (!id) throw new Error('Missing historical rewrite');
+    activateApprovalRewrite(f.captured, f.pod(), id);
     f.podRepo.update('prepare', { status: 'validating', containerId: 'checks-resource' });
     f.worktreeManager.inspectSourceAdoption = vi.fn(async () => ({
       branch: f.pod().branch,
@@ -261,12 +279,20 @@ describe('approval source rewrite custody', () => {
         return receipt;
       },
     );
-    f.prepareRebase.mockResolvedValue({
-      kind: 'unchanged',
-      baseCommitSha: base,
-    });
-    f.provider.getPrStatus.mockResolvedValue(pendingStatus());
+    f.prepareRebase.mockClear();
+    f.prepareRebase.mockRejectedValue(new Error('Another base-drift rewrite is forbidden'));
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        headSha: head,
+        sourceTarget: {
+          repository: publication.repository,
+          branch: f.pod().branch,
+          baseBranch: 'main',
+        },
+      }),
+    );
     await f.approve();
+    expect(f.prepareRebase).not.toHaveBeenCalled();
     expect(f.worktreeManager.pushBranch).toHaveBeenLastCalledWith(
       expect.any(String),
       f.pod().branch,
@@ -278,7 +304,7 @@ describe('approval source rewrite custody', () => {
   });
 
   it('recovers a prepared candidate after interrupted approval without repeating its rebase', async () => {
-    const f = fixture();
+    const f = fixture(true);
     f.podRepo.update('prepare', { status: 'merging' });
     const pod = f.pod();
     const ledger = f.podRepo.sourcePublications;

@@ -139,8 +139,9 @@ approval; earlier results, sibling results and old taskReview do not certify it.
 Later ordinary approval still checks exact repository/PR/base/source bindings
 and publishes only using the original recorded predecessor SHA lease. Remote
 advancement/deletion, target drift or uncertain push/merge refuses mutation.
-If main advances, ordinary approval must prepare another isolated rewrite and
-run fresh checks; it cannot certify the repair against the wrong base. Neither
+If main advances, ordinary GitHub approval uses provider merge eligibility for
+the exact checked published head without another drift-only rewrite. ADO retains
+its isolated rewrite and fresh checks behavior. Neither
 repair request is approval or publication authority.
 
 ## API, release and qualification

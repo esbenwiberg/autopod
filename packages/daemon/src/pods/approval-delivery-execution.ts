@@ -321,14 +321,23 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           // Never rewrite the approved worktree or publish untested rebased code.
           // The isolated candidate is durably selected for checks-only provisioning;
           // successful checks require a new approval before its exact leased push.
-          emitActivityStatus(podId, `Checking latest origin/${mergeBaseBranch}…`);
-          const rewriteId = await prepareApprovalRewrite(
-            captured,
-            mergingAnchor,
-            publishedSource,
-            mergeBaseBranch,
-            await deliveryCredential(approveProfile),
-          );
+          // GitHub base drift alone starts no rewrite, even for a checked historical
+          // candidate. An already prepared selection still needs its recovery path.
+          const savedRewrite = podRepo.approvalRewrites?.latest(mergingAnchor);
+          const prepareRewrite =
+            approveProfile.prProvider === 'ado' ||
+            (savedRewrite?.prepared && !savedRewrite.activated);
+          if (prepareRewrite)
+            emitActivityStatus(podId, `Checking latest origin/${mergeBaseBranch}…`);
+          const rewriteId = prepareRewrite
+            ? await prepareApprovalRewrite(
+                captured,
+                mergingAnchor,
+                publishedSource,
+                mergeBaseBranch,
+                await deliveryCredential(approveProfile),
+              )
+            : null;
           if (rewriteId) {
             const disposition = await deliveryOperation(() =>
               prManager.getPrStatus({ prUrl, worktreePath }),
@@ -363,6 +372,10 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
                 reason:
                   'The PR changed external disposition before merge admission; reconcile the retained source.',
               };
+            // Base drift does not invalidate an exact GitHub source approval.
+            // Provider gates apply only after confirming the published binding.
+            if (approveProfile.prProvider !== 'ado')
+              assertPublishedPr(prStatus, mergeBaseBranch, publishedSource.commitSha);
             if (prStatus.squashRequired && mergeSquash === undefined) mergeSquash = true;
             planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
             if (prStatus.squashRequired && mergeSquash !== true) {

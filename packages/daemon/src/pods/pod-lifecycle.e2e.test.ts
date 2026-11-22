@@ -69,6 +69,26 @@ function createMockPrManager(): PrManager {
   };
 }
 
+function confirmPublishedPr(ctx: TestContext, prManager: PrManager, podId: string) {
+  const pod = ctx.podRepo.getOrThrow(podId);
+  const publication = ctx.podRepo.sourcePublications?.latestConfirmedForMerge?.(pod);
+  if (!publication) throw new Error('Missing confirmed source publication');
+  vi.mocked(prManager.getPrStatus).mockResolvedValue({
+    merged: false,
+    open: true,
+    headSha: publication.commitSha,
+    sourceTarget: {
+      repository: publication.repository,
+      branch: publication.branch,
+      baseBranch: pod.baseBranch ?? 'main',
+    },
+    mergeBlocked: false,
+    blockReason: null,
+    ciFailures: [],
+    reviewComments: [],
+  });
+}
+
 function collectEvents(ctx: TestContext): SystemEvent[] {
   const events: SystemEvent[] = [];
   ctx.eventBus.subscribe((e) => events.push(e));
@@ -118,6 +138,7 @@ describe('Pod Lifecycle E2E', () => {
       expect(processed.linesRemoved).toBe(10);
 
       // 3. Approve the pod
+      confirmPublishedPr(ctx, prManager, pod.id);
       await manager.approveSession(pod.id);
 
       const completed = manager.getSession(pod.id);
@@ -975,6 +996,7 @@ describe('Pod Lifecycle E2E', () => {
       );
 
       await manager.processPod(pod.id);
+      confirmPublishedPr(ctx, prManager, pod.id);
       await manager.approveSession(pod.id);
 
       const eventTypes = events.map((e) => e.type);

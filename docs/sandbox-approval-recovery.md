@@ -42,8 +42,11 @@ by historical validation. Reports can remain pending: the original sandbox and
 unknown wakeup intent stay retained, and no deletion or resume replay follows.
 See [merge recovery](merge-operator-recovery.md#already-merged-prs-normal-polling).
 
-If approval discovers a newer base requiring rebase, the daemon preserves the
-original and queues an isolated candidate through validation-only provisioning.
+Ordinary GitHub approval uses provider eligibility for the exact validated
+published head when the base moves; base drift alone starts no rewrite or checks.
+Existing rewrite custody remains intact. For ADO base updates, the daemon
+preserves the original and queues an isolated candidate through validation-only
+provisioning.
 No coding agent starts, budgets are not reset, and passing checks/review return
 the task for a new human approval rather than publishing automatically. Inspect
 `ap source-recovery POD --json`; do not manually reset source, force-push or detach

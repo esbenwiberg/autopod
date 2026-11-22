@@ -26,8 +26,11 @@ afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(prProvider: 'github' | 'ado' = 'github') {
   const ctx = createTestContext();
+  ctx.db
+    .prepare('UPDATE profiles SET pr_provider = ? WHERE name = ?')
+    .run(prProvider, 'test-profile');
   let disposition: 'open' | 'merged' = 'open';
   const status = (): PrMergeStatus => ({
     merged: disposition === 'merged',
@@ -420,7 +423,7 @@ describe('composed delivery incidents', () => {
   });
 
   it('reconciles external merge racing rewrite preparation without activating the candidate', async () => {
-    const f = fixture();
+    const f = fixture('ado');
     await f.process();
     const original = f.current();
     vi.mocked(f.ctx.worktreeManager.prepareApprovalRebase!).mockImplementation(async (config) => {
@@ -455,7 +458,7 @@ describe('composed delivery incidents', () => {
   });
 
   it('retains a changed predecessor result instead of clearing it when a prepared candidate would activate', async () => {
-    const f = fixture();
+    const f = fixture('ado');
     await f.process();
     const original = f.current();
     const rebase = f.ctx.worktreeManager.prepareApprovalRebase;
@@ -705,7 +708,7 @@ describe('composed delivery incidents', () => {
     false,
     true,
   ])('existing-PR approval cannot publish source changed after checks (during selection=%s)', async (late) => {
-    const f = fixture();
+    const f = fixture(late ? 'ado' : 'github');
     await f.process();
     if (late) {
       vi.mocked(f.ctx.worktreeManager.prepareApprovalRebase!).mockRejectedValueOnce(
@@ -828,7 +831,7 @@ describe('composed delivery incidents', () => {
   });
 
   it('retains failed candidate checks and routes already activated rewrites to their owner', async () => {
-    const f = fixture();
+    const f = fixture('ado');
     await f.process();
     const rebase = f.ctx.worktreeManager.prepareApprovalRebase;
     if (!rebase) throw new Error('Missing rebase support');

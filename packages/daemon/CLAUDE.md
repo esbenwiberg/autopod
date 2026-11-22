@@ -144,8 +144,13 @@ the state is unreachable (transition table miss) or pods land in it and idle
 
 ### Approval-time source updates
 
-Approval prepares rebased candidates in independent Git checkouts, not in the
-approved worktree. Append-only `approval_source_rewrites` facts bind the original
+Ordinary GitHub approval preserves the exact validated published head when the
+base moves and uses provider merge gates; it starts no new drift-only rewrite,
+including after a checked historical rewrite. Missing/mismatched source or target
+evidence fails closed. Existing admitted/prepared/active rewrite custody and
+explicit source-update paths remain intact. ADO approval prepares rebased
+candidates in independent Git checkouts, not in the approved worktree.
+Append-only `approval_source_rewrites` facts bind the original
 publication/remote SHA, base, candidate and current checks. A changed candidate
 uses fresh validation-only provisioning (`skipAgent`), preserving attempt/retry
 budgets and original resources; passing configured checks/review require a new
