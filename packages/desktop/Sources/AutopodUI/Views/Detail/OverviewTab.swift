@@ -586,22 +586,9 @@ struct OverviewTab: View {
             if let options = pod.escalationOptions, !options.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(options, id: \.self) { option in
-                        Button {
-                            sendReply(option)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "circle")
-                                    .font(.system(size: 11))
-                                Text(option)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
-                        .disabled(!replySnapshot.canSubmit)
-                        .accessibilityIdentifier("decision-overview-option-\(option)")
+                        DecisionOptionButton(option: option) { sendReply(option) }
+                            .disabled(!replySnapshot.canSubmit)
+                            .accessibilityIdentifier("decision-overview-option-\(option)")
                     }
                 }
 
@@ -617,8 +604,9 @@ struct OverviewTab: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                TextField("Type your reply...", text: replyText)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Type your reply...", text: replyText, axis: .vertical)
+                    .lineLimit(1...8)
                     .disabled(!replySnapshot.canEdit)
                     .textFieldStyle(.plain)
                     .padding(8)
