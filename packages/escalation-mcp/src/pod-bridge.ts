@@ -155,6 +155,12 @@ export interface PodBridge {
   /** Write a file into the pod's container. Throws if no container. */
   writeFileInContainer(podId: string, path: string, content: string): Promise<void>;
 
+  /**
+   * Advisory view of workspace paths outside committed source while the
+   * worker can still act. Null when not applicable to the pod's output.
+   */
+  inspectWorkspaceCleanliness?(podId: string): Promise<WorkspaceCleanliness | null>;
+
   /** Execute a command in the pod's container. Throws if no container. */
   execInContainer(
     podId: string,
@@ -270,6 +276,13 @@ export interface PodBridge {
 }
 
 export type ValidationPhaseName = 'setup' | 'lint' | 'build' | 'tests';
+
+export interface WorkspaceCleanliness {
+  untracked: string[];
+  changed: string[];
+  /** Untracked paths hidden only by container-local excludes such as `.git/info/exclude`. */
+  hiddenByLocalExclude: string[];
+}
 
 export interface PreSubmitReviewInput {
   /** Optional preview of the agent's planned task summary. */

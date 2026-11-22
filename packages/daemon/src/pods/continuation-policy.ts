@@ -1,6 +1,7 @@
 import type { Pod } from '@autopod/shared';
 import { processContent } from '@autopod/shared';
 import { formatFeedback } from './feedback-formatter.js';
+import { isReviewSourceDirtyReason } from './validation-review-source.js';
 
 export const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
 
@@ -44,6 +45,16 @@ export function buildManualReworkReason(
         : 'Manual rework after validation failure. Fix the failed validation and review items below.',
       '',
       feedback,
+    ].join('\n');
+  }
+
+  if (isReviewSourceDirtyReason(pod.failureReason)) {
+    return [
+      'Manual rework after finalization stopped before any checks ran.',
+      '',
+      `Cause: ${pod.failureReason}`,
+      '',
+      'Review your branch: make sure everything this change needs is committed, and keep scratch notes outside `/workspace` (for example under `/tmp`). Files hidden only by `.git/info/exclude` inside the container are still visible to Autopod. Then finish as before.',
     ].join('\n');
   }
 

@@ -5,7 +5,7 @@ import type {
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
 import { z } from 'zod';
-import type { PodBridge } from '../pod-bridge.js';
+import type { PodBridge, WorkspaceCleanliness } from '../pod-bridge.js';
 
 // Keep bounds/strictness aligned with the daemon's independent write boundary.
 export const deferredChecksSchema = z
@@ -51,6 +51,46 @@ export interface ReportTaskSummaryInput {
   reviewFeedbackResponses?: ReviewFeedbackResponseItem[];
 }
 
+const MAX_LISTED_PATHS = 20;
+
+function displayPath(path: string): string {
+  const cleaned = Array.from(path, (character) => {
+    const code = character.charCodeAt(0);
+    return code < 0x20 || code === 0x7f ? '?' : character;
+  }).join('');
+  return cleaned.length > 200 ? `${cleaned.slice(0, 199)}…` : cleaned;
+}
+
+function listed(title: string, paths: string[]): string[] {
+  if (paths.length === 0) return [];
+  const shown = paths.slice(0, MAX_LISTED_PATHS).map((path) => `- ${displayPath(path)}`);
+  if (paths.length > MAX_LISTED_PATHS) shown.push(`- …and ${paths.length - MAX_LISTED_PATHS} more`);
+  return [title, ...shown];
+}
+
+/** Agent-facing warning while the worker can still commit or remove leftovers. */
+export function formatWorkspaceCleanlinessWarning(
+  state: WorkspaceCleanliness | null | undefined,
+): string {
+  if (!state) return '';
+  const sections = [
+    ...listed('Uncommitted changes to tracked paths:', state.changed),
+    ...listed('Untracked paths:', state.untracked),
+    ...listed(
+      "Hidden only by this container's .git/info/exclude (Autopod's host copy does not share it, so it still sees them):",
+      state.hiddenByLocalExclude,
+    ),
+  ];
+  if (sections.length === 0) return '';
+  return [
+    '',
+    '',
+    'WARNING: your workspace still has paths outside committed source. Before you finish, commit each one that belongs to this change and delete the rest (keep scratch notes outside /workspace, for example under /tmp). Left behind, they are either swept into your change by an automatic commit or stop finalization before any checks run.',
+    ...sections,
+    'Your summary is already recorded; you do not need to report it again.',
+  ].join('\n');
+}
+
 export async function reportTaskSummary(
   podId: string,
   input: ReportTaskSummaryInput,
@@ -91,5 +131,6 @@ export async function reportTaskSummary(
   const deferredNote = deferredChecks?.length
     ? ` ${deferredChecks.length} deferred check(s) reported NOT-RUN; required checks remain incomplete. This is not a pass, waiver or repair receipt.`
     : '';
-  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote}${reviewFeedbackNote}${deferredNote} The reviewer will assess any deviations.`;
+  const cleanliness = await bridge.inspectWorkspaceCleanliness?.(podId).catch(() => null);
+  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote}${reviewFeedbackNote}${deferredNote} The reviewer will assess any deviations.${formatWorkspaceCleanlinessWarning(cleanliness)}`;
 }

@@ -1,4 +1,4 @@
-import type { EscalationRequest, ReviewBatchResult, ValidationFinding } from '@autopod/shared';
+import type { EscalationRequest, Pod, ReviewBatchResult, ValidationFinding } from '@autopod/shared';
 import { AutopodError, generateId } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ValidationEngine } from '../interfaces/index.js';
@@ -30,6 +30,7 @@ import {
   guardValidationContainer,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+import { buildDirtySourceCorrection, ReviewSourceDirtyError } from './validation-review-source.js';
 import { observeValidationSource } from './validation-source-evidence.js';
 import {
   failedValidationPhases,
@@ -169,6 +170,85 @@ export function createValidationTriggerWorkflow(
       runUpdateFromBaseAfterAbort(podId, triggerValidationFromUpdateIntent).catch((e: unknown) =>
         logger.error({ err: e, podId }, 'update-from-base after abort failed'),
       );
+      return true;
+    };
+
+    // Resume the live agent with correction feedback, then re-enter completion.
+    const resumeAgentWithCorrection = async (
+      current: Pod,
+      correctionMessage: string,
+      goalRework: boolean,
+      attempt: number,
+    ): Promise<boolean> => {
+      podRepo.update(podId, { lastCorrectionMessage: correctionMessage });
+
+      // Transition back to running for retry
+      transition(current, 'running');
+
+      // Only the runtime may retry a known idempotent setup command.
+      // Replaying a whole turn after a timeout is unsafe even before the
+      // first event: the provider may have accepted execution already.
+      if (!current.containerId) throw new Error(`Pod ${podId} has no container`);
+      let outcome: AgentRunOutcome;
+      emitActivityStatus(podId, 'Agent working on fixes…');
+      try {
+        const events = await taskFeedbackEvents(podId, correctionMessage, goalRework);
+        outcome = await this.consumeAgentEvents(podId, events, attempt);
+      } catch (error) {
+        if (error instanceof AutopodError && error.code === 'AZURE_SANDBOX_TIMEOUT')
+          throw new AutopodError(
+            'Agent continuation timed out with an unverified execution outcome. No automatic replay was started; retained workspace and provider history require reconciliation before another turn.',
+            'CONTINUATION_OUTCOME_UNVERIFIED',
+            409,
+          );
+        throw error;
+      }
+      if (outcome === 'stopped') return false;
+      await persistRuntimeCredentialsForPod(
+        podId,
+        'Failed to persist rotated credentials after validation-feedback resume',
+      );
+      if (outcome !== 'completed') {
+        logger.info(
+          { podId, attempt, maxAttempts: current.maxValidationAttempts, outcome },
+          'Validation retry agent run did not complete',
+        );
+        return false;
+      }
+      emitActivityStatus(podId, 'Agent finished applying fixes');
+      await this.handleCompletion(podId);
+      return true;
+    };
+
+    // Dirty review source is worker-correctable: while the agent can still be
+    // resumed within its attempt budget, name the exact paths instead of parking.
+    const returnDirtySourceToAgent = async (
+      error: ReviewSourceDirtyError,
+      attempt: number,
+    ): Promise<boolean> => {
+      const current = podRepo.getOrThrow(podId);
+      if (
+        current.status !== 'validating' ||
+        !ownsLifecycle(podId, lifecycleGeneration, lifecycleContainerId) ||
+        !current.containerId ||
+        current.options.agentMode === 'interactive' ||
+        !(force || attempt < current.maxValidationAttempts) ||
+        validationOnly ||
+        podRepo.retainedCoding?.isOwner(podId) ||
+        podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
+      )
+        return false;
+      emitActivityStatus(
+        podId,
+        `Review source has uncommitted files (${error.summary}) — returning cleanup to the agent (attempt ${attempt}/${current.maxValidationAttempts})`,
+      );
+      const correctionMessage = buildDirtySourceCorrection(error.changes);
+      const goalRework = await beginGoalTaskRework(current, correctionMessage);
+      logger.info(
+        { podId, attempt, summary: error.summary },
+        'Returning dirty review source to agent',
+      );
+      await resumeAgentWithCorrection(current, correctionMessage, goalRework, attempt);
       return true;
     };
 
@@ -447,13 +527,18 @@ export function createValidationTriggerWorkflow(
         return;
       }
 
-      const { validationConfig, previousValidation } = await prepareValidationInputs(
-        pod,
-        profile,
-        s1,
-        attempt,
-        validationSuite,
-      );
+      let preparedInputs: Awaited<ReturnType<typeof prepareValidationInputs>>;
+      try {
+        preparedInputs = await prepareValidationInputs(pod, profile, s1, attempt, validationSuite);
+      } catch (inputError) {
+        if (
+          inputError instanceof ReviewSourceDirtyError &&
+          (await returnDirtySourceToAgent(inputError, attempt))
+        )
+          return;
+        throw inputError;
+      }
+      const { validationConfig, previousValidation } = preparedInputs;
 
       let result: Awaited<ReturnType<typeof validationEngine.validate>>;
       const validationController = new AbortController();
@@ -976,43 +1061,7 @@ export function createValidationTriggerWorkflow(
           correctionMessage += `\n\n### Overridden Findings (a human reviewed these — do NOT address them)\n${overrideLines.join('\n')}`;
         }
 
-        podRepo.update(podId, { lastCorrectionMessage: correctionMessage });
-
-        // Transition back to running for retry
-        transition(s2, 'running');
-
-        // Only the runtime may retry a known idempotent setup command.
-        // Replaying a whole turn after a timeout is unsafe even before the
-        // first event: the provider may have accepted execution already.
-        if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
-        let outcome: AgentRunOutcome;
-        emitActivityStatus(podId, 'Agent working on fixes…');
-        try {
-          const events = await taskFeedbackEvents(podId, correctionMessage, goalRework);
-          outcome = await this.consumeAgentEvents(podId, events, attempt);
-        } catch (error) {
-          if (error instanceof AutopodError && error.code === 'AZURE_SANDBOX_TIMEOUT')
-            throw new AutopodError(
-              'Agent continuation timed out with an unverified execution outcome. No automatic replay was started; retained workspace and provider history require reconciliation before another turn.',
-              'CONTINUATION_OUTCOME_UNVERIFIED',
-              409,
-            );
-          throw error;
-        }
-        if (outcome === 'stopped') return;
-        await persistRuntimeCredentialsForPod(
-          podId,
-          'Failed to persist rotated credentials after validation-feedback resume',
-        );
-        if (outcome !== 'completed') {
-          logger.info(
-            { podId, attempt, maxAttempts: s2.maxValidationAttempts, outcome },
-            'Validation retry agent run did not complete',
-          );
-          return;
-        }
-        emitActivityStatus(podId, 'Agent finished applying fixes');
-        await this.handleCompletion(podId);
+        if (!(await resumeAgentWithCorrection(s2, correctionMessage, goalRework, attempt))) return;
 
         logger.info(
           {

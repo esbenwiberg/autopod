@@ -596,7 +596,10 @@ export function generateSystemInstructions(
     '   - **Before calling `report_task_summary`, commit any remaining changes.** ' +
       'If you leave uncommitted work behind, the daemon will auto-commit it with ' +
       'a generic `chore: auto-commit ...` message that pollutes the PR history. ' +
-      'Owning your commits is part of the task.',
+      'Owning your commits is part of the task. Keep scratch notes and other files that must not ' +
+      'ship outside `/workspace` (for example under `/tmp`), or delete them before finishing: ' +
+      '`.git/info/exclude` in this container is not shared with Autopod, so excluding a path ' +
+      'there does not hide it from delivery.',
   );
   lines.push(
     '   - Do not edit `.husky/**`, `.githooks/**`, `.git/hooks/**`, `.claude/**`, `.codex/**`, or `.mcp.json` to bypass sandbox, permission, or hook execution failures unless the task explicitly asks you to change those operational files. If a hook or environment policy blocks you, report the blocker and commit only the task-scoped code changes.',
