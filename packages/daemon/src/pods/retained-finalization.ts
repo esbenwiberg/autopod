@@ -310,6 +310,15 @@ export function createRetainedFinalization(deps: {
       operation,
     };
   }
+  /** Same exact observation as admission; a different identity is never 'stopped'. */
+  async function observedStatus(
+    cm: ContainerManager,
+    binding: FinalizationBinding,
+  ): Promise<Awaited<ReturnType<ContainerManager['getStatus']>>> {
+    if (!cm.observeFinalizationResource) return cm.getStatus(binding.containerId!);
+    const observed = await cm.observeFinalizationResource(binding.containerId!);
+    return observed.resourceKey === binding.resourceKey ? observed.status : 'unknown';
+  }
   async function run(
     podId: string,
     request: RetainedFinalizationRequest,
@@ -334,17 +343,33 @@ export function createRetainedFinalization(deps: {
       const bound: FinalizationBinding = binding;
       if (binding.containerId) {
         const manager = deps.getContainerManager(binding.target);
-        if (!manager.getResourceKey)
+        if (!manager.observeFinalizationResource && !manager.getResourceKey)
           finalizationError('Exact provider resource namespace unavailable.');
-        bound.resourceKey = await manager.getResourceKey(binding.containerId);
+        let initialStatus: Awaited<ReturnType<ContainerManager['getStatus']>> | undefined;
+        try {
+          if (manager.observeFinalizationResource) {
+            const observed = await manager.observeFinalizationResource(binding.containerId);
+            bound.resourceKey = observed.resourceKey;
+            initialStatus = observed.status;
+          } else {
+            bound.resourceKey = await manager.getResourceKey!(binding.containerId);
+          }
+        } catch {
+          current(podId, binding);
+          finalizationError(
+            'Exact current execution resource identity is unavailable; no finalization intent admitted.',
+          );
+        }
         current(podId, binding);
         if (!bound.resourceKey) finalizationError('Exact provider resource namespace unavailable.');
         if (anchor.resourceKey && anchor.resourceKey !== bound.resourceKey)
           finalizationError(
             'Current resource namespace differs from the immutable original owner.',
           );
-        const initialStatus = await manager.getStatus(binding.containerId);
-        current(podId, binding);
+        if (initialStatus === undefined) {
+          initialStatus = await manager.getStatus(binding.containerId);
+          current(podId, binding);
+        }
         if (
           initialStatus !== 'running' &&
           initialStatus !== 'stopped' &&
@@ -375,19 +400,33 @@ export function createRetainedFinalization(deps: {
     const cm = deps.getContainerManager(binding.target);
     if (binding.containerId) {
       // Identity reads never wake execution. A changed engine/provider namespace is not the held resource.
-      if (!cm.getResourceKey) finalizationError('Exact provider resource namespace unavailable.');
-      const resourceKey = await cm.getResourceKey(binding.containerId);
-      current(podId, binding);
-      if (resourceKey !== binding.resourceKey)
-        finalizationError('Provider resource namespace changed.');
-      let status: Awaited<ReturnType<ContainerManager['getStatus']>>;
+      if (!cm.observeFinalizationResource && !cm.getResourceKey)
+        finalizationError('Exact provider resource namespace unavailable.');
+      let resourceKey: string;
+      let status: Awaited<ReturnType<ContainerManager['getStatus']>> | undefined;
       try {
-        status = await cm.getStatus(binding.containerId);
+        if (cm.observeFinalizationResource) {
+          ({ resourceKey, status } = await cm.observeFinalizationResource(binding.containerId));
+        } else {
+          resourceKey = await cm.getResourceKey!(binding.containerId);
+        }
       } catch {
+        // Unobservable identity after admission keeps the intent pending, never a raw failure.
         current(podId, binding);
         return record.receipt;
       }
       current(podId, binding);
+      if (resourceKey !== binding.resourceKey)
+        finalizationError('Provider resource namespace changed.');
+      if (status === undefined) {
+        try {
+          status = await cm.getStatus(binding.containerId);
+        } catch {
+          current(podId, binding);
+          return record.receipt;
+        }
+        current(podId, binding);
+      }
       if (status === 'running' && !record.stopDispatched) {
         try {
           await ledger.dispatchStop(
@@ -403,7 +442,7 @@ export function createRetainedFinalization(deps: {
         }
         current(podId, binding);
         try {
-          status = await cm.getStatus(binding.containerId);
+          status = await observedStatus(cm, binding);
         } catch {
           current(podId, binding);
           return ledger.get(podId)!.receipt;
@@ -435,7 +474,7 @@ export function createRetainedFinalization(deps: {
       if (binding.containerId) {
         let finalStatus: Awaited<ReturnType<ContainerManager['getStatus']>>;
         try {
-          finalStatus = await cm.getStatus(binding.containerId);
+          finalStatus = await observedStatus(cm, binding);
         } catch {
           current(podId, binding);
           return ledger.get(podId)!.receipt;

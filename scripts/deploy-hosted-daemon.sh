@@ -227,13 +227,14 @@ else
 fi
 
 # ---- preflight: restart-blocking pods ------------------------------------
-note "checking for restart-blocking pods"
-TOKEN="$(ap token 2>/dev/null || true)"
-DAEMON="$(grep -E '^daemon:' "$HOME/.autopod/config.yaml" | awk '{print $2}')"
-DRAIN_RESPONSE=""
-if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
-  ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods?status=$RESTART_BLOCKING_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
-    | RESTART_BLOCKING="$RESTART_BLOCKING" python3 -c '
+# Each counter prints exactly one value: a count, or "?" when unknown.
+# Fleet-archived pods still own work, so the API query must include them
+# (GET /pods excludes archived pods by default).
+api_active_count() {
+  local body count
+  body="$(curl -sS --fail --max-time 10 "$DAEMON/pods?status=$RESTART_BLOCKING_QUERY&archive=include&compact=true" \
+    -H "Authorization: Bearer $TOKEN" 2>/dev/null)" || { echo '?'; return 0; }
+  count="$(printf '%s' "$body" | RESTART_BLOCKING="$RESTART_BLOCKING" python3 -c '
 import sys, json, os
 nt = set(os.environ["RESTART_BLOCKING"].split())
 try:
@@ -242,33 +243,48 @@ except Exception:
     print("?"); sys.exit(0)
 pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
 print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
-' 2>/dev/null || echo '?')"
-  note "active (restart-blocking) pods: $ACTIVE"
-  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ]; then
-    if [ "$FORCE" -eq 0 ]; then
-      die "$ACTIVE restart-blocking pod(s) — restart would interrupt them (use --force to override)"
-    fi
-    note "FORCE: proceeding with $ACTIVE restart-blocking pod(s) active at preflight"
-  fi
-  [ "$ACTIVE" = "?" ] && note "WARN: could not parse pod list; proceeding (verify manually)"
-else
-  note "WARN: no token/daemon URL — falling back to VM DB active-pods preflight"
-  ACTIVE_RAW="$(remote "
+' 2>/dev/null)" || count='?'
+  [[ "$count" =~ ^[0-9]+$ ]] || count='?'
+  echo "$count"
+}
+vm_db_active_count() {
+  local raw
+  raw="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
 sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
 " 2>/dev/null || true)"
-  ACTIVE="$(printf '%s\n' "$ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
-  note "active (restart-blocking) pods from VM DB: $ACTIVE"
-  if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ]; then
-    if [ "$FORCE" -eq 0 ]; then
-      die "$ACTIVE restart-blocking pod(s) — restart would interrupt them (use --force to override)"
-    fi
-    note "FORCE: proceeding with $ACTIVE restart-blocking pod(s) active at preflight"
+  printf '%s\n' "$raw" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }'
+}
+# API first; an unknown API answer falls back to the VM DB rather than proceeding.
+active_count() {
+  local count='?'
+  if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
+    count="$(api_active_count)"
+    [ "$count" != '?' ] ||
+      note "WARN: daemon pod query failed or was unparseable — falling back to VM DB count" >&2
+  else
+    note "WARN: no token/daemon URL — falling back to VM DB active-pods count" >&2
   fi
-  if [ "$ACTIVE" = "?" ] && [ "$FORCE" -eq 0 ]; then
-    die "could not determine active pods from API or VM DB (use --force only after manual verification)"
+  [ "$count" != '?' ] || count="$(vm_db_active_count)"
+  echo "$count"
+}
+
+note "checking for restart-blocking pods"
+TOKEN="$(ap token 2>/dev/null || true)"
+DAEMON="$(grep -E '^daemon:' "$HOME/.autopod/config.yaml" | awk '{print $2}')"
+DRAIN_RESPONSE=""
+ACTIVE="$(active_count)"
+note "active (restart-blocking) pods: $ACTIVE"
+if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ]; then
+  if [ "$FORCE" -eq 0 ]; then
+    die "$ACTIVE restart-blocking pod(s) — restart would interrupt them (use --force to override)"
   fi
+  note "FORCE: proceeding with $ACTIVE restart-blocking pod(s) active at preflight"
+fi
+if [ "$ACTIVE" = "?" ]; then
+  [ "$FORCE" -eq 1 ] || die "could not determine active pods from API or VM DB (use --force only after manual verification)"
+  note "FORCE: active pod count unknown at preflight; final VM-database gate remains mandatory"
 fi
 
 # ---- preflight: Docker network capacity (read-only, warning only) --------
@@ -331,17 +347,9 @@ if echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"'; then
   trap release_hosted_deploy_drain EXIT
   note "hosted deployment drain active"
 
-  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods?status=$RESTART_BLOCKING_QUERY&compact=true" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
-    | RESTART_BLOCKING="$RESTART_BLOCKING" python3 -c '
-import sys, json, os
-nt = set(os.environ["RESTART_BLOCKING"].split())
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    print("?"); sys.exit(0)
-pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
-print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
-' 2>/dev/null || echo '?')"
+  ACTIVE_AFTER_DRAIN="$(active_count)"
+  [ "$ACTIVE_AFTER_DRAIN" != "?" ] || [ "$FORCE" -eq 1 ] ||
+    die "could not determine active pods after drain activation — refusing deployment"
   if [ "$ACTIVE_AFTER_DRAIN" != "0" ]; then
     if [ "$FORCE" -eq 0 ]; then
       die "${ACTIVE_AFTER_DRAIN} restart-blocking pod(s) remain after drain activation — refusing deployment"
@@ -582,6 +590,12 @@ fi
 # expired during build/prewarm. The assertion and restart deliberately share
 # one remote shell so forced bootstrap has no admission window between them.
 note "swapping symlink + restarting $SERVICE"
+final_gate_refused() {
+  if printf '%s\n' "$SWAP_OUT" | grep -qxF FINAL_GATE_REFUSED; then
+    SWAP_ATTEMPTED=0 # explicit pre-switch refusal: the maintenance drain may be released
+    die "final gate refused before the release switch — live release $LIVE_SHA unchanged, nothing to roll back"
+  fi
+}
 SWAP_ATTEMPTED=1
 if ! SWAP_OUT="$(remote "
 set -eu
@@ -589,13 +603,15 @@ cd $CURRENT_LINK/packages/daemon
 PREV=\$(readlink $CURRENT_LINK)
 if [ \"\$(basename \"\$PREV\")\" != '$LIVE_SHA' ]; then
   echo 'live release changed during staging; refusing to replace another deployment'
+  echo FINAL_GATE_REFUSED
   exit 1
 fi
 FORCE=$FORCE
-FINAL_ACTIVE=\$(sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\")
+FINAL_ACTIVE=\$(sudo -u ewi -H env RESTART_BLOCKING='$RESTART_BLOCKING' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.RESTART_BLOCKING.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\") || FINAL_ACTIVE='?'
 if [ \"\$FINAL_ACTIVE\" != 0 ]; then
   if [ \"\$FORCE\" != 1 ]; then
     echo \"\$FINAL_ACTIVE active pod(s) at final restart gate — refusing deployment\"
+    echo FINAL_GATE_REFUSED
     exit 1
   fi
   echo \"FORCE: restarting with \$FINAL_ACTIVE active pod(s) at final gate\"
@@ -629,9 +645,13 @@ if [ \"\$service_state\" = active ]; then echo SERVICE_ACTIVE_OK; else echo SERV
 if [ \"\$health_result\" = ok ]; then echo LOCAL_HEALTH_FINAL_OK; else echo HEALTH_FAIL; fi
 ")"; then
   echo "$SWAP_OUT"
+  final_gate_refused
   die "remote final gate or restart failed — symlink may be unchanged; inspect output above"
 fi
 echo "$SWAP_OUT"
+# Run Command reports transport success even when the guest script exits 1, so
+# an explicit pre-switch refusal must be recognised here, not as a failed restart.
+final_gate_refused
 
 # ---- post-verify ----------------------------------------------------------
 echo "$SWAP_OUT" | grep -q "SERVICE_ACTIVE_OK" || die "service not active after restart — ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"

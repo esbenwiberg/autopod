@@ -1046,6 +1046,42 @@ export class DockerContainerManager implements ContainerManager {
     return JSON.stringify(['docker', engine.ID, container.Id]);
   }
 
+  async observeFinalizationResource(
+    containerId: string,
+  ): Promise<{ resourceKey: string; status: 'running' | 'stopped' | 'deleted' }> {
+    const engine = await boundedDockerCall(this.docker.info(), {
+      label: 'docker.info (finalization observation)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+      logger: this.logger,
+      containerId,
+    });
+    const identityUnavailable = () =>
+      new AutopodError(
+        'Exact Docker engine/resource identity unavailable',
+        'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    if (!engine.ID || !/^[a-f0-9]{64}$/.test(containerId)) throw identityUnavailable();
+    const resourceKey = JSON.stringify(['docker', engine.ID, containerId]);
+    let info: Awaited<ReturnType<Dockerode.Container['inspect']>>;
+    try {
+      info = await boundedDockerCall(this.docker.getContainer(containerId).inspect(), {
+        label: 'container.inspect (finalization observation)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId,
+      });
+    } catch (error) {
+      // Only the engine's exact "no such container" answer is absence; timeouts and
+      // other failures remain unknown and fail closed.
+      if ((error as { statusCode?: number }).statusCode === 404)
+        return { resourceKey, status: 'deleted' };
+      throw error;
+    }
+    if (info.Id !== containerId) throw identityUnavailable();
+    return { resourceKey, status: info.State.Running ? 'running' : 'stopped' };
+  }
+
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
     const info = await boundedDockerCall(this.docker.getContainer(containerId).inspect(), {
       label: 'container.inspect (execution metadata)',

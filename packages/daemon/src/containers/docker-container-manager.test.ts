@@ -816,6 +816,52 @@ describe('DockerContainerManager', () => {
     });
   });
 
+  describe('observeFinalizationResource()', () => {
+    const id = 'a'.repeat(64);
+    it('reports exact running and stopped identity on this engine', async () => {
+      container.inspect.mockResolvedValue({ Id: id, State: { Running: true } });
+      expect(await manager.observeFinalizationResource(id)).toEqual({
+        resourceKey: JSON.stringify(['docker', 'fixture-engine-1', id]),
+        status: 'running',
+      });
+      container.inspect.mockResolvedValue({ Id: id, State: { Running: false } });
+      expect((await manager.observeFinalizationResource(id)).status).toBe('stopped');
+    });
+    it('treats only the engine 404 as deleted, keyed by the same engine', async () => {
+      container.inspect.mockRejectedValue(
+        Object.assign(new Error('no such container'), { statusCode: 404 }),
+      );
+      const observed = await manager.observeFinalizationResource(id);
+      expect(observed).toEqual({
+        resourceKey: JSON.stringify(['docker', 'fixture-engine-1', id]),
+        status: 'deleted',
+      });
+      // Same key as getResourceKey produced while the container existed.
+      container.inspect.mockResolvedValue({ Id: id, State: { Running: false } });
+      expect(await manager.getResourceKey(id)).toBe(observed.resourceKey);
+    });
+    it('fails closed for other errors, engine loss, short IDs and mismatched identity', async () => {
+      container.inspect.mockRejectedValue(
+        Object.assign(new Error('server error'), { statusCode: 500 }),
+      );
+      await expect(manager.observeFinalizationResource(id)).rejects.toThrow('server error');
+      container.inspect.mockRejectedValue(new Error('socket hang up'));
+      await expect(manager.observeFinalizationResource(id)).rejects.toThrow('socket hang up');
+      await expect(manager.observeFinalizationResource('a'.repeat(12))).rejects.toMatchObject({
+        code: 'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+      });
+      container.inspect.mockResolvedValue({ Id: 'b'.repeat(64), State: { Running: false } });
+      await expect(manager.observeFinalizationResource(id)).rejects.toMatchObject({
+        code: 'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+      });
+      (docker.info as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('engine down'));
+      container.inspect.mockRejectedValue(
+        Object.assign(new Error('no such container'), { statusCode: 404 }),
+      );
+      await expect(manager.observeFinalizationResource(id)).rejects.toThrow('engine down');
+    });
+  });
+
   // ─── writeFile() ────────────────────────────────────────
 
   describe('writeFile()', () => {

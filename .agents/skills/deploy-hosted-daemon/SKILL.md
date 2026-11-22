@@ -45,7 +45,16 @@ bounded retry window is a deployment failure.
 
 - **Queued pods do not block restarts.** They own no running workload and remain
   queued across a daemon restart. Provisioning, running, validating, paused, and
-  other mid-lifecycle states do block ordinary deploys.
+  other mid-lifecycle states do block ordinary deploys, **including fleet-archived
+  pods** (the preflight queries with `archive=include`). A stale archived pod in
+  such a state needs a supported release first, e.g. `ap finalize-retained <pod>`
+  (inspect, then `--apply --stop-retain`), not a habitual `--force`.
+- **Unknown counts fall back, they don't proceed.** If the daemon pod query fails,
+  the script counts from the VM database instead. If both are unknown it refuses
+  unless `--force`.
+- **A final-gate refusal is not a failed deploy.** "final gate refused before the
+  release switch … nothing to roll back" means `current` was never switched. Do
+  not run `--rollback`; resolve the blocking pod and redeploy.
 - **`--force` means explicit interruption authority.** Use it only after the
   user explicitly approves restarting despite the exact restart-blocking pods.
   It bypasses the pod-count gates with loud warnings; build, reviewer/browser
