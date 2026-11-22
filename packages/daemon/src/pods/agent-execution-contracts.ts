@@ -158,7 +158,7 @@ export interface AgentConsumerCaptured {
   handleProviderLimit: (
     podId: string,
     classification: ProviderFailureClassification,
-  ) => Promise<void>;
+  ) => Promise<'queued' | 'budget_blocked' | 'not_queued'>;
   /**
    * Whether a configured, healthy failover target could take over this pod now, plus
    * receipt lines for targets passed over on observed account health.

@@ -105,6 +105,30 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     assertNoInfrastructureBlocker(podRepo, pod.id);
   }
 
+  /**
+   * Refuse a provider continuation the task ledger would refuse at spawn, before
+   * opening the target attempt or spending another full preparation (#646).
+   */
+  function assertContinuationBudgetAdmissible(podId: string): void {
+    const budget = podRepo.taskExecutions?.snapshot(podId).budgetCheck;
+    if (budget?.status === 'exhausted')
+      throw new AutopodError(
+        `Provider continuation blocked: ${budget.reason}`,
+        'TASK_BUDGET_EXHAUSTED',
+        409,
+      );
+    if (budget?.status === 'unavailable')
+      throw new AutopodError(
+        `Provider continuation blocked: ${budget.reason}${
+          budget.reason.startsWith('Task token accounting incomplete')
+            ? ` Pod owner can run: ap accept-unmeasured-usage ${podId} --reason "<why>"`
+            : ''
+        }`,
+        'TASK_BUDGET_UNAVAILABLE',
+        409,
+      );
+  }
+
   async function queueProviderContinuation(
     pod: Pod,
     target: ProviderFailoverTarget,
@@ -113,6 +137,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     handoffPrepared = false,
   ): Promise<void> {
     assertNoInfrastructureBlocker(podRepo, pod.id);
+    assertContinuationBudgetAdmissible(pod.id);
     if (!handoffPrepared) {
       await prepareProviderContinuationHandoff(pod, classification);
     }
@@ -172,21 +197,21 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
   async function handleProviderLimit(
     podId: string,
     classification: ProviderFailureClassification,
-  ): Promise<void> {
+  ): Promise<'queued' | 'budget_blocked' | 'not_queued'> {
     const source = podRepo.getOrThrow(podId);
     if (podRepo.hasInfrastructureBlocker?.(podId)) {
       emitActivityStatus(
         podId,
         'Infrastructure blocked — provider continuation cannot repair this execution',
       );
-      return;
+      return 'not_queued';
     }
     try {
       await runtimeRegistry.get(source.runtime).abort(podId);
       assertNoInfrastructureBlocker(podRepo, podId);
     } catch (err) {
       logger.warn({ err, podId }, 'Provider-limit runtime drain failed; pausing');
-      return;
+      return 'not_queued';
     }
     if (source.containerId && source.worktreePath) {
       try {
@@ -200,7 +225,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         assertNoInfrastructureBlocker(podRepo, podId);
       } catch (err) {
         logger.warn({ err, podId }, 'Provider-limit worktree synchronization failed; pausing');
-        return;
+        return 'not_queued';
       }
     }
     if (source.containerId) {
@@ -223,7 +248,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         assertNoInfrastructureBlocker(podRepo, podId);
       } catch (err) {
         logger.warn({ err, podId }, 'Provider-limit container teardown could not be proven');
-        return;
+        return 'not_queued';
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -235,7 +260,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
       emitActivityStatus(podId, line);
     if (!selection.target) {
       emitActivityStatus(podId, providerFailoverUnavailableActivity(selection));
-      return;
+      return 'not_queued';
     }
     try {
       await queueProviderContinuation(
@@ -244,9 +269,60 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         classification,
         true,
       );
+      return 'queued';
     } catch (err) {
+      if (
+        err instanceof AutopodError &&
+        (err.code === 'TASK_BUDGET_UNAVAILABLE' || err.code === 'TASK_BUDGET_EXHAUSTED')
+      ) {
+        // Parked before any target attempt or re-preparation; the reason names the attempt.
+        logger.warn({ podId, code: err.code }, 'Provider continuation blocked by task budget');
+        podRepo.update(podId, { failureReason: err.message });
+        emitActivityStatus(podId, err.message);
+        return 'budget_blocked';
+      }
       logger.warn({ err, podId }, 'Automatic provider continuation failed closed');
       emitActivityStatus(podId, 'Provider limit reached — automatic continuation is unsafe');
+      return 'not_queued';
+    }
+  }
+
+  /**
+   * After the pod owner accepted an attempt's usage as unmeasured, queue the
+   * configured failover for a pod still parked on a provider limit. The budget
+   * gate is re-checked by queueProviderContinuation.
+   */
+  async function continueAfterAcceptedUsage(
+    podId: string,
+  ): Promise<{ continuation: 'queued' | 'not_applicable' | 'unavailable'; message?: string }> {
+    const pod = podRepo.getOrThrow(podId);
+    if (pod.status !== 'paused' || pod.pauseReason !== 'provider_limit')
+      return { continuation: 'not_applicable' };
+    const source = deps.providerAttemptRepo
+      ?.list(podId)
+      .findLast((attempt) => attempt.endedAt !== null);
+    const classification = source?.classification;
+    if (!classification)
+      return {
+        continuation: 'unavailable',
+        message: 'No classified provider attempt to continue from',
+      };
+    const selection = selectProviderFailoverTarget(pod);
+    for (const line of providerFailoverSkippedActivity?.(selection) ?? [])
+      emitActivityStatus(podId, line);
+    if (!selection.target) {
+      const message = providerFailoverUnavailableActivity(selection);
+      emitActivityStatus(podId, message);
+      return { continuation: 'unavailable', message };
+    }
+    try {
+      await queueProviderContinuation(pod, selection.target, classification);
+      return { continuation: 'queued' };
+    } catch (err) {
+      const message = operatorErrorMessage(err, 'agent');
+      logger.warn({ err, podId }, 'Provider continuation after accepted usage failed closed');
+      emitActivityStatus(podId, `Provider continuation after accepted usage failed: ${message}`);
+      return { continuation: 'unavailable', message };
     }
   }
 
@@ -264,6 +340,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         'TASK_AGENT_RUN_ACTIVE',
         409,
       );
+    assertContinuationBudgetAdmissible(podId);
     const primaryRecovery = requestedTarget === 'profile-primary';
     const pausedProviderLimit = pod.status === 'paused' && pod.pauseReason === 'provider_limit';
     if (primaryRecovery && pod.status !== 'failed') {
@@ -507,5 +584,6 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     queueProviderContinuation,
     handleProviderLimit,
     continueProvider,
+    continueAfterAcceptedUsage,
   };
 }

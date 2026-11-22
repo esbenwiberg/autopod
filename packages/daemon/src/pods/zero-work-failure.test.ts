@@ -1,11 +1,14 @@
-import type { AgentEvent, ProviderAttempt } from '@autopod/shared';
+import type { AgentEvent, ProviderAttempt, ProviderFailureClassification } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodRepository, type PodUpdates } from './pod-repository.js';
-import { assessZeroWorkProviderAccountFailure } from './zero-work-failure.js';
+import {
+  assessPreUsageProviderRefusal,
+  assessZeroWorkProviderAccountFailure,
+} from './zero-work-failure.js';
 
 const POD_ID = 'zero-work-pod';
 const attempt = (usage: Partial<ProviderAttempt> = {}) =>
@@ -49,8 +52,25 @@ function fixture(updates: PodUpdates = {}, attempts = [attempt()]) {
   };
   const activity = (type: keyof typeof events) =>
     eventBus.emit({ type: 'pod.agent_activity', timestamp, podId: POD_ID, event: events[type] });
-  return { assess, activity };
+  const assessRefusal = (
+    classification: ProviderFailureClassification = OUT_OF_CREDITS,
+    taskRunCount = 1,
+    evidence: { events?: boolean } = {},
+  ) =>
+    assessPreUsageProviderRefusal(podRepo.getOrThrow(POD_ID), classification, {
+      taskRunCount,
+      eventRepo: evidence.events === false ? undefined : eventRepo,
+      providerAttemptRepo: { list: () => attempts },
+    });
+  return { assess, assessRefusal, activity };
 }
+
+const OUT_OF_CREDITS: ProviderFailureClassification = {
+  category: 'auth',
+  definitive: true,
+  sanitizedMessage: 'Your workspace is out of credits.',
+  retryAfter: null,
+};
 
 describe('assessZeroWorkProviderAccountFailure', () => {
   it('qualifies only status and error activity after a provider account refusal', () => {
@@ -85,6 +105,71 @@ describe('assessZeroWorkProviderAccountFailure', () => {
     expect(fixture({}, [attempt(), attempt({ outputTokens: 3 })]).assess()).toEqual({
       qualifies: false,
       reason: 'provider attempt usage recorded',
+    });
+  });
+});
+
+describe('assessPreUsageProviderRefusal', () => {
+  it('qualifies a definitive account refusal with no usage or agent work on the only run', () => {
+    const f = fixture({ status: 'paused' });
+    f.activity('status');
+    f.activity('error');
+    expect(f.assessRefusal()).toEqual({ qualifies: true });
+  });
+
+  it('qualifies a definitive quota stop with no usage', () => {
+    const f = fixture({ status: 'paused' });
+    expect(
+      f.assessRefusal({
+        category: 'quota_exhausted',
+        definitive: true,
+        sanitizedMessage: 'quota',
+        retryAfter: null,
+      }),
+    ).toEqual({ qualifies: true });
+  });
+
+  it.each([
+    [
+      'non-definitive',
+      { ...OUT_OF_CREDITS, definitive: false },
+      1,
+      'provider failure is not definitive',
+    ],
+    [
+      'other auth failure',
+      { ...OUT_OF_CREDITS, sanitizedMessage: 'Authentication failed' },
+      1,
+      'not a provider quota or account refusal',
+    ],
+    ['second run', OUT_OF_CREDITS, 2, 'more than one worker run recorded for this pod'],
+  ] as const)('keeps the block for a %s', (_name, classification, runs, reason) => {
+    const f = fixture({ status: 'paused' });
+    expect(f.assessRefusal(classification, runs)).toEqual({ qualifies: false, reason });
+  });
+
+  it('keeps the block when usage, attempt usage or agent activity was recorded', () => {
+    expect(fixture({ inputTokens: 1 }).assessRefusal()).toEqual({
+      qualifies: false,
+      reason: 'usage recorded',
+    });
+    expect(fixture({}, [attempt({ outputTokens: 3 })]).assessRefusal()).toEqual({
+      qualifies: false,
+      reason: 'provider attempt usage recorded',
+    });
+    const worked = fixture();
+    worked.activity('reasoning');
+    expect(worked.assessRefusal()).toEqual({ qualifies: false, reason: 'agent activity recorded' });
+    expect(fixture().assessRefusal(OUT_OF_CREDITS, 1, { events: false })).toEqual({
+      qualifies: false,
+      reason: 'agent activity evidence unavailable',
+    });
+  });
+
+  it('does not touch already settled accounting', () => {
+    expect(fixture({ tokenTelemetryAccuracy: 'complete' }).assessRefusal()).toEqual({
+      qualifies: false,
+      reason: 'token accounting already settled',
     });
   });
 });

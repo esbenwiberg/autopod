@@ -46,7 +46,7 @@ export function createAgentExecutionFixture(disk = false) {
     sanitizeFailureReason: vi.fn(() => 'Synthetic sanitized failure'),
     hasDurableAgentExecutionEvidence: vi.fn(() => false),
     syncSandboxRuntimeSessionState: f.sandbox.syncSandboxRuntimeSessionState,
-    handleProviderLimit: vi.fn(async () => {}),
+    handleProviderLimit: vi.fn(async () => 'not_queued' as const),
     reconcileInfrastructureBlocker: vi.fn(async () => {}),
   } satisfies AgentConsumerCaptured;
   const consumer = createAgentEventConsumption(f.deps, consumerCaptured);

@@ -86,6 +86,10 @@ function createMockClient() {
     getSessionLogs: vi.fn().mockResolvedValue('build log output'),
     updateFromBase: vi.fn().mockResolvedValue({ ok: true, action: 'queued_after_abort' }),
     continueProvider: vi.fn().mockResolvedValue({ ok: true, action: 'same-provider' }),
+    acceptUnmeasuredUsage: vi.fn().mockResolvedValue({
+      receipt: { id: 'receipt-1', providerAttemptOrdinal: 1 },
+      continuation: 'queued',
+    }),
   } as unknown as AutopodClient;
 }
 
@@ -133,6 +137,63 @@ describe('reconcile-termination command', () => {
     ['--reason', 'Verified deletion of sandbox'],
   ])('requires both mutation flags: %s', async (...args) => {
     await expect(run(...args)).rejects.toThrow('both --run and --reason');
+  });
+});
+
+describe('accept-unmeasured-usage command', () => {
+  async function run(...args: string[]) {
+    const client = createMockClient();
+    const program = new Command().exitOverride();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'accept-unmeasured-usage', 'positive-urial', ...args]);
+    return client;
+  }
+
+  it('submits the owner reason and expected attempt, reporting the queued failover', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = await run('--reason', 'Refused before any output', '--attempt', '1');
+      expect(client.acceptUnmeasuredUsage).toHaveBeenCalledWith('positive-urial', {
+        reason: 'Refused before any output',
+        attempt: 1,
+      });
+      const output = log.mock.calls.flat().join(' ');
+      expect(output).toContain('provider attempt #1 usage accepted as unmeasured');
+      expect(output).toContain('Configured provider failover queued.');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('requires a reason', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(run()).rejects.toThrow(/--reason/);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('rejects a non-positive attempt before calling the daemon', async () => {
+    let client: AutopodClient | undefined;
+    await expect(
+      (async () => {
+        client = createMockClient();
+        const program = new Command().exitOverride();
+        registerPodCommands(program, () => client as AutopodClient);
+        await program.parseAsync([
+          'node',
+          'ap',
+          'accept-unmeasured-usage',
+          'positive-urial',
+          '--reason',
+          'Refused before any output',
+          '--attempt',
+          '0',
+        ]);
+      })(),
+    ).rejects.toThrow('--attempt must be a positive integer');
+    expect(client?.acceptUnmeasuredUsage).not.toHaveBeenCalled();
   });
 });
 

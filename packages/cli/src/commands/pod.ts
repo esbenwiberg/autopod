@@ -1116,6 +1116,40 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       }
     });
 
+  // ap accept-unmeasured-usage
+  program
+    .command('accept-unmeasured-usage <id>')
+    .description(
+      "Pod owner only: count the latest failed provider attempt's usage as unmeasured (audited) and continue the configured failover",
+    )
+    .requiredOption('--reason <text>', 'Why the attempt is accepted as unmeasured (10+ characters)')
+    .option('--attempt <n>', 'Expected provider attempt number (must be the latest settled one)')
+    .action(async (id: string, opts: { reason: string; attempt?: string }) => {
+      const attempt = opts.attempt === undefined ? undefined : Number(opts.attempt);
+      if (attempt !== undefined && (!Number.isSafeInteger(attempt) || attempt <= 0))
+        throw new Error('--attempt must be a positive integer');
+      const client = getClient();
+      const resolvedId = await resolvePodId(client, id);
+      const result = await withSpinner('Recording unmeasured usage acceptance...', () =>
+        client.acceptUnmeasuredUsage(resolvedId, {
+          reason: opts.reason,
+          ...(attempt !== undefined && { attempt }),
+        }),
+      );
+      console.log(
+        chalk.green(
+          `Pod ${resolvedId} provider attempt #${result.receipt.providerAttemptOrdinal} usage accepted as unmeasured (receipt ${result.receipt.id}).`,
+        ),
+      );
+      if (result.continuation === 'queued')
+        console.log(chalk.green('Configured provider failover queued.'));
+      else if (result.continuation === 'unavailable')
+        console.log(
+          chalk.yellow(`Provider failover not queued: ${result.message ?? 'unavailable'}`),
+        );
+      else console.log(chalk.dim('No provider-limit pause to continue; use ap resume if needed.'));
+    });
+
   program
     .command('files <id>')
     .description('Read preserved pod files without waking the worker')
