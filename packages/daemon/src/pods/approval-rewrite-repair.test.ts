@@ -61,7 +61,9 @@ it.each([
   const op = f.recovery.list(f.podId)[0]!;
   expect(op.blocked, JSON.stringify(vi.mocked(f.deps.logger.error).mock.calls)).toBeNull();
   expect(op.prepared).not.toBeNull();
-  expect(f.pod()).toEqual(before);
+  // Preparing a local recovery adds a retained checkpoint owner, which is
+  // reflected in this read-only custody projection without changing source.
+  expect(f.pod()).toEqual({ ...before, retainedDockerCustody: target === 'local' });
   expect(f.deps.enqueue).not.toHaveBeenCalled();
   expect(await readFile(path.join(op.prepared!.snapshot, 'ignored-report.txt'), 'utf8')).toContain(
     'Original report',
@@ -843,8 +845,8 @@ it.each([
   expect(provider.mergePr).not.toHaveBeenCalled();
   expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(originalRewrite);
   if (!drift) {
-    // Advance main in a third fixture checkout. Ordinary later approval must
-    // isolate/recheck this new base, never relabel the old repair pass.
+    // Advance main in a third fixture checkout. GitHub must retain the checked
+    // repair and use provider eligibility, without starting a second rewrite.
     const seed = path.join(f.root, 'new-main');
     await repairGit(f.root, 'clone', '--no-checkout', remote, seed);
     await repairGit(seed, 'checkout', '-b', 'main', originalRewrite.binding.predecessor.commitSha);
@@ -860,26 +862,27 @@ it.each([
       '-m',
       'advance main',
     );
-    const newBase = await repairGit(seed, 'rev-parse', 'HEAD');
     await repairGit(seed, 'push', remote, 'HEAD:refs/heads/main');
-    f.worktrees.prepareApprovalRebase = real.prepareApprovalRebase.bind(real);
+    f.worktrees.prepareApprovalRebase = vi.fn(real.prepareApprovalRebase.bind(real));
+    const status = provider.getPrStatus.getMockImplementation()!;
+    provider.getPrStatus.mockImplementation(async () => ({
+      ...(await status()),
+      mergeBlocked: true,
+      blockReason: 'GitHub branch must be up to date',
+    }));
+    const generation = f.pod().lifecycleGeneration;
     await approval.approveSession(f.podId, {
       actor: f.actor,
-      reason: 'Fresh approval must independently recheck the newly advanced main base',
+      reason: 'Fresh approval of the exact checked repair after main advanced',
     });
-    expect(f.pod().status).toBe('queued');
+    expect(f.pod().status).toBe('merge_pending');
+    expect(f.pod().mergeBlockReason).toBe('GitHub branch must be up to date');
+    expect(f.pod().lifecycleGeneration).toBe(generation);
+    expect(f.worktrees.prepareApprovalRebase).not.toHaveBeenCalled();
     const next = f.ctx.podRepo.approvalRewrites!.latest(f.pod())!;
-    expect(next.id).not.toBe(f.rewriteId);
-    expect(next.binding.baseCommitSha).toBe(newBase);
-    expect(next.binding.predecessor.commitSha).toBe(checkedHead);
-    expect(next.checked).toBeUndefined();
-    const pushes = vi.mocked(f.worktrees.pushBranch).mock.calls.length;
-    vi.mocked(f.cm.spawn).mockResolvedValueOnce('33333333-3333-4333-8333-333333333333');
-    await approval.processPod(f.podId);
-    expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
-    expect(f.ctx.podRepo.approvalRewrites!.latest(f.pod())?.checked).toBeDefined();
+    expect(next.id).toBe(f.rewriteId);
+    expect(next.checked?.head).toBe(checkedHead);
     expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).not.toThrow();
-    expect(f.worktrees.pushBranch).toHaveBeenCalledTimes(pushes);
     expect(provider.mergePr).not.toHaveBeenCalled();
     expect(await repairGit(checkout, 'rev-parse', 'HEAD')).toBe(checkedHead);
     expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(originalRewrite);
