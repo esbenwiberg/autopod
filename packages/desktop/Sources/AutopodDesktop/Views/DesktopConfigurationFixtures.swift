@@ -176,6 +176,11 @@ enum DesktopConfigurationFixtures {
         "privilegedSidecars": .bool(false), "sidecarStorageLimit": .bool(false),
         "maxMemoryGb": .number(16), "maxCpus": .null, "maxStorageGb": .null,
         "maxTotalMemoryGb": .number(16), "memoryTiersGb": .array([2, 4, 8, 16].map { .number(Double($0)) }),
+        // Mirrors the daemon's advertised bundles; pickers show these labels.
+        "memoryBundles": .array([("M", 2.0, 1.0, 20.0), ("L", 4, 2, 40), ("XL", 8, 4, 80), ("2XL", 16, 8, 160)].map { tier, memory, cpus, disk in
+          .object(["tier": .string(tier), "memoryGb": .number(memory), "cpus": .number(cpus), "diskGb": .number(disk),
+                   "label": .string("\(tier) · \(cpus.formatted()) vCPU · \(memory.formatted()) GiB RAM · \(disk.formatted()) GiB disk")])
+        }),
       ]),
     ])])
   }

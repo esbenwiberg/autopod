@@ -157,7 +157,8 @@ internal struct SeriesLaunchReview {
     case .execution:
       let target = preview?.executionTarget.nonEmpty ?? data["target"]?.string
       let memory = preview?.memoryGb ?? data["main"]?["memoryGb"]?.number
-      return [target.map { $0 == "local" ? "Docker" : $0 == "sandbox" ? "Hosted sandbox" : $0 } ?? "Profile allocation", memory.map { "\($0.formatted()) GB" }].compactMap { $0 }.joined(separator: " · ")
+      let backend = ExecutionMemoryLabel.backend(actions.capabilities, target: target)
+      return [target.map { $0 == "local" ? "Docker" : $0 == "sandbox" ? "Hosted sandbox" : $0 } ?? "Profile allocation", memory.map { ExecutionMemoryLabel.text(memoryGb: $0, backend: backend) }].compactMap { $0 }.joined(separator: " · ")
     case .pim: return "\(data.array?.count ?? 0) selected roles"
     case .references: return "\(request.referenceRepositories?.count ?? 0) repositories"
     case .tools: return "\(data.array?.count ?? 0) tool pack\(data.array?.count == 1 ? "" : "s")"
