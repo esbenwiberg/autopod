@@ -701,11 +701,6 @@ public actor DaemonAPI {
     return try await request("POST", "/pods/\(id)/kick", body: body)
   }
 
-  public func archivePod(_ id: String, reason: String) async throws {
-    struct Body: Encodable { let reason: String; let retainResources: Bool }
-    let _: EmptyResponse = try await request("POST", "/pods/\(id)/archive", body: encode(Body(reason: reason, retainResources: true)))
-  }
-
   public func unarchivePod(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)/archive")
   }

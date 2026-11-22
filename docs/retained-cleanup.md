@@ -94,8 +94,13 @@ and retain is a different Recovery action: it preserves storage. Review the
 ordered Docker/host targets and their full identities, what will be lost, and
 what will be kept. Enter a reason and acknowledge permanent loss before
 submitting. If proof is unavailable (including runs without the producer
-inventory), don't substitute Kill or ordinary Delete. Azure sandbox
-abandonment remains a separate control.
+inventory), don't substitute Kill or ordinary Delete. Desktop uses recorded
+checkpoint custody to route those cards to Recovery; an ordinary Docker pod
+keeps its existing Delete action and daemon safety checks. On older daemons
+that do not send the custody hint, ordinary controls still rely on those
+server checks; there is no automatic destructive fallback. Existing Stop and
+retain supports retained PR tasks; already-stopped eligible branch tasks can
+use direct cleanup. Azure sandbox abandonment remains a separate control.
 
 Desktop saves the exact normalized request before sending it, in a private
 local journal keyed by daemon connection and pod. **Observe request** is

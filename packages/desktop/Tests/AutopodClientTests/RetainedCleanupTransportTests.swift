@@ -46,6 +46,7 @@ private func cleanupBody(_ request: URLRequest) throws -> Data {
     var row = try #require(f.store.selectedSession)
     row.executionTarget = "local"
     row.hasWorktree = true
+    row.retainedDockerCustody = true
     f.store.upsertSession(row)
     await f.handler.actions.kill(f.id)
     await f.handler.actions.killAndDelete(f.id)

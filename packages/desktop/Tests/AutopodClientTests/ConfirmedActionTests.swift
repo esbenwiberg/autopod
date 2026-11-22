@@ -84,6 +84,28 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
   }
 }
 
+@MainActor @Test(arguments: [true, false, nil] as [Bool?])
+func confirmedDeleteRoutesOnlyRecordedDockerCustodyToRecovery(custody: Bool?) async throws {
+  try await withConfirmedActionFixture(initial: .failed) { fixture in
+    var pod = try #require(fixture.store.selectedSession)
+    pod.executionTarget = "local"
+    pod.retainedDockerCustody = custody
+    fixture.store.upsertSession(pod)
+    let task = fixture.start { await fixture.handler.actions.delete(fixture.id) }
+    if custody == true {
+      await task.value
+      #expect(fixture.peer.requests.isEmpty)
+      #expect(fixture.handler.lastError?.contains("Open Recovery") == true)
+      fixture.expectState(.failed)
+    } else {
+      try await fixture.next("DELETE").respond(status: 204, body: "")
+      await task.value
+      #expect(fixture.peer.requests.count == 1)
+      #expect(fixture.store.pods.isEmpty)
+    }
+  }
+}
+
 @MainActor @Test func confirmedActionFixtureSeparatesRecoveryObservation() async throws {
   try await withConfirmedActionFixture { fixture in
     let state = try await fixture.handler.actions.sandboxRecovery.load(fixture.id)

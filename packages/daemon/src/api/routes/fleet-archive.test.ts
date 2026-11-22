@@ -17,7 +17,11 @@ let repo: ReturnType<typeof createPodRepository>;
 let app: FastifyInstance;
 const cleanup = vi.fn();
 
-function seed(id: string, status: PodStatus = 'review_required') {
+function seed(
+  id: string,
+  status: PodStatus = 'review_required',
+  target: 'local' | 'sandbox' = 'sandbox',
+) {
   repo.insert({
     id,
     profileName: 'test',
@@ -25,7 +29,7 @@ function seed(id: string, status: PodStatus = 'review_required') {
     status,
     model: 'fixture',
     runtime: 'codex',
-    executionTarget: 'sandbox',
+    executionTarget: target,
     branch: `ap/${id}`,
     userId: 'human',
     maxValidationAttempts: 3,
@@ -66,18 +70,15 @@ afterEach(async () => {
   db.close();
 });
 
-async function archive(
+// Model an archive written by a previous daemon; the current API cannot create one.
+function legacyArchive(
   id: string,
   reason = 'Remove blocked task from fleet while retaining original evidence',
 ) {
-  return app.inject({
-    method: 'POST',
-    url: `/pods/${id}/archive`,
-    payload: { reason, retainResources: true },
-  });
+  repo.fleetArchives!.archive(id, 'human', reason);
 }
 
-it('archives an unverified validation without changing lifecycle, source, reports, custody or cleanup authority', async () => {
+it('keeps previously archived unverified validation and custody without cleanup authority', async () => {
   seed('blocked');
   const result = createPassingValidationResult();
   result.overall = 'fail';
@@ -90,7 +91,7 @@ it('archives an unverified validation without changing lifecycle, source, report
   };
   repo.update('blocked', { lastValidationResult: result });
   const before = db.prepare('SELECT * FROM pods WHERE id=?').get('blocked');
-  expect((await archive('blocked')).statusCode).toBe(200);
+  legacyArchive('blocked');
   expect(db.prepare('SELECT * FROM pods WHERE id=?').get('blocked')).toEqual(before);
   expect(repo.getOrThrow('blocked').fleetArchivedAt).toEqual(expect.any(String));
   expect(repo.list().map((p) => p.id)).toContain('blocked'); // internal execution/retention reads
@@ -120,15 +121,14 @@ it('archives an unverified validation without changing lifecycle, source, report
   });
 });
 
-it('is idempotent, survives repository recreation, and restores only fleet visibility', async () => {
+it('survives repository recreation and restores only fleet visibility', async () => {
   seed('retained');
-  await archive('retained');
+  legacyArchive('retained');
   const first = db.prepare('SELECT * FROM pod_fleet_archives').get();
-  await archive('retained', 'Repeated request must not replace original audit metadata');
-  expect(db.prepare('SELECT * FROM pod_fleet_archives').get()).toEqual(first);
   expect(createPodRepository(db).getOrThrow('retained').fleetArchivedAt).toEqual(
     expect.any(String),
   );
+  expect(db.prepare('SELECT * FROM pod_fleet_archives').get()).toEqual(first);
   for (let i = 0; i < 2; i++)
     expect((await app.inject({ method: 'DELETE', url: '/pods/retained/archive' })).statusCode).toBe(
       200,
@@ -137,8 +137,7 @@ it('is idempotent, survives repository recreation, and restores only fleet visib
     { id: 'retained', fleetArchivedAt: null, status: 'review_required' },
   ]);
   expect(cleanup).not.toHaveBeenCalled();
-  await archive('retained');
-  expect((await app.inject('/pods?archive=only')).json()).toHaveLength(1);
+  expect((await app.inject('/pods?archive=only')).json()).toEqual([]);
 });
 
 it('applies visibility before pagination limits, preserving include and only scopes', async () => {
@@ -146,7 +145,7 @@ it('applies visibility before pagination limits, preserving include and only sco
   seed('b');
   seed('c');
   db.prepare("UPDATE pods SET created_at='2026-11-01 12:00:00'").run();
-  await archive('b');
+  legacyArchive('b');
   const page = (await app.inject('/pods?compact=true&page=true&limit=1')).json();
   expect(page.pods.map((p: { id: string }) => p.id)).toEqual(['c']);
   const next = (
@@ -160,33 +159,65 @@ it('applies visibility before pagination limits, preserving include and only sco
   expect((await app.inject('/pods?archive=include')).json()).toHaveLength(3);
 });
 
-it.each<PodStatus>([
-  'queued',
-  'provisioning',
-  'running',
-  'validating',
-  'approved',
-  'merging',
-  'paused',
-  'killing',
-])('refuses archive in active state %s', async (status) => {
-  seed('active', status);
-  expect((await archive('active')).statusCode).toBe(409);
-  expect(repo.fleetArchives?.archivedAt('active')).toBeNull();
+it.each([
+  'archive',
+  'archive-handled-elsewhere',
+])('returns explicit retirement to older clients of %s without writing any archive or pod state', async (endpoint) => {
+  seed('ordinary', 'failed', 'local');
+  seed('legacy');
+  legacyArchive('legacy');
+  const all = () => [
+    db.prepare('SELECT * FROM pods ORDER BY id').all(),
+    db.prepare('SELECT * FROM pod_fleet_archives ORDER BY pod_id').all(),
+  ];
+  const before = all();
+  for (const id of ['ordinary', 'legacy', 'missing']) {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/pods/${id}/${endpoint}`,
+      payload: { reason: 'Older client requested visibility only', retainResources: true },
+    });
+    expect(response.statusCode).toBe(410);
+    expect(response.json()).toMatchObject({ code: 'FLEET_ARCHIVE_RETIRED' });
+  }
+  expect(all()).toEqual(before);
+  expect(cleanup).not.toHaveBeenCalled();
+  expect((await app.inject('/pods?archive=garbage')).statusCode).toBe(400);
 });
 
-it('requires explicit resource-retention acknowledgement and a meaningful human reason', async () => {
-  seed('retained');
-  for (const payload of [
-    { reason: 'x', retainResources: true },
-    { reason: 'Meaningful operator reason' },
-    { reason: 'Meaningful operator reason', retainResources: false },
-  ]) {
-    expect(
-      (await app.inject({ method: 'POST', url: '/pods/retained/archive', payload })).statusCode,
-    ).toBe(400);
-  }
-  expect((await archive('missing')).statusCode).toBe(404);
-  expect((await app.inject('/pods?archive=garbage')).statusCode).toBe(400);
-  expect(repo.fleetArchives?.archivedAt('retained')).toBeNull();
+it('projects actual retained Docker custody independently of failed status', async () => {
+  seed('ordinary', 'failed', 'local');
+  seed('retained', 'failed', 'local');
+  seed('sandbox', 'failed');
+  db.prepare(`INSERT INTO retained_checkpoint_recoveries (
+    id,pod_id,task_id,generation,container_id,resource_key,worktree_path,request_hash,
+    actor,reason,binding,original_evidence,created_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'checkpoint',
+    'retained',
+    'fixture-task',
+    1,
+    'original-id',
+    'fixture-key',
+    '/retained/retained',
+    'request-hash',
+    '{}',
+    'Legacy held recovery',
+    '{}',
+    '{}',
+    '2026-11-01T00:00:00Z',
+  );
+  expect((await app.inject('/pods/retained')).json()).toMatchObject({
+    retainedDockerCustody: true,
+  });
+  expect((await app.inject('/pods/ordinary')).json()).toMatchObject({
+    retainedDockerCustody: false,
+  });
+  expect((await app.inject('/pods?compact=true')).json()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: 'ordinary', status: 'failed', retainedDockerCustody: false }),
+      expect.objectContaining({ id: 'retained', status: 'failed', retainedDockerCustody: true }),
+      expect.objectContaining({ id: 'sandbox', status: 'failed', retainedDockerCustody: false }),
+    ]),
+  );
 });

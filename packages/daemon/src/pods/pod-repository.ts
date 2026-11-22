@@ -830,9 +830,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
     };
   };
   const fleetArchives = createFleetArchiveRepository(db);
+  const retainedDockerCustody = db.prepare(
+    'SELECT 1 FROM retained_checkpoint_recoveries WHERE pod_id = ? LIMIT 1',
+  );
   const withFleetArchive = (pod: Pod): Pod => ({
     ...readinessProjection(pod),
     fleetArchivedAt: fleetArchives.archivedAt(pod.id),
+    retainedDockerCustody:
+      pod.executionTarget === 'local' && Boolean(retainedDockerCustody.get(pod.id)),
   });
   const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
   const rowToDisplaySession = (row: Record<string, unknown>) =>

@@ -76,6 +76,19 @@ import Testing
     #expect(f.requests.isEmpty && f.observations.isEmpty)
   }
 
+  @Test(arguments: [false, nil] as [Bool?])
+  func ordinaryOrOlderDaemonFailedDockerKeepsDeleteWithoutRetainedRouting(custody: Bool?) async throws {
+    let f = CleanupUIFixture(); defer { f.clean() }
+    var pod = f.pod; pod.retainedDockerCustody = custody
+    #expect(!pod.usesRetainedDockerControls)
+    let host = LaunchComposerHost(SessionCardFinal(pod: pod, actions: f.podActions, density: .detailed)
+      .environment(\.desktopRedesign, false), width: 485)
+    defer { host.close() }
+    try await host.wait { host.enabled("pod-control-delete-\(pod.id)") }
+    #expect(!host.has("pod-control-cleanup-retained-\(pod.id)"))
+    #expect(f.inspections.isEmpty && f.requests.isEmpty)
+  }
+
   @Test func staleAndUncertainRequestsAreNotReplacedOrSentOnCardAndConnectionChanges() async throws {
     let f = CleanupUIFixture(); defer { f.clean() }
     let actions = f.actions()
@@ -140,6 +153,7 @@ import Testing
     var value = Pod(id: "retained-task", status: .failed, hasWorktree: true, branch: "fixture/failed",
       profileName: "Isolated Docker", model: "fixture", startedAt: .now)
     value.executionTarget = "local"
+    value.retainedDockerCustody = true
     return value
   }
   var podActions: PodActions {

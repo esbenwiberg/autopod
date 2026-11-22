@@ -19,7 +19,6 @@ let db: ReturnType<typeof createTestDb>;
 let repo: ReturnType<typeof createPodRepository>;
 let app: FastifyInstance;
 const effects = vi.fn();
-let actorId = 'human';
 const input: HandledElsewhereArchiveRequest = {
   expectedGeneration: 1,
   expectedStatus: 'validated',
@@ -62,22 +61,17 @@ function retainedTables() {
     ]),
   );
 }
-const archive = (id: string, body: unknown = input) =>
-  app.inject({
-    method: 'POST',
-    url: `/pods/${id}/archive-handled-elsewhere`,
-    payload: body as Record<string, unknown>,
-  });
+const seedLegacyArchive = (id: string, body = input) =>
+  repo.fleetArchives!.archiveHandledElsewhere(id, 'human', body);
 beforeEach(async () => {
   db = createTestDb();
   insertTestProfile(db, { name: 'test' });
   repo = createPodRepository(db);
   effects.mockReset();
   vi.mocked(access).mockReset().mockResolvedValue(undefined);
-  actorId = 'human';
   app = Fastify();
   app.addHook('preHandler', async (request) => {
-    request.user = { oid: actorId, name: 'Operator' } as typeof request.user;
+    request.user = { oid: 'human', name: 'Operator' } as typeof request.user;
   });
   app.setErrorHandler((error, _request, reply) => {
     const e = error as Error & { statusCode?: number };
@@ -104,44 +98,13 @@ afterEach(async () => {
   db.close();
 });
 
-it('keeps ordinary archive restrictive and requires a separate explicit visibility action', async () => {
-  seed('delivered');
-  expect(
-    (
-      await app.inject({
-        method: 'POST',
-        url: '/pods/delivered/archive',
-        payload: { reason: input.reason, retainResources: true },
-      })
-    ).statusCode,
-  ).toBe(409);
-  for (const body of [
-    { ...input, acknowledgement: undefined },
-    { ...input, retainResources: false },
-    { ...input, force: true },
-    { ...input, reference: ['https://user', 'secret@example.com/pr/1'].join(':') },
-  ]) {
-    expect((await archive('delivered', body)).statusCode).toBe(400);
-    expect(repo.fleetArchives!.archivedAt('delivered')).toBeNull();
-  }
-  expect((await archive('delivered')).statusCode).toBe(200);
-  expect(effects).not.toHaveBeenCalled();
-});
-
-it('requires an authenticated actor before accepting a visibility disposition', async () => {
-  seed('unauthenticated');
-  actorId = '';
-  expect((await archive('unauthenticated')).statusCode).toBe(401);
-  expect(repo.fleetArchives!.archivedAt('unauthenticated')).toBeNull();
-});
-
 it('archives missing-receipt external delivery without altering ANY native evidence table', async () => {
   seed('delivered');
   repo.update('delivered', {
     failureReason: 'Confirmed source publication unavailable; resources retained',
   });
   const before = retainedTables();
-  expect((await archive('delivered')).statusCode).toBe(200);
+  seedLegacyArchive('delivered');
   expect(retainedTables()).toEqual(before);
   expect(repo.getOrThrow('delivered')).toMatchObject({
     status: 'validated',
@@ -176,18 +139,7 @@ it('retains a paused unknown worker and restores visibility without resuming or 
   });
   const before = retainedTables();
   expect(repo.taskExecutions!.hasActiveRun('paused')).toBe(true);
-  expect((await archive('paused', { ...input, expectedStatus: 'paused' })).statusCode).toBe(200);
-  const audit = db.prepare('SELECT * FROM pod_fleet_archives').get();
-  expect(
-    (
-      await archive('paused', {
-        ...input,
-        expectedStatus: 'paused',
-        reason: 'Repeated input cannot replace the original disposition',
-      })
-    ).statusCode,
-  ).toBe(200);
-  expect(db.prepare('SELECT * FROM pod_fleet_archives').get()).toEqual(audit);
+  seedLegacyArchive('paused', { ...input, expectedStatus: 'paused' });
   expect((await app.inject({ method: 'DELETE', url: '/pods/paused/archive' })).statusCode).toBe(
     200,
   );
@@ -199,36 +151,6 @@ it('retains a paused unknown worker and restores visibility without resuming or 
   expect(retainedTables()).toEqual(before);
   expect(repo.taskExecutions!.hasActiveRun('paused')).toBe(true);
   expect(effects).not.toHaveBeenCalled();
-});
-
-it('rejects stale state/generation and nonmanual/interactive pauses before visibility changes', async () => {
-  seed('stale');
-  for (const body of [
-    { ...input, expectedGeneration: 2 },
-    { ...input, expectedStatus: 'paused' },
-  ])
-    expect((await archive('stale', body)).statusCode).toBe(409);
-  seed('budget', 'paused');
-  repo.update('budget', { pauseReason: 'budget' });
-  expect((await archive('budget', { ...input, expectedStatus: 'paused' })).statusCode).toBe(409);
-  seed('interactive');
-  db.prepare("UPDATE pods SET agent_mode='interactive' WHERE id='interactive'").run();
-  expect((await archive('interactive')).statusCode).toBe(409);
-  for (const status of ['queued', 'running', 'validating', 'approved', 'merging']) {
-    expect((await archive('stale', { ...input, expectedStatus: status })).statusCode).toBe(400);
-  }
-  seed('native-goal');
-  db.prepare(`INSERT INTO pod_goals (pod_id,objective,state,runtime,created_at,updated_at)
-    VALUES (?,?,?,?,?,?)`).run(
-    'native-goal',
-    'Retained native goal',
-    'blocked',
-    'codex',
-    new Date().toISOString(),
-    new Date().toISOString(),
-  );
-  expect((await archive('native-goal')).statusCode).toBe(409);
-  expect(repo.fleetArchives!.archivedAt('stale')).toBeNull();
 });
 
 it.each([
@@ -268,7 +190,7 @@ it.each([
   seed('race', 'running', target);
   const dispose = async () => {
     repo.update('race', { status: 'paused', pauseReason: 'manual' });
-    expect((await archive('race', { ...input, expectedStatus: 'paused' })).statusCode).toBe(200);
+    seedLegacyArchive('race', { ...input, expectedStatus: 'paused' });
   };
   const getStatus = vi.fn(async () => {
     await dispose();

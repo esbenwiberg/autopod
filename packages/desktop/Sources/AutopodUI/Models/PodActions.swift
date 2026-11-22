@@ -80,7 +80,6 @@ public struct PodActions: Sendable {
   public var extendAttempts: @MainActor @Sendable (String, Int) async -> Void
   public var extendPrAttempts: @MainActor @Sendable (String, Int) async -> Void
   public var fork: @MainActor @Sendable (String) async -> String?
-  public var archive: @MainActor @Sendable (String, String) async -> Void
   public var unarchive: @MainActor @Sendable (String) async -> Void
   public var delete: @MainActor @Sendable (String) async -> Void
   public var deleteSeries: @MainActor @Sendable (String) async -> Void
@@ -179,7 +178,6 @@ public struct PodActions: Sendable {
     extendAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
     extendPrAttempts: @escaping @MainActor @Sendable (String, Int) async -> Void = { _, _ in },
     fork: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
-    archive: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
     unarchive: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     delete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     deleteSeries: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -240,7 +238,6 @@ public struct PodActions: Sendable {
     self.extendAttempts = extendAttempts
     self.extendPrAttempts = extendPrAttempts
     self.fork = fork
-    self.archive = archive
     self.unarchive = unarchive
     self.delete = delete
     self.deleteSeries = deleteSeries

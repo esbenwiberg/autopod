@@ -12,7 +12,6 @@ import type {
   DispatchPreflightEvidence,
   EffectiveLaunchConfig,
   ExecutionProvenance,
-  HandledElsewhereArchiveRequest,
   IssueWatcherBinding,
   IssueWatcherBindingPayload,
   LaunchRequest,
@@ -496,27 +495,6 @@ export class AutopodClient {
     input: import('@autopod/shared').SavedWorkDraftConfirm,
   ): Promise<import('@autopod/shared').SavedWorkDraftOperation> {
     return this.request('POST', `/pods/${encodeURIComponent(id)}/saved-work-draft/confirm`, input);
-  }
-
-  async archivePod(
-    id: string,
-    reason: string,
-  ): Promise<{ fleetArchivedAt: string; retainedResources: true }> {
-    return this.request('POST', `/pods/${encodeURIComponent(id)}/archive`, {
-      reason,
-      retainResources: true,
-    });
-  }
-
-  async archivePodHandledElsewhere(
-    id: string,
-    request: HandledElsewhereArchiveRequest,
-  ): Promise<{ fleetArchivedAt: string; retainedResources: true }> {
-    return this.request(
-      'POST',
-      `/pods/${encodeURIComponent(id)}/archive-handled-elsewhere`,
-      request,
-    );
   }
 
   async unarchivePod(id: string): Promise<{ fleetArchivedAt: null; retainedResources: true }> {

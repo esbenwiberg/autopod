@@ -952,10 +952,11 @@ public struct Pod: Identifiable, Sendable {
     public var executionRecoveryNote: String? = nil
     public var executionTarget: String? = nil
 
-    /// Routing only. Fleet rows do not convey exact retained custody or deletion eligibility.
+    /// Positive server-side custody, not a deletion eligibility check. Older daemons
+    /// omit it; keep their ordinary explicit controls and let the daemon guard them.
+    public var retainedDockerCustody: Bool? = nil
     public var usesRetainedDockerControls: Bool {
-        guard !isWorkspace, executionTarget == "local" else { return false }
-        return [.failed, .reviewRequired, .killing].contains(status) || (status == .killed && hasWorktree)
+        !isWorkspace && executionTarget == "local" && retainedDockerCustody == true
     }
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
