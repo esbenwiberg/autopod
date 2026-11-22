@@ -114,7 +114,18 @@ public struct TaskExecutionSummary: Codable, Equatable, Sendable {
   public let recordedUnclassifiedTokens: Int?
   public let recordedTotalTokens: Int?
   public let budgetCountedTokens: Int?
+  /// Cache reads (a subset of input). Absent from older daemon responses.
+  public let recordedCachedInputTokens: Int?
   public var tokensCountedForBudget: Int { budgetCountedTokens ?? totalRecordedTokens }
+  /// Raw total and cache reads beside the budget-counted figure, mirroring
+  /// `describeTaskBudgetUsage` in `@autopod/shared`. Nil when nothing is discounted.
+  public var budgetUsageDetail: String? {
+    guard budgetCountedTokens != nil, let reads = recordedCachedInputTokens, reads > 0 else {
+      return nil
+    }
+    return
+      "\(totalRecordedTokens.formatted()) recorded incl. \(reads.formatted()) cache reads at 0.1×"
+  }
   public var totalRecordedTokens: Int {
     recordedTotalTokens ?? (recordedInputTokens + recordedOutputTokens + (recordedUnclassifiedTokens ?? 0))
   }

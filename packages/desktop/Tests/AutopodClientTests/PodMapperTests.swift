@@ -30,6 +30,67 @@ import AutopodUI
   #expect(response.factDeviations?.first?.action == "waive")
 }
 
+@Test func mapsBudgetPauseReason() throws {
+  let json = """
+  {
+    "id": "feat-oauth-a1b2",
+    "profileName": "profile-uuid",
+    "profileDisplay": { "id": "profile-uuid", "name": "Works Claude", "state": "active" },
+    "task": "Add OAuth login",
+    "status": "paused",
+    "pauseReason": "budget",
+    "lastRecoveryTrigger": "restart",
+    "lastCorrectionMessage": "Recovery paused: task execution ownership remains unresolved.",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/oauth",
+    "containerId": "abc123",
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": "2026-04-01T09:00:35Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 5,
+    "linesAdded": 89,
+    "linesRemoved": 12,
+    "previewUrl": "http://localhost:3001",
+    "prUrl": null,
+    "plan": { "summary": "Add OAuth flow", "steps": ["Setup", "Implement"] },
+    "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "advisoryBrowserQaEnabled": true,
+      "promotable": false
+    },
+    "baseBranch": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 15000,
+    "outputTokens": 3000,
+    "costUsd": 0.42,
+    "commitCount": 2,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let pod = PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: json))
+  #expect(pod.status == .paused)
+  #expect(pod.pauseReason == "budget")
+}
+
 @Test func mapsRunningSession() throws {
   let json = """
   {

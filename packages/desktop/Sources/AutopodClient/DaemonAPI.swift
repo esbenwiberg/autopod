@@ -770,6 +770,12 @@ public actor DaemonAPI {
     try await request("POST", "/pods/\(id)/budget", body: encode(input))
   }
 
+  /// Approve one soft token-budget extension for a pod paused on its token budget
+  /// (the CLI's `ap budget <pod> <n> --continue`). Validation continues in the background.
+  public func continueBudget(_ id: String) async throws -> BudgetContinuationResponse {
+    try await request("POST", "/pods/\(id)/continue-budget")
+  }
+
   /// GET /pods/scores — persisted quality-score leaderboard.
   public func listQualityScores(
     runtime: String? = nil,

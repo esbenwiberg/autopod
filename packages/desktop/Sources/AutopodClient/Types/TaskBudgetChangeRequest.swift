@@ -18,3 +18,24 @@ public struct TaskBudgetChangeRequest: Encodable, Equatable, Sendable {
     try container.encode(expectedBudget, forKey: .expectedBudget)
   }
 }
+
+/// Response to POST /pods/:id/continue-budget (mirrors `BudgetContinuationResponse`).
+public struct BudgetContinuationResponse: Codable, Equatable, Sendable {
+  public let ok: Bool
+  public let action: String
+  public let budgetExtensionsUsed: Int
+  public let maxBudgetExtensions: Int?
+  /// `started`: approval is recorded and validation runs in the background.
+  public let validation: String
+
+  public init(
+    ok: Bool = true, action: String = "continue-budget", budgetExtensionsUsed: Int,
+    maxBudgetExtensions: Int?, validation: String = "started"
+  ) {
+    self.ok = ok
+    self.action = action
+    self.budgetExtensionsUsed = budgetExtensionsUsed
+    self.maxBudgetExtensions = maxBudgetExtensions
+    self.validation = validation
+  }
+}

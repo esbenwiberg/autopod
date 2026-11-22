@@ -39,6 +39,9 @@ struct TaskBudgetControls: View {
           "\(snapshot.tokensCountedForBudget.formatted()) budget-counted tokens / \(snapshot.tokenBudget?.formatted() ?? "no limit")"
         )
         .monospacedDigit().accessibilityIdentifier("task-budget-usage")
+        if let detail = snapshot.budgetUsageDetail {
+          Text(detail).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        }
         Text(
           "Shared across \(snapshot.podCount) pod(s), including linked repairs. Root: \(snapshot.rootPodId)"
         )

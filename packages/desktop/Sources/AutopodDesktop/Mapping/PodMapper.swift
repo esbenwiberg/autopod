@@ -604,6 +604,7 @@ public enum PodMapper {
       reason: response.failureReason, validationTitle: failureTitle(response)
     )
     result.skipValidation = response.skipValidation
+    result.pauseReason = response.pauseReason
     result.executionTarget = response.executionTarget
     result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
