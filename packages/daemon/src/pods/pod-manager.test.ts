@@ -6127,6 +6127,11 @@ describe('PodManager', () => {
       .mock.calls.map(([, command]) => command.join(' '))
       .filter((script) => script.includes('# autopod: provider failover handoff'));
     expect(handoffGuardScripts).toHaveLength(2);
+    for (const script of handoffGuardScripts) {
+      expect(script).toContain("grep -qFx '/.autopod/provider-failover.md'");
+      expect(script).toContain('GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null');
+      expect(script).toContain('core.excludesFile=/dev/null');
+    }
     expect(handoffGuardScripts[0]).toContain(
       'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
     );

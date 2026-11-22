@@ -24,6 +24,7 @@ describe('authenticated durable source recovery API', () => {
       adoptSource: s.controller.submit,
       getSourceAdoptions: s.controller.list,
       getApprovalSourceRewrite: inspectRewrite,
+      getSession: (id) => s.f.podRepo.getOrThrow(id),
     });
     await app.ready();
   });
@@ -61,6 +62,21 @@ describe('authenticated durable source recovery API', () => {
     },
     INTEGRATION_TEST_TIMEOUT_MS,
   );
+  it('points to rework when dirty source stopped validation before admission', async () => {
+    s.f.podRepo.update(s.podId, {
+      status: 'review_required',
+      failureReason: 'Review source has uncommitted files (untracked: 1 path under thoughts/).',
+    });
+    const before = s.f.db.prepare('SELECT total_changes() AS n').get();
+    const response = await app.inject({ method: 'GET', url: url(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      operations: [],
+      recoveryHint: expect.stringContaining(`ap rework ${s.podId}`),
+    });
+    expect(s.f.db.prepare('SELECT total_changes() AS n').get()).toEqual(before);
+    expect(s.cm.execStreaming).not.toHaveBeenCalled();
+  });
   it('includes bounded read-only approval rewrite state without resource mutation', async () => {
     const state: NonNullable<SourceAdoptionList['approvalRewrite']> = {
       id: 'rewrite-once',

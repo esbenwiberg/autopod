@@ -1,5 +1,6 @@
 import type { Pod } from '@autopod/shared';
 import { processContent } from '@autopod/shared';
+import { isAutoCommitIgnoreReason } from '../worktrees/source-adoption-git.js';
 import { formatFeedback } from './feedback-formatter.js';
 import { isReviewSourceDirtyReason } from './validation-review-source.js';
 
@@ -29,6 +30,8 @@ export function buildManualReworkReason(
         : pod.status === 'killed'
           ? 'Your previous pod was killed. Start the task fresh.'
           : 'Your previous work needs revision. Review and improve it.';
+
+  if (isAutoCommitIgnoreReason(pod.failureReason)) return pod.failureReason;
 
   if (pod.lastValidationResult?.overall === 'fail') {
     const feedback = formatFeedback({

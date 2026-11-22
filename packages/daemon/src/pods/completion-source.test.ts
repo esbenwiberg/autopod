@@ -146,8 +146,8 @@ async function fixture(executionTarget: Pod['executionTarget'] = 'local') {
       repo.update(id, { worktreeCompromised: true });
       return true;
     }),
-    transition: vi.fn((pod: Pod, to: 'failed') => {
-      repo.update(pod.id, { status: to });
+    transition: vi.fn((pod: Pod, to: 'failed', updates?: Partial<Pod>) => {
+      repo.update(pod.id, { ...updates, status: to });
       return repo.getOrThrow(pod.id);
     }),
     executionForPod: vi.fn(() => profile),
@@ -187,6 +187,29 @@ async function fixture(executionTarget: Pod['executionTarget'] = 'local') {
 }
 
 describe('completion source material boundary', () => {
+  it('retains unstaged files and refuses the no-changes path on an ignore mismatch', async () => {
+    const f = await fixture();
+    try {
+      const ignore = path.join(f.root, 'private-ignore');
+      await writeFile(ignore, 'private.md\n');
+      await git(f.source, ['config', 'core.excludesFile', ignore]);
+      await writeFile(path.join(f.source, 'private.md'), 'scratch');
+      await writeFile(path.join(f.source, 'feature.txt'), 'pending feature');
+      expect(await f.prepare()).toBeUndefined();
+      expect(f.worktreeManager.getDiffStats).not.toHaveBeenCalled();
+      expect(f.dependencies.recoverWorktreeFromContainer).not.toHaveBeenCalled();
+      expect(f.repo.getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        failureReason: expect.stringContaining('machine-local Git excludes disagree'),
+        worktreeCompromised: false,
+      });
+      expect(await git(f.source, ['rev-parse', 'HEAD'])).toBe(f.base);
+      expect(await git(f.source, ['diff', '--cached', '--name-only'])).toBe('');
+    } finally {
+      await f.close();
+    }
+  });
+
   it('runs real staging, heuristic auto-commit and base-scoped diff, persisting stats across reopen', async () => {
     const f = await fixture();
     try {
