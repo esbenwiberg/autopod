@@ -210,6 +210,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       const source = await resolvePodId(client, id);
       if (!opts.reason.trim()) throw new Error('Intentional rerun requires a human reason');
       const template = await client.getRerunTemplate(source);
+      // The daemon keeps the requested output branch unless another unfinished pod holds it.
+      const requestedBranch = await client
+        .getPodLaunchConfiguration(source)
+        .then((config) => config.work?.branch)
+        .catch(() => undefined);
       const request = {
         ...template,
         requestId: opts.requestKey,
@@ -227,11 +232,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         `Rerun request saved: ${receipt}. Retry with ap run --config ${JSON.stringify(receipt)}`,
       );
       const pod = await client.launchPod(request);
-      withJsonOutput(opts, pod, (value) =>
+      withJsonOutput(opts, pod, (value) => {
         console.log(
-          `Distinct task ${value.id}: ${value.status}. Inspect dispatch-preflight and status for the outcome.`,
-        ),
-      );
+          `Distinct task ${value.id}: ${value.status} on branch ${value.branch}. Inspect dispatch-preflight and status for the outcome.`,
+        );
+        if (requestedBranch && value.branch !== requestedBranch)
+          console.log(
+            `Requested branch '${requestedBranch}' is in use by another unfinished pod (or is the base branch); the rerun uses '${value.branch}'.`,
+          );
+      });
     });
   program
     .command('dispatch-preflight <id>')
