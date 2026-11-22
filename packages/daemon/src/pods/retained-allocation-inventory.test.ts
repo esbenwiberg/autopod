@@ -3,13 +3,13 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockerContainerManager } from '../containers/docker-container-manager.js';
 import { DockerNetworkManager, networkNameForPod } from '../containers/docker-network-manager.js';
-import { registerRetainedPathFunctions } from '../db/retained-path-functions.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import {
   createMigratedTestDb,
   createTestDb,
@@ -69,9 +69,8 @@ async function openFileDb(location: string, template?: Database.Database) {
       template.close();
     }
   }
-  const db = new Database(location);
-  registerRetainedPathFunctions(db);
-  db.pragma('foreign_keys = ON');
+  // Production connection policy (WAL, foreign keys, retained path functions); see disk-database.ts.
+  const db = openTestDiskDatabase(location);
   databases.push(db);
   return db;
 }

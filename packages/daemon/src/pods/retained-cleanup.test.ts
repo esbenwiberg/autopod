@@ -1,14 +1,13 @@
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ALLOCATION_LABEL } from '../containers/docker-allocation-evidence.js';
 import { networkNameForPod } from '../containers/docker-network-manager.js';
 import { createRetainedCleanupDocker } from '../containers/retained-cleanup-docker.js';
 import { retainedNetworkReleaseScope } from '../containers/retained-network-release.js';
-import { registerRetainedPathFunctions } from '../db/retained-path-functions.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestContext, createTestDb } from '../test-utils/mock-helpers.js';
 import { fixtureGit, retainedCleanupFixture } from '../test-utils/retained-cleanup-fixture.js';
 import { createRetainedCleanupHost } from '../worktrees/retained-cleanup-host.js';
@@ -35,9 +34,8 @@ async function fixture() {
   await seed.backup(config);
   seed.close();
   function reopen() {
-    const db = new Database(config);
-    registerRetainedPathFunctions(db);
-    db.pragma('foreign_keys=ON');
+    // Production connection policy (WAL, foreign keys, retained path functions); see disk-database.ts.
+    const db = openTestDiskDatabase(config);
     onClose.push(() => {
       if (db.open) db.close();
     });

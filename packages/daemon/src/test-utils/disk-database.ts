@@ -9,6 +9,26 @@ import { logger } from './mock-helpers.js';
 export const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
 
 /**
+ * Ascending schema versions of the `.sql` migrations in `dir`, read from the files themselves.
+ * Upgrade tests derive the expected latest version (and expected applied tails) from this rather
+ * than hardcoding the current tip, so adding the next migration does not break them.
+ */
+export function migrationVersions(dir: string = MIGRATIONS_DIR): number[] {
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .map((name) => Number.parseInt(name, 10))
+    .sort((a, b) => a - b);
+}
+
+/** Highest schema version in `dir`: what a full upgrade must leave as `MAX(version)`. */
+export function latestMigrationVersion(dir: string = MIGRATIONS_DIR): number {
+  const versions = migrationVersions(dir);
+  const latest = versions.at(-1);
+  if (latest === undefined) throw new Error(`No migrations in ${dir}`);
+  return latest;
+}
+
+/**
  * Opens an on-disk test database with the daemon's production connection policy: WAL,
  * synchronous=NORMAL, busy timeout and foreign keys (`createDatabase`).
  *

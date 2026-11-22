@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pino from 'pino';
 import { expect, it } from 'vitest';
+import { latestMigrationVersion } from '../test-utils/disk-database.js';
 import { createDatabase } from './connection.js';
 import { runMigrations } from './migrate.js';
 
@@ -26,7 +27,9 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     runMigrations(db, old, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 245 });
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 272 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({
+      v: latestMigrationVersion(migrations),
+    });
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_operations').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM saved_work_draft_pr_preparation_cancellations').all()).toEqual(
       [],
