@@ -45,7 +45,10 @@ import {
   workerBindingHash,
 } from './worker-retry-history.js';
 import { createWorkspaceFileObserver } from './workspace-file-observer.js';
-import { PROVIDER_ACCOUNT_UNAVAILABLE } from './zero-work-failure.js';
+import {
+  assessPreUsageProviderRefusal,
+  PROVIDER_ACCOUNT_UNAVAILABLE,
+} from './zero-work-failure.js';
 
 export function createAgentEventConsumption(
   deps: Pick<
@@ -279,10 +282,51 @@ export function createAgentEventConsumption(
     let terminalClassification: ProviderFailureClassification | null = null;
     let executionTerminationUnverified = false;
     let workerEventObserved = false;
+    // Any runtime event besides status or the fatal error itself (including usage
+    // checkpoints) means this run may have consumed model tokens (#646).
+    let modelWorkObserved = false;
+    let usageIncompleteObserved = false;
     let providerRetryNotBefore: string | null = null;
     const retainUnverifiedTermination = () => {
       executionTerminationUnverified = true;
       if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
+    };
+    /**
+     * A provider refusal that ended this pod's only run before any model output
+     * provably consumed no tokens: settle it as measured zero so the configured
+     * failover is admitted by the task ledger instead of failing at spawn (#646).
+     * Anything uncertain keeps the partial accuracy and its budget block.
+     */
+    const settlePreUsageRefusal = (classification: ProviderFailureClassification): void => {
+      if (modelWorkObserved || usageIncompleteObserved || executionTerminationUnverified) return;
+      const pod = podRepo.getOrThrow(podId);
+      const taskRunCount = podRepo.taskExecutions?.podRunCount?.(podId);
+      if (taskRunCount === undefined) return;
+      const assessment = assessPreUsageProviderRefusal(pod, classification, {
+        taskRunCount,
+        eventRepo: deps.eventRepo,
+        providerAttemptRepo: deps.providerAttemptRepo,
+      });
+      if (!assessment.qualifies) {
+        logger.info(
+          { podId, reason: assessment.reason },
+          'Provider refusal token accounting left unsettled',
+        );
+        return;
+      }
+      podRepo.update(podId, {
+        tokenTelemetryAccuracy: 'complete',
+        ...(pod.phaseTokenUsage === null && {
+          phaseTokenUsage: { [agentPhaseBucketKey(attempt)]: { inputTokens: 0, outputTokens: 0 } },
+        }),
+      });
+      const source = deps.providerAttemptRepo
+        ?.list(podId)
+        .findLast((candidate) => candidate.ordinal === runOwner.providerOrdinal);
+      emitActivityStatus(
+        podId,
+        `Provider refused ${source ? `attempt #${source.ordinal} (${source.runtime}/${source.model})` : 'the attempt'} before any model usage; recorded zero token usage.`,
+      );
     };
     try {
       if (!ownsRun()) {
@@ -345,6 +389,8 @@ export function createAgentEventConsumption(
       assertNoInfrastructureBlocker(podRepo, podId);
       for await (const event of events) {
         workerEventObserved = true;
+        if (event.type !== 'status' && event.type !== 'error') modelWorkObserved = true;
+        if (event.type === 'error' && event.usageIncomplete) usageIncompleteObserved = true;
         // Negative termination evidence belongs to this immutable run, even
         // when ordinary events are suppressed by pause or lifecycle replacement.
         if (event.type === 'error' && event.executionTermination === 'unverified')
@@ -836,6 +882,7 @@ export function createAgentEventConsumption(
                 PROVIDER_FAILOVER_HANDOFF_PATH,
                 runOwner.providerOrdinal,
               );
+              if (terminalClassification) settlePreUsageRefusal(terminalClassification);
               if (
                 terminalClassification &&
                 !podRepo.hasInfrastructureBlocker?.(podId) &&
@@ -855,14 +902,21 @@ export function createAgentEventConsumption(
                 PROVIDER_FAILOVER_HANDOFF_PATH,
                 runOwner.providerOrdinal,
               );
+              settlePreUsageRefusal(terminalClassification);
+              let continuation: Awaited<ReturnType<typeof handleProviderLimit>> = 'not_queued';
               if (
                 !podRepo.hasInfrastructureBlocker?.(podId) &&
                 !podRepo.retainedCoding?.isOwner(podId)
               )
-                await handleProviderLimit(podId, terminalClassification);
+                continuation = await handleProviderLimit(podId, terminalClassification);
               // No continuation was queued: an account refusal has no reset to wait for.
+              // A budget-accounting block stays paused so the owner can reconcile and continue.
               const settled = podRepo.getOrThrow(podId);
-              if (settled.status === 'paused' && settled.pauseReason === 'provider_limit')
+              if (
+                continuation !== 'budget_blocked' &&
+                settled.status === 'paused' &&
+                settled.pauseReason === 'provider_limit'
+              )
                 transition(settled, 'failed', {
                   completedAt: new Date().toISOString(),
                   pauseReason: null,

@@ -7,6 +7,7 @@ import { createProviderAccountHealthStore } from '../provider-accounts/provider-
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { classifyProviderError } from '../runtimes/provider-error-classifier.js';
 import { createTestContext } from '../test-utils/mock-helpers.js';
+import { createEventRepository } from './event-repository.js';
 import { createPodManager } from './pod-manager.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 
@@ -17,10 +18,11 @@ afterEach(() => {
 });
 
 /** Real SQLite pod manager with legacy profile failover: source → dead → target. */
-function fixture(targets: string[]) {
+function fixture(targets: string[], options: { tokenBudget?: number } = {}) {
   const ctx = createTestContext();
   const attempts = createProviderAttemptRepository(ctx.db);
   ctx.deps.providerAttemptRepo = attempts;
+  ctx.deps.eventRepo = createEventRepository(ctx.db);
   const accounts = createProviderAccountStore(ctx.db);
   accounts.create({
     id: 'source',
@@ -72,11 +74,13 @@ function fixture(targets: string[]) {
     status: 'running',
     worktreePath,
     containerId: 'source-container',
+    ...(options.tokenBudget !== undefined && { tokenBudget: options.tokenBudget }),
   });
-  const refuse = () =>
+  const refuse = (before: AgentEvent[] = []) =>
     manager.consumeAgentEvents(
       pod.id,
       (async function* (): AsyncIterable<AgentEvent> {
+        yield* before;
         yield {
           type: 'error',
           timestamp: new Date().toISOString(),
@@ -90,6 +94,102 @@ function fixture(targets: string[]) {
 }
 
 describe('provider account refusal failover', () => {
+  it('settles a zero-usage refusal so the budgeted failover run is admitted (#646)', async () => {
+    const f = fixture(['target'], { tokenBudget: 1_000_000 });
+
+    expect(await f.refuse()).toBe('paused');
+
+    const queued = f.manager.getSession(f.podId);
+    expect(queued).toMatchObject({
+      status: 'queued',
+      providerAccountIdSnapshot: 'target',
+      tokenTelemetryAccuracy: 'complete',
+      phaseTokenUsage: { agent_initial: { inputTokens: 0, outputTokens: 0 } },
+    });
+    expect(f.activity.join('\n')).toContain(
+      'Provider refused attempt #1 (claude/opus) before any model usage; recorded zero token usage.',
+    );
+    expect(f.ctx.podRepo.taskExecutions?.snapshot(f.podId).budgetCheck?.status).toBe(
+      'below_recorded_limit',
+    );
+
+    // The failover run starts after re-provisioning and is admitted by the ledger.
+    f.ctx.podRepo.update(f.podId, { status: 'running', containerId: 'target-container' });
+    const outcome = await f.manager.consumeAgentEvents(
+      f.podId,
+      (async function* (): AsyncIterable<AgentEvent> {
+        yield {
+          type: 'complete',
+          timestamp: new Date().toISOString(),
+          result: 'done',
+          totalInputTokens: 10,
+          totalOutputTokens: 5,
+        };
+      })(),
+    );
+    expect(outcome).toBe('completed');
+    expect(
+      f.ctx.db.prepare('SELECT outcome FROM task_agent_runs ORDER BY started_at, rowid').all(),
+    ).toEqual([{ outcome: 'paused' }, { outcome: 'completed' }]);
+    expect(f.attempts.list(f.podId)).toMatchObject([
+      { providerAccountId: 'source', outcome: 'failed' },
+      { providerAccountId: 'target', outcome: 'completed', inputTokens: 10, outputTokens: 5 },
+    ]);
+  });
+
+  it('blocks the failover before re-preparation when the refused attempt may have used tokens', async () => {
+    const f = fixture(['target'], { tokenBudget: 1_000_000 });
+
+    expect(
+      await f.refuse([
+        {
+          type: 'tool_use',
+          timestamp: new Date().toISOString(),
+          tool: 'Bash',
+          input: { command: 'ls' },
+        },
+      ]),
+    ).toBe('paused');
+
+    const parked = f.manager.getSession(f.podId);
+    expect(parked).toMatchObject({
+      status: 'paused',
+      pauseReason: 'provider_limit',
+      providerAccountIdSnapshot: 'source',
+      tokenTelemetryAccuracy: 'partial',
+    });
+    expect(parked.failureReason).toContain(
+      `Task token accounting incomplete for pod ${f.podId} provider attempt #1 (claude/opus, failed)`,
+    );
+    expect(parked.failureReason).toContain(`ap accept-unmeasured-usage ${f.podId}`);
+    // No target attempt opened and nothing requeued: no second preparation is spent.
+    expect(f.attempts.list(f.podId)).toHaveLength(1);
+    expect(f.ctx.deps.requeueSessionAfterCurrent).not.toHaveBeenCalled();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
+    expect(f.activity.join('\n')).not.toContain('recorded zero token usage');
+  });
+
+  it('keeps the budget block for a usage-incomplete refusal', async () => {
+    const f = fixture(['target'], { tokenBudget: 1_000_000 });
+
+    await f.refuse([
+      {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'usage conflict',
+        fatal: false,
+        usageIncomplete: true,
+      },
+    ]);
+
+    expect(f.manager.getSession(f.podId)).toMatchObject({
+      status: 'paused',
+      pauseReason: 'provider_limit',
+      tokenTelemetryAccuracy: 'partial',
+    });
+    expect(f.attempts.list(f.podId)).toHaveLength(1);
+  });
+
   it('continues on the next healthy account, skipping a known-unhealthy one with a receipt', async () => {
     const f = fixture(['dead', 'target']);
     f.health.recordFailure('dead', 'out_of_credits', 'Out of credits', 'earlier-pod');

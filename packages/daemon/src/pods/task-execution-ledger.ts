@@ -76,6 +76,8 @@ export interface TaskExecutionLedger
   snapshot(podId: string): TaskExecutionSummary;
   /** Unsettled durable evidence; not proof that a provider process is still alive. */
   hasActiveRun(podId: string): boolean;
+  /** Worker runs recorded for this pod alone (not the whole logical task). */
+  podRunCount?(podId: string): number;
   /** Positive settlement evidence for this exact lifecycle, cycle and recorded resource. */
   hasSettledRun?(
     pod: Pick<Pod, 'id' | 'lifecycleGeneration' | 'containerId' | 'executionTarget'>,
@@ -107,6 +109,40 @@ export function assertTaskExecutionTerminationVerified(
       'TASK_EXECUTION_TERMINATION_UNVERIFIED',
       409,
     );
+}
+
+/**
+ * Names the latest settled provider attempt of a pod whose agent telemetry is
+ * incomplete, so the owner can see which attempt blocks admission (#646).
+ */
+function describeIncompleteAttempt(db: Database.Database, podId: string): string {
+  const attempt = db
+    .prepare(`SELECT ordinal, runtime, model, outcome FROM retained_provider_attempts
+      WHERE pod_id = ? AND ended_at IS NOT NULL ORDER BY ordinal DESC LIMIT 1`)
+    .get(podId) as
+    | { ordinal: number; runtime: string; model: string; outcome: string | null }
+    | undefined;
+  if (!attempt) return `pod ${podId}`;
+  return `pod ${podId} provider attempt #${attempt.ordinal} (${attempt.runtime}/${attempt.model}, ${attempt.outcome ?? 'unsettled'})`;
+}
+
+/** Owner acceptances of unmeasured usage; absent before the receipt migration. */
+function readUnmeasuredUsageAcceptances(
+  db: Database.Database,
+  podId: string,
+): Array<{ ordinal: number }> {
+  if (
+    !db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'unmeasured_usage_acceptances'",
+      )
+      .get()
+  )
+    return [];
+  return db
+    .prepare(`SELECT provider_attempt_ordinal AS ordinal FROM unmeasured_usage_acceptances
+      WHERE pod_id = ? ORDER BY provider_attempt_ordinal`)
+    .all(podId) as Array<{ ordinal: number }>;
 }
 
 interface Membership {
@@ -192,6 +228,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     let recordedCostUsd = 0;
     const costEvidence = emptyCostEvidence();
     let incompleteSpending = false;
+    // Pods/attempts whose agent telemetry blocks admission, named in the block reason.
+    const incompleteAgentTelemetry = new Set<string>();
+    const nameIncompleteAgentTelemetry = (podId: string): void => {
+      incompleteSpending = true;
+      incompleteAgentTelemetry.add(describeIncompleteAttempt(db, podId));
+    };
     // Conversion/restore rehearsal reads the old schema before applying additive migrations.
     const launchColumn = db
       .prepare("SELECT 1 FROM pragma_table_info('retained_pods') WHERE name='launch_config_digest'")
@@ -306,8 +348,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         !composable?.goalObserved
       ) {
         diagnostics.push(`${row.id}: agent telemetry incomplete`);
-        if (priorWork) incompleteSpending = true;
+        if (priorWork) nameIncompleteAgentTelemetry(row.id);
       }
+      for (const accepted of readUnmeasuredUsageAcceptances(db, row.id))
+        diagnostics.push(
+          `${row.id}: provider attempt #${accepted.ordinal} usage accepted as unmeasured by pod owner`,
+        );
       // New configuration records all reviewer calls in their own durable ledger. Phase totals
       // are UI attribution of those same calls, and must not be added a second time.
       if (composable) continue;
@@ -319,7 +365,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       }
       if (!row.phase_token_usage) {
         diagnostics.push(`${row.id}: phase telemetry unavailable`);
-        if (priorWork) incompleteSpending = true;
+        if (priorWork) nameIncompleteAgentTelemetry(row.id);
         continue;
       }
       try {
@@ -492,8 +538,11 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           : incompleteSpending
             ? {
                 status: 'unavailable',
-                reason:
-                  'Task token accounting incomplete; reconcile prior execution and phase telemetry before starting more budgeted work.',
+                reason: `Task token accounting incomplete${
+                  incompleteAgentTelemetry.size > 0
+                    ? ` for ${[...incompleteAgentTelemetry].join('; ')}`
+                    : ''
+                }; reconcile prior execution and phase telemetry before starting more budgeted work.`,
               }
             : {
                 status: 'below_recorded_limit',
@@ -590,6 +639,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     }),
     register,
     snapshot,
+    podRunCount: (podId) =>
+      (
+        db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs WHERE pod_id = ?').get(podId) as {
+          count: number;
+        }
+      ).count,
     hasActiveRun: (podId) =>
       Boolean(
         db
