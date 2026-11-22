@@ -244,6 +244,40 @@ it('rehearses exactly 276 to 280 on a verified synthetic backup built from the r
   }
 });
 
+it.each([
+  273, 276,
+])('refuses the unpublished parent trial at schema %i before migration', async (version) => {
+  const root = mkdtempSync(path.join(tmpdir(), 'orch-unpublished-parent-'));
+  try {
+    const trial = path.join(root, 'trial-migrations');
+    mkdirSync(trial);
+    // Recreate the trial's exact SQL prefix, including its overlapping numbers.
+    for (const name of readdirSync(MIGRATIONS_DIR).filter((file) => file.endsWith('.sql'))) {
+      const n = Number.parseInt(name, 10);
+      const legacy = n >= 277 && n <= 280 && n - 4 <= version;
+      if (n <= 272 || legacy) {
+        const target = legacy ? `${n - 4}${name.slice(3)}` : name;
+        copyFileSync(path.join(MIGRATIONS_DIR, name), path.join(trial, target));
+      }
+    }
+    const db = createHistoricalDiskDatabase(path.join(root, 'trial.db'), [
+      { dir: trial, through: version },
+    ]);
+    try {
+      expect(db.prepare('SELECT max(version) FROM schema_version').pluck().get()).toBe(version);
+      const before = db.serialize();
+      await expect(runMigrationsWithBackups(db, MIGRATIONS_DIR, logger)).rejects.toThrow(
+        'Unpublished or mixed parent migration lineage',
+      );
+      expect(db.serialize().equals(before)).toBe(true);
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('refuses a populated pre-ownership database even when no custody bytes remain', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'pre-ownership-'));
   const db = createHistoricalDiskDatabase(path.join(root, 'partial.db'), [
