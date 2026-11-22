@@ -84,6 +84,28 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
   }
 }
 
+@MainActor @Test(arguments: [true, false, nil] as [Bool?])
+func confirmedDeleteRoutesOnlyRecordedDockerCustodyToRecovery(custody: Bool?) async throws {
+  try await withConfirmedActionFixture(initial: .failed) { fixture in
+    var pod = try #require(fixture.store.selectedSession)
+    pod.executionTarget = "local"
+    pod.retainedDockerCustody = custody
+    fixture.store.upsertSession(pod)
+    let task = fixture.start { await fixture.handler.actions.delete(fixture.id) }
+    if custody == true {
+      await task.value
+      #expect(fixture.peer.requests.isEmpty)
+      #expect(fixture.handler.lastError?.contains("Open Recovery") == true)
+      fixture.expectState(.failed)
+    } else {
+      try await fixture.next("DELETE").respond(status: 204, body: "")
+      await task.value
+      #expect(fixture.peer.requests.count == 1)
+      #expect(fixture.store.pods.isEmpty)
+    }
+  }
+}
+
 @MainActor @Test func confirmedActionFixtureSeparatesRecoveryObservation() async throws {
   try await withConfirmedActionFixture { fixture in
     let state = try await fixture.handler.actions.sandboxRecovery.load(fixture.id)
@@ -121,9 +143,10 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
 @MainActor
 func withConfirmedActionFixture(
   initial: PodStatus = .running,
+  journalRoot: URL? = nil,
   body: (ConfirmedActionFixture) async throws -> Void
 ) async throws {
-  let fixture = ConfirmedActionFixture(initial: initial)
+  let fixture = ConfirmedActionFixture(initial: initial, journalRoot: journalRoot)
   do {
     try await body(fixture)
     await fixture.dispose()
@@ -154,7 +177,7 @@ func withConfirmedActionFixture(
   private var disposed = false
   private let startedAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120))
 
-  init(initial: PodStatus) {
+  init(initial: PodStatus, journalRoot: URL? = nil) {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [ConfirmedActionProtocol.self]
     session = URLSession(configuration: configuration)
@@ -166,7 +189,7 @@ func withConfirmedActionFixture(
     pod.updatedAt = Date(timeIntervalSince1970: 0)
     store.upsertSession(pod)
     store.selectedSessionId = id
-    handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore())
+    handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore(), journalRoot: journalRoot)
     ConfirmedActionRegistry.shared.add(peer)
   }
 

@@ -365,6 +365,25 @@ export function createProvisioningWorkspace(
     });
     assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
+    const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
+    const allocation = podRepo.retainedAllocations?.scope(
+      podId,
+      checkpoint?.activated?.generation === pod.lifecycleGeneration ? checkpoint.id : null,
+    );
+    const localAllocation = pod.executionTarget === 'local' ? allocation : undefined;
+    if (
+      allocation &&
+      (!localAllocation ||
+        pod.options.agentMode !== 'auto' ||
+        !['branch', 'pr'].includes(pod.options.output ?? 'pr') ||
+        pod.requireSidecars.length > 0 ||
+        (launchConfig?.requiredSidecarIds.length ?? 0) > 0 ||
+        pod.linkedPodId)
+    )
+      allocation
+        .begin('unsupported', 'provisioning')
+        .refuse('unverified', 'unsupported-provisioning-topology');
+
     // Worktree is optional — artifact-mode profiles may have no repoUrl.
     let worktreePath: string | null = null;
     let bareRepoPath: string | null = null;
@@ -434,6 +453,7 @@ export function createProvisioningWorkspace(
           startBranch: pod.startBranch ?? undefined,
           pat: await resolveGitCredential(profile),
           sessionId: pod.id,
+          ...(localAllocation ? { allocation: localAllocation } : {}),
         });
         worktreePath = result.worktreePath;
         bareRepoPath = result.bareRepoPath;
@@ -601,6 +621,7 @@ export function createProvisioningWorkspace(
       providerPreflight,
       worktreePath,
       bareRepoPath,
+      allocation: localAllocation,
       queuedProviderAttempt,
       isFreshContainerValidationOnly,
       isRecovery,

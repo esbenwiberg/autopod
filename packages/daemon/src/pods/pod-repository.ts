@@ -82,6 +82,7 @@ import {
   createRecoveryForkRepository,
   type RecoveryForkRepository,
 } from './recovery-fork-repository.js';
+import { createRetainedAllocationInventory } from './retained-allocation-inventory.js';
 import {
   checkpointError,
   createRetainedCheckpointRepository,
@@ -336,6 +337,11 @@ import {
 } from './external-delivery-repository.js';
 import { createMergeJournal, type MergeJournal } from './merge-journal.js';
 import {
+  createRetainedCleanupRepository,
+  hasRetainedCleanupSchema,
+  type RetainedCleanupRepository,
+} from './retained-cleanup-repository.js';
+import {
   createSavedWorkDraftRepository,
   type SavedWorkDraftRepository,
 } from './saved-work-draft-repository.js';
@@ -352,6 +358,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
   retainedFinalizations?: RetainedFinalizationRepository;
+  retainedCleanup?: RetainedCleanupRepository;
   stalledRecoveries?: StalledWorkerRecoveryRepository;
   retainedCheckpoints?: RetainedCheckpointRepository;
   retainedCoding?: RetainedCodingRepository;
@@ -372,6 +379,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   sourceAdoptions?: SourceAdoptionRepository;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
+  retainedAllocations?: ReturnType<typeof createRetainedAllocationInventory>;
   deletionOwnership?: DeletionOwnership;
   fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
@@ -822,9 +830,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
     };
   };
   const fleetArchives = createFleetArchiveRepository(db);
+  const retainedDockerCustody = db.prepare(
+    'SELECT 1 FROM retained_checkpoint_recoveries WHERE pod_id = ? LIMIT 1',
+  );
   const withFleetArchive = (pod: Pod): Pod => ({
     ...readinessProjection(pod),
     fleetArchivedAt: fleetArchives.archivedAt(pod.id),
+    retainedDockerCustody:
+      pod.executionTarget === 'local' && Boolean(retainedDockerCustody.get(pod.id)),
   });
   const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
   const rowToDisplaySession = (row: Record<string, unknown>) =>
@@ -919,8 +932,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
     savedWorkDrafts: createSavedWorkDraftRepository(db),
     savedWorkspaceCheckpoints: createWorkspaceCheckpointRepository(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
+    retainedCleanup: hasRetainedCleanupSchema(db) ? createRetainedCleanupRepository(db) : undefined,
     stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
+    retainedAllocations: createRetainedAllocationInventory(db),
     retainedCoding: createRetainedCodingRepository(db),
     recoveryForks: createRecoveryForkRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),

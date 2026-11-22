@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "generation": 3,
+  "binding": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sessionId": "fixture-task-execution-3",
+  "resources": [
+    {
+      "kind": "docker_container",
+      "role": "guest_execution",
+      "id": "deadc0de12345678901234567890123456789012345678901234567890123456",
+      "namespace": "fixture-engine"
+    },
+    {
+      "kind": "docker_bridge",
+      "role": "owned_bridge",
+      "id": "bee0000012345678901234567890123456789012345678901234567890123456",
+      "namespace": "fixture-engine"
+    },
+    {
+      "kind": "host_worktree",
+      "role": "original_checkout",
+      "id": "/fixture-private/worktrees/retained-task",
+      "namespace": "fixture-host"
+    }
+  ],
+  "dataLoss": ["Unpublished files and reports", "Writable container layers and logs"],
+  "retained": ["External PRs, refs and History"],
+  "notReclaimed": ["Shared caches, volumes and images"]
+}

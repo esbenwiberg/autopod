@@ -82,6 +82,7 @@ export function createSavedWorkDraftPr(deps: {
     pods.sourceAdoptions.assertControlPlaneSettled(pod.id);
     pods.deletionOwnership.assertTaskAvailable(pod.id);
     pods.stalledRecoveries?.assertAvailable(pod.id);
+    if (pods.retainedCleanup?.forPod(pod.id)) draftError('Delete & free resources owns this task.');
     pods.sandboxWakeups?.recovery.assertAvailable(pod.id);
     ledger.assertCustodySettled(pod.id);
     for (const id of new Set([pod.id, ...pods.sourceAdoptions.taskPodIds(pod.id)]))

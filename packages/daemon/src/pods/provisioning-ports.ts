@@ -33,6 +33,7 @@ import type { createProviderAttemptContext } from './provider-attempt-context.js
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { createProvisioningMaterials } from './provisioning-materials.js';
 import type { createProvisioningSandboxState } from './provisioning-sandbox-state.js';
+import type { AllocationScope } from './retained-allocation-inventory.js';
 import type { ValidationRepository } from './validation-repository.js';
 import type { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
 import type { createWorkspaceTransfer } from './workspace-transfer.js';
@@ -47,6 +48,8 @@ export interface ProvisioningNetworkManager {
     extraAllowedIps?: string[],
     extraAllowedHosts?: string[],
     daemonGatewayPort?: number,
+    includeDaemonGateway?: boolean,
+    allocation?: AllocationScope,
   ): Promise<{ networkName: string; firewallScript: string } | null>;
   getGatewayIp(podId?: string): Promise<string>;
 }

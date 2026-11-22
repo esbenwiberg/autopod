@@ -701,11 +701,6 @@ public actor DaemonAPI {
     return try await request("POST", "/pods/\(id)/kick", body: body)
   }
 
-  public func archivePod(_ id: String, reason: String) async throws {
-    struct Body: Encodable { let reason: String; let retainResources: Bool }
-    let _: EmptyResponse = try await request("POST", "/pods/\(id)/archive", body: encode(Body(reason: reason, retainResources: true)))
-  }
-
   public func unarchivePod(_ id: String) async throws {
     let _: EmptyResponse = try await request("DELETE", "/pods/\(id)/archive")
   }
@@ -1413,6 +1408,80 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("POST", "/pods/\(podId)/validation-overrides", body: body)
   }
 
+  // MARK: - Human, exact-bound retained cleanup
+
+  public func inspectRetainedCleanup(_ id: String) async throws -> RetainedCleanupInspection {
+    let (result, _): (RetainedCleanupInspection, Int) = try await retainedCleanupRequest("GET", cleanupPath(id))
+    try result.validate(podId: id)
+    return result
+  }
+
+  public func observeRetainedCleanup(_ id: String, requestId: String) async throws -> RetainedCleanupReceipt {
+    guard RetainedCleanupRequest.validId(requestId) else { throw DaemonError.badRequest("Invalid cleanup request ID") }
+    let (result, _): (RetainedCleanupReceipt, Int) = try await retainedCleanupRequest("GET", "\(cleanupPath(id))/\(requestId)")
+    try result.validate(podId: id, requestId: requestId)
+    return result
+  }
+
+  public func submitRetainedCleanup(_ id: String, input: RetainedCleanupRequest,
+    isCurrent: (@Sendable () async -> Bool)? = nil) async throws -> RetainedCleanupSubmission {
+    guard input.valid else { throw DaemonError.badRequest("Invalid cleanup request") }
+    let (result, status): (RetainedCleanupSubmission, Int) = try await retainedCleanupRequest(
+      "POST", cleanupPath(id), body: encode(input), isCurrent: isCurrent)
+    switch result {
+    case .blocked(let rejection):
+      try rejection.validate(podId: id)
+      guard status == 200 else { throw RetainedCleanupError.invalidReply }
+    case .receipt(let receipt):
+      try receipt.validate(podId: id, requestId: input.id, expectedRequest: input)
+      guard status == (receipt.state == .deleted ? 200 : 202) else { throw RetainedCleanupError.invalidReply }
+    }
+    return result
+  }
+
+  private func cleanupPath(_ id: String) throws -> String {
+    guard id.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) == id.startIndex..<id.endIndex,
+      ["http", "https"].contains(baseURL.scheme ?? ""), baseURL.user == nil, baseURL.password == nil,
+      baseURL.query == nil, baseURL.fragment == nil
+    else { throw DaemonError.badRequest("Invalid exact cleanup pod or daemon endpoint") }
+    return "/pods/\(id)/retained-cleanup"
+  }
+
+  private func retainedCleanupRequest<T: Decodable>(
+    _ method: String, _ path: String, body: Data? = nil,
+    isCurrent: (@Sendable () async -> Bool)? = nil
+  ) async throws -> (T, Int) {
+    var req = URLRequest(url: try makeRequestURL(path), cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: method == "POST" ? 120 : 30)
+    req.httpMethod = method
+    req.httpShouldHandleCookies = false
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
+    req.setValue("application/json", forHTTPHeaderField: "Accept")
+    req.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+    if let body {
+      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      req.httpBody = body
+    }
+    guard await isCurrent?() ?? true else { throw DaemonError.networkError("Connection changed before dispatch.") }
+    try Task.checkCancellation()
+    // Neither redirects nor authentication challenges may replay this command.
+    let (data, response) = try await pod.data(for: req, delegate: RetainedCleanupTransportDelegate())
+    guard let status = (response as? HTTPURLResponse)?.statusCode else { throw RetainedCleanupError.invalidReply }
+    switch status {
+    case 200: break
+    case 202 where method == "POST": break
+    case 401: throw DaemonError.unauthorized(decodeErrorMessage(data))
+    case 404:
+      if (try? decoder.decode(RetainedCleanupErrorCode.self, from: data))?.code == "POD_NOT_FOUND" {
+        throw RetainedCleanupError.notFound
+      }
+      throw RetainedCleanupError.unsupported
+    default: throw DaemonError.serverError(status, decodeErrorMessage(data) ?? "Cleanup request failed")
+    }
+    do { return (try decoder.decode(T.self, from: data), status) }
+    catch { throw RetainedCleanupError.invalidReply }
+  }
+
   // MARK: - Internal request helper
 
   private func encode(_ value: some Encodable) throws -> Data {
@@ -1597,6 +1666,19 @@ public actor DaemonAPI {
       accessToken = token
     }
     return "Bearer \(Self.normalizeBearerToken(accessToken))"
+  }
+}
+
+private struct RetainedCleanupErrorCode: Decodable { let code: String? }
+
+private final class RetainedCleanupTransportDelegate: NSObject, URLSessionTaskDelegate {
+  func urlSession(_ session: URLSession, task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? { nil }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask,
+    didReceive challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+    (challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust
+      ? .performDefaultHandling : .rejectProtectionSpace, nil)
   }
 }
 

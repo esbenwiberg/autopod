@@ -234,6 +234,8 @@ export interface ResearchFindings {
 export interface Pod {
   /** Hidden from the default fleet only; no execution or resource custody is released. */
   fleetArchivedAt?: string | null;
+  /** Display routing hint only, not eligibility or deletion authority. */
+  retainedDockerCustody?: boolean;
   /** Frozen workflow projection; absent on historical launches. */
   completionPolicy?: 'accept-findings' | null;
   researchFindings?: ResearchFindings | null;
@@ -733,6 +735,7 @@ export interface CompactPod {
   /** Normalized parents; absent on older daemons or when compact metadata is unavailable. */
   dependsOnPodIds?: string[];
   fleetArchivedAt?: string | null;
+  retainedDockerCustody?: boolean;
   completionPolicy?: Pod['completionPolicy'];
   /** Absent on older daemons; present with null progress means no reported milestone. */
   display?: PodFleetDisplay;

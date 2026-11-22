@@ -2,8 +2,9 @@ import AutopodClient
 import Foundation
 import Observation
 
-enum RecoveryRoute: String, CaseIterable {
+enum RecoveryRoute: String, CaseIterable, Identifiable {
   case overview, continueWork, recoverFiles, freeStorage, repair, stalled, finalization, checks, freshPod, memoryChecks
+  var id: String { rawValue }
 }
 
 func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
@@ -28,6 +29,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   let repair: RepairContinuationModel
   let stalled: StalledWorkerRecoveryModel
   let finalization: RetainedFinalizationModel
+  let cleanup: RetainedCleanupModel
   let sandbox: SandboxRecoveryModel
   let files: FileRecoveryModel
   let fork: RecoveryForkModel
@@ -45,6 +47,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     repair = RepairContinuationModel(podId: podId, actions: actions.repairContinuation)
     stalled = StalledWorkerRecoveryModel(podId: podId, actions: actions.stalledWorkerRecovery)
     finalization = RetainedFinalizationModel(podId: podId, actions: actions.retainedFinalization)
+    cleanup = RetainedCleanupModel(podId: podId, actions: actions.retainedCleanup)
     sandbox = SandboxRecoveryModel(podId: podId, actions: actions.sandboxRecovery)
     files = FileRecoveryModel(podId: podId, actions: actions.fileRecovery)
     fork = RecoveryForkModel(podId: podId, actions: actions.recoveryFork)
@@ -53,22 +56,24 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
 
   static func scope(_ actions: PodActions) -> String {
     [actions.memoryChecks.scope, actions.sandboxRecovery.scope, actions.repairContinuation.scope,
-     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope, actions.recoveryFork.scope]
+     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope,
+     actions.recoveryFork.scope, actions.retainedCleanup.scope]
       .map { "\($0.utf8.count):\($0)" }.joined()
   }
 
   static func available(_ actions: PodActions, workspace: Bool) -> Bool {
     actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.memoryChecks.available || actions.recoveryFork.available || actions.repairContinuation.available
-      || actions.retainedFinalization.available || actions.stalledWorkerRecovery.available))
+      || actions.retainedFinalization.available || actions.stalledWorkerRecovery.available || actions.retainedCleanup.available))
   }
 
   static func canInspectSandbox(_ pod: Pod) -> Bool {
     [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
   }
 
-  var busy: Bool { refreshing || memoryChecks.busy || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy }
+  var busy: Bool { refreshing || memoryChecks.busy || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy || cleanup.busy }
 
   var pendingRoute: RecoveryRoute? {
+    if cleanup.needsObservation { return .freeStorage }
     if memoryChecks.needsObservation { return .memoryChecks }
     if fork.needsObservation || fork.invalidJournal { return .freshPod }
     if repair.pending != nil && ![.validated, .failed].contains(repair.operation?.state) { return .repair }
@@ -183,7 +188,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     inspectingFork = !pod.isWorkspace && actions.recoveryFork.available
       && ([.failed, .reviewRequired].contains(pod.status) || fork.needsObservation || fork.operation != nil)
     inspectingSandbox = actions.sandboxRecovery.available && Self.canInspectSandbox(pod)
-    inspectingFinalization = !pod.isWorkspace && actions.retainedFinalization.available && Self.canInspectSandbox(pod)
+    inspectingFinalization = !pod.isWorkspace && actions.retainedFinalization.available && (Self.canInspectSandbox(pod) || pod.status == .killing)
     inspectingStalled = !pod.isWorkspace && actions.stalledWorkerRecovery.available
       && [.running, .failed, .reviewRequired].contains(pod.status)
     inspectingRepair = !pod.isWorkspace && actions.repairContinuation.available

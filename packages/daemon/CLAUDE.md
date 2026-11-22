@@ -187,14 +187,13 @@ controls remain blocked while this source is owned. Never clear custody to retry
 or downgrade to an unaware binary after selection. See
 `docs/retained-pod-continuation.md` at the repository root.
 
-### Externally handled fleet cards
+### Previously archived fleet cards
 
-`ap archive-handled-elsewhere` is a separate human visibility disposition for
-ordinary Validated/manually Paused work. It retains native status and all source,
-unknown accounting/execution, guidance and custody. Its reference is human-supplied,
-not a historical publication/merge receipt. Default Archive remains restrictive.
-Startup must not resume archived ordinary tasks or explicit manual pauses; Goal
-and interactive owners remain separate. See `docs/fleet-closeout.md`.
+Creating fleet archives (including handled-elsewhere) is retired. Keep legacy
+rows and their startup recovery fence; do not infer resource release, change
+status or treat a historical human reference as delivery proof. Archive scope
+and exact-ID lookup remain available. Visibility restoration does not resume
+work. See [the archive runbook](../../docs/fleet-closeout.md).
 
 ### Infrastructure-held running originals
 

@@ -1,0 +1,34 @@
+# Retained Docker allocation inventory (v1)
+
+This is **producer evidence**, not cleanup admission, a release receipt, or a destructive operation. No API/CLI, continuation eligibility, retention/archive, network release, reaper, or ordinary cleanup authority changes. Internal readers use `createRetainedAllocationInventory(db).readTask(taskId)` (also `podRepo.retainedAllocations`). The read is a consistent, unpaged SQLite snapshot; it never queries Docker or opens an old path.
+
+## What is recorded
+
+- Migration `274` enrolls newly inserted executions only. The append-only inventory binds each allocation attempt to version, logical task, execution, pod, lifecycle generation, and (where applicable) the retained checkpoint request. Unknown effects stay in the history, even if a subsequent attempt succeeds. An intent precedes each tracked native create; a full-ID create reply, when available, is recorded separately from verification. A crash between dispatch and verification leaves an explicit `pending` attempt. Inspection failure after a known reply is `unverified`; a preexisting name/path or rejected conflict is `reused-or-foreign`. Neither result is promoted later by name, label, path, or attachment.
+- Docker verification pins the Engine `ID`, the **full** native ID from create, and inspection of that exact object in the same namespace. The per-attempt label only correlates a new create and its inspect; labels are not ownership evidence on their own. The container's observed bridge ID is joined to the bridge's producer record. A same-name replacement does not overwrite a previous bridge record, including after detachment. Bridge allocations during ordinary network refresh are covered too; exact previously recorded bridges can be reused without manufacturing a second allocation.
+- The ordinary checkout producer reserves the private directory, then records the physical worktree, `.git` link, and registration under the shared cache after `git worktree add`. Evidence includes canonical and supplied path, device, inode, birth time, registered Git worktree listing, and reciprocal registration checked at observation. The link registration is specific to that checkout; the cache's common store is a **shared reference**, never an owned private store. Existing stale-path handling is unchanged; a path that preexisted the producer attempt is not certified by this inventory.
+- The retained preparation producer reserves its own root and binds the prepared worktree/registration, independent bare common store, snapshot and its sidecar receipt, and source bundle to explicit private roles. The input checkout is a **source reference**, not newly owned by preparation; its captured physical/Git identity must agree with the previous producer record. The shared parent of checkpoint roots, shared source/cache data, other bind mounts (runtime session state, inputs, provider/tool caches, spec/series data), and unrelated files are not v1 removal targets. The snapshot is a preserved copy, not a registration in the original Git store.
+
+## How to interpret the read
+
+`recorded` means the v1 **historical producer** chain agrees with the durable execution/continuation projections. `incomplete` returns all attempts alongside typed coverage reasons: legacy/missing task coverage, unsupported topology or generation, pending/foreign/unverified allocation, missing bridge/container/worktree/prepared source or a binding mismatch. A verified bridge alone does not make an inventory complete. Even `recorded` does **not** certify present custody, physical continuity, quiescence, successful Stop and retain, replacement or archive state, absence, deletion safety or deletion completion. A future consumer must recheck task/generation ownership and exact Docker/Git identity under effect fences and preserve History. Never treat an inventory locator as a target by itself, delete a shared cache, follow an embedded snapshot `.git` link, or infer positive absence from a failed inspection.
+
+V1 targets an ordinary single-execution local Docker PR/branch pod with a pod-owned bridge and normal linked checkout, and its isolated ordinary retained continuation replacements. Additional families, sidecars, shared/default network, interactive and artifact flows, Sandbox, approval rewrite/adoption/fork, pre-validation sealed-source and specialized infrastructure recovery paths are not qualified. Git/filesystem evidence is host-local and requires observable stable file/registration identity; unsupported storage, missing data, unexpectedly reused source, an uncertain capacity retry, or unreconciled creation remains incomplete. Producer coverage assumes uninterrupted use of the instrumented daemon from execution creation; do not qualify allocations after running older or mixed binaries against this DB. There is no backfill. Executions from before migration (including old retained pods such as loud-ocelot) require separate trustworthy operator evidence or a future workflow.
+
+## Fixture qualification
+
+The default `retained-allocation-inventory` test filter exercises real SQLite/reopen and disposable local Git with fake Docker transport. It is not native provider proof. For native proof, use only an explicitly isolated disposable local engine with no user networks or containers. Give that engine the dockerd label `com.autopod.engine=retained-allocation-fixture`; point it at a canonical Unix socket named `retained-allocation-fixture.sock` in an owned private (0700) directory. Load a matching existing compatible Autopod image on that engine beforehand (`autopod` user and `sleep infinity`). No current Docker context, default socket, credential, pull, existing workload manipulation, or prune is used by the fixture. Verify the exact local namespace and image ID yourself before marking the test opt-in:
+
+```bash
+AUTOPOD_ALLOCATION_NATIVE_FIXTURE=1 \
+AUTOPOD_ALLOCATION_FIXTURE_SOCKET=/absolute/private/retained-allocation-fixture.sock \
+AUTOPOD_ALLOCATION_FIXTURE_ENGINE='<exact Docker Engine ID>' \
+AUTOPOD_ALLOCATION_FIXTURE_IMAGE='sha256:<exact local image ID>' \
+npx pnpm --filter @autopod/daemon test retained-allocation-inventory.docker.test.ts
+```
+
+Before construction the fixture refuses Docker transport overrides
+(`DOCKER_HOST`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`, `DOCKER_PATH_PREFIX`).
+The cleanup case requires Linux so it can verify host mount identity.
+
+The fixture verifies the socket, engine marker/ID, empty isolation and exact image; it creates uniquely labeled objects, detaches the original bridge and checks that its exact ID survives in the ledger. It then creates a different bridge at the same name and verifies refusal to adopt it. Teardown inspects exact full IDs/labels on the pinned engine before removal. A lost reply without verifiable exact fixture identity can leave a disposable fixture object behind; do not use global prune.

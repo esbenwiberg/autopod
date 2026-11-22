@@ -951,6 +951,13 @@ public struct Pod: Identifiable, Sendable {
     /// Recorded restart/wakeup hold, not a timer-based inference of process exit.
     public var executionRecoveryNote: String? = nil
     public var executionTarget: String? = nil
+
+    /// Positive server-side custody, not a deletion eligibility check. Older daemons
+    /// omit it; keep their ordinary explicit controls and let the daemon guard them.
+    public var retainedDockerCustody: Bool? = nil
+    public var usesRetainedDockerControls: Bool {
+        !isWorkspace && executionTarget == "local" && retainedDockerCustody == true
+    }
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 

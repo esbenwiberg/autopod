@@ -8,6 +8,7 @@ import { createProvisioningToolInstallation } from './provisioning-tool-installa
 import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
+import { createRetainedCleanup } from './retained-cleanup.js';
 import { createRetainedFinalization } from './retained-finalization.js';
 import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
@@ -1959,8 +1960,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
         })
       : undefined;
+  const retainedCleanup =
+    podRepo.retainedCleanup &&
+    createRetainedCleanup({
+      pods: podRepo,
+      docker: deps.retainedCleanupDocker,
+      isIdle: (id) =>
+        !controlOperations.isActive(id) &&
+        !activeAgentRuns.has(id) &&
+        !validationAbortControllers.has(id) &&
+        !validationResumeRuns.has(id) &&
+        !artifactResumeRuns.has(id) &&
+        !artifactCompletionRuns.has(id) &&
+        !attemptExtensionRuns.has(id) &&
+        !checkpointRecovery?.isActive(id) &&
+        !stalledWorkerRecovery?.isActive(id) &&
+        !retainedFinalization?.isActive(id),
+      isGoal: (id) =>
+        deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+        Boolean(deps.launchConfiguration?.goals?.get(id)),
+    });
   return controlOperations.wrap(
     createPodManagerFacade({
+      retainedCleanup,
       recoveryFork,
       stalledWorkerRecovery,
       sandboxRecovery,

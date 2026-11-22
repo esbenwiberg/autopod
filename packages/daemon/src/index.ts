@@ -23,6 +23,7 @@ import {
 import { boundedDockerCall } from './containers/docker-bounds.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
+import { createRetainedCleanupDocker } from './containers/retained-cleanup-docker.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
@@ -520,7 +521,7 @@ if (MOCK_DOCKER) {
     managedDatabase: db,
   });
   networkManager = new DockerNetworkManager({ docker: d, logger, managedDatabase: db });
-  sidecarManager = new DockerSidecarManager({ docker: d, logger });
+  sidecarManager = new DockerSidecarManager({ docker: d, logger, managedDatabase: db });
 }
 
 // Surface sidecar wiring in startup output so a missing manager is obvious
@@ -855,6 +856,7 @@ const configuration = createHostConfigurationComponents({
 await configuration.recover();
 
 podManager = createPodManager({
+  retainedCleanupDocker: docker ? createRetainedCleanupDocker(docker, true) : undefined,
   launchConfiguration: configuration.launchConfiguration,
   podRepo,
   providerAttemptRepo,

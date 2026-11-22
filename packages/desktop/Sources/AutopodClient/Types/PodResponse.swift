@@ -110,6 +110,7 @@ public struct CompactPodResponse: Codable, Sendable {
   // nil means an older daemon did not provide dependency metadata; [] is a root.
   public let dependsOnPodIds: [String]?
   public let fleetArchivedAt: String?
+  public let retainedDockerCustody: Bool?
   public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
@@ -195,6 +196,7 @@ public struct ProviderAttemptResponse: Codable, Sendable {
 
 public struct SessionResponse: Codable, Sendable {
   public let fleetArchivedAt: String?
+  public let retainedDockerCustody: Bool?
   public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
@@ -318,7 +320,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, profileDisplay, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
-    case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt
+    case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt, retainedDockerCustody
     case completionPolicy, researchFindings
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId

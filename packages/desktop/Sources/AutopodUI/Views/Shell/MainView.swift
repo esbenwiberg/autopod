@@ -428,7 +428,7 @@ public struct MainView: View {
 
     /// Pods shown by the Browse sidebar item before search/sort is applied.
     /// Recent mode keeps the default surface actionable and bounded, while
-    /// Archive mode and search both use the full loaded archive.
+    /// All records mode and search both use the full loaded collection.
     static func browsePods(
         _ pods: [Pod],
         scope: BrowseScope,
@@ -975,7 +975,8 @@ public struct MainView: View {
                 analyticsOverview
                 .frame(minWidth: 600)
             } else if sidebarSelection == .history {
-                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
+                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames,
+                    configurationActions: configurationActions, openPod: { id in openFleetPod(id) })
                     .frame(minWidth: 600)
             } else if sidebarSelection == .memory {
                 memoryWorkspace
@@ -1627,7 +1628,7 @@ public struct MainView: View {
                 Text("Showing \(visibleCount) of \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Archive") {
+                Button(BrowseScope.archive.rawValue) {
                     browseScope = .archive
                 }
                 .buttonStyle(.borderless)
@@ -1647,14 +1648,17 @@ public struct MainView: View {
     }
 
     /// Shared destination for explicit navigation from another workspace into the fleet.
-    static func fleetPodDestination(sessionId: String)
+    static func fleetPodDestination(sessionId: String, pods: [Pod] = [])
         -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String, query: String, repositoryID: String?) {
-        (card: nil, sidebar: .all, session: sessionId, query: "", repositoryID: nil)
+        // A selected archived pod is intentionally not pinned into Recent.
+        // Use Browse search to reveal it without changing the Browse scope.
+        let isArchived = pods.contains { $0.id == sessionId && $0.fleetArchivedAt != nil }
+        return (card: nil, sidebar: .all, session: sessionId, query: isArchived ? sessionId : "", repositoryID: nil)
     }
 
     private func openFleetPod(_ id: String, tab: DetailTab? = nil) {
         requestWorkspace {
-            let destination = Self.fleetPodDestination(sessionId: id)
+            let destination = Self.fleetPodDestination(sessionId: id, pods: pods)
             selectedAnalyticsCard = destination.card
             searchText = destination.query
             repositoryID = destination.repositoryID
@@ -1714,7 +1718,7 @@ enum ViewMode: String {
 
 enum BrowseScope: String, CaseIterable {
     case recent = "Recent"
-    case archive = "Archive"
+    case archive = "All records"
 }
 
 // MARK: - Sort order

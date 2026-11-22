@@ -463,6 +463,34 @@ func fleetDisplayEnrichesEqualVersionRecordsAfterDaemonUpgrade(hydrate: Bool) as
   #expect(store.pods.first?.task == task)
 }
 
+@MainActor @Test(arguments: [false, true])
+func observedRetainedCustodySurvivesStaleOrMissingFleetHints(omitHint: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    let hint = await mode.isNewer ? (omitHint ? "" : "\"retainedDockerCustody\":false,")
+      : "\"retainedDockerCustody\":true,"
+    let isDetail = request.url?.path == "/pods/retained"
+    let body = isDetail ? fullPod(id: "retained")
+      : compactPage(id: "retained", hasNext: false, updatedAt: "2026-07-01T00:10:00Z")
+    return SelfResponse.json(body.replacingOccurrences(of: "\"id\":", with: hint + "\"id\":"), for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test",
+    session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  await store.hydrateSessionIfNeeded("retained")
+  #expect(store.pods.first?.retainedDockerCustody == true)
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.usesRetainedDockerControls == true)
+  await store.refreshSession("retained")
+  #expect(store.pods.first?.usesRetainedDockerControls == true)
+}
+
 }
 
 private func compactPage(

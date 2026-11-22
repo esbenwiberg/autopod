@@ -53,7 +53,7 @@ struct RetainedFinalizationSheet: View {
         Text("Finalize retained work").font(.title3.weight(.semibold))
         Spacer()
         Button("Check status") { Task { await model.refresh(actions) } }
-          .disabled(model.busy).accessibilityIdentifier("retained-finalization-refresh")
+          .disabled(model.busy || !actions.available).accessibilityIdentifier("retained-finalization-refresh")
         if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
       }.controlSize(.small)
       Text(model.podId).font(.caption.monospaced()).foregroundStyle(RecoveryPalette.secondary).textSelection(.enabled)

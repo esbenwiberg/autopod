@@ -795,6 +795,8 @@ export function createRetainedCheckpointRecovery(deps: {
       generation: record.generation,
       cycle: record.binding.cycle,
       assertCurrent,
+      allocation: deps.podRepo.retainedAllocations?.scope(record.podId, record.id),
+      sourceStoreOwnership: record.generation > 1 ? 'private-prepared' : 'shared-cache',
     });
     assertCurrent();
     const coding = deps.podRepo.retainedCoding?.get(record.id);

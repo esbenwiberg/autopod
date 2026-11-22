@@ -106,6 +106,8 @@ public struct RetainedFinalizationActions: Sendable {
         }
         try accept(operation)
       }
+    } catch DaemonError.notFound {
+      error = "Stop and retain requires a compatible daemon. No stop was sent; do not substitute Kill."
     } catch { self.error = error.localizedDescription }
   }
 

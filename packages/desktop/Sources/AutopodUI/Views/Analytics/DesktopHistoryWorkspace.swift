@@ -51,17 +51,22 @@ public struct DesktopHistoryWorkspace: View {
             if let loadError {
                 Label(loadError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange).padding(14)
             }
-            DesktopSectionPicker(title: "", items: ["Past pods", "Patterns"], selection: $tab, label: { $0 })
-            HStack {
-                Text(tab == "Past pods" ? "Loaded worker records · older/deleted work via History Workspace" : "Patterns across loaded workers · active sessions remain in denominators")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Picker("Started", selection: $filter.days) {
-                    Text("Last 7 days").tag(7); Text("Last 30 days").tag(30)
-                    Text("Last 90 days").tag(90); Text("All loaded").tag(0)
-                }.fixedSize().controlSize(.small)
-            }.padding(.horizontal, 24).padding(.vertical, 12).background(DesktopTheme.canvas)
+            DesktopSectionPicker(title: "", items: ["Past pods", "Patterns", PreviouslyArchivedPods.title], selection: $tab, label: { $0 })
+            if tab != PreviouslyArchivedPods.title {
+                HStack {
+                    Text(tab == "Past pods" ? "Loaded worker records · older/deleted work via History Workspace" : "Patterns across loaded workers · active sessions remain in denominators")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("Started", selection: $filter.days) {
+                        Text("Last 7 days").tag(7); Text("Last 30 days").tag(30)
+                        Text("Last 90 days").tag(90); Text("All loaded").tag(0)
+                    }.fixedSize().controlSize(.small)
+                }.padding(.horizontal, 24).padding(.vertical, 12).background(DesktopTheme.canvas)
+            }
             if isLoading && pods.isEmpty { ProgressView("Loading history…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if tab == PreviouslyArchivedPods.title {
+                ScrollView { PreviouslyArchivedPodsView(pods: pods, openPod: openPod).padding(24) }
+            }
             else if tab == "Patterns" { patterns }
             else {
                 GeometryReader { geo in

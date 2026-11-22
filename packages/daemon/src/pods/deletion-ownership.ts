@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertRetainedCleanupAvailable } from './retained-cleanup-repository.js';
 import { assertSavedDraftAvailable } from './saved-work-draft-repository.js';
 import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
 
@@ -61,6 +62,7 @@ export function createDeletionOwnership(db: Database.Database): DeletionOwnershi
         throw deletionOwnershipError();
     },
     acquire: db.transaction((podId: string, configuration: string): DeletionClaim => {
+      assertRetainedCleanupAvailable(db, podId);
       assertSavedDraftAvailable(db, podId);
       assertTaskValidationDeletable(db, podId);
       if (

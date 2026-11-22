@@ -12,6 +12,8 @@ interface EntraJwtClaims extends JWTPayload {
   email?: string;
   name?: string;
   roles?: unknown;
+  scp?: unknown;
+  idtyp?: unknown;
 }
 
 export interface EntraAuthModuleConfig {
@@ -103,6 +105,9 @@ function mapClaims(payload: EntraJwtClaims): JwtPayload {
   return {
     oid,
     preferred_username: username,
+    ...(payload.idtyp !== 'app' && stringClaim(payload.oid) && stringClaim(payload.scp)
+      ? { operatorPrincipal: 'delegated-user' as const }
+      : {}),
     name,
     roles: mapRoles(payload.roles),
     aud,

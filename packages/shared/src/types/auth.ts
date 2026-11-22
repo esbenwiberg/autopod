@@ -13,6 +13,8 @@ export type AppRole = 'admin' | 'operator' | 'viewer';
 export interface JwtPayload {
   oid: string;
   preferred_username: string;
+  /** Verified authority for human-only operator actions; absent for app-only tokens. */
+  operatorPrincipal?: 'delegated-user' | 'local-dev';
   name: string;
   roles: AppRole[];
   aud: string;

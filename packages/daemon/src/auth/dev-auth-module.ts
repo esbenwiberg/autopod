@@ -39,6 +39,7 @@ function devPayload(): JwtPayload {
   return {
     oid: 'dev-user',
     preferred_username: 'developer',
+    operatorPrincipal: 'local-dev',
     name: 'Developer',
     roles: ['admin'],
     aud: 'autopod',
