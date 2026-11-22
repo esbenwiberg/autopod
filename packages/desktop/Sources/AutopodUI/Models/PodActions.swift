@@ -48,6 +48,7 @@ public struct PodActions: Sendable {
   public var taskBudget: TaskBudgetActions = .unavailable
   public var stalledWorkerRecovery: StalledWorkerRecoveryActions = .unavailable
   public var retainedFinalization: RetainedFinalizationActions = .unavailable
+  public var retainedCleanup: RetainedCleanupActions = .unavailable
   public var repairContinuation: RepairContinuationActions = .unavailable
   public var memoryChecks: MemoryChecksActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable

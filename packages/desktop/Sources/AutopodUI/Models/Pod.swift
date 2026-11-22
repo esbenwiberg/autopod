@@ -951,6 +951,12 @@ public struct Pod: Identifiable, Sendable {
     /// Recorded restart/wakeup hold, not a timer-based inference of process exit.
     public var executionRecoveryNote: String? = nil
     public var executionTarget: String? = nil
+
+    /// Routing only. Fleet rows do not convey exact retained custody or deletion eligibility.
+    public var usesRetainedDockerControls: Bool {
+        guard !isWorkspace, executionTarget == "local" else { return false }
+        return [.failed, .reviewRequired, .killing].contains(status) || (status == .killed && hasWorktree)
+    }
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 

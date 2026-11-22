@@ -85,6 +85,47 @@ runtime state, input/report data and immutable review, validation, custody and
 cost evidence are not deleted. This is not a billing estimate or an instruction
 to reclaim shared storage.
 
+## Desktop and CLI
+
+On a retained failed or review-held Docker card, open **Delete & free
+resources…** (also **Recovery → Free storage**). On a killed card, the
+daemon still requires the exact completed **Stop and retain** receipt. Stop
+and retain is a different Recovery action: it preserves storage. Review the
+ordered Docker/host targets and their full identities, what will be lost, and
+what will be kept. Enter a reason and acknowledge permanent loss before
+submitting. If proof is unavailable (including runs without the producer
+inventory), don't substitute Kill or ordinary Delete. Azure sandbox
+abandonment remains a separate control.
+
+Desktop saves the exact normalized request before sending it, in a private
+local journal keyed by daemon connection and pod. **Observe request** is
+read-only; **Reconcile saved request** sends the same request only when you
+choose it. Reopen the same daemon connection to recover an uncertain request.
+If another client submitted it, Desktop can observe it but cannot recreate
+that client's journal. Use the CLI's exact observation if the fleet row is
+already gone.
+
+```sh
+ap cleanup-retained "$POD" --json       # preview only
+# Copy the daemon identity, version, generation, binding and session ID
+# from that exact eligible preview; choose and keep one stable request ID.
+ap cleanup-retained "$POD" --apply --daemon-identity "$DAEMON" --plan-version 1 \
+  --generation "$GENERATION" --binding "$BINDING" --session "$SESSION" \
+  --request-id "$REQUEST_ID" --request-file "$JOURNAL" \
+  --acknowledge-data-loss --reason 'Discard unpublished work after exporting needed files'
+ap cleanup-retained "$POD" --observe --request-file "$JOURNAL"
+# Without the file: --observe --request-id "$REQUEST_ID" (same daemon and pod).
+ap cleanup-retained "$POD" --reconcile --request-file "$JOURNAL"
+```
+
+Apply needs a new file in a directory you control. The CLI writes the mode-0600
+journal before dispatch; reconcile checks the configured daemon endpoint and
+exact pod against it. Keep the file unchanged and use the original operator.
+There is no automatic POST retry, even for auth or connection failures.
+Inspect the output state: eligible, blocked, requested, pending, partial,
+unsupported, missing or uncertain are not confirmed deletion. An exact
+`deleted` receipt lists every agreed target as `confirmed_absent`.
+
 ## Schema and qualification
 
 Migration **275** adds immutable task/resource claims, per-target dispatch and

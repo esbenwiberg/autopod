@@ -8,7 +8,7 @@ struct RecoveryHubCard: View {
   var onOpenValidation: () -> Void = {}
   var onOpenEvidence: (() -> Void)?
   @State private var model: RecoveryHubModel
-  @State private var showing = false
+  @State private var destinationRoute: RecoveryRoute?
 
   init(pod: Pod, actions: PodActions, onOpenValidation: @escaping () -> Void = {},
        onOpenEvidence: (() -> Void)? = nil, model: RecoveryHubModel? = nil) {
@@ -32,25 +32,36 @@ struct RecoveryHubCard: View {
               .fixedSize(horizontal: false, vertical: true)
           }
           Spacer(minLength: 8)
-          Button("Review recovery…") { showing = true }
+          Button("Review recovery…") { destinationRoute = .overview }
             .controlSize(.small).accessibilityIdentifier("recovery-hub-open")
         }.padding(14).recoverySurface(inset: 0).padding(.horizontal, 16).padding(.vertical, 10)
       } else {
         HStack {
           if !model.errors.isEmpty { Text("Some recovery status could not be checked.").font(.caption).foregroundStyle(RecoveryPalette.secondary) }
           Spacer()
-          Button("Recovery options…") { showing = true }
+          Button("Recovery options…") { destinationRoute = .overview }
             .controlSize(.small).accessibilityIdentifier("recovery-hub-open")
         }.padding(.horizontal, 16).padding(.vertical, 6)
+      }
+      if pod.usesRetainedDockerControls {
+        HStack {
+          if pod.status != .killed {
+            Button("Stop and retain…") { destinationRoute = .finalization }
+              .accessibilityIdentifier("recovery-stop-retain")
+          }
+          Button(model.cleanup.needsObservation ? "Check cleanup request…" : "Delete & free resources…") {
+            destinationRoute = .freeStorage
+          }.accessibilityIdentifier("recovery-delete-retained")
+        }.controlSize(.small).padding(.horizontal, 16).padding(.bottom, 8)
       }
     }.tint(DesktopTheme.accent)
     .task(id: pod.status) {
       model.invalidateObservation()
       if pod.status != .running || pod.needsExecutionInspection || model.fork.needsObservation { await model.refresh(pod: pod, actions: actions) }
     }
-    .sheet(isPresented: $showing, onDismiss: { Task { await model.refresh(pod: pod, actions: actions) } }) {
+    .sheet(item: $destinationRoute, onDismiss: { Task { await model.refresh(pod: pod, actions: actions) } }) { route in
       RecoveryHubSheet(pod: pod, actions: actions, model: model, onOpenValidation: onOpenValidation,
-        onOpenEvidence: onOpenEvidence)
+        onOpenEvidence: onOpenEvidence, initialRoute: route)
     }
   }
 }
@@ -61,8 +72,15 @@ struct RecoveryHubSheet: View {
   @State var model: RecoveryHubModel
   var onOpenValidation: () -> Void = {}
   var onOpenEvidence: (() -> Void)?
-  @State private var route = RecoveryRoute.overview
+  @State private var route: RecoveryRoute
   @Environment(\.dismiss) private var dismiss
+
+  init(pod: Pod, actions: PodActions, model: RecoveryHubModel, onOpenValidation: @escaping () -> Void = {},
+       onOpenEvidence: (() -> Void)? = nil, initialRoute: RecoveryRoute = .overview) {
+    self.pod = pod; self.actions = actions; self.model = model
+    self.onOpenValidation = onOpenValidation; self.onOpenEvidence = onOpenEvidence
+    _route = State(initialValue: model.cleanup.needsObservation && initialRoute != .overview ? .freeStorage : initialRoute)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -83,7 +101,9 @@ struct RecoveryHubSheet: View {
     .frame(minWidth: 660, idealWidth: 820, maxWidth: 1000, minHeight: 640, idealHeight: 780, maxHeight: 1000)
     .background(DesktopTheme.canvas).tint(DesktopTheme.accent)
     .interactiveDismissDisabled(model.busy)
-    .task { if !model.inspected { await model.refresh(pod: pod, actions: actions) } }
+    .task(id: route == .overview) {
+      if route == .overview && !model.inspected { await model.refresh(pod: pod, actions: actions) }
+    }
   }
 
   private var toolbar: some View {
@@ -118,7 +138,10 @@ struct RecoveryHubSheet: View {
     case .recoverFiles:
       FileRecoveryView(actions: actions, model: model.files, sandbox: model.sandbox, onOpenEvidence: evidenceAction)
     case .freeStorage:
-      if actions.sandboxRecovery.available && RecoveryHubModel.canInspectSandbox(pod) {
+      if pod.usesRetainedDockerControls || model.cleanup.needsObservation {
+        RetainedCleanupView(actions: actions.retainedCleanup, model: model.cleanup)
+          .id("\(actions.retainedCleanup.scope):\(pod.id)")
+      } else if actions.sandboxRecovery.available && RecoveryHubModel.canInspectSandbox(pod) {
         SandboxRecoverySheet(podId: pod.id, actions: actions.sandboxRecovery, purpose: .storage,
           embedded: true, model: model.sandbox)
       } else {
@@ -137,7 +160,11 @@ struct RecoveryHubSheet: View {
       StalledWorkerRecoverySheet(podId: pod.id, actions: actions.stalledWorkerRecovery, embedded: true,
         model: model.stalled, onOpenValidation: openValidation)
     case .finalization:
-      RetainedFinalizationSheet(podId: pod.id, actions: actions.retainedFinalization, model: model.finalization, embedded: true)
+      if actions.retainedFinalization.available {
+        RetainedFinalizationSheet(podId: pod.id, actions: actions.retainedFinalization, model: model.finalization, embedded: true)
+      } else {
+        RecoveryNotice(title: "Stop and retain unavailable", message: "Use a compatible daemon to inspect Stop and retain. Do not substitute Kill; stopping does not reclaim storage.")
+      }
     case .checks:
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
@@ -241,14 +268,14 @@ struct RecoveryHubSheet: View {
                 icon: "arrow.right.circle", destination: .continueWork)
               goalCard("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.",
                 icon: "doc.on.doc", destination: .recoverFiles)
-              goalCard("Free storage", detail: "Review data loss before deleting. Safe archive-and-release is not yet available.",
+              goalCard("Free storage", detail: "Inspect what can be deleted, what is kept, and what cannot be proven.",
                 icon: "externaldrive.badge.minus", destination: .freeStorage)
             }.fixedSize(horizontal: false, vertical: true)
           } else {
             VStack(spacing: 10) {
               option("Continue work", detail: "Retry, repair, or continue a checkpoint in a fresh pod. No implicit publish or merge.", icon: "arrow.right.circle", destination: .continueWork)
               option("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.", icon: "doc.on.doc", destination: .recoverFiles)
-              option("Free storage", detail: "Review data loss before deleting. Safe archive-and-release is not yet available.", icon: "externaldrive.badge.minus", destination: .freeStorage)
+              option("Free storage", detail: "Inspect what can be deleted, what is kept, and what cannot be proven.", icon: "externaldrive.badge.minus", destination: .freeStorage)
             }
           }
         }
@@ -283,8 +310,8 @@ struct RecoveryHubSheet: View {
           if actions.stalledWorkerRecovery.available && [.running, .failed, .reviewRequired].contains(pod.status) {
             option("Inspect and stop a stalled run", detail: "Supported Docker runs only. Retain work and verify the stop before deciding what to do next.", icon: "pause.circle", destination: .stalled)
           }
-          if actions.retainedFinalization.available && RecoveryHubModel.canInspectSandbox(pod) {
-            option("End with work retained, or verify an existing merge", detail: "Does not publish, merge or free storage. An open PR cannot be marked delivered.", icon: "lock.doc", destination: .finalization)
+          if actions.retainedFinalization.available && (RecoveryHubModel.canInspectSandbox(pod) || pod.usesRetainedDockerControls) {
+            option("Stop and retain, or verify an existing merge", detail: "Keeps storage. Does not publish, merge or delete anything.", icon: "lock.doc", destination: .finalization)
           }
         } else { Text("This is an interactive workspace. Agent repair controls do not apply.") }
         Button("Open validation and reports", action: openValidation).controlSize(.small)

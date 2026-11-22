@@ -353,7 +353,7 @@ public struct DetailPanelView: View {
             detailHeader
 
             if RecoveryHubModel.available(actions, workspace: pod.isWorkspace) &&
-                [.running, .failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
+                (pod.usesRetainedDockerControls || [.running, .failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)) {
                 RecoveryHubCard(pod: pod, actions: actions,
                     onOpenValidation: { selectedTab = .validation },
                     onOpenEvidence: isEvidenceAvailable ? { selectedTab = .evidence } : nil)
@@ -1150,16 +1150,18 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 forkButton
-                Button {
-                    Task { await actions.kill(pod.id) }
-                } label: {
-                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
+                if !pod.usesRetainedDockerControls {
+                    Button {
+                        Task { await actions.kill(pod.id) }
+                    } label: {
+                        Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
+                    }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-kill-\(pod.id)")
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
                 }
-                .disabled(pendingControl != nil)
-                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.red)
 
             case .mergePending:
                 Button {
@@ -1266,15 +1268,17 @@ public struct DetailPanelView: View {
                 .controlSize(.small)
                 .tint(.red)
                 .help("Admin override — mark this pod complete without pushing/PR/merge. Reason persisted for audit.")
-                Button(role: .destructive) {
-                    showDeleteConfirmation = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
+                if !pod.usesRetainedDockerControls {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-delete-\(pod.id)")
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .disabled(pendingControl != nil)
-                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
             case .killed:
                 Button {
@@ -1290,15 +1294,17 @@ public struct DetailPanelView: View {
                     ? "Spin up a fresh container against the same worktree. No agent runs, no tokens spent."
                     : "Re-run the agent from scratch with feedback. Spends tokens.")
                 forkButton
-                Button(role: .destructive) {
-                    showDeleteConfirmation = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
+                if !pod.usesRetainedDockerControls {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-delete-\(pod.id)")
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .disabled(pendingControl != nil)
-                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
             default:
                 if pod.isTerminal {

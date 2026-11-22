@@ -121,9 +121,10 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
 @MainActor
 func withConfirmedActionFixture(
   initial: PodStatus = .running,
+  journalRoot: URL? = nil,
   body: (ConfirmedActionFixture) async throws -> Void
 ) async throws {
-  let fixture = ConfirmedActionFixture(initial: initial)
+  let fixture = ConfirmedActionFixture(initial: initial, journalRoot: journalRoot)
   do {
     try await body(fixture)
     await fixture.dispose()
@@ -154,7 +155,7 @@ func withConfirmedActionFixture(
   private var disposed = false
   private let startedAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120))
 
-  init(initial: PodStatus) {
+  init(initial: PodStatus, journalRoot: URL? = nil) {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [ConfirmedActionProtocol.self]
     session = URLSession(configuration: configuration)
@@ -166,7 +167,7 @@ func withConfirmedActionFixture(
     pod.updatedAt = Date(timeIntervalSince1970: 0)
     store.upsertSession(pod)
     store.selectedSessionId = id
-    handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore())
+    handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore(), journalRoot: journalRoot)
     ConfirmedActionRegistry.shared.add(peer)
   }
 

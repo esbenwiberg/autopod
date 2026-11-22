@@ -27,6 +27,7 @@ public final class ActionHandler {
   }
   @ObservationIgnored private var controls: [String: OwnedControl] = [:]
   @ObservationIgnored private var deletionWorkflows: [String: OwnedControl] = [:]
+  @ObservationIgnored private var cleanupInFlight: Set<String> = []
   private var pendingControls: [String: PendingPodControl] = [:]
 
   public func pendingControl(_ podId: String) -> PendingPodControl? {
@@ -57,6 +58,10 @@ public final class ActionHandler {
     guard podStore.isCurrent(ownership) else {
       throw DaemonError.networkError("Connection changed. Refresh before continuing.")
     }
+  }
+
+  private func retainedCleanupOwnerIsCurrent() -> Bool {
+    podStore.isCurrent(ownership)
   }
 
   /// Admission is local authority, not cancellation of already-admitted server work.
@@ -336,6 +341,33 @@ public final class ActionHandler {
         // Only daemon events/observations change local status; pending is not success.
         return try await self.perform { try await self.api.finalizeRetained(id, input: input) }
       })
+    result.retainedCleanup = RetainedCleanupActions(
+      scope: replyContextID.uuidString,
+      connection: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("retained-cleanup-v1", isDirectory: true),
+      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      inspect: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectRetainedCleanup(id) }
+      }, observe: { [weak self] id, requestId in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.observeRetainedCleanup(id, requestId: requestId) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        try self.requireCurrent()
+        guard self.cleanupInFlight.insert(id).inserted else {
+          throw DaemonError.badRequest("Cleanup is already in flight for this pod. Observe the saved request.")
+        }
+        defer { self.cleanupInFlight.remove(id) }
+        return try await self.perform {
+          try await self.api.submitRetainedCleanup(id, input: input, isCurrent: { [weak self] in
+            await self?.retainedCleanupOwnerIsCurrent() == true
+          })
+        }
+      }, confirmDeleted: { [weak self] receipt in
+        guard let self, self.podStore.isCurrent(self.ownership), receipt.state == .deleted else { return }
+        self.podStore.removeSession(receipt.podId)
+      })
     result.repairContinuation = RepairContinuationActions(
       scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
@@ -495,7 +527,16 @@ public final class ActionHandler {
   }
 
   public func kill(_ podId: String) async {
+    guard permitsOrdinaryDestruction(podId) else { return }
     _ = await controlTask(podId, kind: .kill)?.value
+  }
+
+  private func permitsOrdinaryDestruction(_ podId: String) -> Bool {
+    guard podStore.pods.first(where: { $0.id == podId })?.usesRetainedDockerControls != true else {
+      lastError = "Open Recovery to inspect Stop and retain or Delete & free resources. Do not use ordinary Kill or Delete for this pod."
+      return false
+    }
+    return true
   }
 
   /// Admission is synchronous on MainActor. Caller cancellation does not cancel
@@ -542,6 +583,7 @@ public final class ActionHandler {
       _ = await current.task.value
       return
     }
+    guard permitsOrdinaryDestruction(podId) else { return }
     // Admit/join Kill before publishing the combined workflow, avoiding self-join.
     guard let kill = controlTask(podId, kind: .kill) else { return }
     let id = UUID()
@@ -552,7 +594,7 @@ public final class ActionHandler {
           self.pendingControls.removeValue(forKey: podId)
         }
       }
-      guard await kill.value else { return false }
+      guard await kill.value, self.permitsOrdinaryDestruction(podId) else { return false }
       await self.deletePodRaw(podId)
       return true
     }
@@ -808,7 +850,15 @@ public final class ActionHandler {
   public func killAllFailed() async {
     pendingAction = "kill-failed"
     do {
-      _ = try await perform { try await api.killAllFailed() }
+      // The bulk endpoint cannot exclude retained tasks. Inspect failed rows
+      // first and keep those on their exact recovery routes.
+      let failed = try await perform { try await api.listPods(status: "failed") }.map { PodMapper.map($0) }
+      for pod in failed where !pod.usesRetainedDockerControls {
+        await kill(pod.id)
+      }
+      if failed.contains(where: \.usesRetainedDockerControls) {
+        lastError = "Retained Docker candidates were skipped. Open their Recovery options individually."
+      }
       try await perform { await podStore.loadSessions() }
     } catch {
       lastError = error.localizedDescription
@@ -873,6 +923,7 @@ public final class ActionHandler {
       _ = await workflow.task.value
       return
     }
+    guard permitsOrdinaryDestruction(podId) else { return }
     await deletePodRaw(podId)
   }
 

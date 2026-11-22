@@ -345,7 +345,7 @@ import Testing
       [hubValue(node, "accessibilityLabel") as? String, hubValue(node, "accessibilityValue") as? String].compactMap { $0 }
     }.joined(separator: "\n")
     for fact in [model.savedWork, model.execution, model.storage] { #expect(copy.contains(fact)) }
-    #expect(copy.contains("archive-and-release is not yet available"))
+    #expect(copy.contains("what cannot be proven"))
     if scenario == "pending" { #expect(copy.contains("A missing response does not prove failure")) }
     #expect(f.requests.count == requestsBeforeRendering)
     if let directory = ProcessInfo.processInfo.environment["AUTOPOD_HUB_SCREENSHOTS"] {
