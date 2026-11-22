@@ -64,6 +64,25 @@ import Testing
   #expect(ParentReviewPresentation(try #require(malformed.review), isStale: false).title == "Review unavailable")
 }
 
+@MainActor @Test func parentBundleTargetIsBoundToCurrentFamilyAndDisappearsWhenStale() async throws {
+  let scope = ParentFamilyScope(connectionID: UUID(), parent: "parent")
+  let other = ParentFamilyScope(connectionID: UUID(), parent: "parent")
+  let commit = String(repeating: "a", count: 40)
+  let evidence = "sha256:" + String(repeating: "b", count: 64)
+  let family = try decodeFamily(children: [], review: ["status": "ready", "evidenceDigest": evidence, "commit": commit])
+  let model = ParentFamilyModel()
+  await model.load(parent: scope.parent, connectionID: scope.connectionID) { _ in family }
+  #expect(model.bundleTarget(for: scope)?.selection.commit == commit)
+  #expect(model.bundleTarget(for: scope)?.selection.run == family.run)
+  #expect(model.bundleTarget(for: other) == nil)
+
+  await model.load(parent: scope.parent, connectionID: scope.connectionID) { _ in
+    throw URLError(.timedOut)
+  }
+  #expect(model.family(for: scope) == family)
+  #expect(model.bundleTarget(for: scope) == nil)
+}
+
 @Test(arguments: [
   ["not-sent", "Evaluation not sent"],
   ["unknown", "Evaluation outcome unknown"],

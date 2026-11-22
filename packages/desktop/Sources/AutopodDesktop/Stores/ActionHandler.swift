@@ -448,6 +448,42 @@ public final class ActionHandler {
       guard let self else { throw URLError(.notConnectedToInternet) }
       return try await self.perform { try await self.api.getParentManagedFamily(id) }
     }
+    result.parentBundle = ParentBundleActions(
+      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      preview: { [weak self] selection, check in
+        guard let self else { throw CancellationError() }
+        return try await self.perform {
+          try check()
+          return try await self.api.previewParentBundle(selection) { [weak self] in
+            guard let self else { throw CancellationError() }
+            try self.requireCurrent()
+            try check()
+          }
+        }
+      },
+      approve: { [weak self] selection, review, check in
+        guard let self else { throw CancellationError() }
+        return try await self.perform {
+          try check()
+          return try await self.api.approveParentBundle(selection, review: review) { [weak self] in
+            guard let self else { throw CancellationError() }
+            try self.requireCurrent()
+            try check()
+          }
+        }
+      },
+      download: { [weak self] selection, approval, check in
+        guard let self else { throw CancellationError() }
+        return try await self.perform {
+          try check()
+          return try await self.api.downloadParentBundle(selection, approval: approval) { [weak self] in
+            guard let self else { throw CancellationError() }
+            try self.requireCurrent()
+            try check()
+          }
+        }
+      }
+    )
     return result
   }
 

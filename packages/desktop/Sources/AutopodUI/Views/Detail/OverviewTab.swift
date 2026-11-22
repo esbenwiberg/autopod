@@ -43,6 +43,7 @@ struct OverviewTab: View {
     @State private var quality: PodQualitySignals? = nil
     @State private var poller = PreviewPoller()
     @State private var parentFamilyModel = ParentFamilyModel()
+    @State private var parentReviewSheet: ParentBundleTarget?
 
     private var parentFamilyScope: ParentFamilyScope? {
         ParentFamilyModel.scope(
@@ -50,6 +51,11 @@ struct OverviewTab: View {
             isWorkspace: pod.isWorkspace,
             connectionID: actions.parentFamilyConnectionID
         )
+    }
+
+    private var parentBundleTarget: ParentBundleTarget? {
+        guard actions.parentBundle?.isCurrent() == true else { return nil }
+        return parentFamilyModel.bundleTarget(for: parentFamilyScope)
     }
 
     private var parentFamilyLoadKey: String? {
@@ -83,7 +89,8 @@ struct OverviewTab: View {
                         family: family,
                         isStale: parentFamilyModel.isStale,
                         isRefreshing: parentFamilyModel.isLoading,
-                        refresh: refreshParentFamily
+                        refresh: refreshParentFamily,
+                        openReview: parentBundleTarget.map { target in { parentReviewSheet = target } }
                     )
                 }
 
@@ -132,6 +139,18 @@ struct OverviewTab: View {
             }
             .padding(redesign ? 24 : 20)
         }
+        .sheet(item: $parentReviewSheet) { target in
+            if let bundleActions = actions.parentBundle {
+                let model = parentFamilyModel
+                ParentBundleReviewSheet(target: target, actions: bundleActions) {
+                    model.bundleTarget(for: target.scope) == target
+                }
+                .id(target)
+            }
+        }
+        .onChange(of: parentBundleTarget) { _, target in
+            if parentReviewSheet != target { parentReviewSheet = nil }
+        }
         .onAppear { prepareReplySurface(replyContext) }
         .onChange(of: replyContext) { _, context in prepareReplySurface(context) }
         .task(id: pod.id) {
@@ -149,6 +168,7 @@ struct OverviewTab: View {
         }
         .onDisappear {
             poller.stop()
+            parentReviewSheet = nil
             parentFamilyModel.invalidate()
             replySurface.unmount()
         }
