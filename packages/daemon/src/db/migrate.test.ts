@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProfileStore } from '../profiles/profile-store.js';
+import { latestMigrationVersion } from '../test-utils/disk-database.js';
 import { runMigrations, runMigrationsWithBackups } from './migrate.js';
 
 const logger = pino({ level: 'silent' });
@@ -13,15 +14,6 @@ const MIGRATIONS_DIR = new URL('../../src/db/migrations', import.meta.url).pathn
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   return rows.some((r) => r.name === column);
-}
-
-function latestMigrationVersion(): number {
-  return Math.max(
-    ...fs
-      .readdirSync(MIGRATIONS_DIR)
-      .filter((file) => file.endsWith('.sql'))
-      .map((file) => Number.parseInt(file.split('_', 1)[0] ?? '', 10)),
-  );
 }
 
 describe('runMigrations — @allow-duplicate-columns', () => {
