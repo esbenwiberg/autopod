@@ -4,7 +4,7 @@ import {
   type EffectiveLaunchConfig,
   type RepositoryPreparationEvidence,
 } from '@autopod/shared';
-import { redactActionValue } from '../actions/action-diagnostics.js';
+import { redactSecretText } from '../actions/action-diagnostics.js';
 import { ExecInterruptedError, isObservedExitCode } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { sanitizeProviderMessage } from '../runtimes/provider-error-classifier.js';
@@ -126,19 +126,32 @@ export async function assertPreparationSourceCurrent(
     );
 }
 
+/** Shorter per-word command fragments are ordinary words, not plausible credentials. */
+const MIN_COMMAND_WORD_SECRET_LENGTH = 8;
+/** Persisted detail budget; the tail carries the verdict, so most of it goes there. */
+const FAILURE_DETAIL_LIMIT = 1100;
+const FAILURE_DETAIL_HEAD = 200;
+
 function failureDetail(
   raw: string,
   command: string,
   env: Record<string, string>,
   secrets: string[],
+  publicLiterals: Record<string, string> = {},
 ): string {
-  // Command literals may themselves be credentials. Suppress command words as
-  // well as the full command, xtrace lines, resolved env values and registry secrets.
+  // Command literals may themselves be credentials. Suppress the full command and
+  // credential-length command words as well as xtrace lines, resolved env values and
+  // registry secrets. Declared public buildEnv literals (already visible in argv) are
+  // not secrets: hiding values such as "1" or "true" destroys unrelated output.
   const hidden = new Set([
-    ...Object.values(env),
+    ...Object.entries(env)
+      .filter(([key, value]) => publicLiterals[key] !== value)
+      .map(([, value]) => value),
     ...secrets,
     command,
-    ...command.split(/[\s'"`=;|&()]+/).filter(Boolean),
+    ...command
+      .split(/[\s'"`=;|&()]+/)
+      .filter((word) => word.length >= MIN_COMMAND_WORD_SECRET_LENGTH),
   ]);
   const text = raw
     .replace(/^\s*\+.*$/gm, '[shell trace withheld]')
@@ -147,7 +160,12 @@ function failureDetail(
       '[credential-bearing line withheld]',
     )
     .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL withheld]');
-  return boundOutput(sanitizeProviderMessage(String(redactActionValue(text, hidden))), 1200, 300);
+  // Redact without truncation, then bound keeping the tail (where failures are reported)
+  // before final sanitization, whose own 1200-character cap would otherwise keep only
+  // the head of long install output.
+  return sanitizeProviderMessage(
+    boundOutput(redactSecretText(text, hidden), FAILURE_DETAIL_LIMIT, FAILURE_DETAIL_HEAD),
+  );
 }
 
 /** Source-dependent preparation runs only in this pod after checkout and scoped feed setup. */
@@ -228,7 +246,7 @@ export async function prepareLaunchRepository(
         ? 'timed out'
         : 'exit unverified';
     return fail(
-      `${category}; ${failureDetail(error instanceof Error ? error.message : 'transport unavailable', command, env, options.sensitiveValues ?? [])}`,
+      `${category}; ${failureDetail(error instanceof Error ? error.message : 'transport unavailable', command, env, options.sensitiveValues ?? [], literals)}`,
       true,
     );
   }
@@ -236,7 +254,7 @@ export async function prepareLaunchRepository(
   if (evidence.exitCode !== 0) {
     evidence.status = evidence.exitCode === null ? 'unverified' : 'failed';
     return fail(
-      `${evidence.exitCode === null ? 'exit unverified' : `exit code ${evidence.exitCode}`}; ${failureDetail(`${result.stdout}\n${result.stderr}`, command, env, options.sensitiveValues ?? [])}`,
+      `${evidence.exitCode === null ? 'exit unverified' : `exit code ${evidence.exitCode}`}; ${failureDetail(`${result.stdout}\n${result.stderr}`, command, env, options.sensitiveValues ?? [], literals)}`,
       evidence.exitCode === null,
     );
   }

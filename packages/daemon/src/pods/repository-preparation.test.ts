@@ -146,6 +146,63 @@ describe('repository preparation', () => {
     expect(evidence?.status).toBe('failed');
   });
 
+  it('keeps the failure verdict at the end of long output and public literal values', async () => {
+    const f = await fixture('npm ci && npm run bootstrap && npm run verify:worker');
+    f.result.exitCode = 1;
+    f.result.stdout = [
+      'added 369 packages, and audited 372 packages in 6s',
+      'found 0 vulnerabilities',
+      '> agent-pods@0.1.0 bootstrap',
+      ...Array.from({ length: 200 }, (_, i) => `  restored package ${i} visible`),
+      '> agent-pods@0.1.0 verify:worker',
+    ].join('\n');
+    f.result.stderr = 'Pinned Chromium must launch with its sandbox; specified check failed.';
+    let evidence: RepositoryPreparationEvidence | undefined;
+    await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      { PUBLIC_VALUE: 'visible', PRIVATE_VALUE: 'private-fixture' },
+      {
+        record: (value) => {
+          evidence = value;
+        },
+      },
+    ).catch(() => undefined);
+    const detail = evidence?.detail ?? '';
+    expect(detail).toContain(
+      'Pinned Chromium must launch with its sandbox; specified check failed.',
+    );
+    expect(detail).toContain('added 369 packages');
+    expect(detail).toContain('agent-pods@0.1.0');
+    expect(detail).toContain('restored package 199 visible');
+    expect(detail).not.toContain('[truncated]');
+    expect(detail.length).toBeLessThanOrEqual(1200);
+    expect(evidence?.status).toBe('failed');
+  });
+
+  it('still hides secret env values and credential-length command words', async () => {
+    const f = await fixture('deploy --key Zx9qwertyuiop && npm ci');
+    f.result.exitCode = 1;
+    f.result.stderr = `${'noise\n'.repeat(400)}used Zx9qwertyuiop with private-fixture then failed`;
+    let evidence: RepositoryPreparationEvidence | undefined;
+    await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      { PUBLIC_VALUE: 'visible', PRIVATE_VALUE: 'private-fixture' },
+      {
+        record: (value) => {
+          evidence = value;
+        },
+      },
+    ).catch(() => undefined);
+    const detail = evidence?.detail ?? '';
+    expect(detail).toContain('then failed');
+    expect(detail).not.toContain('Zx9qwertyuiop');
+    expect(detail).not.toContain('private-fixture');
+  });
+
   it.each([
     'unknown',
     'timeout',

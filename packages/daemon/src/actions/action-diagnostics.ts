@@ -70,7 +70,11 @@ export function safeFailure(error: unknown): {
 
 const SENSITIVE = /token|password|secret|pat|key|credential|auth|bearer/i;
 
-function safeText(text: string, secrets: ReadonlySet<string>): string {
+/**
+ * Redact secret values (raw, URL-encoded and base64 forms) and URL credentials without
+ * truncating. Callers that persist the result must bound it themselves.
+ */
+export function redactSecretText(text: string, secrets: ReadonlySet<string>): string {
   let result = text;
   for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
     if (!secret) continue;
@@ -91,6 +95,11 @@ function safeText(text: string, secrets: ReadonlySet<string>): string {
       return '[invalid URL withheld]';
     }
   });
+  return result;
+}
+
+function safeText(text: string, secrets: ReadonlySet<string>): string {
+  const result = redactSecretText(text, secrets);
   return result.length > 500 ? `${result.slice(0, 100)}... [truncated]` : result;
 }
 
