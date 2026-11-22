@@ -26,7 +26,20 @@ is not a recovery receipt; otherwise leave it retained for explicit recovery.
 
 ## Approval rebase candidates and exact publication leases
 
-Approval never rebases the approved checkout in place. If the fetched base is
+Ordinary GitHub approval keeps the exact validated published head, repository,
+head branch and base binding when the base advances. It does not fetch/rebase to
+clear merge gates or dispatch fresh validation for base drift. GitHub's checks,
+required reviews and branch policy determine eligibility; non-clean or unknown
+evidence remains blocked. A permitted exact head uses the durable merge flow;
+blocked heads remain pending with the provider reason. Changed or missing head
+or target evidence requires reconciliation, never permission to merge.
+
+Already admitted/prepared/active rewrites retain their custody and recovery
+rules below. A checked historical GitHub rewrite does not trigger another
+drift-only rewrite. Explicit source updates still require their existing checks
+and approval. Review-only publication grants no merge authority.
+
+ADO approval never rebases the approved checkout in place. If the fetched base is
 already included, normal approval continues. Otherwise the daemon preserves the
 original host source, prepares an independent Git checkout, and records an
 append-only `approval_source_rewrites` binding before preparing the candidate.

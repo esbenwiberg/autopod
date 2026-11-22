@@ -20,6 +20,105 @@ async function input(
 }
 describe('approval delivery stages', () => {
   it.each([
+    'permitted',
+    'blocked',
+    'moved-head',
+    'wrong-base',
+    'missing-head',
+  ] as const)('uses exact GitHub provider evidence without a drift rewrite (%s)', async (gate) => {
+    const f = createDeliveryFixture();
+    const { publication } = await f.planMerge();
+    f.podRepo.update('prepare', { status: 'validated' });
+    const original = f.pod();
+    // Any attempted drift preparation would require a candidate and fresh checks.
+    if (!f.worktreeManager.prepareApprovalRebase) throw new Error('Missing fixture method');
+    const rebase = vi.mocked(f.worktreeManager.prepareApprovalRebase);
+    rebase.mockRejectedValue(new Error('Base moved: candidate would be required'));
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        headSha:
+          gate === 'missing-head'
+            ? undefined
+            : gate === 'moved-head'
+              ? 'f'.repeat(40)
+              : publication.commitSha,
+        sourceTarget: {
+          repository: publication.repository,
+          branch: publication.branch,
+          baseBranch: gate === 'wrong-base' ? 'other' : 'main',
+        },
+        mergeBlocked: gate === 'blocked',
+        blockReason: gate === 'blocked' ? 'GitHub branch must be up to date' : null,
+      }),
+    );
+    f.provider.mergePr.mockImplementation(async (config) => {
+      config.onPrepared?.();
+      f.provider.getPrStatus.mockResolvedValue(
+        pendingStatus({
+          merged: true,
+          open: false,
+          headSha: publication.commitSha,
+          sourceTarget: {
+            repository: publication.repository,
+            branch: publication.branch,
+            baseBranch: 'main',
+          },
+        }),
+      );
+      return { merged: true, autoMergeScheduled: false };
+    });
+    const captured = {
+      ...f.mainCaptured,
+      executionForPod: (pod: typeof original) => ({
+        ...f.mainCaptured.executionForPod(pod),
+        prProvider: 'github' as const,
+      }),
+      prManagerFactory: () => f.provider,
+    };
+    const workflow = createApprovalWorkflow({
+      ...captured,
+      ...createApprovalDeliveryPreparation(captured),
+      ...createApprovalDeliveryExecution(captured),
+    });
+    const approval = workflow.approveSession('prepare', {
+      actor: { type: 'human', userId: 'operator' },
+    });
+    if (gate === 'moved-head' || gate === 'wrong-base' || gate === 'missing-head') {
+      await expect(approval).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+      expect(f.pod().status).toBe('validated');
+    } else {
+      await approval;
+      expect(f.pod().status).toBe(gate === 'permitted' ? 'complete' : 'merge_pending');
+    }
+    expect(f.pod().lifecycleGeneration).toBe(original.lifecycleGeneration);
+    expect(rebase).not.toHaveBeenCalled();
+    expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(captured.enqueueSession).not.toHaveBeenCalled();
+    expect(f.podRepo.approvalRewrites?.latest(f.pod())).toBeNull();
+    if (gate === 'permitted') {
+      expect(f.provider.mergePr).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          expectedHeadSha: publication.commitSha,
+          expectedTarget: {
+            repository: publication.repository,
+            branch: publication.branch,
+            baseBranch: 'main',
+          },
+        }),
+      );
+      expect(f.db.prepare('SELECT disposition FROM merge_observations').all()).toContainEqual({
+        disposition: 'merged',
+      });
+    } else {
+      expect(f.provider.mergePr).not.toHaveBeenCalled();
+      expect(captured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+    }
+    if (gate === 'blocked') {
+      expect(f.pod().mergeBlockReason).toBe('GitHub branch must be up to date');
+      expect(captured.startMergePolling).toHaveBeenCalledWith('prepare');
+    }
+  });
+  it.each([
     false,
     true,
   ])('recognizes a source-bound external merge without republishing (admitted: %s)', async (admitted) => {
