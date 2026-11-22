@@ -13,6 +13,23 @@ describe('reported backend capabilities', () => {
     expect(caps.defaults.storageGb).toBeNull();
     expect(caps.maxStorageGb).toBeNull();
     expect(sandboxCapabilities({ enabled: true, defaultTier: 'M' }).defaults.memoryGb).toBe(2);
+    expect(caps.memoryBundles?.map((bundle) => bundle.memoryGb)).toEqual(caps.memoryTiersGb);
+    expect(caps.memoryBundles?.slice(-2)).toEqual([
+      {
+        tier: 'XL',
+        memoryGb: 8,
+        cpus: 4,
+        diskGb: 80,
+        label: 'XL · 4 vCPU · 8 GiB RAM · 80 GiB disk',
+      },
+      {
+        tier: '2XL',
+        memoryGb: 16,
+        cpus: 8,
+        diskGb: 160,
+        label: '2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk',
+      },
+    ]);
     expect(caps.sidecars).toBe(false);
     expect(caps.maxCpus).toBeNull();
     expect(sandboxCapabilities({ enabled: false, defaultTier: 'M' }).available).toBe(false);
@@ -30,6 +47,7 @@ describe('reported backend capabilities', () => {
     expect(caps.privilegedSidecars).toBe(false);
     expect(caps.maxStorageGb).toBeNull();
     expect(caps.sidecarStorageLimit).toBe(false);
+    expect(caps.memoryBundles).toBeNull();
     const offline = await dockerCapabilities({
       docker: null,
       privilegedSidecars: false,

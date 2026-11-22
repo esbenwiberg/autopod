@@ -51,6 +51,18 @@ export interface ResolvedAllocation {
   cpus: number | null;
   storageGb: number | null;
 }
+/**
+ * A fixed hosted-sandbox resource bundle. Selecting `memoryGb` chooses the whole
+ * bundle; CPU and disk are not independently adjustable.
+ */
+export interface SandboxMemoryBundle {
+  tier: string;
+  memoryGb: number;
+  cpus: number;
+  diskGb: number;
+  /** Display text, e.g. `XL · 4 vCPU · 8 GiB RAM · 80 GiB disk`. */
+  label: string;
+}
 export interface ExecutionCapabilities {
   target: ExecutionSettings['target'];
   available: boolean;
@@ -60,6 +72,8 @@ export interface ExecutionCapabilities {
   maxCpus: number | null;
   maxStorageGb: number | null;
   memoryTiersGb: number[] | null;
+  /** The bundle behind each memory tier, in the same order; `null` for targets without bundles. */
+  memoryBundles: SandboxMemoryBundle[] | null;
   sidecars: boolean;
   privilegedSidecars: boolean;
   sidecarStorageLimit: boolean;

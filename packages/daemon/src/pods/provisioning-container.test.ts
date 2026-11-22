@@ -54,6 +54,30 @@ describe('provisioning container', () => {
     expect(config?.env).not.toHaveProperty('ANTHROPIC_API_KEY');
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
   });
+  it.each([
+    ['local', null, 10 * 1024 ** 3],
+    ['local', 6, 6 * 1024 ** 3],
+    // A legacy sandbox pod with no size leaves the bundle to the manager's configured
+    // default (L) instead of requesting the 10 GiB Docker default.
+    ['sandbox', null, undefined],
+    // An explicit size is passed through unchanged, so the manager selects or refuses it.
+    ['sandbox', 16, 16 * 1024 ** 3],
+  ] as const)('requests %s memory %s GB as %s bytes', async (target, containerMemoryGb, memoryBytes) => {
+    const f = fixture();
+    f.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run(target, 'prepare');
+    f.profiles.update('test-profile', { executionTarget: target, containerMemoryGb });
+    if (target === 'sandbox')
+      f.profiles.setWarmImage(
+        'test-profile',
+        'ewiacr.azurecr.io/autopod/test:warm',
+        new Date().toISOString(),
+      );
+    await f.container();
+    expect(f.cm.spawn).toHaveBeenCalledTimes(1);
+    const config = vi.mocked(f.cm.spawn).mock.calls[0]?.[0];
+    expect(config).toBeDefined();
+    expect(config?.memoryBytes).toBe(memoryBytes);
+  });
   for (const phase of ['health', 'main'] as const) {
     it(`kills the started sidecar exactly once when ${phase} provisioning fails`, async () => {
       const f = fixture();

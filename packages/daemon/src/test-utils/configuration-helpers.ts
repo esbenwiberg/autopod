@@ -15,6 +15,7 @@ export const testExecutionCapabilities: ExecutionCapabilities = {
   maxCpus: 8,
   maxStorageGb: null,
   memoryTiersGb: null,
+  memoryBundles: null,
   sidecars: true,
   privilegedSidecars: false,
   sidecarStorageLimit: false,

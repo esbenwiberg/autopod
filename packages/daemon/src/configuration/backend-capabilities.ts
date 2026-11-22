@@ -5,6 +5,7 @@ import {
   SANDBOX_TIERS,
   type SandboxDefaultTier,
   sandboxTier,
+  sandboxTierLabel,
 } from '../containers/sandbox-tiers.js';
 
 const gib = 1024 ** 3;
@@ -39,6 +40,13 @@ export function sandboxCapabilities(options: {
     maxCpus: null,
     maxStorageGb: null,
     memoryTiersGb: tiers,
+    memoryBundles: SANDBOX_TIERS.map((entry) => ({
+      tier: entry.tier,
+      memoryGb: entry.memoryGiB,
+      cpus: entry.vcpu,
+      diskGb: entry.diskGiB,
+      label: sandboxTierLabel(entry.tier),
+    })),
     sidecars: false,
     privilegedSidecars: false,
     sidecarStorageLimit: false,
@@ -82,6 +90,7 @@ export async function dockerCapabilities(options: {
     maxCpus: cpus,
     maxStorageGb: null,
     memoryTiersGb: null,
+    memoryBundles: null,
     sidecars: true,
     privilegedSidecars: options.privilegedSidecars,
     sidecarStorageLimit: false,
