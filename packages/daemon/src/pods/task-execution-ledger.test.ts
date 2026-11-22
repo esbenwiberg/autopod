@@ -8,6 +8,7 @@ import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { aggregateCost } from './cost-aggregation.js';
 import { createPodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 
 function fixture() {
   const db = createTestDb();
@@ -332,6 +333,55 @@ describe('task-wide execution accounting', () => {
       repo.update('root', { tokenTelemetryAccuracy: 'repaired', phaseTokenUsage: {} });
       expect(repo.taskExecutions?.snapshot('fix').budgetCheck?.status).toBe('below_recorded_limit');
       expect(repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toEqual(expect.any(String));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('names the pod and provider attempt whose telemetry blocks admission (#646)', () => {
+    const { db, repo } = fixture();
+    try {
+      const attempts = createProviderAttemptRepository(db);
+      attempts.open({
+        podId: 'root',
+        provider: 'openai',
+        providerAccountId: 'codex-account',
+        runtime: 'codex',
+        model: 'gpt-5',
+        profileReference: 'pod:root@profile-snapshot#abcdef1',
+        profileSnapshot: {},
+      });
+      attempts.close('root', {
+        nativeSessionId: null,
+        outcome: 'failed',
+        classification: {
+          category: 'auth',
+          definitive: true,
+          sanitizedMessage: 'Your workspace is out of credits.',
+          retryAfter: null,
+        },
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      });
+      const reason = repo.taskExecutions?.snapshot('fix').budgetCheck?.reason;
+      expect(reason).toBe(
+        'Task token accounting incomplete for pod root provider attempt #1 (codex/gpt-5, failed); reconcile prior execution and phase telemetry before starting more budgeted work.',
+      );
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(
+        'pod root provider attempt #1 (codex/gpt-5, failed)',
+      );
+      db.prepare(`INSERT INTO unmeasured_usage_acceptances (id, pod_id, provider_attempt_ordinal,
+        task_id, lifecycle_generation, accepted_by, authorization_basis, reason, prior_accuracy,
+        recorded_input_tokens, recorded_output_tokens, recorded_cost_usd, accepted_at)
+        VALUES ('r1', 'root', 1, 't', 1, 'user-1', 'pod_owner', 'Refused before usage', 'partial',
+        0, 0, 0, '2026-11-22T00:00:00.000Z')`).run();
+      repo.update('root', { tokenTelemetryAccuracy: 'repaired', phaseTokenUsage: {} });
+      const settled = repo.taskExecutions?.snapshot('fix');
+      expect(settled?.budgetCheck?.status).toBe('below_recorded_limit');
+      expect(settled?.diagnostics).toContain(
+        'root: provider attempt #1 usage accepted as unmeasured by pod owner',
+      );
     } finally {
       db.close();
     }
