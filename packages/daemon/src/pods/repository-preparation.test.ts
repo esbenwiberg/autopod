@@ -9,6 +9,7 @@ import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createMockContainerManager, createTestDb } from '../test-utils/mock-helpers.js';
+import { CACHE_SIGNAL_SCRIPT } from './preparation-timing.js';
 import { PREPARATION_SOURCE_PROBE, prepareLaunchRepository } from './repository-preparation.js';
 
 const exec = promisify(execFile);
@@ -68,7 +69,9 @@ describe('repository preparation', () => {
         'PUBLIC_VALUE=visible',
         'sh',
         '-c',
-        'set -e\npnpm install --frozen-lockfile',
+        expect.stringMatching(
+          /^set -e\n__autopod_prep_mark\(\) [^\n]+\ntrap '__autopod_prep_mark end' EXIT\n__autopod_prep_mark 1\npnpm install --frozen-lockfile$/,
+        ),
       ],
       {
         cwd: '/workspace/app',
@@ -201,6 +204,115 @@ describe('repository preparation', () => {
     expect(detail).toContain('then failed');
     expect(detail).not.toContain('Zx9qwertyuiop');
     expect(detail).not.toContain('private-fixture');
+  });
+
+  function timedExec(
+    f: Awaited<ReturnType<typeof fixture>>,
+    markers: string | null,
+    cacheLines = 'absent\nabsent\nabsent\nabsent\nabsent\nabsent\nabsent',
+  ) {
+    vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, argv) => {
+      if (argv[2] === PREPARATION_SOURCE_PROBE)
+        return { exitCode: 0, stdout: JSON.stringify(source), stderr: '' };
+      if (argv[2] === CACHE_SIGNAL_SCRIPT) return { exitCode: 0, stdout: cacheLines, stderr: '' };
+      if (String(argv[2]).startsWith('cat -- "$1"'))
+        return markers === null
+          ? { exitCode: 1, stdout: '', stderr: '' }
+          : { exitCode: 0, stdout: markers, stderr: '' };
+      return f.result;
+    });
+  }
+
+  it('records per-stage durations and cache signals for a passing run', async () => {
+    const f = await fixture('npm ci && npm run bootstrap && node scripts/probe.mjs');
+    timedExec(
+      f,
+      '1 100.00\n2 801.50\n3 838.00\nend 842.25\n',
+      ['present', 'absent', 'absent', 'absent', 'absent', 'absent', 'absent'].join('\n'),
+    );
+    const record = vi.fn();
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        record,
+        preflightMs: 1500,
+      },
+    );
+    expect(evidence.status).toBe('passed');
+    expect(evidence.timing).toMatchObject({
+      preflightMs: 1500,
+      stageTiming: 'measured',
+      stages: [
+        { index: 1, label: 'npm ci', durationMs: 701500, status: 'passed' },
+        { index: 2, label: 'npm run bootstrap', durationMs: 36500, status: 'passed' },
+        { index: 3, label: 'node scripts/probe.mjs', durationMs: 4250, status: 'passed' },
+      ],
+    });
+    expect(evidence.timing?.totalMs).toEqual(expect.any(Number));
+    expect(evidence.timing?.commandMs).toEqual(expect.any(Number));
+    expect(evidence.timing?.sourceProbeMs).toEqual(expect.any(Number));
+    expect(evidence.cache?.signals[0]).toEqual({ name: 'npm-cache', state: 'present' });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ timing: evidence.timing }));
+    const script = vi
+      .mocked(f.cm.execInContainer)
+      .mock.calls.map(([, argv]) => argv)
+      .find((argv) => String(argv.at(-1)).startsWith('set -e'));
+    expect(script?.at(-1)).toContain(
+      '__autopod_prep_mark 1 && npm ci && __autopod_prep_mark 2 && npm run bootstrap && __autopod_prep_mark 3 && node scripts/probe.mjs',
+    );
+  });
+
+  it('records the failing stage with unchanged failure detail', async () => {
+    const run = async (markers: string | null) => {
+      const f = await fixture('npm ci && npm run bootstrap && npm run verify');
+      f.result.exitCode = 2;
+      f.result.stderr = 'bootstrap exploded';
+      timedExec(f, markers);
+      let evidence: RepositoryPreparationEvidence | undefined;
+      const error = await prepareLaunchRepository(
+        f.config,
+        f.cm,
+        'candidate',
+        {},
+        {
+          record: (value) => {
+            evidence = value;
+          },
+        },
+      ).catch((e: Error) => e);
+      return { evidence, error };
+    };
+    const timed = await run('1 10.00\n2 20.00\nend 95.50\n');
+    const untimed = await run(null);
+    expect(timed.error).toBeInstanceOf(Error);
+    expect(timed.evidence).toMatchObject({ status: 'failed', exitCode: 2 });
+    expect(timed.evidence?.timing?.stages).toEqual([
+      { index: 1, label: 'npm ci', durationMs: 10000, status: 'passed' },
+      { index: 2, label: 'npm run bootstrap', durationMs: 75500, status: 'failed' },
+      { index: 3, label: 'npm run verify', durationMs: null, status: 'not-run' },
+    ]);
+    expect(timed.evidence?.detail).toBe(untimed.evidence?.detail);
+    expect((timed.error as Error).message).toBe((untimed.error as Error).message);
+    expect(untimed.evidence?.timing?.stageTiming).toBe('unavailable');
+  });
+
+  it('records timing with every stage not run when the source probe fails first', async () => {
+    const f = await fixture('npm ci && npm test');
+    vi.mocked(f.cm.execInContainer).mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
+    const record = vi.fn();
+    await expect(
+      prepareLaunchRepository(f.config, f.cm, 'candidate', {}, { record }),
+    ).rejects.toThrow();
+    expect(record.mock.calls[0]?.[0].timing).toMatchObject({
+      commandMs: null,
+      stages: [
+        { index: 1, status: 'not-run' },
+        { index: 2, status: 'not-run' },
+      ],
+    });
   });
 
   it.each([

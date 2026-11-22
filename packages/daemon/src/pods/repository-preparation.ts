@@ -3,12 +3,22 @@ import {
   AutopodError,
   type EffectiveLaunchConfig,
   type RepositoryPreparationEvidence,
+  type RepositoryPreparationTiming,
 } from '@autopod/shared';
 import { redactSecretText } from '../actions/action-diagnostics.js';
 import { ExecInterruptedError, isObservedExitCode } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { sanitizeProviderMessage } from '../runtimes/provider-error-classifier.js';
 import { boundOutput } from '../util/bounded-output.js';
+import {
+  CACHE_SIGNAL_SCRIPT,
+  instrumentPrepareCommand,
+  parseCacheSignals,
+  parseStageTiming,
+  preparationTimingPath,
+  prepareStageLabel,
+  splitPrepareStages,
+} from './preparation-timing.js';
 import { wrapValidationExecCommand } from './registry-injector.js';
 
 /** Uses existing validation termination gates when preparation may still be running. */
@@ -178,8 +188,11 @@ export async function prepareLaunchRepository(
     assertCurrent?(): void;
     record?(evidence: RepositoryPreparationEvidence): void;
     sensitiveValues?: string[];
+    /** Duration of the execution preflight the caller ran just before, for the timing record. */
+    preflightMs?: number | null;
   } = {},
 ): Promise<RepositoryPreparationEvidence> {
+  const startedAt = Date.now();
   const assertCurrent = options.assertCurrent ?? (() => {});
   assertCurrent();
   const setup = config?.repository?.setup;
@@ -199,8 +212,49 @@ export async function prepareLaunchRepository(
     source: null,
     exitCode: null,
   };
+  const literals = Object.fromEntries(
+    Object.entries(setup?.buildEnv ?? {}).flatMap(([key, binding]) =>
+      'value' in binding ? [[key, binding.value]] : [],
+    ),
+  );
+  const stages = command ? splitPrepareStages(command) : [];
+  const hiddenLabelWords = new Set([
+    ...Object.entries(env)
+      .filter(([key, value]) => literals[key] !== value)
+      .map(([, value]) => value),
+    ...(options.sensitiveValues ?? []),
+  ]);
+  const labels = stages.map((stage, i) => prepareStageLabel(stage, i + 1, hiddenLabelWords));
+  let sourceProbeMs: number | null = null;
+  let commandMs: number | null = null;
+  // Until markers are read, every stage is "not run" (e.g. the source probe failed first).
+  let stageTiming: Pick<RepositoryPreparationTiming, 'stageTiming' | 'stages'> = {
+    stageTiming: 'unavailable',
+    stages: labels.map((label, i) => ({
+      index: i + 1,
+      label,
+      durationMs: null,
+      status: 'not-run',
+    })),
+  };
+  const probeSource = async () => {
+    const probeStarted = Date.now();
+    try {
+      return await inspectPreparationSource(containerManager, containerId, assertCurrent);
+    } finally {
+      sourceProbeMs = (sourceProbeMs ?? 0) + (Date.now() - probeStarted);
+    }
+  };
   const finish = () => {
     assertCurrent();
+    if (command)
+      evidence.timing = {
+        totalMs: Date.now() - startedAt,
+        commandMs,
+        ...(options.preflightMs !== undefined ? { preflightMs: options.preflightMs } : {}),
+        sourceProbeMs,
+        ...stageTiming,
+      };
     options.record?.(evidence);
     return evidence;
   };
@@ -214,23 +268,43 @@ export async function prepareLaunchRepository(
   };
   if (!setup || !command) return finish();
   try {
-    evidence.source = await inspectPreparationSource(containerManager, containerId, assertCurrent);
+    evidence.source = await probeSource();
   } catch {
     assertCurrent();
     return fail('Source/dependency inputs could not be verified before preparation.');
   }
-  const literals = Object.fromEntries(
-    Object.entries(setup.buildEnv).flatMap(([key, binding]) =>
-      'value' in binding ? [[key, binding.value]] : [],
-    ),
+  const workDir = setup.buildWorkDir ? `/workspace/${setup.buildWorkDir}` : '/workspace';
+  evidence.cache = parseCacheSignals(
+    await containerManager
+      .execInContainer(containerId, ['sh', '-c', CACHE_SIGNAL_SCRIPT], {
+        cwd: workDir,
+        timeout: 5000,
+        maxOutputBytes: 1024,
+      })
+      .then((probe) => (probe.exitCode === 0 ? probe.stdout : null))
+      .catch(() => null),
   );
+  assertCurrent();
+  const timingPath = preparationTimingPath();
+  const readStageTiming = async (exitCode: number | null) => {
+    const text = await containerManager
+      .execInContainer(
+        containerId,
+        ['sh', '-c', 'cat -- "$1" 2>/dev/null; rm -f -- "$1"', 'autopod-prep-timing', timingPath],
+        { timeout: 5000, maxOutputBytes: 4096 },
+      )
+      .then((read) => (read.exitCode === 0 ? read.stdout : null))
+      .catch(() => null);
+    stageTiming = parseStageTiming(text, labels, exitCode);
+  };
   let result: Awaited<ReturnType<ContainerManager['execInContainer']>>;
+  const commandStarted = Date.now();
   try {
     result = await containerManager.execInContainer(
       containerId,
-      wrapValidationExecCommand(`set -e\n${command}`, env, literals),
+      wrapValidationExecCommand(instrumentPrepareCommand(stages, timingPath), env, literals),
       {
-        cwd: setup.buildWorkDir ? `/workspace/${setup.buildWorkDir}` : '/workspace',
+        cwd: workDir,
         timeout: (setup.buildTimeout ?? 300) * 1000,
         env,
         assertCurrent,
@@ -238,8 +312,12 @@ export async function prepareLaunchRepository(
         maxOutputBytes: 65536,
       },
     );
+    commandMs = Date.now() - commandStarted;
     assertCurrent();
   } catch (error) {
+    commandMs = Date.now() - commandStarted;
+    assertCurrent();
+    await readStageTiming(null);
     assertCurrent();
     const category =
       error instanceof ExecInterruptedError && error.execution?.cause === 'timeout'
@@ -251,6 +329,8 @@ export async function prepareLaunchRepository(
     );
   }
   evidence.exitCode = isObservedExitCode(result.exitCode) ? result.exitCode : null;
+  await readStageTiming(evidence.exitCode);
+  assertCurrent();
   if (evidence.exitCode !== 0) {
     evidence.status = evidence.exitCode === null ? 'unverified' : 'failed';
     return fail(
@@ -260,7 +340,7 @@ export async function prepareLaunchRepository(
   }
   let after: RepositoryPreparationEvidence['source'] = null;
   try {
-    after = await inspectPreparationSource(containerManager, containerId, assertCurrent);
+    after = await probeSource();
   } catch {
     assertCurrent();
   }

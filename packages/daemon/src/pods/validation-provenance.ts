@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { EffectiveLaunchConfig, Pod } from '@autopod/shared';
+import type { EffectiveLaunchConfig, Pod, RepositoryPreparationEvidence } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ReviewerLaunchIdentity } from '../interfaces/reviewer-launch.js';
@@ -27,6 +27,8 @@ interface ValidationProvenanceDependencies {
   resolveEffectiveBoundProfile(pod: Pod): PodExecutionSettings;
   readLaunch?(podId: string): EffectiveLaunchConfig | null;
   preparationSecrets?(launch: EffectiveLaunchConfig): Promise<string[]>;
+  /** Pod log surface for the preparation timing summary (#644). */
+  reportPreparation?(podId: string, evidence: RepositoryPreparationEvidence): void;
 }
 
 export function createValidationProvenance(deps: ValidationProvenanceDependencies): {
@@ -89,6 +91,7 @@ export function createValidationProvenance(deps: ValidationProvenanceDependencie
         sensitiveValues: [...secrets, ...(profile.registryPat ? [profile.registryPat] : [])],
         record(evidence) {
           guard();
+          if (evidence.timing) deps.reportPreparation?.(pod.id, evidence);
           provenance.repositoryPreparation = evidence;
           if (evidence.status !== 'passed') provenance.status = 'blocked';
           const ledger = podRepo.executionProvenance;

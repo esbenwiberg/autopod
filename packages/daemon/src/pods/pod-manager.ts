@@ -73,6 +73,7 @@ import {
   buildPrFixTask,
   createFixCyclePolicy,
 } from './fix-policy.js';
+import { formatPreparationSummary } from './preparation-timing.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { createProviderContinuation } from './provider-continuation.js';
@@ -802,6 +803,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       readLaunch: (id) => deps.launchConfiguration?.read(id) ?? null,
       preparationSecrets: async (launch) =>
         (await executionCredentialsFor(launch)?.registries(launch))?.redactionSecrets ?? [],
+      reportPreparation: (podId, evidence) => {
+        logger.info(
+          {
+            podId,
+            purpose: 'validation',
+            status: evidence.status,
+            timing: evidence.timing,
+            cache: evidence.cache,
+          },
+          'Repository preparation timing',
+        );
+        emitActivityStatus(podId, `Validation: ${formatPreparationSummary(evidence)}`);
+      },
     });
 
   const { publishValidationResult } = createValidationPublication({

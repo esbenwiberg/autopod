@@ -307,3 +307,29 @@ reverting removes reuse. Leftover snapshot directories are inert and can be dele
 - Original task: issue #644 (brief in pod spicy-cockroach)
 - Research: `thoughts/shared/research/2026-11-22-644-preparation-timing.md`
 - Similar pattern: `packages/daemon/src/runtimes/claude-state-store.ts`, `pods/provider-continuation.ts:118-131` (#646 budget gate)
+
+## Approval and conditions (2026-11-22, owner via orchestrator)
+
+Approved as option A, with the following binding conditions:
+
+1. **Stage splitting never changes what runs.** If there is any doubt (newline, heredoc `<<`,
+   comment `#`, `$(`, backticks, `(`/`)`/`{`/`}` subshells or groups, `||`, pipes, `;`, a lone
+   `&`, `!`, a backslash or line continuation, `&&` inside quotes, unbalanced quotes, or an empty
+   segment), the command is a single stage. A single stage gets its marker as a separate no-op line
+   before the unchanged command, not chained. The marker function always returns 0, writes only to
+   its own `/tmp` file, and redirects its own stderr. The EXIT trap does not change the exit status.
+   Tests execute the generated script with real `/bin/sh` and compare the exit code and
+   stdout/stderr against the uninstrumented command, including tricky inputs. A failure-detail test
+   confirms the output is unchanged.
+2. **Snapshot disk bounds:** consumed once, then deleted. Snapshots are deleted when the pod is
+   missing or no longer queued/provisioning, by a sweep at startup and on an interval (a 15-minute
+   grace for an in-progress capture, and a 24-hour hard age), as well as on kill and delete. There
+   is a global cap of 8 GiB across pods (`AUTOPOD_PREPARED_DEPENDENCIES_TOTAL_MAX_BYTES`) in
+   addition to 4 GiB per pod. Capture is skipped when free host disk is below
+   `max(2 GiB, 2 × per-pod cap)`. Every skipped capture and refused reuse is logged with its
+   reason. The directory is created with mode 0700 and is never mounted into containers.
+3. **Capture is best effort and bounded** (5 min). On timeout or error the snapshot is removed and
+   the continuation proceeds; the next provisioning prepares in full.
+4. **Validation and fresh launches always prepare from scratch.** A test proves that validation
+   preparation never consumes a snapshot.
+5. **Phase 1 is committed separately**, before Phase 2.

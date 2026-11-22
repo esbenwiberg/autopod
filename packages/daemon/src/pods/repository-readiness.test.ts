@@ -66,7 +66,11 @@ async function admitted(command: string | null = 'repo-owned-serial-prepare') {
   vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
     if (args[1][2] === PREPARATION_SOURCE_PROBE)
       return { exitCode: 0, stdout: JSON.stringify(state.source), stderr: '' };
-    if (args[1].some((arg) => arg.includes('set -e\nrepo-owned-serial-prepare'))) {
+    if (
+      args[1].some(
+        (arg) => arg.startsWith('set -e\n') && arg.endsWith('\nrepo-owned-serial-prepare'),
+      )
+    ) {
       state.prepareCalls++;
       await state.onPrepare();
       return {
@@ -155,6 +159,15 @@ describe('repository readiness production runtime admission', () => {
       status: 'passed',
       source: t.state.source,
     });
+    // #644: per-stage timing is durable in provenance and summarized in pod activity.
+    const preparation = t.f.podRepo.executionProvenance?.latest(t.id)?.repositoryPreparation;
+    expect(preparation?.timing).toMatchObject({
+      commandMs: expect.any(Number),
+      preflightMs: expect.any(Number),
+      stages: [{ index: 1, label: 'repo-owned-serial-prepare' }],
+    });
+    const events = JSON.stringify(t.f.db.prepare('SELECT payload FROM events').all());
+    expect(events).toContain('Repository preparation passed in');
   });
 
   it('keeps no-prepare launches compatible without calling them repository-ready', async () => {

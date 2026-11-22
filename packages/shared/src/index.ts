@@ -333,6 +333,9 @@ export type {
   ExecutionProvenance,
   ExecutionProvenanceInput,
   RepositoryPreparationEvidence,
+  RepositoryPreparationReuse,
+  RepositoryPreparationStageTiming,
+  RepositoryPreparationTiming,
 } from './types/execution-provenance.js';
 export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
 export * from './types/github-access.js';

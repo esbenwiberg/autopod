@@ -12,6 +12,7 @@ import {
   PARENT_DELEGATE_INSTRUCTIONS,
   provisionParentDelegate,
 } from './parent-delegate-materials.js';
+import { formatPreparationSummary } from './preparation-timing.js';
 import { projectMemoryScope } from './project-memory-scope.js';
 import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type {
@@ -569,10 +570,12 @@ export function createProvisioningAgentMaterials(
     };
     assertCurrent();
     let preparationProvenance: Awaited<ReturnType<typeof inspectExecutionPreflight>> | undefined;
+    let preflightMs: number | null | undefined;
     if (launchConfig?.repository?.setup.prepareCommand) {
       emitStatus('Preparing repository dependencies…');
       if (!podRepo.executionProvenance)
         throw new Error('Repository preparation provenance ledger is unavailable');
+      const preflightStarted = Date.now();
       preparationProvenance = await inspectExecutionPreflight(
         containerManager,
         containerId,
@@ -582,6 +585,7 @@ export function createProvisioningAgentMaterials(
         'worker',
         { assertCurrent },
       );
+      preflightMs = Date.now() - preflightStarted;
       assertCurrent();
     }
     const repositoryPreparation = await prepareLaunchRepository(
@@ -596,12 +600,26 @@ export function createProvisioningAgentMaterials(
       },
       {
         assertCurrent,
+        ...(preflightMs !== undefined ? { preflightMs } : {}),
         sensitiveValues: [
           ...(effectiveRegistryPat ? [effectiveRegistryPat] : []),
           ...(launchRegistry?.redactionSecrets ?? []),
         ],
         record(evidence) {
           assertCurrent();
+          if (evidence.timing) {
+            logger.info(
+              {
+                podId,
+                status: evidence.status,
+                timing: evidence.timing,
+                cache: evidence.cache,
+                reuse: evidence.reuse,
+              },
+              'Repository preparation timing',
+            );
+            emitStatus(formatPreparationSummary(evidence));
+          }
           if (!preparationProvenance) return;
           preparationProvenance.repositoryPreparation = evidence;
           if (evidence.status === 'failed' || evidence.status === 'unverified')

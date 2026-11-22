@@ -7,7 +7,7 @@ import { AutopodError } from '@autopod/shared';
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutopodClient } from '../api/client.js';
-import { registerPodCommands } from './pod.js';
+import { printRepositoryPreparation, registerPodCommands } from './pod.js';
 
 vi.mock('ora', () => ({
   default: () => ({
@@ -1839,4 +1839,45 @@ it.each([
   } finally {
     output.mockRestore();
   }
+});
+
+describe('printRepositoryPreparation', () => {
+  it('prints per-stage timing, cache signals and the reuse decision', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      printRepositoryPreparation({
+        status: 'failed',
+        containerId: 'c',
+        commandHash: null,
+        configurationHash: null,
+        source: null,
+        exitCode: 1,
+        timing: {
+          totalMs: 742_000,
+          commandMs: 740_000,
+          preflightMs: 1_200,
+          sourceProbeMs: 800,
+          stageTiming: 'measured',
+          stages: [
+            { index: 1, label: 'npm ci', durationMs: 701_000, status: 'passed' },
+            { index: 2, label: 'npm run bootstrap', durationMs: 39_000, status: 'failed' },
+            { index: 3, label: 'node', durationMs: null, status: 'not-run' },
+          ],
+        },
+        cache: { signals: [{ name: 'npm-cache', state: 'absent' }] },
+        reuse: { decision: 'refused', reason: 'dependency-inputs-changed' },
+      });
+      const output = log.mock.calls.flat().join('\n');
+      expect(output).toContain(
+        'Repository preparation failed in 742s (command 740s; probes 0.8s; preflight 1.2s)',
+      );
+      expect(output).toContain('Reuse: refused — dependency-inputs-changed');
+      expect(output).toContain('[1] npm ci: passed 701s');
+      expect(output).toContain('[2] npm run bootstrap: failed 39s');
+      expect(output).toContain('[3] node: not-run');
+      expect(output).toContain('Caches before: npm-cache absent');
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
