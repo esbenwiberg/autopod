@@ -178,6 +178,14 @@ export interface ContainerManager {
   readonly supportsExecRecovery?: boolean;
   /** Exact backend/engine/region/group/resource namespace, never an owner label. */
   getResourceKey?(containerId: string): Promise<string>;
+  /**
+   * Retained-finalization-only exact observation. Returns `deleted` only when the
+   * same engine/provider authoritatively reports the exact resource absent; every
+   * other failure throws. Never wakes, stops or changes the resource.
+   */
+  observeFinalizationResource?(
+    containerId: string,
+  ): Promise<{ resourceKey: string; status: 'running' | 'stopped' | 'deleted' }>;
   /** Bounded descriptor-relative read-only browser. NEVER resumes or changes a resource. */
   listRecoveryFiles?(
     containerId: string,

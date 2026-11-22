@@ -29,7 +29,14 @@ EOF
 cat >"$tmp/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  *'/pods'*) echo "${DEPLOY_TEST_PODS_JSON:-[]}" ;;
+  *'/pods'*)
+    if [ "${DEPLOY_TEST_PODS_FAIL:-0}" = 1 ]; then echo 'curl: (28) timed out' >&2; exit 28; fi
+    # The daemon excludes fleet-archived pods unless archive=include is requested.
+    if [[ "$*" == *'archive=include'* ]]; then
+      echo "${DEPLOY_TEST_PODS_JSON:-[]}"
+    else
+      echo "${DEPLOY_TEST_UNARCHIVED_PODS_JSON:-[]}"
+    fi ;;
   *'hosted-deploy-drain'*)
     if [[ "$*" == *'-X DELETE'* ]]; then echo removed >"$DEPLOY_TEST_DRAIN_REMOVED"; fi
     echo '{"active":{"expiresAt":"2099-01-01T00:00:00.000Z"}}' ;;
@@ -103,11 +110,16 @@ case "$remote_script" in
   *'MISSING_RELEASE'*) sh -c "$remote_script" ;;
   *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
   *'FINAL_ACTIVE='*)
+    # Like Run Command: transport success even when the guest script exits 1.
     if [ "${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" = 1 ]; then
-      sh -c "$remote_script" | tail -c 512
+      { sh -c "$remote_script" || true; } | tail -c 512
     else
-      sh -c "$remote_script"
+      sh -c "$remote_script" || true
     fi
+    ;;
+  *'select count(*) as n from pods'*)
+    echo db-preflight >>"$DEPLOY_TEST_DB_PREFLIGHT"
+    if [ "${DEPLOY_TEST_DB_FAIL:-0}" = 1 ]; then echo 'node: better-sqlite3 failed'; else echo "${DEPLOY_TEST_DB_ACTIVE:-0}"; fi
     ;;
   *'keep_set='*) echo 'keep (protected): cafebabe' ;;
   *) echo "unexpected VM command $count" >&2; exit 1 ;;
@@ -155,6 +167,7 @@ run_deploy() {
     DEPLOY_TEST_TRUNCATE_REMOTE="${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" \
     DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
     DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
+    DEPLOY_TEST_DB_PREFLIGHT="$tmp/db-preflight" \
     DEPLOY_TEST_DATA_DIR="${DEPLOY_TEST_DATA_DIR-/data/autopod/data}" \
     DEPLOY_TEST_BROWSER_SCRIPT="$tmp/browser-script" \
     bash "$script" --target cafebabe --yes ${DEPLOY_TEST_SKIP_BROWSER---skip-playwright-prewarm} "$@"
@@ -162,7 +175,7 @@ run_deploy() {
 
 reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
-  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
+  rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed" "$tmp/db-preflight"
 }
 
 # The release switch and restart can succeed while the proxy serves an error.
@@ -224,7 +237,50 @@ if DEPLOY_TEST_FINAL_ACTIVE=1 run_deploy >"$tmp/out" 2>&1; then
   exit 1
 fi
 grep -qF '1 active pod(s) at final restart gate — refusing deployment' "$tmp/out"
+grep -qF 'final gate refused before the release switch — live release deadbeef unchanged, nothing to roll back' "$tmp/out"
+if grep -qF 'ROLL BACK' "$tmp/out"; then echo 'final-gate refusal advised a rollback' >&2; exit 1; fi
 [ "$(cat "$tmp/az-count")" = 4 ]
+[ ! -e "$tmp/restarted" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+[ -e "$tmp/drain-removed" ]
+
+# A fleet-archived pod can still own restart-blocking work. The API preflight
+# must request archived pods and refuse before any build is staged.
+reset_fixture
+if DEPLOY_TEST_PODS_JSON='[{"id":"archived-pod","status":"review_required","fleetArchivedAt":"2026-01-01T00:00:00Z"}]' \
+  run_deploy >"$tmp/archived-out" 2>&1; then
+  echo 'deployment ignored a fleet-archived restart-blocking pod' >&2
+  exit 1
+fi
+grep -qxF 'ERROR: 1 restart-blocking pod(s) — restart would interrupt them (use --force to override)' "$tmp/archived-out"
+[ "$(cat "$tmp/az-count")" = 1 ]
+[ ! -e "$tmp/restarted" ]
+
+# A failed pod query must yield one value and fall back to the VM DB count,
+# neither printing a doubled "?" nor proceeding on an unknown count.
+reset_fixture
+if DEPLOY_TEST_PODS_FAIL=1 DEPLOY_TEST_DB_ACTIVE=1 run_deploy >"$tmp/api-fail-out" 2>&1; then
+  echo 'deployment proceeded despite a VM DB restart-blocking pod' >&2
+  exit 1
+fi
+grep -qF 'falling back to VM DB count' "$tmp/api-fail-out"
+grep -qxF '==> active (restart-blocking) pods: 1' "$tmp/api-fail-out"
+grep -qxF 'ERROR: 1 restart-blocking pod(s) — restart would interrupt them (use --force to override)' "$tmp/api-fail-out"
+if grep -qF '?' <(grep -F 'restart-blocking pod' "$tmp/api-fail-out"); then exit 1; fi
+[ ! -e "$tmp/restarted" ]
+reset_fixture
+if ! DEPLOY_TEST_PODS_FAIL=1 run_deploy >"$tmp/api-fail-ok-out" 2>&1; then
+  cat "$tmp/api-fail-ok-out" >&2
+  exit 1
+fi
+[ "$(wc -l <"$tmp/db-preflight")" -eq 2 ] # preflight and post-drain snapshots
+grep -qF 'DEPLOYED deadbeef -> cafebabe' "$tmp/api-fail-ok-out"
+reset_fixture
+if DEPLOY_TEST_PODS_FAIL=1 DEPLOY_TEST_DB_FAIL=1 run_deploy >"$tmp/unknown-out" 2>&1; then
+  echo 'deployment proceeded with an unknown active-pod count' >&2
+  exit 1
+fi
+grep -qF 'could not determine active pods from API or VM DB' "$tmp/unknown-out"
 [ ! -e "$tmp/restarted" ]
 
 # Queued work has no running workload to interrupt. It must remain queued and

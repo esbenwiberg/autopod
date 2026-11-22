@@ -386,6 +386,64 @@ describe('retained finalization', () => {
     expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
     expect(f.cm.stop).not.toHaveBeenCalled();
   });
+  it('stop-retains an engine-confirmed deleted resource without dispatching stop or releasing pointers', async () => {
+    const f = await fixture();
+    const before = f.pod();
+    f.cm.observeFinalizationResource = vi.fn(async () => ({
+      resourceKey: f.resourceKey,
+      status: 'deleted' as const,
+    }));
+    const receipt = await f.submit();
+    expect(receipt.state).toBe('finalized');
+    expect(f.pod()).toMatchObject({
+      status: 'killed',
+      containerId: before.containerId,
+      worktreePath: before.worktreePath,
+    });
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(await f.submit()).toEqual(receipt);
+  });
+  it('refuses a deleted resource observed in another provider namespace', async () => {
+    const f = await fixture();
+    f.cm.observeFinalizationResource = vi.fn(async () => ({
+      resourceKey: 'another-provider/namespace',
+      status: 'deleted' as const,
+    }));
+    await expect(f.submit()).rejects.toThrow(/immutable original owner/);
+    expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
+  });
+  it('returns a 409 without admitting an intent when exact identity is unobservable', async () => {
+    const f = await fixture();
+    f.cm.observeFinalizationResource = vi.fn(async () => {
+      throw Object.assign(new Error('docker unavailable'), { statusCode: 500 });
+    });
+    await expect(f.submit()).rejects.toMatchObject({
+      code: 'RETAINED_FINALIZATION_BLOCKED',
+      statusCode: 409,
+      message: expect.stringMatching(/no finalization intent admitted/),
+    });
+    expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
+  it('keeps an admitted intent pending when identity becomes unobservable', async () => {
+    const f = await fixture();
+    const observe = vi
+      .fn()
+      .mockResolvedValueOnce({ resourceKey: f.resourceKey, status: 'running' })
+      .mockRejectedValue(Object.assign(new Error('docker unavailable'), { statusCode: 500 }));
+    f.cm.observeFinalizationResource = observe;
+    expect((await f.submit()).state).toBe('pending');
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect((await f.controller().finalizeRetained(f.id, f.request, f.actor)).state).toBe('pending');
+    expect(f.pod().status).not.toBe('killed');
+    observe.mockResolvedValue({ resourceKey: f.resourceKey, status: 'deleted' });
+    expect((await f.controller().finalizeRetained(f.id, f.request, f.actor)).state).toBe(
+      'finalized',
+    );
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
   it('does not fence ordinary tasks', () => {
     const f = createTestContext();
     expect(createRetainedFinalizationRepository(f.db).get('ordinary')).toBeNull();

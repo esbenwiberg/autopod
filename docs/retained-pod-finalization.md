@@ -54,6 +54,17 @@ checkpoint, or clean replacement B cannot substitute for selected A. A legacy
 original binding without a tree resolves the tree from its exact recorded Git
 commit, not from the currently observed HEAD.
 
+### Observing the current resource
+
+Admission and every later step use the same exact observation. For local Docker,
+the engine ID must be readable, and only the engine's exact "no such container"
+answer for the bound full container ID counts as `deleted`. The resource key is
+still `['docker', engineId, containerId]`, so it must match the immutable owner.
+Timeouts, other Docker errors, short IDs and mismatched identities fail closed.
+Before admission, an unobservable identity returns HTTP 409 and records no intent.
+After admission, it leaves the operation pending. A deleted resource is never sent
+a stop request. This does not change Docker status reporting anywhere else.
+
 ## Pending is not terminal
 
 The durable intent and all resource claims are committed before any stop request.
