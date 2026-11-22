@@ -3,28 +3,102 @@ import { describe, expect, it } from 'vitest';
 import { buildPrBody, buildPrTitle, escapeMd, type PrBodyConfig } from './pr-body-builder.js';
 
 describe('buildPrTitle', () => {
-  it('prefixes with feat: when no conventional commit prefix', () => {
-    expect(buildPrTitle('Add dark mode toggle')).toBe('feat: Add dark mode toggle');
+  it('does not add a conventional-commit type prefix the generator did not choose', () => {
+    expect(buildPrTitle({ task: 'Add dark mode toggle' })).toBe('Add dark mode toggle');
   });
 
   it('preserves existing conventional commit prefix', () => {
-    expect(buildPrTitle('fix: resolve login crash')).toBe('fix: resolve login crash');
-    expect(buildPrTitle('chore: update dependencies')).toBe('chore: update dependencies');
-    expect(buildPrTitle('refactor(auth): simplify token refresh')).toBe(
+    expect(buildPrTitle({ task: 'fix: resolve login crash' })).toBe('fix: resolve login crash');
+    expect(buildPrTitle({ task: 'chore: update dependencies' })).toBe('chore: update dependencies');
+    expect(buildPrTitle({ task: 'refactor(auth): simplify token refresh' })).toBe(
       'refactor(auth): simplify token refresh',
     );
   });
 
-  it('truncates at 70 chars', () => {
-    const longTask =
-      'Add a comprehensive dark mode toggle with persistent user preferences and system theme detection';
-    const title = buildPrTitle(longTask);
-    expect(title.length).toBeLessThanOrEqual(70);
-    expect(title).toMatch(/\.\.\.$/);
+  it('strips the Markdown heading marker and ignores the rest of the brief (#643/#652)', () => {
+    const brief =
+      '# Fix #646: provider failover blocked by "Task token accounting incomplete"\n\n' +
+      '## Problem\n\nWhen a provider fails over, the pod is blocked.';
+    const title = buildPrTitle({ task: brief });
+    expect(title).toBe('Fix #646: provider failover blocked by "Task token accounting…');
+    expect(title).not.toMatch(/^feat:/);
+    expect(title).not.toContain('# ');
+    expect(title).not.toContain('Problem');
   });
 
-  it('strips newlines', () => {
-    expect(buildPrTitle('Fix\nthe\nbug')).toBe('feat: Fix the bug');
+  it('keeps a short Markdown heading whole', () => {
+    expect(buildPrTitle({ task: '## #123 Some task title\n\nBody text' })).toBe(
+      '#123 Some task title',
+    );
+  });
+
+  it.each([
+    ['> Add the **retry** helper', 'Add the retry helper'],
+    ['- [ ] Wire `retryCreatePr` into the API', 'Wire retryCreatePr into the API'],
+    ['* Remove _legacy_ output modes', 'Remove legacy output modes'],
+    ['1. Rename the [profile store](docs/x.md)', 'Rename the profile store'],
+    ['### __Bold__ heading ###', 'Bold heading'],
+    ['\n\n   \n# Leading blank lines', 'Leading blank lines'],
+  ])('strips leading Markdown syntax from %j', (task, expected) => {
+    expect(buildPrTitle({ task })).toBe(expected);
+  });
+
+  it('uses the frontmatter title of a brief when present', () => {
+    const brief = '---\ntitle: "Clean PR titles"\ntouches: [a.ts]\n---\n# Heading\n\nBody';
+    expect(buildPrTitle({ task: brief })).toBe('Clean PR titles');
+  });
+
+  it('skips frontmatter without a title', () => {
+    expect(buildPrTitle({ task: '---\ntouches: [a.ts]\n---\n\n# Real heading' })).toBe(
+      'Real heading',
+    );
+  });
+
+  it('prefers the contract title, then the brief title, over the task text', () => {
+    const task = '# Raw heading from the brief';
+    expect(buildPrTitle({ task, briefTitle: 'Brief title', contractTitle: 'Contract title' })).toBe(
+      'Contract title',
+    );
+    expect(buildPrTitle({ task, briefTitle: 'Brief title' })).toBe('Brief title');
+    expect(buildPrTitle({ task, briefTitle: '  ', contractTitle: '' })).toBe(
+      'Raw heading from the brief',
+    );
+  });
+
+  it('prefers a brief title over the shared series name', () => {
+    expect(
+      buildPrTitle({
+        task: 'x',
+        briefTitle: 'Per-pod brief',
+        seriesName: 'my-series',
+        seriesDescription: 'Series purpose',
+      }),
+    ).toBe('Per-pod brief');
+    expect(
+      buildPrTitle({ task: 'x', seriesName: 'my-series', seriesDescription: 'Series purpose' }),
+    ).toBe('my series');
+  });
+
+  it('truncates long titles at a word boundary to at most 72 chars', () => {
+    const longTask =
+      'Add a comprehensive dark mode toggle with persistent user preferences and system theme detection';
+    const title = buildPrTitle({ task: longTask });
+    expect(title.length).toBeLessThanOrEqual(72);
+    expect(title).toBe('Add a comprehensive dark mode toggle with persistent user preferences…');
+  });
+
+  it('hard-truncates a single overlong word', () => {
+    const title = buildPrTitle({ task: 'x'.repeat(100) });
+    expect(title.length).toBeLessThanOrEqual(72);
+    expect(title.endsWith('…')).toBe(true);
+  });
+
+  it('joins soft-wrapped lines of the first paragraph', () => {
+    expect(buildPrTitle({ task: 'Fix\nthe\nbug\n\nMore detail' })).toBe('Fix the bug');
+  });
+
+  it('never returns an empty title', () => {
+    expect(buildPrTitle({ task: '#\n\n---\n' }).length).toBeGreaterThan(0);
   });
 });
 

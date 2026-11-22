@@ -7,6 +7,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import {
   createProfileAnthropicClient,
   type ProfileLlmClientDeps,
+  type ProfileLlmClientRoute,
   type ProfileLlmClientUnavailableReason,
 } from '../providers/llm-client.js';
 import { buildPrTitle } from './pr-body-builder.js';
@@ -71,7 +72,10 @@ export interface PrTitleResult {
   title: string;
   usedFallback: boolean;
   fallbackReason?: LlmFallbackReason;
-  /** Underlying error message when relevant (api_call_failed). */
+  /**
+   * Bounded, secret-redacted diagnostic. For api_call_failed it names the
+   * provider, auth route, model, HTTP status, error type and request id.
+   */
   fallbackDetail?: string;
 }
 
@@ -84,6 +88,10 @@ export interface PrNarrativeResult {
 
 export interface PrDescriptionInput {
   task: string;
+  /** Spec contract `title`; preferred for the fallback title when present. */
+  contractTitle?: string;
+  /** Brief frontmatter title (`work.briefTitle`); used for the fallback title. */
+  briefTitle?: string;
   worktreePath: string;
   baseBranch: string;
   taskSummary?: TaskSummary;
@@ -131,6 +139,8 @@ async function readBranchDiff(
 
 function buildUserMessage(input: PrDescriptionInput, diff: string): string {
   const lines: string[] = [];
+  const title = input.contractTitle?.trim() || input.briefTitle?.trim();
+  if (title) lines.push(`Title: ${title}`);
   lines.push(`Task: ${input.task}`);
   if (input.handoffInstructions) {
     lines.push(`Human handoff instructions: ${input.handoffInstructions}`);
@@ -163,11 +173,13 @@ export async function generatePrTitle(
   input: PrDescriptionInput,
   logger: Logger,
 ): Promise<PrTitleResult> {
-  const fallbackTitle = buildPrTitle(
-    input.handoffInstructions || input.task,
-    input.seriesName,
-    input.seriesDescription,
-  );
+  const fallbackTitle = buildPrTitle({
+    task: input.handoffInstructions || input.task,
+    contractTitle: input.contractTitle,
+    briefTitle: input.briefTitle,
+    seriesName: input.seriesName,
+    seriesDescription: input.seriesDescription,
+  });
 
   const llm = await createProfileAnthropicClient(
     input.profile,
@@ -213,16 +225,16 @@ export async function generatePrTitle(
 
     return { title: text, usedFallback: false };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const failure = describeApiCallFailure(err, llm, input.profile);
     logger.error(
-      { err, reason: 'api_call_failed' },
+      { reason: 'api_call_failed', ...failure.fields },
       'pr-description-generator: title generation API call failed, using fallback',
     );
     return {
       title: fallbackTitle,
       usedFallback: true,
       fallbackReason: 'api_call_failed',
-      fallbackDetail: detail,
+      fallbackDetail: failure.detail,
     };
   }
 }
@@ -302,18 +314,107 @@ export async function generatePrNarrative(
 
     return { narrative: parsed, usedFallback: false };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const failure = describeApiCallFailure(err, llm, input.profile);
     logger.error(
-      { err, reason: 'api_call_failed' },
+      { reason: 'api_call_failed', ...failure.fields },
       'pr-description-generator: narrative generation API call failed, using fallback',
     );
     return {
       narrative: fallbackNarrative,
       usedFallback: true,
       fallbackReason: 'api_call_failed',
-      fallbackDetail: detail,
+      fallbackDetail: failure.detail,
     };
   }
+}
+
+const MAX_FAILURE_DETAIL_LENGTH = 300;
+const MAX_FAILURE_MESSAGE_LENGTH = 160;
+
+interface ApiCallFailureFields {
+  provider: string;
+  route: string;
+  model: string;
+  status?: number;
+  errorType?: string;
+  errorName?: string;
+  requestId?: string;
+  message: string;
+}
+
+/**
+ * Turn an LLM API error into a bounded, secret-redacted diagnostic. Reads only
+ * scalar metadata from the SDK error (never headers, request options or the
+ * raw error object) so keys and tokens cannot reach logs, pod activity or the
+ * PR body footer.
+ */
+function describeApiCallFailure(
+  err: unknown,
+  llm: { model: string; route?: ProfileLlmClientRoute },
+  profile: Pick<PodExecutionSettings, 'modelProvider'>,
+): { detail: string; fields: ApiCallFailureFields } {
+  const record = (typeof err === 'object' && err !== null ? err : {}) as Record<string, unknown>;
+  const body = asRecord(record.error);
+  const errorType = safeToken(asRecord(body?.error)?.type) ?? safeToken(body?.type);
+  const errorName = safeToken(record.name);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const fields: ApiCallFailureFields = {
+    provider: llm.route?.provider ?? profile.modelProvider ?? 'unknown',
+    route: llm.route?.auth ?? 'unknown',
+    model: llm.model,
+    ...(typeof record.status === 'number' ? { status: record.status } : {}),
+    ...(errorType ? { errorType } : {}),
+    ...(errorName && errorName !== 'Error' ? { errorName } : {}),
+    ...(safeToken(record.requestID ?? record.request_id)
+      ? { requestId: safeToken(record.requestID ?? record.request_id) }
+      : {}),
+    message: truncate(redactSecrets(rawMessage), MAX_FAILURE_MESSAGE_LENGTH),
+  };
+  const parts = [
+    `provider=${fields.provider}`,
+    `route=${fields.route}`,
+    `model=${fields.model}`,
+    fields.status !== undefined ? `status=${fields.status}` : null,
+    fields.errorType ? `type=${fields.errorType}` : null,
+    fields.errorName ? `error=${fields.errorName}` : null,
+    fields.requestId ? `request_id=${fields.requestId}` : null,
+  ].filter((part): part is string => part !== null);
+  const detail = truncate(
+    `${parts.join(' ')}${fields.message ? `: ${fields.message}` : ''}`,
+    MAX_FAILURE_DETAIL_LENGTH,
+  );
+  return { detail, fields };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function safeToken(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(value) ? value : undefined;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** Best-effort redaction of credentials that providers may echo in error messages. */
+function redactSecrets(text: string): string {
+  return text
+    .replace(/\beyJ[\w-]*\.[\w-]*\.[\w-]*/g, '[redacted]')
+    .replace(/\b(?:sk|pk|rk)-[\w-]{6,}/gi, '[redacted]')
+    .replace(/\b(Bearer|Basic)\s+[^\s"',}]+/gi, '$1 [redacted]')
+    .replace(
+      /\b(api[-_]?key|x-api-key|access[-_]?token|refresh[-_]?token|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)[^\s"',}]+/gi,
+      '$1$2[redacted]',
+    )
+    .replace(/(https?:\/\/)[^\s/@"']+@/gi, '$1[redacted]@')
+    .replace(/(https?:\/\/[^\s?#"']+)\?[^\s"']*/gi, '$1?[redacted]')
+    .replace(/[A-Za-z0-9+/_-]{40,}={0,2}/g, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parseNarrativeJson(raw: string): PrNarrative | null {

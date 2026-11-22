@@ -408,6 +408,8 @@ export class GhPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      briefTitle: config.briefTitle,
+      contractTitle: config.contractTitle,
       deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
@@ -1007,6 +1009,8 @@ export class GitHubApiPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      briefTitle: config.briefTitle,
+      contractTitle: config.contractTitle,
       deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
