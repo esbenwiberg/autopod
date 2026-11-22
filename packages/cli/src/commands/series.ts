@@ -85,7 +85,11 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     .option('--workflow <name-or-id>', 'Workflow preset')
     .option('--github-access <name-or-id>', 'GitHub access preset')
     .option('--execution <target>', 'local or sandbox')
-    .option('--memory-gb <number>', 'Main container memory', Number)
+    .option(
+      '--memory-gb <number>',
+      'Main container memory (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL)',
+      Number,
+    )
     .option('--cpus <number>', 'Main container CPU allocation', Number)
     .option('--request-id <id>', 'Stable admission request ID')
     .option(
