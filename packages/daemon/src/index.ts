@@ -26,6 +26,11 @@ import { inspectNetworkCapacity } from './containers/docker-network-capacity.js'
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { createRetainedCleanupDocker } from './containers/retained-cleanup-docker.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
+import {
+  DEFAULT_SANDBOX_TIER,
+  parseSandboxDefaultTier,
+  type SandboxDefaultTier,
+} from './containers/sandbox-tiers.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
@@ -551,11 +556,12 @@ if (sidecarManager) {
   );
 }
 
-function parseSandboxTier(value: string | undefined): SandboxResourceTier | undefined {
-  if (!value) return undefined;
-  if (value === 'XS' || value === 'S' || value === 'M' || value === 'L') return value;
-  logger.warn({ value }, 'Ignoring invalid sandbox tier; expected XS, S, M, or L');
-  return undefined;
+function parseSandboxTier(value: string | undefined): SandboxDefaultTier | undefined {
+  // Fleet default only: XL/2XL are per-repository opt-in and are rejected like
+  // any unknown value (warn, ignore, fall back to the L default).
+  const parsed = parseSandboxDefaultTier(value);
+  if (parsed.warning) logger.warn({ value }, parsed.warning);
+  return parsed.tier;
 }
 
 function parseSandboxRegistryCredentials(): { username: string; token: string } | undefined {
@@ -636,7 +642,6 @@ const SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID =
   process.env.AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID ??
   process.env.SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID;
 const SANDBOX_REGISTRY_CREDENTIALS = parseSandboxRegistryCredentials();
-type SandboxResourceTier = import('./containers/sandbox-api-client.js').SandboxResourceTier;
 const SANDBOX_TIER = parseSandboxTier(process.env.AZURE_SANDBOX_TIER ?? process.env.SANDBOX_TIER);
 
 let sandboxContainerManager:
@@ -670,7 +675,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
       imagePullIdentityConfigured: Boolean(SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID),
       registryCredentialsConfigured: Boolean(SANDBOX_REGISTRY_CREDENTIALS),
-      tier: SANDBOX_TIER ?? 'L',
+      tier: SANDBOX_TIER ?? DEFAULT_SANDBOX_TIER,
     },
     'Sandbox execution target enabled',
   );
@@ -876,7 +881,7 @@ const configuration = createHostConfigurationComponents({
   network: networkManager,
   docker,
   sandboxEnabled: !!sandboxContainerManager,
-  sandboxDefaultTier: SANDBOX_TIER ?? 'L',
+  sandboxDefaultTier: SANDBOX_TIER ?? DEFAULT_SANDBOX_TIER,
   // The node22 base carries the runtime CLIs and no repository content, so it doubles as the
   // isolated reviewer image when the host file names none. Pinned to its digest per resolution.
   ...(reviewerRegistry

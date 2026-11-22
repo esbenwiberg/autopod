@@ -49,16 +49,20 @@ Close the legacy path that would silently round the implicit 10 GiB Docker defau
    `sandboxTierResources(tier)` (Azure units: `${vcpu*1000}m`, `${memoryGiB*1024}Mi`,
    `${diskGiB}Gi`), `sandboxTierLabel(tier)`, `parseSandboxTier(value)`,
    `resolveSandboxTier(memoryBytes, defaultTier)`.
-3. **Resolver semantics (`resolveSandboxTier`):** no hint (`undefined`/≤0) → configured
-   default; otherwise the smallest tier whose RAM ≥ request (preserves today’s XS–L
-   round-up for legacy explicit values); above 2XL → throw
-   `AutopodError(…, 'PREFLIGHT_INSUFFICIENT_MEMORY', 409)` naming the request and the 2XL
-   ceiling. The launch API stays stricter: `resolve-execution.ts` already requires an exact
-   advertised tier, so explicit new-launch selections never round.
-4. **Default vs maximum:** the default remains `L` (`AZURE_SANDBOX_TIER` unset).
-   `parseSandboxTier` is derived from the catalog (case-insensitive, normalized), so an
-   operator *may* explicitly configure any catalog tier as the fleet default; we do not
-   change the default and docs warn against raising it (see open question Q2).
+3. **Resolver semantics (`resolveSandboxTier`) — approved Q1 alternative:** no hint
+   (`undefined`/≤0) → configured default. A request ≤ L RAM rounds up to the smallest
+   satisfying tier within XS–L (today’s mapping, unchanged). A request above L must equal an
+   opt-in tier exactly (8 GiB = XL, 16 GiB = 2XL); any other value above L (e.g. a legacy
+   explicit `containerMemoryGb: 10`, or 32 GiB) is refused with
+   `AutopodError(…, 'PREFLIGHT_INSUFFICIENT_MEMORY', 409)` naming XL (8) and 2XL (16) as the
+   options — never rounded up. The catalog marks XL/2XL `optIn: true`; the round-up range is
+   the non-opt-in tiers. The launch API stays exact-tier via `resolve-execution.ts`.
+4. **Default vs maximum — approved Q2 alternative:** the default remains `L`
+   (`AZURE_SANDBOX_TIER` unset). The configurable fleet default is limited to non-opt-in tiers
+   (≤ L). `XL`/`2XL` as the fleet default is invalid configuration handled exactly like an
+   unknown value today (warn, ignore, fall back to `L`), with a message that larger tiers are
+   per-repository opt-in. Parsing is a pure catalog helper (`parseSandboxDefaultTier`) so it
+   is unit-tested; `DEFAULT_SANDBOX_TIER` and `MAX_SANDBOX_TIER` remain separate constants.
 5. **Capabilities contract:** add `memoryBundles: SandboxMemoryBundle[] | null` to shared
    `ExecutionCapabilities` (`{ tier, memoryGb, cpus, diskGb, label }`); Docker reports `null`.
    Do **not** populate `defaults.cpus/storageGb` or the resolved allocation with bundle CPU/disk:
@@ -108,8 +112,8 @@ Files:
 
 Tests:
 - `sandbox-tiers.test.ts`: ordering; XS–L payloads byte-identical to baseline; XL/2XL
-  payloads; labels; resolver (omitted→default, 1.5→M, 4→L, 6→XL, 8→XL, 16→2XL, 16.5 & 32
-  throw); default ≠ max; parse (`xl`, `2XL`, invalid, `3XL` → undefined).
+  payloads; labels; resolver (omitted→default, 1.5→M, 4→L, 8→XL, 16→2XL; 6, 10, 16.5 & 32
+  throw before allocation); default ≠ max; default parse (`m`, `L` ok; `XL`, `2XL`, `3XL`, invalid → warning + undefined).
 - `sandbox-container-manager.test.ts`: spawn 8/16 GiB → XL/2XL; 32 GiB rejects with zero
   creates; omitted → L / configured M. `ensureManagedContainer` 8/16 GiB → XL/2XL;
   32 GiB rejects before any claim row or create; lost-response retry at 16 GiB creates once
@@ -210,11 +214,12 @@ swift test --package-path packages/desktop --filter LaunchComposerTests
 Broader daemon suite (`npx pnpm --filter @autopod/daemon test`) if time allows; failures
 outside the touched areas are reported, not hidden.
 
-## Open questions
+## Resolved decisions (parent approval, attempt 1)
 
-- **Q1 (legacy explicit values):** a legacy (no launch config) sandbox profile with an explicit
-  non-tier value above L (e.g. `containerMemoryGb: 10`, previously refused) will round up to
-  2XL under the shared resolver. Plan: accept (explicit setting, same rule as XS–L). Alternative:
-  require an exact tier above the default on the legacy path.
-- **Q2 (operator default):** plan accepts any catalog tier for `AZURE_SANDBOX_TIER`
-  (derived parsing). Alternative: restrict the configurable default to ≤ L.
+- **Q1 → alternative:** round-up only within XS–L; above L requires an exact advertised tier
+  (8 = XL, 16 = 2XL). Legacy explicit `containerMemoryGb: 10` stays refused before any claim
+  or create, with a message naming XL (8) and 2XL (16). Tests: 10 → refused (both spawn
+  paths, zero claims/creates); 8/16 → exact XL/2XL.
+- **Q2 → alternative:** `AZURE_SANDBOX_TIER` accepts only ≤ L. XL/2XL are handled like an
+  unknown tier value (same warning severity, ignored, falls back to L) with a message that
+  larger tiers are per-repository opt-in. Test added; default and maximum stay separate.

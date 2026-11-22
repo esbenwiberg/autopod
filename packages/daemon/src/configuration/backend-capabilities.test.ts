@@ -3,10 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { dockerCapabilities, sandboxCapabilities } from './backend-capabilities.js';
 
 describe('reported backend capabilities', () => {
-  it('reports the provisioning sandbox tiers and configured default without inventing larger sizes', () => {
+  it('reports every offered sandbox bundle up to 2XL, keeping the L default separate from the maximum', () => {
     const caps = sandboxCapabilities({ enabled: true, defaultTier: 'L' });
-    expect(caps.memoryTiersGb).toEqual([0.5, 1, 2, 4]);
+    expect(caps.memoryTiersGb).toEqual([0.5, 1, 2, 4, 8, 16]);
     expect(caps.defaults.memoryGb).toBe(4);
+    expect(caps.maxMemoryGb).toBe(16);
+    expect(caps.maxTotalMemoryGb).toBe(16);
+    expect(caps.defaults.cpus).toBeNull();
+    expect(caps.defaults.storageGb).toBeNull();
+    expect(caps.maxStorageGb).toBeNull();
+    expect(sandboxCapabilities({ enabled: true, defaultTier: 'M' }).defaults.memoryGb).toBe(2);
     expect(caps.sidecars).toBe(false);
     expect(caps.maxCpus).toBeNull();
     expect(sandboxCapabilities({ enabled: false, defaultTier: 'M' }).available).toBe(false);

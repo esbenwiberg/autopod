@@ -1,7 +1,11 @@
 import type { ExecutionCapabilities } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import { boundedDockerCall } from '../containers/docker-bounds.js';
-import { SANDBOX_TIER_MEMORY_BYTES } from '../containers/sandbox-api-client.js';
+import {
+  SANDBOX_TIERS,
+  type SandboxDefaultTier,
+  sandboxTier,
+} from '../containers/sandbox-tiers.js';
 
 const gib = 1024 ** 3;
 const sidecarDefaults: ExecutionCapabilities['sidecarDefaults'] = {
@@ -10,14 +14,15 @@ const sidecarDefaults: ExecutionCapabilities['sidecarDefaults'] = {
   redis: { memoryGb: 0.5, cpus: 0.5, storageGb: null },
 };
 
-/** Uses the same sandbox tier constants as provisioning, including its configured default. */
+/**
+ * Derived from the same sandbox tier catalog as provisioning. The configured
+ * default (≤ L) is reported separately from the 2XL maximum.
+ */
 export function sandboxCapabilities(options: {
   enabled: boolean;
-  defaultTier: keyof typeof SANDBOX_TIER_MEMORY_BYTES;
+  defaultTier: SandboxDefaultTier;
 }): ExecutionCapabilities {
-  const tiers = Object.values(SANDBOX_TIER_MEMORY_BYTES)
-    .map((n) => n / gib)
-    .sort((a, b) => a - b);
+  const tiers = SANDBOX_TIERS.map((entry) => entry.memoryGiB);
   const maxMemoryGb = Math.max(...tiers);
   return {
     target: 'sandbox',
@@ -26,7 +31,7 @@ export function sandboxCapabilities(options: {
       ? {}
       : { unavailableReason: 'Hosted sandbox is not configured on this daemon' }),
     defaults: {
-      memoryGb: SANDBOX_TIER_MEMORY_BYTES[options.defaultTier] / gib,
+      memoryGb: sandboxTier(options.defaultTier).memoryGiB,
       cpus: null,
       storageGb: null,
     },
