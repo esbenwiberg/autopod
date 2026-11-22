@@ -32,6 +32,16 @@ final class ParentFamilyModel {
     return family
   }
 
+  func bundleTarget(for scope: ParentFamilyScope?) -> ParentBundleTarget? {
+    guard let scope, let family = family(for: scope), let review = family.review else { return nil }
+    let display = ParentReviewPresentation(review, isStale: isStale)
+    guard let evidence = display.evidence, let commit = display.commit,
+      let selection = ParentBundleSelection(
+        parentId: scope.parent, run: family.run, evidenceDigest: evidence, commit: commit
+      ) else { return nil }
+    return ParentBundleTarget(scope: scope, selection: selection)
+  }
+
   func invalidate() {
     requestID = UUID()
     scope = nil

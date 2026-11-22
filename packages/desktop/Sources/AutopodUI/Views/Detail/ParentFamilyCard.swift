@@ -9,6 +9,7 @@ struct ParentFamilyCard: View {
   let isStale: Bool
   let isRefreshing: Bool
   let refresh: () -> Void
+  var openReview: (() -> Void)? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -86,6 +87,12 @@ struct ParentFamilyCard: View {
       if let commit = review.commit, let evidence = review.evidence {
         Text("Commit: \(commit)")
         Text("Evidence: \(evidence)")
+        if let openReview {
+          Button("Review private bundle…", action: openReview)
+            .font(.caption)
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("parent-bundle-review")
+        }
       }
     }
     .font(.system(.caption2, design: .monospaced))

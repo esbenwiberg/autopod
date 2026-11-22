@@ -397,8 +397,18 @@ alongside the family, without notifications, attention prompts, or new
 actions. A stale connection never presents a change as currently ready.
 Report-only parents and older daemons omit this section.
 
-**Private review handoff.** For a coding-enrolled parent, the authenticated
-owner can preview one qualified evidence digest at
+**Private review handoff.** In Desktop, open the Task’s **Overview → Delegated
+workers → Review private bundle** when the tested change is ready. The preview
+shows the exact commit, tree, bundle digest and changed paths. Choose **Approve
+private download** to approve only that bundle, then **Save verified bundle**
+and select a destination. Desktop verifies SHA-256 against the approved preview
+before installing the bundle atomically with owner-only file mode. Changing the
+Task or connection invalidates the open review.
+On reopening, you can confirm the same approval again without creating a new
+approval. This flow does not publish anything.
+
+The authenticated owner of a coding-enrolled parent can also preview one
+qualified evidence digest at
 `/orchestration/parents/:podId/review/:evidence/preview`. POST
 `{evidenceDigest, expectedReviewDigest}` to the corresponding `/approve` to
 approve release of that immutable change for human review, then GET `/bundle`
