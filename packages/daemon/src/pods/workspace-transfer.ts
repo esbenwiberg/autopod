@@ -8,7 +8,21 @@ import type { ExecutionTarget } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { mirrorStagedDirectory } from '../containers/staged-directory-mirror.js';
 import type { ContainerManager } from '../interfaces/index.js';
-import { deriveBareRepoPath, pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
+import {
+  deriveBareRepoPath,
+  type PushResult,
+  type PushToBareOptions,
+  pushCommitsToBareViaStagingRef,
+  type RunGit,
+} from '../worktrees/bare-push.js';
+import {
+  proveRebaseRewrite,
+  type RebaseRewriteEvidence,
+} from '../worktrees/rebase-rewrite-proof.js';
+import type {
+  AdoptedHistoryRewrite,
+  FixHistoryRewritePolicy,
+} from './fix-history-rewrite-policy.js';
 import {
   buildWorkspaceMirrorCopyScript,
   WORKSPACE_SYNC_EXCLUDES,
@@ -27,6 +41,13 @@ interface WorkspaceSyncOptions {
 export interface WorkspaceTransferDependencies {
   captureAuthority(podId: string, containerId: string, worktreePath: string): () => void;
   logger: Pick<Logger, 'info' | 'warn'>;
+  /**
+   * Authority to adopt a proven container-side rebase into the host branch.
+   * Absent or null → every non-fast-forward container push is refused.
+   */
+  historyRewritePolicy?(podId: string): FixHistoryRewritePolicy | null;
+  /** Durable audit hook, called once per adopted rewrite after the CAS promote. */
+  onHistoryRewriteAdopted?(podId: string, adoption: AdoptedHistoryRewrite): void;
 }
 
 /**
@@ -98,6 +119,206 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     check();
     return authority.run(check, () =>
       recoverWorktreeFromContainerOwned(containerId, worktreePath, cm, podId),
+    );
+  }
+  /**
+   * Promote the container's branch into the host bare only — no file mirroring —
+   * and only when the pod has rewrite authority. Returns true when the host
+   * branch now matches the container HEAD (fast-forward or proven rewrite).
+   * Used by validation preparation to resolve a Docker HEAD divergence without
+   * touching host files when the divergence cannot be proven.
+   */
+  async function adoptContainerHistoryRewrite(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ): Promise<boolean> {
+    const check = deps.captureAuthority(podId, containerId, worktreePath);
+    check();
+    if (!deps.historyRewritePolicy?.(podId)) return false;
+    return authority.run(check, async () => {
+      const result = await pushContainerCommitsToBare(containerId, worktreePath, cm, podId);
+      if (result && !result.pushed) {
+        logger.warn(
+          { podId, reason: result.reason },
+          'Container history was not adopted into the host branch',
+        );
+      }
+      return result?.pushed === true;
+    });
+  }
+
+  /**
+   * Push options for one bare push. The proof runs host-side against the bare,
+   * where both the predecessor and the pushed staging tip resolve.
+   */
+  function bareRewriteOptions(podId: string): {
+    options: PushToBareOptions;
+    adopted: () => AdoptedHistoryRewrite | null;
+  } {
+    const policy = deps.historyRewritePolicy?.(podId) ?? null;
+    if (!policy) return { options: {}, adopted: () => null };
+    let evidence: RebaseRewriteEvidence | null = null;
+    return {
+      adopted: () => (evidence ? { policy, evidence } : null),
+      options: {
+        authorizeRewrite: async ({ bareRepoPath, branch, expectedOld, candidate }) => {
+          evidence = null;
+          if (branch !== policy.branch)
+            return {
+              authorized: false,
+              reason: `container branch ${branch} is not the pod branch ${policy.branch}`,
+            };
+          const bareGit: RunGit = async (args) => {
+            try {
+              const r = await execFileAsync('git', ['--git-dir', bareRepoPath, ...args], {
+                maxBuffer: 16 * 1024 * 1024,
+              });
+              return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
+            } catch (err) {
+              const e = err as { stdout?: string; stderr?: string; code?: number };
+              return {
+                stdout: e.stdout ?? '',
+                stderr: e.stderr ?? (err as Error).message,
+                exitCode: typeof e.code === 'number' ? e.code : 1,
+              };
+            }
+          };
+          const proof = await proveRebaseRewrite(bareGit, {
+            predecessor: expectedOld,
+            candidate,
+            baseRef: `refs/remotes/origin/${policy.baseBranch}`,
+          });
+          if (!proof.ok) {
+            logger.warn(
+              { podId, expectedOld, candidate, reason: proof.reason },
+              'Container history rewrite is not a proven rebase — keeping host branch',
+            );
+            return { authorized: false, reason: proof.reason };
+          }
+          const { ok: _ok, ...proven } = proof;
+          evidence = proven;
+          return { authorized: true, evidence: proven };
+        },
+      },
+    };
+  }
+
+  /** Every container→bare push goes through here so rewrite authority is uniform. */
+  async function pushToBare(
+    runGit: RunGit,
+    bareRepoPath: string,
+    podId: string,
+  ): Promise<PushResult> {
+    const rewrite = bareRewriteOptions(podId);
+    const result = await pushCommitsToBareViaStagingRef(
+      runGit,
+      bareRepoPath,
+      podId,
+      assertTransferCurrent,
+      rewrite.options,
+    );
+    const adopted = result.pushed && result.rewrite ? rewrite.adopted() : null;
+    if (adopted) {
+      logger.info(
+        { podId, policy: adopted.policy, evidence: adopted.evidence },
+        'Adopted proven container rebase into host branch',
+      );
+      deps.onHistoryRewriteAdopted?.(podId, adopted);
+    }
+    return result;
+  }
+
+  /**
+   * Validate the container-reported bare path against the daemon-derived one and
+   * push the container HEAD into it. Returns null when no push was attempted.
+   */
+  async function pushContainerCommitsToBare(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ): Promise<PushResult | null> {
+    // Read the bare repo path from the alternates file written during gitlink conversion.
+    // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
+    const alternatesResult = await owned(() =>
+      cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+        ],
+        { timeout: 5_000, assertCurrent: assertTransferCurrent },
+      ),
+    );
+    const bareRepoPath =
+      alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
+        ? alternatesResult.stdout.trim()
+        : null;
+    if (!bareRepoPath) return null;
+
+    // Validate the container-supplied path against the daemon-derived path to
+    // prevent an adversarial agent from injecting a different remote via the alternates file.
+    let expectedBareRepoPath: string | null = null;
+    try {
+      expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
+    } catch {
+      // If we can't derive the expected path, skip the push (fail safe).
+    }
+    if (!expectedBareRepoPath || bareRepoPath !== expectedBareRepoPath) {
+      logger.warn(
+        { worktreePath, bareRepoPath, expectedBareRepoPath },
+        'Bare repo path from container does not match daemon-derived path — skipping in-container push',
+      );
+      return null;
+    }
+    for (const safeDirectory of ['/workspace', bareRepoPath]) {
+      const safeDirectoryResult = await owned(() =>
+        cm.execInContainer(
+          containerId,
+          ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
+          { timeout: 5_000, assertCurrent: assertTransferCurrent },
+        ),
+      );
+      if (safeDirectoryResult.exitCode !== 0) {
+        logger.warn(
+          {
+            podId,
+            safeDirectory,
+            stderr: safeDirectoryResult.stderr.slice(0, 500),
+          },
+          'Failed to persist git safe.directory before sync-back push',
+        );
+      }
+    }
+
+    // Push via per-pod staging ref then promote — a direct push to refs/heads/<branch>
+    // is refused by the bare's `receive.denyCurrentBranch` because the host worktree
+    // (a linked worktree of the bare) has that branch checked out.
+    return pushToBare(
+      async (args) => {
+        const r = await owned(() =>
+          cm.execInContainer(
+            containerId,
+            [
+              'git',
+              '-c',
+              'safe.directory=/workspace',
+              '-c',
+              `safe.directory=${bareRepoPath}`,
+              '-C',
+              '/workspace',
+              ...args,
+            ],
+            { timeout: 30_000, assertCurrent: assertTransferCurrent },
+          ),
+        );
+        return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+      },
+      bareRepoPath,
+      podId,
     );
   }
 
@@ -233,100 +454,19 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
       );
     }
     try {
-      // Read the bare repo path from the alternates file written during gitlink conversion.
-      // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
-      const alternatesResult = await owned(() =>
-        cm.execInContainer(
-          containerId,
-          [
-            'sh',
-            '-c',
-            "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
-          ],
-          { timeout: 5_000, assertCurrent: assertTransferCurrent },
-        ),
-      );
-      const bareRepoPath =
-        alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
-          ? alternatesResult.stdout.trim()
-          : null;
-
       // Push new commits to the bare before clearing the bind mount, so any commits made
       // inside the container are visible to host-side git operations after sync.
-      if (bareRepoPath) {
-        // Validate the container-supplied path against the daemon-derived path to
-        // prevent an adversarial agent from injecting a different remote via the alternates file.
-        let expectedBareRepoPath: string | null = null;
-        try {
-          expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
-        } catch {
-          // If we can't derive the expected path, skip the push (fail safe).
-        }
-        if (!expectedBareRepoPath || bareRepoPath !== expectedBareRepoPath) {
-          logger.warn(
-            { worktreePath, bareRepoPath, expectedBareRepoPath },
-            'Bare repo path from container does not match daemon-derived path — skipping in-container push',
-          );
-        } else {
-          for (const safeDirectory of ['/workspace', bareRepoPath]) {
-            const safeDirectoryResult = await owned(() =>
-              cm.execInContainer(
-                containerId,
-                ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
-                { timeout: 5_000, assertCurrent: assertTransferCurrent },
-              ),
-            );
-            if (safeDirectoryResult.exitCode !== 0) {
-              logger.warn(
-                {
-                  podId,
-                  safeDirectory,
-                  stderr: safeDirectoryResult.stderr.slice(0, 500),
-                },
-                'Failed to persist git safe.directory before sync-back push',
-              );
-            }
-          }
-
-          // Push via per-pod staging ref then promote — a direct push to refs/heads/<branch>
-          // is refused by the bare's `receive.denyCurrentBranch` because the host worktree
-          // (a linked worktree of the bare) has that branch checked out.
-          const result = await pushCommitsToBareViaStagingRef(
-            async (args) => {
-              const r = await owned(() =>
-                cm.execInContainer(
-                  containerId,
-                  [
-                    'git',
-                    '-c',
-                    'safe.directory=/workspace',
-                    '-c',
-                    `safe.directory=${bareRepoPath}`,
-                    '-C',
-                    '/workspace',
-                    ...args,
-                  ],
-                  { timeout: 30_000, assertCurrent: assertTransferCurrent },
-                ),
-              );
-              return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
-            },
-            bareRepoPath,
-            podId,
-            assertTransferCurrent,
-          );
-          if (result.pushed) {
-            pushed = true;
-          } else {
-            // Surface as pushed=false rather than throwing. The caller uses pushed=false
-            // to clamp auto-commit's deletion guard so a partially-synced worktree can't
-            // get swept into a single bogus chore commit via `git add -A`.
-            logger.warn(
-              { worktreePath, reason: result.reason },
-              'Git push to bare during sync-back failed — agent commits not on host branch',
-            );
-          }
-        }
+      const result = await pushContainerCommitsToBare(containerId, worktreePath, cm, podId);
+      if (result?.pushed) {
+        pushed = true;
+      } else if (result) {
+        // Surface as pushed=false rather than throwing. The caller uses pushed=false
+        // to clamp auto-commit's deletion guard so a partially-synced worktree can't
+        // get swept into a single bogus chore commit via `git add -A`.
+        logger.warn(
+          { worktreePath, reason: result.reason },
+          'Git push to bare during sync-back failed — agent commits not on host branch',
+        );
       }
 
       // Sync files back, excluding git/dependency/tooling caches. The caches are ignored
@@ -454,7 +594,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
         // so git can resolve baseline objects and push only the new ones.
         await extractInto('/workspace/.git', tmpGitDir);
-        const result = await pushCommitsToBareViaStagingRef(
+        const result = await pushToBare(
           async (args) => {
             try {
               const r = await owned(() => execFileAsync('git', ['--git-dir', tmpGitDir, ...args]));
@@ -470,7 +610,6 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           },
           bareRepoPath,
           podId,
-          assertTransferCurrent,
         );
         if (result.pushed) {
           pushed = true;
@@ -539,7 +678,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           expectedBareRepoPath = await deriveBareRepoPath(worktreePath);
         } catch {}
         if (expectedBareRepoPath && containerBareRepoPath === expectedBareRepoPath) {
-          const result = await pushCommitsToBareViaStagingRef(
+          const result = await pushToBare(
             async (args) => {
               const r = await owned(() =>
                 cm.execInContainer(containerId, ['git', '-C', '/workspace', ...args], {
@@ -551,7 +690,6 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
             },
             containerBareRepoPath,
             podId,
-            assertTransferCurrent,
           );
           if (!result.pushed) {
             logger.warn(
@@ -593,5 +731,5 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     }
   }
 
-  return { syncWorkspaceBack, recoverWorktreeFromContainer };
+  return { syncWorkspaceBack, recoverWorktreeFromContainer, adoptContainerHistoryRewrite };
 }
