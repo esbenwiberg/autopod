@@ -7,6 +7,11 @@ import type {
 } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
 import { resolveContainerMemory } from '../containers/container-memory.js';
+import {
+  DEFAULT_SANDBOX_TIER,
+  MAX_SANDBOX_TIER,
+  sandboxTierLabel,
+} from '../containers/sandbox-tiers.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { RelevantMemory } from './memory-selector.js';
 import { hasPendingProviderContinuation } from './recovery-context.js';
@@ -888,19 +893,25 @@ function generateOperatingEnvironment(
   // environment ceiling from a bug in its change, and burns a human escalation
   // rediscovering a documented platform limit.
   const memory = resolveContainerMemory(profile.containerMemoryGb, executionTarget);
-  if (memory.grantedGb !== null) {
+  if (executionTarget === 'sandbox') {
+    lines.push('### Resources');
+    if (memory.bundleLabel) {
+      lines.push(
+        `- Container resources: **${memory.bundleLabel}** (fixed sandbox bundle). The memory is a hard ceiling.`,
+      );
+    } else if (!memory.unsupported) {
+      lines.push(
+        `- Container resources: the daemon's default sandbox bundle (normally **${sandboxTierLabel(DEFAULT_SANDBOX_TIER)}**). The memory is a hard ceiling.`,
+      );
+    }
+    lines.push(
+      `- The bundle is fixed for this pod and cannot be resized from inside the container. Larger bundles (up to ${sandboxTierLabel(MAX_SANDBOX_TIER)}) are a per-repository opt-in selected before launch; if the work genuinely needs one, report it via \`report_blocker\`.`,
+    );
+  } else if (memory.grantedGb !== null) {
     lines.push('### Resources');
     lines.push(`- Container memory limit: **${memory.grantedGb} GB**. This is a hard ceiling.`);
-    if (executionTarget === 'sandbox') {
-      lines.push(
-        `- ${memory.grantedGb} GB is the largest tier this execution target offers; it cannot be raised from inside the container or by the profile.`,
-      );
-    }
-    if (memory.clamped) {
-      lines.push(
-        `- The profile asked for ${memory.requestedGb} GB, but this target caps at ${memory.grantedGb} GB. Do not trust the profile's number.`,
-      );
-    }
+  }
+  if (executionTarget === 'sandbox' || memory.grantedGb !== null) {
     lines.push(
       '- Serialize install, typecheck, build, test and browser workloads under the admitted memory and CPU limits; prefer a repository-owned serial verifier when available.',
     );

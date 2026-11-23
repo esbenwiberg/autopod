@@ -38,6 +38,7 @@ import {
   sandboxGoalRoot,
   sandboxGoalSupervisor,
 } from './sandbox-goal-process.js';
+import { sandboxTierResources } from './sandbox-tiers.js';
 import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 
 const API_VERSION = '2026-02-01-preview';
@@ -1864,7 +1865,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       {
         json: {
           sourcesRef: { diskImage: { id: diskImageId } },
-          resources: resourcesForTier(options.tier),
+          resources: sandboxTierResources(options.tier),
           lifecycle: {
             autoSuspendPolicy: { enabled: true, interval: 900, mode: 'Memory' },
           },
@@ -2348,20 +2349,6 @@ const stoppedStates = new Set(['Stopped', 'Suspended', 'Idle']);
 
 function endpointForRegion(location: string): string {
   return `https://management.${location.toLowerCase().replace(/\s+/g, '')}.azuredevcompute.io`;
-}
-
-function resourcesForTier(tier: CreateSandboxOptions['tier']): {
-  cpu: string;
-  memory: string;
-  disk: string;
-} {
-  const tiers = {
-    XS: { cpu: '250m', memory: '512Mi', disk: '5Gi' },
-    S: { cpu: '500m', memory: '1024Mi', disk: '10Gi' },
-    M: { cpu: '1000m', memory: '2048Mi', disk: '20Gi' },
-    L: { cpu: '2000m', memory: '4096Mi', disk: '40Gi' },
-  };
-  return tiers[tier];
 }
 
 function userAssignedIdentity(resourceId: string): {

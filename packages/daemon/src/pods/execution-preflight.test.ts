@@ -375,3 +375,29 @@ it('applies v2 strict launchers during worker validation as well as coding', asy
   expect(result.status).toBe('blocked');
   expect(result.diagnostics.map((item) => item.code)).toContain('PREFLIGHT_COMMAND_UNVERIFIED');
 });
+it('treats an omitted sandbox size as the default bundle, not the 10 GiB Docker default', async () => {
+  const cm = createMockContainerManager();
+  cm.getExecutionMetadata = vi.fn().mockResolvedValue({
+    imageDigest: null,
+    memoryLimitBytes: 4 * 1024 ** 3,
+    cpuLimit: 2,
+    networkMode: null,
+  });
+  const memoryDiagnostics = async (target: 'local' | 'sandbox', containerMemoryGb: number | null) =>
+    (
+      await inspectExecutionPreflight(
+        cm,
+        'container',
+        { ...pod, executionTarget: target } as Pod,
+        { containerMemoryGb } as Profile,
+      )
+    ).diagnostics
+      .map((item) => item.code)
+      .filter((code) => code === 'PREFLIGHT_INSUFFICIENT_MEMORY');
+  // Legacy sandbox pod with no size: the L allocation satisfies the requirement.
+  expect(await memoryDiagnostics('sandbox', null)).toEqual([]);
+  // An explicit/frozen XL requirement is still enforced against the observed allocation.
+  expect(await memoryDiagnostics('sandbox', 8)).toEqual(['PREFLIGHT_INSUFFICIENT_MEMORY']);
+  // Docker keeps the generic default.
+  expect(await memoryDiagnostics('local', null)).toEqual(['PREFLIGHT_INSUFFICIENT_MEMORY']);
+});

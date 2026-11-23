@@ -387,6 +387,10 @@ export function addLaunchPresetOptions(command: Command): Command {
     )
     .option('--no-sidecars', 'Clear explicitly required sidecars; environment defaults still apply')
     .option('--execution <local|sandbox>', 'Choose Docker (local) or hosted sandbox')
-    .option('--memory-gb <amount>', 'Main container memory in GB', positive)
+    .option(
+      '--memory-gb <amount>',
+      'Main container memory in GB (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL)',
+      positive,
+    )
     .option('--cpus <amount>', 'Main container CPU allocation where supported', positive);
 }
