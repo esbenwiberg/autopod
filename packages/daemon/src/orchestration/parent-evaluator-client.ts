@@ -9,6 +9,7 @@ import {
   type ParentIntegrationGates,
   parentIntegrationGateDigest,
 } from './parent-integration-qualified.js';
+import { brokeredReviewDeadlineMs } from './parent-review-broker.js';
 
 const endpoint = z
   .string()
@@ -51,6 +52,7 @@ export function createParentEvaluatorClient(
   policy: CombinedPolicy,
   fetchPort: typeof fetch = fetch,
   authorize?: EvaluatorDispatchSigner,
+  nativeReview = false,
 ): ParentIntegrationGates {
   const bound = parentEvaluatorEndpointsSchema.parse(endpoints);
   const call =
@@ -69,7 +71,9 @@ export function createParentEvaluatorClient(
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         redirect: 'error',
         credentials: 'omit',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(
+          nativeReview && role === 'independentReview' ? brokeredReviewDeadlineMs : timeoutMs,
+        ),
         body: JSON.stringify({
           request,
           bundle: bundle.toString('base64'),

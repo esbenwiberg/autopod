@@ -66,6 +66,8 @@ interface EndpointConfig {
   /** Authenticated ingress identity, not a caller-supplied role/header. No public mode. */
   authorize: (request: FastifyRequest) => boolean;
   ports: ParentEvaluatorPorts;
+  /** Optional role dependency probe; never consumes an evaluation claim. */
+  ready?: () => Promise<void>;
 }
 type LeaseMode =
   | { lease: ParentEvaluatorLease; enrollment?: never; resolveBase?: never }
@@ -195,6 +197,11 @@ export function registerParentEvaluatorEndpoint(
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
             return reply.code(503).send({ code: 'evaluator-claim-unavailable' });
+        }
+        try {
+          await config.ready?.();
+        } catch {
+          return reply.code(503).send({ code: 'evaluator-role-unavailable' });
         }
         return { ready: true, bindingDigest };
       }

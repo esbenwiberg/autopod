@@ -68,6 +68,7 @@ import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { claimDaemonLifetime } from './local-recovery-claim.js';
 import { parentExactTreeEvaluator } from './parent-exact-tree-evaluator.js';
 import { readQualifiedParentIntegration } from './parent-integration-qualified.js';
+import { reviewAnchoredParentEvidence } from './parent-isolated-review.js';
 import { ParentReportResults } from './parent-report-results.js';
 import { ParentReviewHandoff } from './parent-review-handoff.js';
 import {
@@ -1243,30 +1244,68 @@ it.each([
         },
         anchor('checks-source'),
       ),
-      independentReview: parentExactTreeEvaluator(
-        root,
-        gatePolicy,
-        'independentReview',
-        {
-          async evaluate({ mirror, commit, tree, predecessor }) {
-            seen.push({ role: 'review', tree, commit });
-            const passed =
-              predecessor === checkpoint.commit &&
-              (await managedGit(mirror, [
-                'diff-tree',
-                '--name-only',
-                '-r',
-                predecessor,
-                commit,
-              ])) === 'sample/count.txt\nsample/reason.txt';
-            return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+      independentReview: async (
+        request: Parameters<ReturnType<typeof parentExactTreeEvaluator>>[0],
+        bundle: Buffer,
+      ) =>
+        parentExactTreeEvaluator(
+          root,
+          gatePolicy,
+          'independentReview',
+          {
+            async evaluate({ mirror, commit, tree, predecessor, inputDigest }) {
+              seen.push({ role: 'review', tree, commit });
+              if (publishedMode) {
+                const delta = await anchor('native-review-source')!(predecessor);
+                const review = reviewAnchoredParentEvidence({
+                  db,
+                  run: plan.runId,
+                  scratch: root,
+                  delta,
+                  excludedReviewerAccounts: plan.policy.workers.map((role) => role.accountId),
+                  readPod: (id) => createPodRepository(db).getOrThrow(id),
+                  readLaunch: (id) => createLaunchSnapshotRepository(db, f.store).get(id),
+                  reviewer: {
+                    parentQualification(pod, config, selected, assertCurrent) {
+                      expect(pod.id).toBe(podId);
+                      expect(config.task).toBe(f.request.task);
+                      expect(selected).toBe(inputDigest);
+                      return async ({ prompt, timeout, outputContract }) => {
+                        assertCurrent();
+                        expect(timeout).toBe(90_000);
+                        expect(outputContract?.name).toBe('parent-private-review-v1');
+                        expect(prompt).toContain(tree);
+                        expect(prompt).toContain('+24 is twice 12');
+                        expect(prompt).toContain(f.request.task);
+                        return {
+                          stdout: JSON.stringify({
+                            verdict: 'pass',
+                            reason: 'Scoped docs fixture',
+                          }),
+                        };
+                      };
+                    },
+                  },
+                });
+                return review(request, bundle);
+              }
+              const passed =
+                predecessor === checkpoint.commit &&
+                (await managedGit(mirror, [
+                  'diff-tree',
+                  '--name-only',
+                  '-r',
+                  predecessor,
+                  commit,
+                ])) === 'sample/count.txt\nsample/reason.txt';
+              return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+            },
+            async sign(statement) {
+              return reviewSigner.attest(statement);
+            },
           },
-          async sign(statement) {
-            return reviewSigner.attest(statement);
-          },
-        },
-        anchor('review-source'),
-      ),
+          anchor('review-source'),
+        )(request, bundle),
     };
     const pinnedWorkerSource = new AsyncLocalStorage<string>();
     const launches: string[] = [];

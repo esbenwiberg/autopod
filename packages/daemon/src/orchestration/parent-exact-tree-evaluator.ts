@@ -24,6 +24,8 @@ export interface ParentEvaluatorPorts {
     commit: string;
     tree: string;
     predecessor: string;
+    run: string;
+    inputDigest: string;
   }): Promise<{ status: 'passed' | 'failed'; evidence: Buffer }>;
   /** Owned by the independent evaluator, not the worker or bundle importer. */
   sign(statement: GateStatement): Promise<SignedGateReceipt>;
@@ -67,7 +69,8 @@ export function parentExactTreeEvaluator(
       scratch,
       { commit, tree, predecessor },
       bundle,
-      (mirror) => evaluate({ mirror, commit, tree, predecessor }),
+      (mirror) =>
+        evaluate({ mirror, commit, tree, predecessor, run: request.subject.run, inputDigest }),
     );
     const { status, evidence } = result;
     if (

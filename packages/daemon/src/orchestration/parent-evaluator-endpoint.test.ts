@@ -1,5 +1,15 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  chown,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,6 +27,11 @@ import { type EvaluatorEnrollment, enrollParentEvaluators } from './parent-evalu
 import { readinessDigest, requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { startParentEvaluatorService } from './parent-evaluator-service.js';
 import { parentIntegrationGateDigest } from './parent-integration-qualified.js';
+import {
+  createParentReviewBroker,
+  nativeBrokerReviewer,
+  nativeReviewConfigurationDigest,
+} from './parent-review-broker.js';
 
 async function fixture(unexpectedCombinedPath = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'evaluator-endpoint-'));
@@ -167,7 +182,7 @@ async function fixture(unexpectedCombinedPath = false) {
   return { request, bundle, policy, endpoint, lease, root };
 }
 
-it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as const)(
+it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored', 'native'] as const)(
   'runs the %s standalone evaluator on a protected Unix socket only',
   async (mode) => {
     const f = await fixture();
@@ -178,6 +193,13 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
     const socket = path.join(socketDir, 'verify.sock');
     const cfg = path.join(root, 'service.json');
     const recipe = path.join(root, 'recipe.mjs');
+    const native = mode === 'native';
+    const role = native ? 'independentReview' : 'checks';
+    const brokerDir = native
+      ? await mkdtemp(path.join(await realpath('/tmp'), 'ap-review-'))
+      : root;
+    if (native) onTestFinished(() => rm(brokerDir, { recursive: true, force: true }));
+    const reviewBrokerSocket = path.join(brokerDir, 'review.sock');
     const source = Buffer.from(
       'export async function evaluate({commit, tree}) { return { status: "passed", evidence: Buffer.from(commit + ":" + tree) } }',
     );
@@ -185,17 +207,19 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
     const dispatch = generateKeyPairSync('ed25519');
     const policy = {
       ...f.policy,
-      checks: {
-        ...f.policy.checks,
+      [role]: {
+        ...f.policy[role],
         publicKey: receipt.publicKey.export({ format: 'jwk' }).x!,
-        configurationDigest: sha256(source),
+        configurationDigest: native
+          ? nativeReviewConfigurationDigest(reviewBrokerSocket)
+          : sha256(source),
       },
     };
     const lease = {
       ...f.lease,
       dispatchPublicKey: dispatch.publicKey.export({ format: 'jwk' }).x!,
     };
-    const resultTransport = mode === 'anchored' ? ('anchored/v1' as const) : undefined;
+    const resultTransport = mode === 'anchored' || native ? ('anchored/v1' as const) : undefined;
     const request = {
       ...f.request,
       subject: { ...f.request.subject, policyDigest: combinedPolicyDigest(policy) },
@@ -230,7 +254,15 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
     await writeFile(recipe, 'export const evaluate = 1', { mode: 0o600 });
     await writeFile(
       cfg,
-      JSON.stringify({ role: 'checks', policy, ...leaseConfig, stateDir, scratch, socket, recipe }),
+      JSON.stringify({
+        role,
+        policy,
+        ...leaseConfig,
+        stateDir,
+        scratch,
+        socket,
+        ...(native ? { reviewBrokerSocket } : { recipe }),
+      }),
       { mode: 0o600 },
     );
     await writeFile(
@@ -238,9 +270,10 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
       receipt.privateKey.export({ format: 'pem', type: 'pkcs8' }),
       { mode: 0o600 },
     );
-    await expect(startParentEvaluatorService(cfg, credentialsDir)).rejects.toThrow(
-      'recipe-mismatch',
-    );
+    if (!native)
+      await expect(startParentEvaluatorService(cfg, credentialsDir)).rejects.toThrow(
+        'recipe-mismatch',
+      );
     await writeFile(recipe, source);
     const credential = path.join(credentialsDir, 'evaluator-receipt-key');
     await writeFile(credential, dispatch.privateKey.export({ format: 'pem', type: 'pkcs8' }));
@@ -259,13 +292,12 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
     expect((await lstat(socket)).mode & 0o777).toBe(0o660);
     await expect(startParentEvaluatorService(cfg, credentialsDir)).rejects.toThrow('socket-exists');
     const input = parentIntegrationGateDigest(request);
-    const authorize = createEvaluatorDispatchSigner(
-      {
-        checks: dispatch.privateKey,
-        independentReview: generateKeyPairSync('ed25519').privateKey,
-      },
-      policy,
-    );
+    const keys = {
+      checks: generateKeyPairSync('ed25519').privateKey,
+      independentReview: generateKeyPairSync('ed25519').privateKey,
+    };
+    keys[role] = dispatch.privateKey;
+    const authorize = createEvaluatorDispatchSigner(keys, policy);
     const post = (body: string) =>
       new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
         const req = httpRequest(
@@ -292,18 +324,37 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
         req.setTimeout(3000, () => req.destroy(new Error('fixture timeout')));
         req.end(body);
       });
-    if (mode !== 'fixed') {
-      const urls = {
-        checks: 'https://checks.fixture.example/verify',
-        independentReview: 'https://review.fixture.example/verify',
+    const urls = {
+      checks: 'https://checks.fixture.example/verify',
+      independentReview: 'https://review.fixture.example/verify',
+    };
+    const dispatched: typeof fetch = async (url, init) => {
+      if (url !== urls[role]) throw new Error('second role not configured in this fixture');
+      const result = await post(String(init?.body));
+      return new Response(result.body, {
+        status: result.status,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    if (native) {
+      const { run, repository, predecessor, paths } = lease;
+      const enrollment = {
+        run,
+        repository,
+        predecessor,
+        paths,
+        basePolicyDigest: policy.basePolicyDigest,
+        resultTransport,
       };
-      const dispatched: typeof fetch = async (url, init) => {
-        // This standalone test owns checks only; the two-role test below verifies both roles.
-        if (url !== urls.checks) throw new Error('second role not configured in this fixture');
-        const result = await post(String(init?.body));
-        expect(result.status).toBe(200);
-        return new Response(result.body, { status: result.status });
-      };
+      const id = digest([
+        'autopod.evaluator-enrollment/v1',
+        enrollment,
+        combinedPolicyDigest(policy),
+      ]);
+      expect(
+        (await post(JSON.stringify({ enrollment, dispatch: authorize(role, id) }))).status,
+      ).toBe(200);
+    } else if (mode !== 'fixed') {
       await expect(
         enrollParentEvaluators(
           urls,
@@ -321,17 +372,64 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as c
         ),
       ).rejects.toThrow('second role not configured');
     }
-    const result = await post(
-      JSON.stringify({
-        request,
-        bundle: bundle.toString('base64'),
-        dispatch: authorize('checks', input),
-      }),
-    );
+    const payload = JSON.stringify({
+      request,
+      bundle: bundle.toString('base64'),
+      dispatch: authorize(role, input),
+    });
+    const select = {
+      run: request.subject.run,
+      inputDigest: input,
+      commit: request.subject.commit,
+      tree: request.subject.tree,
+    };
+    const evaluate = vi.fn(async () => ({
+      status: 'passed' as const,
+      evidence: Buffer.from(select.tree),
+    }));
+    let result: Awaited<ReturnType<typeof post>>;
+    if (native) {
+      const readiness = {
+        run: lease.run,
+        repository: lease.repository,
+        predecessor: lease.predecessor,
+        paths: lease.paths,
+        policyDigest: request.subject.policyDigest,
+      };
+      const readinessPayload = JSON.stringify({
+        readiness,
+        dispatch: authorize(role, readinessDigest(readiness)),
+      });
+      expect((await post(readinessPayload)).status).toBe(503);
+      const gid = process.getgid!();
+      await chown(brokerDir, process.getuid!(), gid);
+      const broker = createParentReviewBroker({ socket: reviewBrokerSocket, groupId: gid });
+      await expect(broker.open()).rejects.toThrow('directory-refused');
+      await chmod(brokerDir, 0o2750);
+      await broker.open();
+      onTestFinished(() => broker.close());
+      expect((await post(readinessPayload)).status).toBe(200);
+      const nativePort = nativeBrokerReviewer(reviewBrokerSocket);
+      const direct = { ...select, mirror: root, predecessor: lease.predecessor };
+      await expect(nativePort.evaluate(direct)).rejects.toThrow('unavailable');
+      result = await broker.withDispatch(select, evaluate, async () => {
+        await expect(nativePort.evaluate({ ...direct, tree: 'a'.repeat(40) })).rejects.toThrow(
+          'unavailable',
+        );
+        await expect(
+          nativePort.evaluate({ ...direct, inputDigest: digest('another input') }),
+        ).rejects.toThrow('unavailable');
+        expect(evaluate).not.toHaveBeenCalled();
+        const outcome = await post(payload);
+        await expect(nativePort.evaluate(direct)).rejects.toThrow('unavailable');
+        return outcome;
+      });
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      await expect(nativePort.evaluate(direct)).rejects.toThrow('unavailable');
+      expect((await post(payload)).status).toBe(409);
+    } else result = await post(payload);
     expect(result.status).toBe(200);
-    expect(verifyGateReceipt(policy, 'checks', input, JSON.parse(result.body)).status).toBe(
-      'passed',
-    );
+    expect(verifyGateReceipt(policy, role, input, JSON.parse(result.body)).status).toBe('passed');
   },
 );
 
