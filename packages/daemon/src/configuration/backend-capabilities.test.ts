@@ -125,7 +125,7 @@ describe('Docker host capacity probe (#665)', () => {
     );
     expect(caps.hostCapacity?.reason).toContain('new containers wait in the queue');
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'timeout', durationMs: DOCKER_CAPACITY_PROBE_TIMEOUT_MS }),
+      { probeFailure: caps.hostCapacity?.probeFailure },
       'Docker host capacity check failed',
     );
   });
@@ -184,6 +184,22 @@ describe('Docker host capacity probe (#665)', () => {
     clock += DOCKER_CAPACITY_PROBE_MEMO_MS - 1;
     expect((await probe()).failure?.message).toBe('engine busy');
     expect(info).toHaveBeenCalledTimes(2);
+  });
+
+  it('redacts Docker endpoint credentials before logging or reporting the failure', async () => {
+    const logger = { warn: vi.fn() };
+    const probe = createDockerHostCapacityProbe({
+      docker: {
+        info: async () => {
+          throw new Error('connect Docker at https://user:fixture-password@docker.test');
+        },
+      },
+      logger,
+    });
+    const caps = await dockerCapabilities({ probe, ...settings });
+    expect(caps.hostCapacity?.reason).toContain('https://[REDACTED]@docker.test');
+    expect(JSON.stringify(caps)).not.toContain('fixture-password');
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('fixture-password');
   });
 
   it('treats an invalid host report as a failed check', async () => {

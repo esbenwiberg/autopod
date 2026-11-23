@@ -162,6 +162,7 @@ import { createResourcePreviewTimers } from './resource-preview-timers.js';
 export type { PodCreator } from './workspace-contracts.js';
 
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
+import { createExecutionCapacityRetry } from './execution-capacity-retry.js';
 import { createSandboxRecovery } from './sandbox-recovery.js';
 import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
@@ -270,6 +271,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   const { prManagerFactory } = createDeliveryProvider(rawPrManagerFactory, podRepo);
   const { scheduleHostFetchRetry } = createWorkspaceHostFetchRetry({
+    podRepo,
+    enqueueSession,
+    emitActivityStatus: (podId, message) => emitActivityStatus(podId, message),
+  });
+
+  const { scheduleExecutionCapacityRetry } = createExecutionCapacityRetry({
     podRepo,
     enqueueSession,
     emitActivityStatus: (podId, message) => emitActivityStatus(podId, message),
@@ -1144,6 +1151,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,
     scheduleHostFetchRetry,
+    scheduleExecutionCapacityRetry,
     emitActivityError,
     transition,
     escalationRepo,

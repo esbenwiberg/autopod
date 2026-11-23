@@ -82,9 +82,14 @@ export type DockerHostCapacityProbe = () => Promise<DockerHostCapacityObservatio
 
 function sanitizeProbeMessage(err: unknown): string {
   const raw = err instanceof Error && err.message.trim() ? err.message : String(err);
+  const redacted = raw.replace(/(\b[a-z][a-z\d+.-]*:\/\/)[^\s/?#]+@/gi, '$1[REDACTED]@');
   return (
-    processContent(raw.slice(0, 300), { sanitization: { preset: 'standard' } }).text.trim() ||
-    'unknown error'
+    // Sanitize before truncating so a credential at the output boundary is not partially exposed.
+    processContent(redacted, { sanitization: { preset: 'standard' } })
+      .text.replace(/[^\S ]+/g, ' ')
+      .replace(/\p{Cc}/gu, '')
+      .trim()
+      .slice(0, 300) || 'unknown error'
   );
 }
 
@@ -137,10 +142,7 @@ export function createDockerHostCapacityProbe(options: {
         at: new Date(finished).toISOString(),
       };
       last = { atMs: finished, failure };
-      options.logger?.warn(
-        { err, kind: failure.kind, durationMs: failure.durationMs },
-        'Docker host capacity check failed',
-      );
+      options.logger?.warn({ probeFailure: failure }, 'Docker host capacity check failed');
     }
   }
 
@@ -174,7 +176,7 @@ function hostCapacityReport(observation: DockerHostCapacityObservation): Executi
   if (observation.state === 'live') return { state: 'live', observedAt };
   const failure = observation.failure;
   const cause = failure
-    ? `the last check ${describeExecutionCapacityProbeFailure(failure)} at ${failure.at}`
+    ? `the last check ${describeExecutionCapacityProbeFailure(failure)} at ${failure.at}${failure.kind === 'timeout' ? ` (${failure.message})` : ''}`
     : 'no check has completed';
   const reason =
     observation.state === 'cached'

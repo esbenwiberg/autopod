@@ -81,6 +81,7 @@ export function createAgentExecutionFixture(disk = false) {
     tryRecoverTransientSandboxFailure: vi.fn(async () => false),
     closeProviderAttempt: attempts.closeProviderAttempt,
     scheduleHostFetchRetry: vi.fn(),
+    scheduleExecutionCapacityRetry: vi.fn(),
     emitActivityError: vi.fn(),
     transition: f.captured.transition,
     escalationRepo: f.deps.escalationRepo,

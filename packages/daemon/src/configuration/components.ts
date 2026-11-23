@@ -178,7 +178,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     : undefined;
   const assertPimAllowed = (selection: Parameters<typeof policy.assertPimAllowed>[0]) =>
     policy.assertPimAllowed(selection);
-  async function assertCurrent(config: EffectiveLaunchConfig) {
+  async function assertCurrent(config: EffectiveLaunchConfig, requireVerifiedHostSize = false) {
     // Check the final work contract, not only templates that happened to use resolveLaunch().
     assertLaunchRequirements(config);
     policy.assertLaunch(config);
@@ -215,6 +215,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
         'CONFIG_CREDENTIAL_CHANGED',
         403,
       );
+    const capabilities = await options.ports.executionCapabilities(config.execution.target);
     const allocation = resolveExecution({
       environment: config.environment,
       execution: {
@@ -226,7 +227,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       trustedRepository: !!config.repository?.config.trustedSetupIds.includes(
         config.repository.setup.id,
       ),
-      capabilities: await options.ports.executionCapabilities(config.execution.target),
+      capabilities,
     });
     if (configurationDigest(allocation) !== configurationDigest(config.resolvedExecution))
       configurationError(
@@ -242,6 +243,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     assertAnalysisWorkspace(config);
     await options.ports.assertCapabilities(config);
     policy.assertLaunch(config);
+    if (requireVerifiedHostSize && capabilities.hostCapacity?.state === 'unverified')
+      throw new ExecutionCapacityUnverifiedError(capabilities.hostCapacity);
   }
   const resolution: LaunchResolutionServices = {
     ...options.ports,
@@ -375,14 +378,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     assertCurrentCapabilities: assertCurrent,
     // Provisioning gate (#665): new containers need a live or recently reported Docker
     // host size. Unverified is transient, so the caller keeps the pod queued.
-    async assertExecutionCapacity(config) {
-      if (config.execution.target === 'local') {
-        const capabilities = await options.ports.executionCapabilities('local');
-        if (capabilities.hostCapacity?.state === 'unverified')
-          throw new ExecutionCapacityUnverifiedError(capabilities.hostCapacity);
-      }
-      await assertCurrent(config);
-    },
+    assertExecutionCapacity: (config) => assertCurrent(config, true),
     async previewRetainedExecution(podId, profileId, previewOptions) {
       const parent = snapshots.get(podId);
       if (!parent?.repository)
