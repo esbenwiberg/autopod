@@ -80,10 +80,12 @@ describe('finite CLI exit evidence', () => {
     const { stdout, stderr, events } = fixture(kind);
     const iterator = events[Symbol.asyncIterator]();
     const next = iterator.next();
+    // Claude holds a result until its turn is known to be final (#648), so the
+    // first observable event of a live Claude turn is its init frame.
     stdout.write(
       kind === 'copilot'
         ? 'Retain first output\n'
-        : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain first output' })}\n`,
+        : `${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'retained' })}\n`,
     );
     const first = await next;
     expect(first.done).toBe(false);

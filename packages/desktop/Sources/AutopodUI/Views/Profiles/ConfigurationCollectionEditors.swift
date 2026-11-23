@@ -135,7 +135,7 @@ struct ProfileExecutionDefaultsEditor: View {
       if let tiers = backend?["memoryTiersGb"]?.array?.compactMap(\.number) {
         Picker("Memory", selection: Binding(get: { main.wrappedValue["memoryGb"]?.number ?? 0 }, set: { main.wrappedValue["memoryGb"] = $0 == 0 ? .null : .number($0) })) {
           Text("Backend default").tag(0.0)
-          ForEach(tiers, id: \.self) { Text("\($0.formatted()) GB").tag($0) }
+          ForEach(tiers, id: \.self) { Text(ExecutionMemoryLabel.text(memoryGb: $0, backend: backend)).tag($0) }
           if let current = main.wrappedValue["memoryGb"]?.number, !tiers.contains(current) { Text("\(current.formatted()) GB · unavailable").tag(current) }
         }
       } else { ConfigurationNumberValue(title: "Memory (GB)", fields: main, key: "memoryGb", fallback: 4) }

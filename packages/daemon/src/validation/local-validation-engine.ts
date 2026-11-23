@@ -2201,10 +2201,11 @@ async function runFactValidation(
           log,
         );
         const replacementChanged = artifactChangeSatisfied(config.diff, replacementPath, 'update');
+        // A fact is proof: an unobserved exit is infrastructure, never a synthetic failure.
         const replacementCmd = await containerManager.execInContainer(
           config.containerId,
           ['sh', '-c', replacement.command],
-          { cwd },
+          { cwd, requireObservedExit: true },
         );
         const replacementInfrastructureFailure = classifyCommandResourceFailure(
           'facts',
@@ -2325,6 +2326,10 @@ async function runFactValidation(
             cwd,
             timeout: config.testTimeout ?? 600_000,
             env: factEnv,
+            // Record only the command's observed exit. An unobserved exit raises
+            // EXEC_EXIT_UNVERIFIED (with the raw end status), classified below
+            // as infrastructure instead of sending the agent to fix a passing check.
+            requireObservedExit: true,
           },
         );
       }

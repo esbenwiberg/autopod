@@ -170,6 +170,12 @@ export interface AgentErrorEvent {
   executionTermination?: 'unverified';
   /** A trusted adapter detected an accounting gap; does not imply an execution-exit failure. */
   usageIncomplete?: true;
+  /**
+   * Trusted runtime adapter evidence, set only after verified process exit, that the
+   * agent's turn ended unfinished (stopped mid-turn or while waiting on background
+   * work). A preceding `complete` is accounting only, never a finished turn.
+   */
+  turnInterrupted?: true;
 }
 
 export interface AgentEscalationEvent {

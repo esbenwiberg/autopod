@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { createDeploymentHostAdapter } from '../actions/deployment-host-adapter.js';
 import { deploymentTargetSchema } from '../actions/deployment-service.js';
 import { createServiceReadTransport } from '../actions/service-read-transport.js';
+import type { SandboxDefaultTier } from '../containers/sandbox-tiers.js';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 import { createGitHubApiClient } from '../github/api-client.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
@@ -152,7 +153,7 @@ export function createHostConfigurationComponents(
     docker?: Dockerode;
     readSnapshotArchive?: (input: { repoUrl: string; revision: string }) => Promise<Buffer>;
     sandboxEnabled: boolean;
-    sandboxDefaultTier: 'XS' | 'S' | 'M' | 'L';
+    sandboxDefaultTier: SandboxDefaultTier;
     settings: z.infer<typeof hostConfigurationSettingsSchema>;
     /** Registry-pinned fallback used when settings name no reviewer image for a target. */
     defaultReviewerImage?: (target: 'local' | 'sandbox') => Promise<string>;

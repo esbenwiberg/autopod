@@ -1403,6 +1403,52 @@ describe('DockerContainerManager', () => {
       ).resolves.toMatchObject({ exitCode });
     });
 
+    // #665: the hijacked attach stream can end before Docker records the exec's
+    // exit. Reading that window as "exit 1" turned a passing command into a failure.
+    it.each([
+      false,
+      true,
+    ])('reads the exit Docker records after the attach stream ends (strict=%s)', async (strict) => {
+      const output = 'checked 273 Markdown files: 0 problem(s)\n';
+      const inspect = vi
+        .fn()
+        .mockResolvedValueOnce({ Running: true, ExitCode: null })
+        .mockResolvedValueOnce({ Running: false, ExitCode: 0 });
+      container.exec.mockResolvedValue({
+        id: 'race-exec',
+        start: vi.fn().mockResolvedValue(createMockMuxStream(output, '')),
+        inspect,
+      });
+      const result = await manager.execInContainer(
+        'abc123',
+        ['sh', '-c', 'python3 scripts/check_docs.py'],
+        strict ? { requireObservedExit: true } : undefined,
+      );
+      expect(result).toEqual({ stdout: output, stderr: '', exitCode: 0 });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports the raw exec end status when strict execution never observes an exit', async () => {
+      container.exec.mockResolvedValue({
+        id: 'still-running-exec',
+        start: vi.fn().mockResolvedValue(createMockMuxStream('done\n', '')),
+        inspect: vi.fn().mockResolvedValue({ Running: true, ExitCode: null, Pid: 4242 }),
+      });
+      const rejection = await manager
+        .execInContainer('abc123', ['proof'], { requireObservedExit: true })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(rejection).toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      const message = (rejection as Error).message;
+      expect(message).toContain('still-running-exec');
+      expect(message).toContain('"streamEnded":true');
+      expect(message).toContain('"Running":true');
+      expect(message).toContain('"ExitCode":null');
+      expect(message).toContain('"Pid":4242');
+    });
+
     it('defaults to exit code 1 when ExitCode is null', async () => {
       const muxStream = createMockMuxStream();
       const mockExec = {
@@ -1980,7 +2026,10 @@ describe('DockerContainerManager', () => {
       });
       await expect(
         manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
-      ).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      ).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: expect.stringContaining('"inspectError":"timeout"'),
+      });
     });
 
     it('redacts long args in exec.inspect timed out warn log', async () => {

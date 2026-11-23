@@ -239,8 +239,10 @@ describe('provider continuation', () => {
       });
     // Effects already admitted before the report remain truthful; no later
     // teardown, target attempt, or queue admission is allowed after the hold.
-    // A completed sync before the hold is a truthful preservation receipt (#670).
-    const synced = !['before', 'abort', 'sync'].includes(stage);
+    // A completed sync before the hold is a truthful preservation receipt (#670) on the
+    // automatic path. An operator continuation records it only once teardown committed,
+    // so a rejected operator continuation leaves the pod unchanged.
+    const synced = automatic ? !['before', 'abort', 'sync'].includes(stage) : stage === 'handoff';
     expect(f.pod()).toEqual({
       ...before,
       containerId: stage === 'handoff' ? null : before.containerId,

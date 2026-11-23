@@ -549,7 +549,6 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
           throw err;
         }
         assertNoInfrastructureBlocker(podRepo, podId);
-        if (pod.worktreePath) recordWorkspacePreserved(podRepo, pod);
         await capturePreparedDependencies(pod, pod.containerId);
         assertNoInfrastructureBlocker(podRepo, podId);
         await stopSandboxPreviewProxy(pod.id);
@@ -574,6 +573,9 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         assertNoInfrastructureBlocker(podRepo, podId);
         forgetMaxCredentialLineage(pod.id);
         podRepo.update(podId, { containerId: null });
+        // Record the preservation receipt only once teardown committed the continuation:
+        // a rejected continuation must leave the pod unchanged.
+        if (pod.worktreePath) recordWorkspacePreserved(podRepo, pod);
       } catch (err) {
         if (err instanceof AutopodError && err.code === 'INFRASTRUCTURE_BLOCKED') throw err;
         throw new AutopodError(

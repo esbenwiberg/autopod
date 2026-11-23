@@ -930,6 +930,137 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  describe('opt-in XL, 2XL and 3XL bundles', () => {
+    const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
+    const sourceDigest = `sha256:${'1'.repeat(64)}`;
+    const diskImage = {
+      id: 'disk-digest1',
+      image: { base: `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}` },
+      status: { state: 'Ready' },
+      labels: diskImageLabelsFor(image, sourceDigest),
+    };
+    const reuseConfig = {
+      assumeGroupExists: true,
+      resolveImageDigest: async () => sourceDigest,
+      retry: { maxDelayMs: 0 },
+    };
+    const sandboxPuts = (requests: CapturedRequest[]) =>
+      requests.filter(
+        (request) =>
+          request.init?.method === 'PUT' && new URL(request.url).pathname.endsWith('/sandboxes'),
+      );
+
+    it.each([
+      ['XL', { cpu: '4000m', memory: '8192Mi', disk: '80Gi' }],
+      ['2XL', { cpu: '8000m', memory: '16384Mi', disk: '160Gi' }],
+      ['3XL', { cpu: '16000m', memory: '32768Mi', disk: '320Gi' }],
+    ] as const)('sends the whole %s bundle in the create payload', async (tier, resources) => {
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: { value: [diskImage] } },
+          { status: 200, body: { id: 'sbx-1', state: 'Creating' } },
+          { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        ],
+        reuseConfig,
+      );
+      await client.createSandbox({
+        image,
+        tier,
+        podId: 'pod-1',
+        env: {},
+        egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+      });
+      const puts = sandboxPuts(requests);
+      expect(puts).toHaveLength(1);
+      expect(jsonBody(puts[0] ?? failRequest())).toMatchObject({ resources });
+    });
+
+    it('resends the identical 2XL payload after a rate-limit retry, never a smaller one', async () => {
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: { value: [diskImage] } },
+          { status: 429, body: { retryAfterSeconds: 0 } },
+          { status: 200, body: { id: 'sbx-1', state: 'Creating' } },
+          { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        ],
+        reuseConfig,
+      );
+      await client.createSandbox({
+        image,
+        tier: '2XL',
+        podId: 'pod-1',
+        env: {},
+        egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+      });
+      const bodies = sandboxPuts(requests).map((request) => jsonBody(request));
+      expect(bodies).toHaveLength(2);
+      for (const body of bodies)
+        expect(body).toMatchObject({
+          resources: { cpu: '8000m', memory: '16384Mi', disk: '160Gi' },
+        });
+    });
+
+    it.each([
+      [409, { error: { code: 'QuotaExceeded', message: 'Sandbox core quota exceeded' } }],
+      [400, { error: { code: 'InsufficientCapacity', message: 'No capacity for 8 vCPU' } }],
+    ])('surfaces a %s quota/capacity refusal without falling back to a smaller tier', async (status, body) => {
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: { value: [diskImage] } },
+          { status, body },
+        ],
+        reuseConfig,
+      );
+      await expect(
+        client.createSandbox({
+          image,
+          tier: '2XL',
+          podId: 'pod-1',
+          env: {},
+          egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+        }),
+      ).rejects.toThrow(String(status));
+      const puts = sandboxPuts(requests);
+      expect(puts).toHaveLength(1);
+      expect(jsonBody(puts[0] ?? failRequest())).toMatchObject({
+        resources: { cpu: '8000m', memory: '16384Mi', disk: '160Gi' },
+      });
+      expect(requests).toHaveLength(2);
+    });
+
+    it('surfaces a managed XL quota refusal after exactly one create attempt', async () => {
+      const pinned = `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}`;
+      const disk = {
+        id: 'exact-disk',
+        image: { base: pinned },
+        status: { state: 'Ready' },
+        labels: diskImageLabelsFor(pinned, sourceDigest),
+      };
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: disk },
+          { status: 429, body: { error: { code: 'QuotaExceeded' } } },
+        ],
+        { assumeGroupExists: true, readyDiskImageId: disk.id, retry: { maxDelayMs: 0 } },
+      );
+      await expect(
+        client.createSandbox({
+          image: pinned,
+          tier: 'XL',
+          podId: 'managed-1',
+          managedSpecDigest: `sha256:${'2'.repeat(64)}`,
+          env: {},
+          egressPolicy: { defaultAction: 'Deny', hostRules: [], trafficInspection: 'Full' },
+        }),
+      ).rejects.toThrow('429');
+      const puts = sandboxPuts(requests);
+      expect(puts).toHaveLength(1);
+      expect(jsonBody(puts[0] ?? failRequest())).toMatchObject({
+        resources: { cpu: '4000m', memory: '8192Mi', disk: '80Gi' },
+      });
+    });
+  });
+
   it('uses only the exact ready disk image in qualification mode, without cache writes or discovery', async () => {
     const sourceDigest = `sha256:${'1'.repeat(64)}`;
     const image = `ewiacr.azurecr.io/autopod/test-app@${sourceDigest}`;

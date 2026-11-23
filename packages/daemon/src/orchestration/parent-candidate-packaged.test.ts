@@ -23,6 +23,7 @@ import {
 } from '../managed/private-commit-policy.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { resign } from '../test-utils/managed-fixture.js';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { checkInspectionDraft, signingPacket } from './enrollment-packet.js';
@@ -107,9 +108,8 @@ async function idleBoot(
 }
 
 async function privateCutover(root: string, env: NodeJS.ProcessEnv, database: string, key: string) {
-  const db = new Database(database);
+  const db = openTestDiskDatabase(database);
   try {
-    db.pragma('journal_mode = WAL');
     runMigrations(db, path.join(dist, 'db/migrations'), logger);
     insertTestProfile(db);
     db.prepare(`UPDATE profiles SET repo_url='https://github.com/fictional/fixture',
@@ -304,7 +304,7 @@ it.skipIf(process.env.AUTOPOD_TEST_PACKAGED_PARENT_CANDIDATE !== '1')(
         },
       },
     };
-    const configDb = new Database(database);
+    const configDb = openTestDiskDatabase(database);
     const { selection, services } = await (async () => {
       try {
         expect(configurationCutoverReadiness(configDb, true)).toMatchObject({ ready: true });
@@ -573,9 +573,8 @@ it.skipIf(process.env.AUTOPOD_TEST_PACKAGED_PARENT_CANDIDATE !== '1')(
     // commission a parent, fabricate child outputs, build a candidate, or send.
     const lostDigest = digest('fictional interrupted send');
     const lostSelection = '[]';
-    const db = new Database(database);
+    const db = openTestDiskDatabase(database);
     try {
-      db.pragma('foreign_keys = ON');
       db.prepare(`INSERT INTO parent_managed_runs (run_id,pod_id,launch_digest,policy_digest,policy_json)
       SELECT id,'fictional-stopped-parent',?,policy_digest,? FROM orchestration_runs WHERE id=?`).run(
         selection.digest,

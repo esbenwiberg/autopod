@@ -1,4 +1,5 @@
 import type { Pod, PodStatus } from '@autopod/shared';
+import { resolveStuckRunningThresholdMs } from '../util/stuck-running-threshold.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type {
   WorkspaceWatchdogCalls,
@@ -30,11 +31,7 @@ export function createWorkspaceWatchdog(
   ): void {
     if (stuckPodWatchdog) return; // idempotent
     const intervalMs = options?.intervalMs ?? 60_000;
-    const thresholdMs =
-      options?.thresholdMs ??
-      (process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS
-        ? Number(process.env.AUTOPOD_STUCK_RUNNING_THRESHOLD_MS)
-        : 30 * 60 * 1_000);
+    const thresholdMs = options?.thresholdMs ?? resolveStuckRunningThresholdMs();
 
     const WAKE_GRACE_MS = 60_000;
     let lastWakeAt: number | null = null;

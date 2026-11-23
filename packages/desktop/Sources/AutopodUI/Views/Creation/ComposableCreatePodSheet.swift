@@ -289,7 +289,7 @@ public struct ComposableCreatePodSheet: View {
       VStack(alignment: .leading, spacing: 8) {
         if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
         if let preview {
-          Text("\(preview.mainModel) · \(preview.executionTarget) · \(preview.memoryGb.map { String($0) } ?? "default") GB · \(preview.intent.capitalized)")
+          Text("\(preview.mainModel) · \(preview.executionTarget) · \(preview.memoryGb.map { ExecutionMemoryLabel.text(memoryGb: $0, backend: ExecutionMemoryLabel.backend(actions.capabilities, target: preview.executionTarget)) } ?? "default GB") · \(preview.intent.capitalized)")
           if enrolled { enrollmentSummary }
           DisclosureGroup("Resolved settings and value sources") { ScrollView { Text(ConfigurationJSON.object(preview.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 170) }
         }
@@ -397,7 +397,7 @@ public struct ComposableCreatePodSheet: View {
           Picker("Memory", selection: allocationChoice("memoryGb")) {
             Text("Profile default").tag("profile")
             Text("Backend default").tag("backend")
-            ForEach(tiers, id: \.self) { value in Text("\(value.formatted()) GB").tag(String(value)) }
+            ForEach(tiers, id: \.self) { value in Text(ExecutionMemoryLabel.text(memoryGb: value, backend: backend)).tag(String(value)) }
             if let value = request.overrides?.execution?["main"]?["memoryGb"]?.number, !tiers.contains(value) { Text("\(value.formatted()) GB · unavailable").tag(String(value)) }
           }
         } else { HStack {

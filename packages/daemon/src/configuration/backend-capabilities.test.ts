@@ -3,10 +3,40 @@ import { describe, expect, it } from 'vitest';
 import { dockerCapabilities, sandboxCapabilities } from './backend-capabilities.js';
 
 describe('reported backend capabilities', () => {
-  it('reports the provisioning sandbox tiers and configured default without inventing larger sizes', () => {
+  it('reports every offered sandbox bundle up to 3XL, keeping the L default separate from the maximum', () => {
     const caps = sandboxCapabilities({ enabled: true, defaultTier: 'L' });
-    expect(caps.memoryTiersGb).toEqual([0.5, 1, 2, 4]);
+    expect(caps.memoryTiersGb).toEqual([0.5, 1, 2, 4, 8, 16, 32]);
     expect(caps.defaults.memoryGb).toBe(4);
+    expect(caps.maxMemoryGb).toBe(32);
+    expect(caps.maxTotalMemoryGb).toBe(32);
+    expect(caps.defaults.cpus).toBeNull();
+    expect(caps.defaults.storageGb).toBeNull();
+    expect(caps.maxStorageGb).toBeNull();
+    expect(sandboxCapabilities({ enabled: true, defaultTier: 'M' }).defaults.memoryGb).toBe(2);
+    expect(caps.memoryBundles?.map((bundle) => bundle.memoryGb)).toEqual(caps.memoryTiersGb);
+    expect(caps.memoryBundles?.slice(-3)).toEqual([
+      {
+        tier: 'XL',
+        memoryGb: 8,
+        cpus: 4,
+        diskGb: 80,
+        label: 'XL · 4 vCPU · 8 GiB RAM · 80 GiB disk',
+      },
+      {
+        tier: '2XL',
+        memoryGb: 16,
+        cpus: 8,
+        diskGb: 160,
+        label: '2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk',
+      },
+      {
+        tier: '3XL',
+        memoryGb: 32,
+        cpus: 16,
+        diskGb: 320,
+        label: '3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk',
+      },
+    ]);
     expect(caps.sidecars).toBe(false);
     expect(caps.maxCpus).toBeNull();
     expect(sandboxCapabilities({ enabled: false, defaultTier: 'M' }).available).toBe(false);
@@ -24,6 +54,7 @@ describe('reported backend capabilities', () => {
     expect(caps.privilegedSidecars).toBe(false);
     expect(caps.maxStorageGb).toBeNull();
     expect(caps.sidecarStorageLimit).toBe(false);
+    expect(caps.memoryBundles).toBeNull();
     const offline = await dockerCapabilities({
       docker: null,
       privilegedSidecars: false,

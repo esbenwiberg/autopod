@@ -73,12 +73,25 @@ exclusions and historical checks with unknown exact-snapshot applicability. It
 never generates a pass, waiver or AI-authored success narrative.
 
 Configured publication security scanning still runs on the independent selected
-tree before push. It uses full-tree scope because the saved bundle may not carry
-a usable base ref. The daemon gives this full-tree scan up to eight minutes; the
-ordinary push scan budget is unchanged. Confirmation can take several minutes
-and must still be valid when the push is admitted. Blocked or incomplete scans
-prevent publication. This is separate from task validation and does not change
-its check results or budgets.
+tree before push. The daemon reads the frozen target's `origin/<base>` tracking
+ref in the original object store, takes its merge-base with the selected source
+and proves that commit is an ancestor in the independent checkout. With that
+verified base it applies the ordinary push semantics: changed files are scanned
+and findings already present in the base are ignored, so pre-existing content
+(for example test fixtures) cannot block an unrelated docs change. Without a
+verified base, for a compromised original, or when the profile configures
+full-tree push scans, it scans the full tree. The daemon gives this scan up to
+eight minutes; the ordinary push scan budget is unchanged. Confirmation can take
+several minutes and must still be valid when the push is admitted.
+
+A refusal names its cause and pushes nothing. `SECURITY_SCAN_BLOCKED` lists each
+blocking finding's scanner, rule and file:line; matched values are never
+recorded. `SECURITY_SCAN_INCOMPLETE` (for example budget exhausted, files could
+not be listed or a detector failed) and `SECURITY_SCAN_FAILED` (the scanner could
+not run) carry their reason. The redacted result is stored on the operation as
+`publicationScan`, so `--observe` shows it while the operation stays `prepared`.
+This is separate from task validation and does not change its check results or
+budgets.
 
 Preparation failures and expired initial confirmations record cancellation before
 any external admission. A human can explicitly cancel an interrupted or prepared

@@ -52,6 +52,84 @@ Explicitly unsupported until Autopod wires up the remaining pieces:
   them yet.
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
+## Resource bundles and large repositories
+
+Azure Container Apps Sandboxes sell fixed bundles. When you pick a RAM size, you also get that
+bundle's vCPU and disk. Autopod offers these bundles, all from one catalog
+(`packages/daemon/src/containers/sandbox-tiers.ts`):
+
+| Bundle | vCPU | RAM (GiB) | Disk (GiB) | Notes |
+|---|---:|---:|---:|---|
+| XS | 0.25 | 0.5 | 5 | |
+| S | 0.5 | 1 | 10 | |
+| M | 1 | 2 | 20 | |
+| **L** | 2 | 4 | 40 | **Default** for every sandbox launch that does not select a size |
+| XL | 4 | 8 | 80 | Opt-in per repository |
+| 2XL | 8 | 16 | 160 | Opt-in per repository |
+| 3XL | 16 | 32 | 320 | Opt-in per repository; the largest bundle Azure documents |
+
+Source: [Azure Container Apps Sandboxes resource tiers](https://learn.microsoft.com/en-us/azure/container-apps/sandboxes-overview#resource-tiers)
+and the [Sandboxes tier table](https://sandboxes.azure.com/docs/sandboxes/sandbox#resource-tiers).
+Autopod offers every documented tier. Requests above 32 GiB are refused.
+
+How a size is chosen:
+
+- The daemon reports each bundle in its execution capabilities: `memoryTiersGb` plus
+  `memoryBundles`, with labels such as `XL · 4 vCPU · 8 GiB RAM · 80 GiB disk`. The desktop memory
+  pickers and launch preview show these labels.
+- On a launch, the sandbox memory must be one of the listed tiers (0.5, 1, 2, 4, 8, 16 or 32).
+  Choosing 8, 16 or 32 selects the whole XL, 2XL or 3XL bundle. Any other value is refused at preview or
+  admission (`ALLOCATION_UNSUPPORTED`). Setting CPU or disk on its own is still refused for this
+  target, so CPU and disk always follow the bundle.
+- If no size is selected, the launch freezes the configured default, normally L. The choice is
+  stored in the launch's resolved allocation (`resolvedExecution.main.memoryGb`). Retry,
+  recovery and resume reuse that frozen value; they never fall back to the default. If the
+  backend can no longer provide the frozen bundle, recovery fails with
+  `EXECUTION_CAPABILITIES_CHANGED` and does not shrink the bundle. Profiles have no separate
+  sizing field.
+- Legacy pods without a frozen launch work the same way. With no memory setting they get the
+  default bundle, not the 10 GB generic Docker default. An explicit value up to 4 GB rounds up
+  to the nearest bundle (XS–L). Above 4 GB, only exactly 8 (XL), 16 (2XL) or 32 (3XL) is accepted. Any
+  other value, such as 10, is refused before a sandbox is created
+  (`PREFLIGHT_INSUFFICIENT_MEMORY`). It is never rounded up.
+- If Azure refuses a create for lack of quota or capacity, the error reaches the pod unchanged.
+  Autopod never retries with a smaller bundle. Running sandboxes cannot be resized.
+
+Example: a large repository whose build or tests outgrow L. Select XL on the profile that
+repository uses. In the desktop, open the profile's execution defaults, set **Run in** to
+**Hosted sandbox**, and pick **XL · 4 vCPU · 8 GiB RAM · 80 GiB disk**. In the profile JSON, set:
+
+```json
+{ "execution": { "target": "sandbox", "main": { "memoryGb": 8, "cpus": null, "storageGb": null } } }
+```
+
+To use a larger bundle for a single launch only, override it and check the preview first:
+
+```sh
+ap run --repo big-repo --execution sandbox --memory-gb 16 --task 'Run the full suite' --preview --json
+```
+
+Other repositories and profiles keep L.
+
+Cost: while running, sandboxes are billed per vCPU-second and per GiB-second
+(see [sandbox compute cost](sandbox-compute-cost.md)). XL costs about 2× L, 2XL about 4× L and 3XL about 8× L
+for each second they run. Every isolated reviewer run (review, advisor and memory) gets its own
+sandbox with the same bundle as the main worker. A task therefore holds at least twice the
+bundle's cores while one of them runs alongside the worker (for example 32 cores for 3XL), and
+more if runs overlap. Those cores count against the concurrent-core quota of the subscription and region (300 by
+default), which is shared with every other sandbox there. Reaching it blocks all sandbox creates
+and starts. Choose a larger bundle only where the repository needs it.
+
+`AZURE_SANDBOX_TIER` sets the **fleet default** and accepts only `XS`, `S`, `M` or `L`. Keep it at
+`L`. `XL`, `2XL` and `3XL` are per-repository opt-in. As a fleet default they count as invalid
+configuration: the daemon logs a warning, ignores the value and uses `L`, as it does for an
+unknown value.
+
+Rollout check (separate authorization): Microsoft's documentation confirms the bundle shapes, but
+not capacity in our hosted region or subscription. Before offering XL, 2XL or 3XL to hosted users,
+create one disposable sandbox per new bundle, compare the CPU and RAM it actually gets with the
+request, and verify that it is deleted.
+
 ## Provisioning deadlines and buffered-exec failures
 
 Direct exec calls in workspace population, session-material and agent-material
@@ -310,7 +388,7 @@ export ACR_REGISTRY_URL=<registry>.azurecr.io
 Recommended:
 
 ```bash
-export AZURE_SANDBOX_TIER=L
+export AZURE_SANDBOX_TIER=L   # fleet default: XS|S|M|L only; XL/2XL/3XL are per-repository opt-in
 export AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1
 export AUTOPOD_CONTAINER_HOST=<daemon-host-reachable-from-azure-sandbox>
 # Optional when containers must reach the daemon through a proxy/front door:

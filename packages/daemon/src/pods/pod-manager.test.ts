@@ -12099,11 +12099,15 @@ describe('PodManager', () => {
       );
     });
 
-    it('refuses an undersized sandbox through the actual adapter before allocating or starting a worker', async () => {
+    it('refuses an unsupported sandbox size through the actual adapter before allocating or starting a worker', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
       });
+      // An explicit non-bundle size above L is refused, never rounded up to 2XL.
+      ctx.db
+        .prepare('UPDATE profiles SET container_memory_gb = 10 WHERE name = ?')
+        .run('test-profile');
       const createSandbox = vi.fn();
       const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
       vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
@@ -12117,6 +12121,27 @@ describe('PodManager', () => {
       expect(createSandbox).not.toHaveBeenCalled();
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).failureReason).toContain('requested 10 GiB');
+    });
+
+    it('gives a legacy sandbox pod without a size the default bundle, not the 10 GiB Docker default', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const createSandbox = vi.fn(async () => {
+        throw new Error('stop after recording the create request');
+      });
+      const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
+      vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Use the default sandbox bundle' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(createSandbox).toHaveBeenCalledTimes(1);
+      expect(createSandbox).toHaveBeenCalledWith(expect.objectContaining({ tier: 'L' }));
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
     });
 
     it('does not start a coding agent when its runtime version cannot be verified', async () => {
@@ -22829,6 +22854,53 @@ describe('PodManager', () => {
       // Cheapest possible recovery — never spawn the agent runtime again.
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('refuses Resume when the agent failed before finishing its run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      const revalidateSpy = vi.spyOn(manager, 'revalidateSession');
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+        statusCode: 409,
+        message: expect.stringContaining(`ap rework ${pod.id}`),
+      });
+      expect(revalidateSpy).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('failed');
+    });
+
+    it('does not publish an earlier passing validation over an unfinished agent run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'pass', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'settled',
+      'entered validation',
+    ] as const)('still revalidates when the agent finished its run before failing (%s)', async (finish) => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      // Completion without usage evidence never records agentSettledAt.
+      if (finish === 'settled')
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'done');
+      else ctx.podRepo.completionJournal?.mark(ctx.podRepo.getOrThrow(pod.id), 'finalizing');
+      const revalidateSpy = vi
+        .spyOn(manager, 'revalidateSession')
+        .mockResolvedValue({ newCommits: false, result: 'fail' });
+
+      await expect(manager.resumePod(pod.id)).resolves.toEqual({ action: 'revalidate' });
+      expect(revalidateSpy).toHaveBeenCalledWith(pod.id, { force: true });
     });
 
     it('HTTP Resume acknowledges a pending validation run and coalesces duplicate requests', async () => {

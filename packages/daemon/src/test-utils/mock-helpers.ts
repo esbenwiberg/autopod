@@ -478,6 +478,7 @@ export function createMockRepoScanner(opts?: {
       filesScanned: 0,
       filesSkipped: 0,
       scanIncomplete: false,
+      incompleteReasons: [],
       findings,
       decision,
       warningSection,

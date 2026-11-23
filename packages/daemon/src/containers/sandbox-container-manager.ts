@@ -70,14 +70,18 @@ import {
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   egressPolicyForMode,
-  pickSandboxTier,
-  SANDBOX_TIER_MEMORY_BYTES,
   type SandboxApiClient,
   type SandboxDescriptor,
   type SandboxExecOptions,
   type SandboxRegistryCredentials,
   type SandboxResourceTier,
 } from './sandbox-api-client.js';
+import {
+  DEFAULT_SANDBOX_TIER,
+  resolveSandboxTier,
+  type SandboxDefaultTier,
+  sandboxTierLabel,
+} from './sandbox-tiers.js';
 import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 import { exportSandboxWorkspace, isExcludedPath } from './sandbox-workspace-export.js';
 
@@ -86,8 +90,11 @@ export interface SandboxContainerManagerOptions {
   managedDatabase?: Database.Database;
   /** Required for Azure resume mutations; independent of managed/native execution accounting. */
   wakeupJournal?: SandboxWakeupJournal;
-  /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
-  defaultTier?: SandboxResourceTier;
+  /**
+   * Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). This is
+   * the fleet default, not the maximum: larger bundles are explicit opt-in.
+   */
+  defaultTier?: SandboxDefaultTier;
   /** Test seam for exercising multi-part archive uploads. */
   volumeUploadChunkBytes?: number;
 }
@@ -116,8 +123,8 @@ export interface SandboxContainerManagerConfig {
   registryCredentials?: SandboxRegistryCredentials;
   /** Resolve mutable image tags to their current manifest digest for persistent disk-image keys. */
   resolveImageDigest?: (image: string) => Promise<string | undefined>;
-  /** Resource tier per sandbox (default: 'L' — the largest preview tier). */
-  tier?: SandboxResourceTier;
+  /** Fleet default tier when a spawn carries no memory hint (default: 'L'; never an opt-in XL–3XL bundle). */
+  tier?: SandboxDefaultTier;
 }
 
 /**
@@ -164,7 +171,7 @@ export class SandboxContainerManager implements ContainerManager {
     this.client = client;
     this.managedDatabase = options.managedDatabase;
     this.logger = logger;
-    this.defaultTier = options.defaultTier ?? 'L';
+    this.defaultTier = options.defaultTier ?? DEFAULT_SANDBOX_TIER;
     this.volumeUploadChunkBytes = Math.max(
       1,
       options.volumeUploadChunkBytes ?? SANDBOX_VOLUME_UPLOAD_CHUNK_BYTES,
@@ -325,7 +332,7 @@ export class SandboxContainerManager implements ContainerManager {
     }
     const manager = new SandboxContainerManager(client, logger, {
       ...options,
-      defaultTier: config.tier ?? 'L',
+      defaultTier: config.tier ?? DEFAULT_SANDBOX_TIER,
     });
     manager.stopComputeSampler = () => {
       stopped = true;
@@ -379,17 +386,9 @@ export class SandboxContainerManager implements ContainerManager {
   async spawn(config: ContainerSpawnConfig): Promise<string> {
     assertRegistryQualifiedImage(config.image);
 
-    const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
-    const grantedMemoryBytes = SANDBOX_TIER_MEMORY_BYTES[tier];
-    // Refuse an impossible request before allocating a sandbox. The adapter's
-    // supported capacity is a bound, never permission to silently reduce it.
-    if (config.memoryBytes && config.memoryBytes > grantedMemoryBytes) {
-      throw new AutopodError(
-        `Sandbox resource preflight failed: requested ${config.memoryBytes / 1024 ** 3} GiB, but the supported ${tier} tier provides ${grantedMemoryBytes / 1024 ** 3} GiB. Explicitly choose a smaller requirement or a compatible execution target.`,
-        'PREFLIGHT_INSUFFICIENT_MEMORY',
-        409,
-      );
-    }
+    // Refuses an unsupported request before allocating a sandbox: never clamps
+    // down, and never rounds up into an opt-in (more expensive) bundle.
+    const tier = resolveSandboxTier(config.memoryBytes, this.defaultTier);
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);
 
     const sandboxId = await this.client.createSandbox({
@@ -447,6 +446,7 @@ os.chown('/autopod',0,0);os.chmod('/autopod',0o755)
         podId: config.podId,
         sandboxId,
         tier,
+        bundle: sandboxTierLabel(tier),
         networkPolicyMode: config.networkPolicyMode ?? 'allow-all',
         egressDefault: egressPolicy.defaultAction,
         egressRules: egressPolicy.hostRules.length,
@@ -459,14 +459,10 @@ os.chown('/autopod',0,0);os.chmod('/autopod',0o755)
   async ensureManagedContainer(config: ContainerSpawnConfig): Promise<string> {
     const db = this.managedDatabase;
     const digest = config.managedSpecDigest;
-    if (
-      !db ||
-      !digest ||
-      !this.client.findManagedSandbox ||
-      !config.image.includes('@sha256:') ||
-      (config.memoryBytes && config.memoryBytes > SANDBOX_TIER_MEMORY_BYTES.L)
-    )
+    if (!db || !digest || !this.client.findManagedSandbox || !config.image.includes('@sha256:'))
       throw new Error('managed-sandbox-enforcement-unavailable');
+    // Same resolver as ordinary spawn, applied before any claim, discovery or create.
+    const tier = resolveSandboxTier(config.memoryBytes, this.defaultTier);
     assertRegistryQualifiedImage(config.image);
     const prior = db
       .prepare('SELECT * FROM managed_sandbox_allocations WHERE pod_id=?')
@@ -492,7 +488,7 @@ os.chown('/autopod',0,0);os.chmod('/autopod',0o755)
         podId: config.podId,
         managedSpecDigest: digest,
         image: config.image,
-        tier: pickSandboxTier(config.memoryBytes, this.defaultTier),
+        tier,
         egressPolicy: policy,
         env: config.env,
       });

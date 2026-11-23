@@ -108,6 +108,25 @@ describe('generateSystemInstructions', () => {
     }
   });
 
+  it.each([
+    'claude',
+    'codex',
+    'pi',
+    'copilot',
+  ] as const)('gives background-command guidance only to Claude workers (%s)', (runtime) => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ runtime }),
+      'http://localhost:8080/mcp/x',
+    );
+    const guidance =
+      'Prefer foreground commands. If you background a long command, do not end your turn until it has finished and you have reported. Poll or wait for it instead.';
+    if (runtime === 'claude') {
+      expect(md).toContain('## Background Commands');
+      expect(md).toContain(guidance);
+    } else expect(md).not.toContain('## Background Commands');
+  });
+
   it('does not add coding-edit guidance to research/artifact workflows', () => {
     const md = generateSystemInstructions(
       makeProfile({ outputMode: 'artifact' }),
@@ -1194,22 +1213,36 @@ human_review: []
   });
 
   describe('resource ceiling', () => {
-    it('states the sandbox ceiling and flags the clamp when the profile asks for more', () => {
+    it.each([
+      [4, 'L · 2 vCPU · 4 GiB RAM · 40 GiB disk'],
+      [8, 'XL · 4 vCPU · 8 GiB RAM · 80 GiB disk'],
+      [16, '2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk'],
+      [32, '3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk'],
+    ])('states the selected %s GiB sandbox bundle as the hard ceiling', (memoryGb, label) => {
       const md = generateSystemInstructions(
-        // 10 GB is the daemon default, and every published sandbox tier is smaller,
-        // so this is the path an unconfigured sandbox profile actually takes.
-        makeProfile({ executionTarget: 'sandbox', containerMemoryGb: 10 }),
+        makeProfile({ executionTarget: 'sandbox', containerMemoryGb: memoryGb }),
         makeSession({ executionTarget: 'sandbox' }),
         'http://localhost:8080/mcp/x',
       );
       expect(md).toContain('### Resources');
-      expect(md).toContain('Container memory limit: **4 GB**');
-      expect(md).toContain('largest tier this execution target offers');
-      expect(md).toContain('The profile asked for 10 GB');
+      expect(md).toContain(`Container resources: **${label}** (fixed sandbox bundle)`);
+      expect(md).toContain('per-repository opt-in selected before launch');
+      expect(md).not.toContain('largest tier this execution target offers');
       expect(md).toContain('Array buffer allocation failed');
       expect(md).toContain('Serialize install, typecheck, build, test and browser workloads');
       expect(md).toContain('prefer a repository-owned serial verifier');
       expect(md).toContain('A kill alone does not prove OOM');
+    });
+
+    it('describes an omitted sandbox size as the default bundle, never the 10 GB Docker default', () => {
+      const md = generateSystemInstructions(
+        makeProfile({ executionTarget: 'sandbox', containerMemoryGb: null }),
+        makeSession({ executionTarget: 'sandbox' }),
+        'http://localhost:8080/mcp/x',
+      );
+      expect(md).toContain("the daemon's default sandbox bundle");
+      expect(md).not.toContain('10 GB');
+      expect(md).not.toContain('2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk**');
     });
 
     it('states the requested ceiling on docker without a clamp warning', () => {

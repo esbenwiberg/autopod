@@ -1657,7 +1657,11 @@ export class AutopodClient {
           const id = path.split('/pods/')[1]?.split('/')[0] ?? 'unknown';
           throw new InvalidStateTransitionError(id, errorBody.from, errorBody.to);
         }
-        throw new AutopodError(message, errorBody.code ?? 'CONFLICT', 409);
+        // The daemon error handler sends the stable code as `error`.
+        const code =
+          errorBody.code ??
+          (/^[A-Z][A-Z0-9_]+$/.test(errorBody.error ?? '') ? errorBody.error : undefined);
+        throw new AutopodError(message, code ?? 'CONFLICT', 409);
       }
       case 422:
         throw new ValidationError(message);
