@@ -24,6 +24,9 @@ public struct ComposableCreatePodSheet: View {
   @State private var showSaveProfile = false
   @State private var advanced = ""
   @State private var showAdvanced = false
+  @State private var delegationPolicies: [LaunchDelegationPolicy] = []
+  @State private var loadedDelegationKey: String?
+  @State private var delegationError: String?
   public init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions,
     onCreated: (@MainActor (String) -> Void)? = nil) {
     self._isPresented = isPresented; self.actions = actions; self.onCreated = onCreated
@@ -55,7 +58,20 @@ public struct ComposableCreatePodSheet: View {
     let main = LaunchComposerContext(request: request, actions: actions).details(.ai)["main"]
     return actions.capabilities["nativeGoals"]?.array?.contains { $0["available"]?.bool == true && $0["runtime"]?.string == main?["runtime"]?.string && $0["accountId"]?.string == main?["providerAccountId"]?.string && $0["backend"]?.string == executionTarget } ?? false
   }
-  private var canPreview: Bool { !request.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (request.repositoryId != nil || request.emptyWorkspace == true) && (profileID != nil) }
+  private var delegationKey: String? {
+    guard actions.capabilities["savedDelegation"]?["available"]?.bool == true,
+      let connection = actions.connectionID, let repo = request.repositoryId,
+      request.intent != "goal", !enrolled, request.source == nil else { return nil }
+    return "\(connection):\(repo)"
+  }
+  private var currentDelegationPolicies: [LaunchDelegationPolicy] {
+    delegationKey != nil && loadedDelegationKey == delegationKey ? delegationPolicies : []
+  }
+  private var delegationSelectionAvailable: Bool {
+    guard let selection = request.delegation else { return true }
+    return currentDelegationPolicies.contains { $0.selection == selection }
+  }
+  private var canPreview: Bool { !request.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (request.repositoryId != nil || request.emptyWorkspace == true) && (profileID != nil) && delegationSelectionAvailable }
   private var enrolled: Bool { request.requireParentEnrollment == true }
   private var enrolledSubmission: Bool { pendingRequest?.requireParentEnrollment == true }
   private var previewMatches: Bool {
@@ -64,6 +80,7 @@ public struct ComposableCreatePodSheet: View {
   public var body: some View {
     Group { if redesign { composer } else { legacyBody } }
       .onChange(of: actions.connectionID) { _, _ in invalidatePreview() }
+      .task(id: delegationKey) { await loadDelegationPolicies() }
   }
   private var enrollmentSummary: some View {
     VStack(alignment: .leading, spacing: 3) {
@@ -90,6 +107,7 @@ public struct ComposableCreatePodSheet: View {
           case .review:
             if let preview, previewRequest == request, !jsonDirty {
               LaunchResolvedReview(preview: preview)
+              if let delegated = preview.delegation { delegationReview(delegated) }
               if enrolled { enrollmentSummary }
               Text(request.task).font(.body).textSelection(.enabled)
             } else {
@@ -155,7 +173,7 @@ public struct ComposableCreatePodSheet: View {
       }
     } else {
       if stage == .compose { Button("Inspect configuration →") { stage = .configure }.disabled(busy) }
-      if preview != nil && !enrolled { Button("Save as profile…") { showSaveProfile = true }.disabled(busy || jsonDirty || previewRequest != request) }
+      if preview != nil && !enrolled && request.delegation == nil { Button("Save as profile…") { showSaveProfile = true }.disabled(busy || jsonDirty || previewRequest != request) }
       Button(preview == nil ? "Preview launch" : "Refresh preview") { Task { await resolve() } }
         .disabled(busy || !canPreview || jsonDirty).accessibilityIdentifier("launch-preview")
       Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent)
@@ -191,6 +209,7 @@ public struct ComposableCreatePodSheet: View {
         intentButton(nativeGoalAvailable ? "Native Goal" : "Native Goal · locked", value: "goal")
       }
       if !nativeGoalAvailable { Text("Native Goal is unavailable until verified for the selected AI account and execution backend.").font(.caption).foregroundStyle(.secondary) }
+      delegationPicker
       Text(request.intent == "goal" ? "Objective" : "Task or objective").font(.headline)
       TextEditor(text: $request.task).font(.body).scrollContentBackground(.hidden).frame(minHeight: 180)
         .padding(12).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 7))
@@ -240,6 +259,7 @@ public struct ComposableCreatePodSheet: View {
                 Text("Workflow default").tag(""); Text("Task").tag("task"); Text("Goal").tag("goal").disabled(!nativeGoalAvailable)
               }.pickerStyle(.segmented)
               if !nativeGoalAvailable { Text("Native Goals are not yet verified for this AI account and execution backend. Task mode is available.").font(.caption).foregroundStyle(.secondary) }
+              delegationPicker
               Text(request.intent == "goal" ? "Objective" : "Task or objective").font(.headline)
               TextEditor(text: $request.task).frame(minHeight: 90).font(.body).overlay(RoundedRectangle(cornerRadius: 5).stroke(.quaternary))
               LaunchAttachmentsEditor(files: $referenceFiles, work: $request.work, available: actions.capabilities["inputBundles"]?["available"]?.bool == true)
@@ -291,6 +311,7 @@ public struct ComposableCreatePodSheet: View {
         if let preview {
           Text("\(preview.mainModel) · \(preview.executionTarget) · \(preview.memoryGb.map { String($0) } ?? "default") GB · \(preview.intent.capitalized)")
           if enrolled { enrollmentSummary }
+          if let delegated = preview.delegation { delegationReview(delegated) }
           DisclosureGroup("Resolved settings and value sources") { ScrollView { Text(ConfigurationJSON.object(preview.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 170) }
         }
         if !launchAvailable { Text(actions.capabilities["launchUnavailableReason"]?.string ?? "Launch is unavailable until daemon configuration migration and execution checks are complete.").font(.caption).foregroundStyle(.secondary) }
@@ -303,7 +324,7 @@ public struct ComposableCreatePodSheet: View {
               Button("Retry saved launch") { Task { await submit() } }.disabled(busy)
             }
           } else {
-            if !enrolled { Button("Save as profile") { showSaveProfile = true }.disabled(busy || !previewMatches) }
+            if !enrolled && request.delegation == nil { Button("Save as profile") { showSaveProfile = true }.disabled(busy || !previewMatches) }
             Button("Preview") { Task { await resolve() } }.disabled(busy || !canPreview || jsonDirty)
               .accessibilityIdentifier("launch-preview")
             Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent)
@@ -477,6 +498,58 @@ public struct ComposableCreatePodSheet: View {
       request.overrides?.execution = execution
     })
   }
+  @ViewBuilder private var delegationPicker: some View {
+    if delegationKey != nil || request.delegation != nil {
+      Picker("Delegation", selection: Binding(get: { request.delegation }, set: { selection in
+        request.delegation = selection
+        request.requestId = selection == nil ? nil : UUID().uuidString
+        request.expectedDigest = nil
+        if selection != nil { request.intent = "task" }
+        invalidatePreview()
+      })) {
+        Text("Off").tag(nil as LaunchDelegationSelection?)
+        ForEach(currentDelegationPolicies) { item in
+          Text(item.name).tag(Optional(item.selection))
+        }
+        if let selected = request.delegation, !delegationSelectionAvailable {
+          Text("Selected policy unavailable").tag(Optional(selected))
+        }
+      }.accessibilityIdentifier("launch-delegation-policy")
+      if !delegationSelectionAvailable {
+        Text("Choose a current policy for this repo or explicitly turn delegation off.")
+          .font(.caption).foregroundStyle(.orange)
+      } else if let delegationError, delegationKey != nil {
+        Text(delegationError).font(.caption).foregroundStyle(.secondary)
+      }
+    }
+  }
+  private func delegationReview(_ plan: LaunchDelegationPreview) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text("Delegation · \(plan.name) (rev \(plan.revision))").font(.headline)
+      Text("Source: \(plan.source.ref) at \(plan.source.commit)").textSelection(.enabled)
+      Text("Up to \(plan.maxConcurrentWorkers) workers at once · \(plan.workerModelRequests) total model requests")
+      ForEach(plan.workers, id: \.role) { worker in
+        Text("\(worker.role): \(worker.files.joined(separator: ", ")) · \(worker.modelRequests) requests · \(worker.observedTokenStop) observed-token stop · \(worker.wallSeconds)s · account \(worker.accountId)")
+      }
+      Text("Independent reviewer: \(plan.reviewer.accountId) · \(plan.reviewer.tokenBudget) tokens")
+      Text("Nothing is published by approving this launch.")
+    }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityIdentifier("launch-delegation-review")
+  }
+  private func loadDelegationPolicies() async {
+    guard let key = delegationKey, let repo = request.repositoryId else {
+      loadedDelegationKey = nil; delegationPolicies = []; delegationError = nil; return
+    }
+    do {
+      let policies = try await actions.listDelegationPolicies(repo)
+      guard !Task.isCancelled, delegationKey == key else { return }
+      delegationPolicies = policies; loadedDelegationKey = key; delegationError = nil
+    } catch {
+      guard !Task.isCancelled, delegationKey == key else { return }
+      delegationPolicies = []; loadedDelegationKey = nil
+      delegationError = "Saved delegation policies could not be loaded."
+    }
+  }
   private func updateAdvanced() { let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; advanced = (try? String(decoding: encoder.encode(request), as: UTF8.self)) ?? "{}" }
   private func resolve() async {
     guard !busy, !jsonDirty, canPreview else { return }
@@ -491,6 +564,10 @@ public struct ComposableCreatePodSheet: View {
     defer { busy = false }
     do {
       var candidate = source
+      if candidate.delegation != nil {
+        if candidate.requestId == nil { candidate.requestId = UUID().uuidString }
+        candidate.expectedDigest = nil
+      }
       if !files.isEmpty {
         let bundle = try await actions.uploadInputs(files)
         if candidate.work == nil { candidate.work = [:] }
@@ -499,7 +576,7 @@ public struct ComposableCreatePodSheet: View {
       guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
       let resolved = try await actions.resolve(candidate)
       guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
-      if candidate.requireParentEnrollment == true {
+      if candidate.requireParentEnrollment == true || candidate.delegation != nil {
         _ = try LaunchComposerJSON.submission(candidate, preview: resolved)
       }
       request = candidate; preview = resolved; previewRequest = candidate; previewConnection = connection; stage = .review

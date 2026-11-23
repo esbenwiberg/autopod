@@ -170,6 +170,35 @@ import Testing
     #expect(!host.enabled("launch-submit") && fixture.launches.isEmpty)
   }
 
+  @Test func savedDelegationUsesTheReviewedPlanDigestAndNeverFallsBack() throws {
+    let id = "5ecff8d3-de82-48cb-961a-dc06dc506533"
+    let policy = "ceee418a-1e94-44bc-aee4-b046c883d61d"
+    let request = try LaunchComposerJSON.decode("""
+      {"repositoryId":"repo","task":"Review delegation","requestId":"\(id)","delegation":{"policyId":"\(policy)","revision":2}}
+      """, selectionOnly: false, task: "")
+    let digest = String(repeating: "d", count: 64)
+    let gitOID = String(repeating: "a", count: 40)
+    let preview = try JSONDecoder().decode(EffectiveLaunchPreview.self, from: Data("""
+      {"intent":"task","repository":{"id":"repo"},"digest":"\(String(repeating: "c", count: 64))",
+      "delegationPreview":{"digest":"\(digest)","requestId":"\(id)","policyId":"\(policy)","revision":2,"name":"Fixture",
+      "source":{"commit":"\(gitOID)","tree":"\(gitOID)","ref":"refs/heads/main"},"workerModelRequests":12,"maxConcurrentWorkers":2,
+      "workers":[{"role":"left","files":["a.txt"],"accountId":"child","modelRequests":6,"observedTokenStop":36000,"wallSeconds":180},
+      {"role":"right","files":["b.txt"],"accountId":"child","modelRequests":6,"observedTokenStop":36000,"wallSeconds":180}],
+      "reviewer":{"accountId":"review","tokenBudget":8000}}}
+      """.utf8))
+    let reviewed = try LaunchComposerJSON.submission(request, preview: preview)
+    #expect(reviewed.expectedDigest == digest && reviewed.requestId == id)
+    #expect(reviewed.delegation == request.delegation)
+    #expect(LaunchComposerJSON.value(reviewed, selectionOnly: true)["delegation"] == nil)
+    var stale = request; stale.requestId = UUID().uuidString
+    #expect(throws: (any Error).self) { try LaunchComposerJSON.submission(stale, preview: preview) }
+    stale = request; stale.delegation = nil
+    #expect(throws: (any Error).self) { try LaunchComposerJSON.submission(stale, preview: preview) }
+    var stripped = preview; stripped.fields["delegationPreview"] = nil
+    #expect(throws: (any Error).self) { try LaunchComposerJSON.submission(request, preview: stripped) }
+    #expect(throws: (any Error).self) { try request.validateSavedDelegation(requirePreview: true) }
+  }
+
   private func enrolledRequest(_ fixture: LaunchComposerFixture) throws -> ComposableLaunchRequest {
     let text = #"{"repositoryId":"repo","task":"Fictional enrolled Task","intent":"task","requestId":"5ecff8d3-de82-48cb-961a-dc06dc506533","expectedDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requireParentEnrollment":true}"#
     let request = try LaunchComposerJSON.decode(text, selectionOnly: false, task: "")

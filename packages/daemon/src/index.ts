@@ -942,7 +942,18 @@ podManager = createPodManager({
   },
   pendingRequestsByPod,
   sessionTokenIssuer,
-  provisionParentSession: (podId) => parentManaged?.provision(podId) ?? Promise.resolve(undefined),
+  provisionParentSession: async (podId) => {
+    // A retained saved-policy Task must not start an ordinary agent session
+    // while this bootstrap has no saved runtime attached.
+    if (
+      db
+        .prepare(`SELECT 1 FROM saved_delegation_admissions a
+      JOIN parent_managed_runs p ON p.run_id=a.run_id WHERE p.pod_id=?`)
+        .get(podId)
+    )
+      throw new Error('saved-delegation-runtime-not-attached');
+    return parentManaged?.provision(podId);
+  },
   memoryRepo,
   memoryUsageRepo,
   beforeContainerCleanup: (podId) => preCleanupMemoryExtraction(podId),

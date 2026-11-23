@@ -50,7 +50,7 @@ export function attachSavedDelegationRuntime(input: {
   /** Bind the exact mirror to the worker service for this operation; never fall back to a branch. */
   withWorkerSource<T>(mirror: string, run: string, use: () => Promise<T>): Promise<T>;
   /** Observe the checkout that the parent will actually run against. */
-  observeParentSource(podId: string): Promise<{ commit: string; tree: string }>;
+  observeParentSource(podId: string): Promise<{ commit: string; tree: string; clean: boolean }>;
 }) {
   const { db, podId, issuer, service, scratch } = input;
   const principal = { ...input.principal };
@@ -180,6 +180,7 @@ export function attachSavedDelegationRuntime(input: {
         if (
           observed.commit !== commit ||
           observed.tree !== tree ||
+          observed.clean !== true ||
           canonical(identity()) !== expected
         )
           throw new Error('saved-delegation-parent-checkout-mismatch');

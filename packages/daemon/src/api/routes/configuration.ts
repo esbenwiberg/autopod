@@ -63,6 +63,15 @@ export interface ConfigurationRouteDependencies {
   /** Reports actually enabled features. Supplying configuration routes never enables creation. */
   capabilities: () => unknown;
   previewLaunch?: (raw: unknown, principal: JwtPayload) => Promise<EffectiveLaunchConfig>;
+  listDelegationPolicies?: (
+    principal: JwtPayload,
+    repositoryId: string,
+  ) => Array<{
+    policyId: string;
+    revision: number;
+    name: string;
+    repositoryId: string;
+  }>;
   /** Candidate-only, read-only comparison of the authenticated Desktop connection to the frozen owner. */
   candidateOwnerStatus?: (principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'>) => {
     uniqueSlot: boolean;
@@ -87,7 +96,7 @@ export interface ConfigurationRouteDependencies {
       email?: string;
       name?: string;
       actor: OperatorActor;
-      principal?: Pick<JwtPayload, 'oid' | 'iss' | 'aud'>;
+      principal?: Pick<JwtPayload, 'oid' | 'iss' | 'aud' | 'operatorPrincipal'>;
     },
   ) => Promise<Pod>;
 }
@@ -372,6 +381,14 @@ export function configurationRoutes(
         ? deps.previewLaunch(request.body, request.user)
         : resolveLaunch(request.body, deps.resolution, request.user.oid),
   );
+  const listDelegation = deps.listDelegationPolicies;
+  if (listDelegation) {
+    app.get('/launch/delegation-policies', async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      const query = z.object({ repositoryId: configurationIdSchema }).strict().parse(request.query);
+      return listDelegation(request.user, query.repositoryId);
+    });
+  }
   app.post('/launch/dispatch-preview', async (request): Promise<DispatchPreview> => {
     const config = await resolveLaunch(request.body, deps.resolution, request.user.oid);
     const notApplicable: DispatchPreview = {

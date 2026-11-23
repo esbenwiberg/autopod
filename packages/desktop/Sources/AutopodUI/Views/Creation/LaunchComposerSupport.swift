@@ -30,7 +30,7 @@ internal enum LaunchConfigurationSection: String, CaseIterable, Identifiable {
 }
 
 internal enum LaunchComposerJSON {
-  private static let runFields: Set<String> = ["task", "work", "requestId", "expectedDigest", "origin", "requireParentEnrollment"]
+  private static let runFields: Set<String> = ["task", "work", "requestId", "expectedDigest", "origin", "requireParentEnrollment", "delegation"]
   static func value<T: Encodable>(_ request: T) -> ConfigurationJSON {
     (try? JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(request))) ?? .null
   }
@@ -70,6 +70,19 @@ internal enum LaunchComposerJSON {
         throw LaunchJSONError.invalid("The preview does not match the enrolled Task. Nothing was sent.")
       }
       return request
+    }
+    if request.delegation != nil {
+      try request.validateSavedDelegation(requirePreview: false)
+      guard let delegated = preview.delegation, delegated.matches(request), preview.intent == "task",
+        preview.fields["repository"]?["id"]?.string == request.repositoryId else {
+        throw LaunchJSONError.invalid("The saved delegation preview no longer matches this Task. Nothing was sent.")
+      }
+      var reviewed = request
+      reviewed.expectedDigest = delegated.digest
+      return reviewed
+    }
+    guard preview.fields["delegationPreview"] == nil else {
+      throw LaunchJSONError.invalid("Delegation must be explicitly selected. Nothing was sent.")
     }
     var ordinary = request
     ordinary.requestId = UUID().uuidString

@@ -448,19 +448,26 @@ isolation using the real continuation ledger.
 The local saved-policy runtime attaches to one retained Task. It requires the
 reviewed worker execution-spec digests and the exact public pins of both
 independent signers. A parent gets an attempt credential only after a trusted
-checkout observation matches the retained commit and tree. Each worker role can
+checkout observation matches the retained commit and tree and reports no local
+changes. Each worker role can
 be reserved once, with its own file scope and budget. The watchdog is scoped to
 that installation, uses verified private mirrors, collects explicit submissions,
 and qualifies the combined tree through the existing two-receipt gate. On
 reattachment, recorded worker identities and reservations are reused; uncertain
 evaluation claims are fenced instead of replayed.
 
-The normal Desktop and CLI launch paths still reject saved-policy opt-in with
-`SAVED_DELEGATION_UNAVAILABLE`. The local fixture supplies the runtime, checkout
-and signer ports without cloud calls. Before enabling normal launch, the daemon
-must supply those concrete runtime ports, bind the scoped delegate bridge and
-reattach the watchdog on startup. No policy editor or new evaluator permission
-is enabled here.
+The normal launch API and Desktop composer can select and preview a saved
+policy **only** when a trusted host composition advertises readiness. The
+ordinary config digest is not sufficient for admission: the composer sends the
+exact request UUID, selected revision and reviewed delegation digest. If the
+host becomes unavailable, the launch is refused rather than starting an
+ordinary Task. The local smoke uses the ordinary preview and pod routes with
+fixture checkout, runtime and signer ports; it makes no cloud calls.
+
+The default daemon bootstrap does not yet install those concrete ports, the
+scoped delegate bridge or the startup watchdog. Its picker is hidden and a
+retained saved-policy Task cannot start without an attached runtime. No policy
+editor or new evaluator permission is enabled here.
 
 ## Evidence and remaining milestones
 

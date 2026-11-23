@@ -154,6 +154,22 @@ export function createSavedDelegationPolicyStore(db: Database.Database) {
       const owner = delegationOwnerDigest(principal);
       return put(owner, randomUUID(), 1, raw);
     },
+    listCurrent(principal: DelegationPrincipal, repositoryId: string) {
+      const owner = delegationOwnerDigest(principal);
+      const rows = db
+        .prepare(`SELECT r.policy_id,r.revision,r.payload,r.payload_digest
+        FROM saved_delegation_policy_revisions r JOIN (
+          SELECT policy_id,max(revision) AS revision FROM saved_delegation_policy_revisions
+          WHERE owner_digest=? GROUP BY policy_id
+        ) latest ON latest.policy_id=r.policy_id AND latest.revision=r.revision
+        WHERE r.owner_digest=? AND json_extract(r.payload,'$.repositoryId')=?
+        ORDER BY r.policy_id LIMIT 64`)
+        .all(owner, owner, repositoryId) as PolicyRow[];
+      return rows.map((row) => {
+        const { policyId, revision, policy } = decode(row);
+        return { policyId, revision, name: policy.name, repositoryId: policy.repositoryId };
+      });
+    },
     readCurrent(principal: DelegationPrincipal, policyId: string, revision?: number) {
       const saved = get(delegationOwnerDigest(principal), policyId);
       if (revision !== undefined && saved.revision !== revision)

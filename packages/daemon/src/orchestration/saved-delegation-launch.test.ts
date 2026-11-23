@@ -4,8 +4,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { launchRequestSchema, savedLaunchSelectionSchema } from '@autopod/shared';
+import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
+import { createActionAuditRepository } from '../actions/audit-repository.js';
+import { errorHandler } from '../api/error-handler.js';
+import { configurationRoutes } from '../api/routes/configuration.js';
+import { podRoutes } from '../api/routes/pods.js';
+import { createConfigurationComponents } from '../configuration/components.js';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
+import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { configurationDigest, resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
@@ -14,7 +21,7 @@ import { runMigrationsWithBackups } from '../db/migrate.js';
 import { ArtifactExports } from '../managed/artifact-exports.js';
 import { ManagedArtifactPipeline } from '../managed/artifact-pipeline.js';
 import { MemoryArtifactStore } from '../managed/artifact-store.js';
-import { canonical, digest, sha256 } from '../managed/canonical.js';
+import { digest, sha256 } from '../managed/canonical.js';
 import { ManagedControls } from '../managed/managed-controls.js';
 import { ManagedPodService } from '../managed/managed-service.js';
 import {
@@ -23,6 +30,9 @@ import {
   PRIVATE_SUBMISSION_FILE,
 } from '../managed/private-commit-policy.js';
 import { managedGit, managedGitBytes } from '../managed/source-git.js';
+import type { PodManager } from '../pods/pod-manager.js';
+import { createPodRepository } from '../pods/pod-repository.js';
+import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import {
   createTestConfiguration,
   insertConfigurationTestPod,
@@ -34,7 +44,7 @@ import {
 } from '../test-utils/disk-database.js';
 import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { resign } from '../test-utils/managed-fixture.js';
-import { createTestDb, logger } from '../test-utils/mock-helpers.js';
+import { createMockContainerManager, createTestDb, logger } from '../test-utils/mock-helpers.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { OrchestrationContinuations } from './continuations.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
@@ -744,8 +754,126 @@ it('executes two saved roles from private pinned source and qualifies once acros
         template.executionSpecDigest;
       return result;
     });
-    const receipt = await f.submit(await f.reviewed());
-    const { podId, plan, checkpoint } = receipt;
+    const app = Fastify();
+    let podId: string;
+    try {
+      app.setErrorHandler(errorHandler);
+      app.addHook('preHandler', async (request) => {
+        const subject = request.headers['x-fixture-subject'];
+        request.user = {
+          ...owner,
+          oid: subject === 'other' ? 'other-owner' : owner.oid,
+          operatorPrincipal: subject === 'app' ? undefined : owner.operatorPrincipal,
+          preferred_username: 'fixture',
+          name: 'fixture',
+          roles: ['operator'],
+          iat: 0,
+          exp: 4100000000,
+        };
+      });
+      const pods = createPodRepository(db);
+      const manager = {
+        createResolvedSession: () => pods.getOrThrow(f.insertPod()),
+      } as unknown as PodManager;
+      const accounts = createProviderAccountStore(db);
+      accounts.create({
+        id: 'account',
+        name: 'Main',
+        provider: 'anthropic',
+        credentials: { provider: 'anthropic', apiKey: 'fixture-key' },
+      });
+      accounts.create({
+        id: 'review',
+        name: 'Review',
+        provider: 'openai',
+        credentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: '{"tokens":{"access_token":"fixture"}}',
+        },
+      });
+      let available = true;
+      const components = createConfigurationComponents({
+        db,
+        logger,
+        pods,
+        accounts,
+        ports: f.services,
+        credentials: createConfigurationCredentialStore(
+          db,
+          { encrypt: (s) => s, decrypt: (s) => s },
+          async () => {},
+        ),
+        images: {
+          resolveEnvironment: f.services.resolveEnvironment,
+          buildEnvironmentImage: vi.fn(),
+        },
+        github: { get: vi.fn(), mutate: vi.fn(), download: vi.fn() },
+        audit: createActionAuditRepository(db),
+        reviewer: { manager: createMockContainerManager, image: () => 'unused' },
+        admissionReady: () => ({ ready: true }),
+        podManager: () => manager,
+        savedDelegationHost: {
+          available: () => available,
+          scratch: root,
+          readVerifiedPins: f.pins,
+          readSeedBundle: f.readSeedBundle,
+        },
+      });
+      configurationRoutes(app, components.routes);
+      podRoutes(
+        app,
+        manager,
+        undefined,
+        undefined,
+        pods,
+        undefined,
+        undefined,
+        undefined,
+        db,
+        undefined,
+        undefined,
+        components.routes,
+      );
+      const list = '/launch/delegation-policies?repositoryId=repo-a';
+      expect((await app.inject(list)).json()).toEqual([
+        { policyId: f.saved.policyId, revision: 1, repositoryId: 'repo-a', name: seed.name },
+      ]);
+      expect(
+        (await app.inject({ url: list, headers: { 'x-fixture-subject': 'other' } })).json(),
+      ).toEqual([]);
+      expect(
+        (await app.inject({ url: list, headers: { 'x-fixture-subject': 'app' } })).statusCode,
+      ).toBe(403);
+      const launchRequest = { ...f.request, selections: { githubAccessId: null } };
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/launch/resolve',
+        payload: launchRequest,
+      });
+      expect(preview.statusCode, preview.body).toBe(200);
+      const reviewed = preview.json();
+      expect(reviewed.delegationPreview).toMatchObject({
+        policyId: f.saved.policyId,
+        requestId: id,
+        source: { commit: f.source.cp.commit },
+      });
+      const submit = (expectedDigest: string) =>
+        app.inject({ method: 'POST', url: '/pods', payload: { ...launchRequest, expectedDigest } });
+      expect((await submit(reviewed.digest)).statusCode).toBe(409);
+      available = false;
+      expect((await submit(reviewed.delegationPreview.digest)).statusCode).toBe(503);
+      expect(f.insertPod).not.toHaveBeenCalled();
+      available = true;
+      const launched = await submit(reviewed.delegationPreview.digest);
+      expect(launched.statusCode, launched.body).toBe(201);
+      podId = launched.json().id as string;
+      expect((await submit(reviewed.delegationPreview.digest)).json().id).toBe(podId);
+      expect(f.insertPod).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+    const { plan, checkpoint } = readSavedDelegationAdmission(db, podId, owner);
     const keyPath = path.join(root, 'pod-key');
     writeFileSync(keyPath, Buffer.alloc(32, 81), { mode: 0o600, flag: 'wx' });
     const issuer = createPodTokenIssuer(keyPath);
@@ -868,10 +996,12 @@ it('executes two saved roles from private pinned source and qualifies once acros
         },
         withWorkerSource: (mirror, _run, use) => pinnedWorkerSource.run(mirror, use),
         async observeParentSource() {
-          if (wrongParentCheckout) return { commit: checkpoint.predecessor, tree: checkpoint.tree };
+          if (wrongParentCheckout)
+            return { commit: checkpoint.predecessor, tree: checkpoint.tree, clean: true };
           return {
             commit: await managedGit(parentCheckout, ['rev-parse', 'HEAD']),
             tree: await managedGit(parentCheckout, ['rev-parse', 'HEAD^{tree}']),
+            clean: (await managedGit(parentCheckout, ['status', '--porcelain'])) === '',
           };
         },
       });
@@ -890,6 +1020,10 @@ it('executes two saved roles from private pinned source and qualifies once acros
       await managedGit(parentCheckout, ['checkout', '--detach', checkpoint.commit]);
     });
     wrongParentCheckout = false;
+    const untracked = path.join(parentCheckout, 'unexpected.txt');
+    writeFileSync(untracked, 'unreviewed local edit');
+    await expect(runtime.provision()).rejects.toThrow('saved-delegation-parent-checkout-mismatch');
+    rmSync(untracked);
     const beforeRestart = await runtime.provision();
     const first = { requestKey: 'reason-work', recipe: 'reason', brief: 'Explain why.' };
     await expect(

@@ -67,6 +67,10 @@ import {
   type RetainedExecutionSelection,
   retainedContinuationLaunch,
 } from './retained-continuation-launch.js';
+import {
+  createSavedDelegationLaunchLane,
+  type SavedDelegationLaunchHost,
+} from './saved-delegation-launch-lane.js';
 import { createScanLaunches } from './scan-launches.js';
 import { createScopedPodTools } from './scoped-pod-tools.js';
 import { ConfigurationSecurityPolicyStore } from './security-policy.js';
@@ -107,6 +111,7 @@ export interface ConfigurationComponentsOptions {
     assertLaunch(config: EffectiveLaunchConfig): void;
     assertNetworkHeadroom?(): Promise<void>;
   };
+  savedDelegationHost?: SavedDelegationLaunchHost;
   authorizeParentLaunch?: (
     requestId: string | undefined,
     principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'> | undefined,
@@ -257,6 +262,11 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       resolveLaunchCredentialReferences(config, options.credentials),
     assertCapabilities: assertCurrent,
   };
+  if (options.savedDelegationHost && options.parentCandidate)
+    throw new Error('saved-delegation-cannot-share-signed-candidate-runtime');
+  const delegation = options.savedDelegationHost
+    ? createSavedDelegationLaunchLane(db, resolution, options.savedDelegationHost)
+    : undefined;
   const reviewerRuns = new ReviewerRunRepository(db, (id) => {
     if (!options.pods.taskExecutions)
       configurationError('Whole-task accounting is unavailable', 'TASK_BUDGET_UNAVAILABLE', 503);
@@ -653,9 +663,11 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     },
     db,
     resolution,
-    ...(options.parentCandidate?.assertNetworkHeadroom && {
+    ...(delegation && { listDelegationPolicies: delegation.list }),
+    ...((delegation || options.parentCandidate?.assertNetworkHeadroom) && {
       async previewLaunch(raw: unknown, principal: JwtPayload) {
         const request = launchRequestSchema.parse(raw);
+        if (request.delegation && delegation) return delegation.preview(request, principal);
         const candidate = options.parentCandidate;
         if (candidate && request.requireParentEnrollment) {
           candidate.requireLaunch(request);
@@ -685,6 +697,9 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       );
       return {
         schemaVersion: 1,
+        ...(delegation && {
+          savedDelegation: { available: ready.ready && !suspended && delegation.available() },
+        }),
         inputBundles: {
           available: true,
           maxFiles: MAX_INPUT_FILES,
@@ -730,6 +745,30 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
         );
       const createSession = manager.createResolvedSession.bind(manager);
       const prepareSession = manager.prepareResolvedSession?.bind(manager);
+      const parsed = launchRequestSchema.parse(request);
+      if (parsed.delegation && delegation) {
+        const admitted = await delegation.admit(
+          parsed,
+          identity.principal,
+          identity.userId,
+          (config) => {
+            if (!options.admissionReady().ready)
+              configurationError(
+                'Configuration cutover is incomplete',
+                'CONFIG_CUTOVER_REQUIRED',
+                409,
+              );
+            policy.assertLaunch(config);
+            return createSession(
+              config,
+              identity.userId,
+              { name: identity.name, email: identity.email },
+              identity.actor,
+            ).id;
+          },
+        );
+        return options.pods.getOrThrow(admitted.podId);
+      }
       const admitted = await admitLaunch({
         request,
         actorId: identity.userId,
