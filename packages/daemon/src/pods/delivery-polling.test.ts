@@ -122,6 +122,7 @@ describe('owned merge polling', () => {
     vi.useFakeTimers();
     const f = createFixCycleFixture();
     const { entry } = await f.planMerge();
+    f.podRepo.update('prepare', { baseBranch: null });
     f.pollingCaptured.prManagerFactory.mockReturnValue(f.provider);
     f.provider.getPrStatus.mockResolvedValue(
       pendingStatus({
@@ -143,7 +144,11 @@ describe('owned merge polling', () => {
     await vi.advanceTimersByTimeAsync(0);
     const fixId = f.pod().fixPodId;
     expect(fixId).toBeTruthy();
-    expect(f.podRepo.getOrThrow(fixId ?? '').linkedPodId).toBe('prepare');
+    expect(f.podRepo.getOrThrow(fixId ?? '')).toMatchObject({
+      linkedPodId: 'prepare',
+      baseBranch: 'main',
+      branch: entry.request.config.expectedTarget.branch,
+    });
     expect(f.deps.fixFeedbackRepo.peekLatest('prepare')?.message).toContain(
       'git merge origin/main',
     );

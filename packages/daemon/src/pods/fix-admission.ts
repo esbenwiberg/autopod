@@ -30,7 +30,7 @@ export function createFixAdmission(
   } = captured;
   const maybeSpawnFixSession = async (
     parentSessionId: string,
-    _status: PrMergeStatus,
+    status: PrMergeStatus,
   ): Promise<void> => {
     // Re-read from DB to avoid stale closure state across 60s intervals
     const parent = podRepo.getOrThrow(parentSessionId);
@@ -132,7 +132,11 @@ export function createFixAdmission(
     // diverge from the PR's actual source branch, so resolve the PR owner
     // and take branch/baseBranch/prUrl from it. Other prModes own their own
     // PR per pod, so the parent's fields are correct.
-    const branchSource = resolveBranchSource(parent);
+    // Conflict feedback is admitted only with a provider target that matches
+    // this parent's merge journal. Provision against those same refs.
+    const conflictTarget = status.mergeConflict ? status.sourceTarget : undefined;
+    const branchSource = conflictTarget ? parent : resolveBranchSource(parent);
+    const baseBranch = conflictTarget?.baseBranch ?? branchSource.baseBranch;
 
     // Recycle the terminal fix pod via the legal `complete|failed|killed →
     // queued` transition rather than creating a new child — keeps the "one fix
@@ -173,7 +177,7 @@ export function createFixAdmission(
         // the new run record its own.
         taskSummary: null,
         fixIteration: newIteration,
-        baseBranch: branchSource.baseBranch ?? null,
+        baseBranch: baseBranch ?? null,
         prUrl: branchSource.prUrl ?? null,
       });
 
@@ -223,7 +227,7 @@ export function createFixAdmission(
             skipValidation: false,
             options: config ? launchPodOptions(config) : parent.options,
             outputMode: parent.outputMode,
-            baseBranch: branchSource.baseBranch ?? null,
+            baseBranch: baseBranch ?? null,
             linkedPodId: parent.id,
             pimGroups: parent.pimGroups ?? null,
             prUrl: branchSource.prUrl ?? null,
@@ -258,7 +262,7 @@ export function createFixAdmission(
           task: placeholderTask,
           work: {
             branch: branchSource.branch,
-            baseBranch: branchSource.baseBranch ?? profile.defaultBranch ?? 'main',
+            baseBranch: baseBranch ?? profile.defaultBranch ?? 'main',
             linkedPodId: parent.id,
             dependsOnPodIds: [],
           },
