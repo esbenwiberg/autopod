@@ -73,16 +73,16 @@ Reuse `preservePodWorkspace` everywhere. Add one small helper that records the o
 
 ### Success Criteria
 #### Automated Verification
-- [ ] `workspace-preservation-recovery.test.ts`:
+- [x] `workspace-preservation-recovery.test.ts`:
   - A local failed pod calls `preservePodWorkspace` and `finalization.sourcePreservedAt` is set.
   - A preservation error leaves `failureReason` containing the marker, keeps `containerId`, and never calls `cleanupContainer`.
   - A sandbox pod records `sourcePreservedAt` too.
   - The active-run guard is unchanged.
-- [ ] Workflow-level test, in the existing pod-manager or validation-trigger suite:
+- [x] Workflow-level test, in the existing pod-manager or validation-trigger suite:
   - A failed local pod with a container is reworked. A mock `syncWorkspaceBack` writes an untracked file into the worktree. That sync runs before `cleanupContainer`, `recoveryWorktreePath` equals the worktree, and the file is present.
   - When sync fails, rework rejects with `WORKSPACE_SYNC_FAILED`, the container is not killed and `containerId` is unchanged.
-- [ ] Agent-process path: a fatal `error` event with an unknown or non-definitive quota classification on a local pod leads to preservation, `sourcePreservedAt` is set, and the call happens before `releaseZeroWorkFailure`.
-- [ ] `npx pnpm --filter @autopod/daemon exec vitest run <touched suites>` passes.
+- [x] Agent-process path: a fatal `error` event with an unknown or non-definitive quota classification on a local pod leads to preservation, `sourcePreservedAt` is set, and the call happens before `releaseZeroWorkFailure`.
+- [x] `npx pnpm --filter @autopod/daemon exec vitest run <touched suites>` passes.
 
 ## Phase 2: Provider-limit and continue-provider record preservation
 
@@ -96,11 +96,11 @@ Reuse `preservePodWorkspace` everywhere. Add one small helper that records the o
 
 ### Success Criteria
 #### Automated Verification
-- [ ] `provider-continuation.test.ts`:
+- [x] `provider-continuation.test.ts`:
   - On a definitive-quota provider limit, the sync's untracked file is present in the worktree, `sourcePreservedAt` is set, and the order is `['abort','sync','capture','kill']`. The existing order is preserved.
   - When sync fails, nothing is killed, `containerId` is retained, and `failureReason` has the marker.
   - `continueProvider` records `sourcePreservedAt`.
-- [ ] Suites pass.
+- [x] Suites pass.
 
 ## Phase 3: Resume refuses agent-stage failures; CLI shows the preservation state
 
@@ -119,13 +119,13 @@ Reuse `preservePodWorkspace` everywhere. Add one small helper that records the o
 
 ### Success Criteria
 #### Automated Verification
-- [ ] `continuation-controls.test.ts`:
+- [x] `continuation-controls.test.ts`:
   - A failed pod whose latest run outcome is `failed` makes resume reject with `AGENT_STAGE_FAILED`, and the message contains `ap rework` and `ap continue-provider`. `revalidateSession`, `pushAndCreatePr` and `enqueueSession` are not called.
   - A failed pod whose run `completed` (validation failure) still revalidates.
-- [ ] `task-execution-ledger` unit test for `latestRun`.
-- [ ] CLI `pod.test.ts`: the status output renders both `Source saved` variants.
-- [ ] Typecheck and build: `npx pnpm --filter @autopod/shared build && npx pnpm --filter @autopod/daemon exec tsc --noEmit && npx pnpm --filter @autopod/cli exec tsc --noEmit`.
-- [ ] `npx pnpm lint` (Biome). Daemon and CLI affected suites pass. The broader `npx pnpm test:pr` runs once at the end, in the foreground.
+- [x] `task-execution-ledger` unit test for `latestRun`.
+- [x] CLI `pod.test.ts`: the status output renders both `Source saved` variants.
+- [x] Typecheck and build: `npx pnpm --filter @autopod/shared build && npx pnpm --filter @autopod/daemon exec tsc --noEmit && npx pnpm --filter @autopod/cli exec tsc --noEmit`.
+- [x] `npx pnpm lint` (Biome). Daemon and CLI affected suites pass. The broader `npx pnpm test:pr` runs once at the end, in the foreground.
 
 ## Testing Strategy
 - Unit tests at each owner, using the existing fixtures (`createWorkspaceFixture`, the provider-continuation `fixture()`, the continuation-controls `fixture()`).
@@ -147,3 +147,20 @@ No migration. The existing `sourcePreservedAt` column is used and the failure go
 - Issue #670, the incident on spicy-cockroach (#644).
 - Research: `thoughts/shared/research/2026-11-23-670-preserve-workspace-on-abnormal-exit.md`.
 - Precedents: the budget-stop preserve and mark (`agent-event-consumption.ts:1000-1027`) and the resume gate `assertBudgetCodingNotInterrupted` (`budget-stop.ts:20-27`).
+
+## Implementation Notes (2026-11-23)
+
+Approved on 2026-11-23 as option 1: sync-only preservation, no auto-commit, no migration. The operator added three notes, each folded in as listed:
+
+1. A fatal error after `complete` in the same run (#648) is preserved. Covered by `abnormal-exit-preservation.test.ts`.
+2. A failed preservation names the retained container and gives exact next steps (`ap rework`, manual copy, `ap kill`) in `failureReason`. `ap status` shows `Source saved: NOT saved`.
+3. Committed per phase. Tests ran in foreground batches.
+
+Deviations and refinements:
+- **Predicate moved to its own module.** The resume-gate predicate lives in `pods/agent-stage-interruption.ts` (`isAgentStageInterrupted` and `assertAgentStageNotInterrupted`). It treats any non-`completed`, settled run (`failed`, `paused`, `stopped`) as interrupted.
+- **Rework uses the same predicate.** Rework syncs a failed local worker only when its agent stage was interrupted. Validation-stage failures were already synced at completion, and re-syncing them could import validation-generated files.
+- **Rework writes no journal receipt.** The generation increments before teardown, and the receipt from the failure-time preservation already exists.
+- **Receipt after the infrastructure fence.** On the provider-limit path, `Source saved` is recorded only after the post-sync infrastructure fence. The fence tests now expect that receipt for holds that arrive after a completed sync.
+- **Zero-work release guarded.** `releaseZeroWorkFailure` also refuses to remove a container whose preservation failed.
+- **No separate `latestRun` unit test.** It is covered with real SQLite by `agent-stage-interruption.test.ts` and `continuation-controls.test.ts`.
+- **Pre-existing failures.** Five `pod-manager.test.ts > approveSession` tests fail identically on the base commit `5e544da`. They are unrelated to this change.
