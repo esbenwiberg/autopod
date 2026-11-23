@@ -61,7 +61,16 @@ queued → provisioning → running → validating → validated → approved �
 Any non-terminal state → killing → killed
 ```
 
-**Fix pods** are spawned automatically when a pod's PR is blocked — by CI failures, failing checks, or `CHANGES_REQUESTED` review comments. The fix pod receives the original task plus sanitized failure summaries and reviewer notes, and pushes to the same branch. The cycle repeats up to `maxPrFixAttempts` (default: 3).
+**Fix pods** can start automatically while a PR is `merge_pending` for CI failures,
+`CHANGES_REQUESTED` review feedback, or a confirmed merge conflict (GitHub `DIRTY`,
+Azure DevOps `conflicts`). A conflict repair requires the provider's PR head and
+base to match the recorded delivery target. Being behind the base branch does not
+trigger a conflict repair.
+
+The fix pod receives the original task and the relevant feedback. For a conflict,
+it merges the base into the PR branch without rewriting existing commits. The
+daemon validates the result before publishing to the existing branch. The cycle
+is limited by `maxPrFixAttempts` (default: 3).
 
 ### Validation Pipeline
 
