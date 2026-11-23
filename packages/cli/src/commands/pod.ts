@@ -1137,7 +1137,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(chalk.green(`Pod ${resolvedId} re-enqueued.`));
       } else {
         console.log(chalk.yellow(`Pod ${resolvedId} force-failed — slot freed.`));
-        console.log(chalk.dim('Recover with: ap resume <id> or ap force-complete <id>'));
+        console.log(
+          chalk.dim(
+            'Recover with: ap rework <id> (agent unfinished), ap resume <id> (retry checks/delivery) or ap force-complete <id>',
+          ),
+        );
       }
     });
 
