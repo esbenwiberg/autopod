@@ -219,6 +219,75 @@ describe('required fact execution', () => {
     expect(fact?.[2]?.timeout).toBe(900000);
   });
 
+  // #665: a fact whose command exited 0 was recorded as `exitCode: 1` because the
+  // transport could not observe the exit and synthesized a failure.
+  it('classifies an unobserved fact exit as infrastructure with the raw end status', async () => {
+    const endStatus =
+      '{"execId":"fact-exec","streamEnded":true,"inspections":11,"lastInspection":{"Running":true,"ExitCode":null}}';
+    const cm = {
+      execInContainer: vi.fn(
+        async (_id: string, command: string[], options?: { requireObservedExit?: boolean }) => {
+          if (!command.join(' ').includes('python3 scripts/check_docs.py'))
+            return { stdout: '', stderr: '', exitCode: 0 };
+          // Non-strict buffered exec substitutes a synthetic exit 1 for an unobserved exit.
+          if (!options?.requireObservedExit)
+            return {
+              stdout: 'checked 273 Markdown files: 0 problem(s)\n',
+              stderr: '',
+              exitCode: 1,
+            };
+          throw new AutopodError(
+            `Buffered Docker exec fact-exec has no observed stopped exit: ${endStatus}`,
+            'EXEC_EXIT_UNVERIFIED',
+            409,
+          );
+        },
+      ),
+    } as unknown as ContainerManager;
+    const result = await createLocalValidationEngine(cm).validate({
+      podId: 'unobserved-fact-exit',
+      containerId: 'fixture',
+      previewUrl: '',
+      buildCommand: '',
+      startCommand: '',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [],
+      attempt: 1,
+      task: 'Check docs',
+      hasWebUi: false,
+      skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'review'],
+      diff: '',
+      contract: {
+        contractVersion: 1,
+        title: 'Docs check',
+        dependsOn: [],
+        scenarios: [],
+        humanReview: [],
+        requiredFacts: [
+          {
+            id: 'docs-check',
+            proves: [],
+            kind: 'custom-command',
+            artifact: { path: 'docs', change: 'touch' },
+            command: 'python3 scripts/check_docs.py',
+          },
+        ],
+      },
+    });
+    const factCall = vi
+      .mocked(cm.execInContainer)
+      .mock.calls.find(([, command]) => command.join(' ').includes('check_docs.py'));
+    expect(factCall?.[2]).toMatchObject({ requireObservedExit: true });
+    expect(result.factValidation?.results.some((fact) => fact.status === 'fail')).toBe(false);
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'facts',
+      code: 'EXEC_EXIT_UNVERIFIED',
+      retryable: false,
+      message: expect.stringContaining(endStatus),
+    });
+  });
+
   it.each([
     { presenceExit: 1, commandExit: 0, passed: true },
     { presenceExit: 0, commandExit: 0, passed: false },
