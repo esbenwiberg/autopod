@@ -1,6 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  statfs,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExecutionTarget, PodStatus, RepositoryPreparationEvidence } from '@autopod/shared';
@@ -65,7 +75,11 @@ export function preparedDependenciesDirForPod(podId: string): string {
   return path.join(preparedDependenciesRoot(), podId);
 }
 
-export function snapshotLimits(): { perPodBytes: number; totalBytes: number; minFreeBytes: number } {
+export function snapshotLimits(): {
+  perPodBytes: number;
+  totalBytes: number;
+  minFreeBytes: number;
+} {
   const perPodBytes = positiveEnvBytes('AUTOPOD_PREPARED_DEPENDENCIES_MAX_BYTES', 4 * GIB);
   const totalBytes = positiveEnvBytes('AUTOPOD_PREPARED_DEPENDENCIES_TOTAL_MAX_BYTES', 8 * GIB);
   return { perPodBytes, totalBytes, minFreeBytes: Math.max(2 * GIB, 2 * perPodBytes) };
@@ -86,7 +100,11 @@ async function directoryBytes(dir: string): Promise<number> {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) total += await directoryBytes(full);
-    else if (entry.isFile()) total += await stat(full).then((s) => s.size, () => 0);
+    else if (entry.isFile())
+      total += await stat(full).then(
+        (s) => s.size,
+        () => 0,
+      );
   }
   return total;
 }
@@ -222,9 +240,9 @@ export async function capturePreparedDependencySnapshot(
       const file = `${String(i).padStart(3, '0')}.tar`;
       let exported: { bytes: number; sha256: string };
       try {
-        exported = await (input.cm.exportPathArchive as NonNullable<
-          ContainerManager['exportPathArchive']
-        >)(input.containerId, containerPath, path.join(dir, ARCHIVES, file), {
+        exported = await (
+          input.cm.exportPathArchive as NonNullable<ContainerManager['exportPathArchive']>
+        )(input.containerId, containerPath, path.join(dir, ARCHIVES, file), {
           maxBytes: budget - totalBytes,
           timeoutMs: remaining(),
         });
@@ -369,9 +387,14 @@ export async function consumePreparedDependencySnapshot(input: {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new SnapshotSkip('restore-timed-out');
       restored.push(archive.containerPath);
-      await cm.importPathArchive(containerId, path.join(dir, ARCHIVES, archive.file), parents[i] as string, {
-        timeoutMs: remaining,
-      });
+      await cm.importPathArchive(
+        containerId,
+        path.join(dir, ARCHIVES, archive.file),
+        parents[i] as string,
+        {
+          timeoutMs: remaining,
+        },
+      );
     }
     return {
       reused: true,
@@ -424,7 +447,12 @@ export async function sweepPreparedDependencySnapshots(
           return null;
         }
       })();
-      const age = now - (await stat(dir).then((s) => s.mtimeMs, () => 0));
+      const age =
+        now -
+        (await stat(dir).then(
+          (s) => s.mtimeMs,
+          () => 0,
+        ));
       const awaiting =
         pod?.status === 'queued' || pod?.status === 'provisioning' || pod?.status === 'paused';
       remove =
@@ -444,11 +472,7 @@ export async function sweepPreparedDependencySnapshots(
   return removed;
 }
 
-export function logCaptureResult(
-  logger: Logger,
-  podId: string,
-  result: CaptureResult,
-): string {
+export function logCaptureResult(logger: Logger, podId: string, result: CaptureResult): string {
   if (result.status === 'captured') {
     logger.info({ podId, ...result }, 'Prepared dependencies saved for continuation');
     return `Prepared dependencies saved for continuation (${result.archives} archive${

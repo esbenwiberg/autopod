@@ -1,8 +1,8 @@
 import { AutopodError } from '@autopod/shared';
 import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState } from '../runtimes/codex-state-store.js';
-import { cleanupPreparedDependencies } from './prepared-dependency-snapshot.js';
 import type { OperatorKillCaptured, OperatorKillLiveDependencies } from './operator-contracts.js';
+import { cleanupPreparedDependencies } from './prepared-dependency-snapshot.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { canKill } from './state-machine.js';
 export function createOperatorKill(

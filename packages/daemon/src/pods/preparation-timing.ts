@@ -198,7 +198,8 @@ export function formatPreparationSummary(evidence: RepositoryPreparationEvidence
     extras.push(`preflight ${seconds(timing.preflightMs)}`);
   if (timing?.sourceProbeMs !== null && timing?.sourceProbeMs !== undefined)
     extras.push(`probes ${seconds(timing.sourceProbeMs)}`);
-  if (evidence.reuse?.decision === 'refused') extras.push(`reuse refused: ${evidence.reuse.reason}`);
+  if (evidence.reuse?.decision === 'refused')
+    extras.push(`reuse refused: ${evidence.reuse.reason}`);
   const known = evidence.cache?.signals.filter((signal) => signal.state !== 'unknown') ?? [];
   if (known.length)
     extras.push(`caches before: ${known.map((s) => `${s.name} ${s.state}`).join(', ')}`);

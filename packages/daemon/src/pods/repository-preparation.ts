@@ -247,7 +247,7 @@ export const OUTSIDE_WORKSPACE_WRITES_SCRIPT = [
   // Any find error (unreadable directory, bad option) reports "unverified", never "none".
   [
     'first=$( { find "$@" -xdev \\(',
-    '-path "$h/.npm/_cacache" -o -path "$h/.npm/_logs" -o -path "$h/.npm/_update-notifier-last-checked"',
+    '-path "$h/.npm" -o -path "$h/.cache/node-gyp" -o -path "$h/.config/configstore"',
     '-o -path "$h/.cache/pnpm" -o -path "$h/.local/share/pnpm/store" -o -path "$h/.cache/yarn"',
     '-o -path "$h/.yarn/berry/cache" -o -path "$h/.cache/pip" -o -path "$h/.cache/node/corepack"',
     '-o -path "$h/.claude" -o -path "$h/.codex" -o -path "$h/.autopod" -o -path "$h/.pi" \\)',

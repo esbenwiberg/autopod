@@ -13,6 +13,10 @@ import {
   provisionParentDelegate,
 } from './parent-delegate-materials.js';
 import { formatPreparationSummary } from './preparation-timing.js';
+import {
+  cleanupPreparedDependencies,
+  consumePreparedDependencySnapshot,
+} from './prepared-dependency-snapshot.js';
 import { projectMemoryScope } from './project-memory-scope.js';
 import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type {
@@ -36,10 +40,6 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
-import {
-  cleanupPreparedDependencies,
-  consumePreparedDependencySnapshot,
-} from './prepared-dependency-snapshot.js';
 import { prepareLaunchRepository } from './repository-preparation.js';
 import { resolveSections } from './section-resolver.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';

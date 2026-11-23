@@ -460,9 +460,7 @@ describe('repository preparation', () => {
     marker = await run();
     await exec('mkdir', ['-p', path.join(home, '.cache/ms-playwright')]);
     await writeFile(path.join(home, '.cache/ms-playwright/chromium'), 'browser');
-    expect((await exec('sh', ['-c', script, 'x', marker], { env })).stdout.trim()).toBe(
-      'detected',
-    );
+    expect((await exec('sh', ['-c', script, 'x', marker], { env })).stdout.trim()).toBe('detected');
     // A missing marker or a failing find never reads as "none".
     expect((await exec('sh', ['-c', script, 'x', `${marker}.gone`], { env })).stdout.trim()).toBe(
       'unverified',
@@ -484,10 +482,16 @@ describe('repository preparation', () => {
       restoreMs: 120,
     }));
     const recorded: RepositoryPreparationEvidence[] = [];
-    const evidence = await prepareLaunchRepository(f.config, f.cm, 'candidate', {}, {
-      reuse: { attempt },
-      record: (e) => recorded.push(structuredClone(e)),
-    });
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: { attempt },
+        record: (e) => recorded.push(structuredClone(e)),
+      },
+    );
     expect(attempt).toHaveBeenCalledWith({
       commandHash: evidence.commandHash,
       configurationHash: evidence.configurationHash,
@@ -513,9 +517,15 @@ describe('repository preparation', () => {
 
   it('runs the full command and records the reason when reuse is refused', async () => {
     const f = await fixture('npm ci && npm run bootstrap');
-    const evidence = await prepareLaunchRepository(f.config, f.cm, 'candidate', {}, {
-      reuse: { attempt: async () => ({ reused: false, reason: 'dependency-inputs-changed' }) },
-    });
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: { attempt: async () => ({ reused: false, reason: 'dependency-inputs-changed' }) },
+      },
+    );
     expect(evidence).toMatchObject({
       status: 'passed',
       exitCode: 0,
@@ -539,17 +549,23 @@ describe('repository preparation', () => {
           }
         : f.result,
     );
-    const evidence = await prepareLaunchRepository(f.config, f.cm, 'candidate', {}, {
-      reuse: {
-        attempt: async () => ({
-          reused: true,
-          sourceContainerId: 'old',
-          restoredArchives: 1,
-          restoredBytes: 1,
-          restoreMs: 1,
-        }),
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: {
+          attempt: async () => ({
+            reused: true,
+            sourceContainerId: 'old',
+            restoredArchives: 1,
+            restoredBytes: 1,
+            restoreMs: 1,
+          }),
+        },
       },
-    });
+    );
     expect(evidence.reuse).toEqual({ decision: 'refused', reason: 'source-changed-after-restore' });
     expect(evidence.status).toBe('passed');
     expect(evidence.exitCode).toBe(0);

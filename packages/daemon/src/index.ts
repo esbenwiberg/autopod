@@ -83,13 +83,13 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { sweepPreparedDependencySnapshots } from './pods/prepared-dependency-snapshot.js';
 import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
 import { assertFinalizationPathAvailable } from './pods/retained-finalization-repository.js';
 import {
   captureSandboxCheckpointAuthority,
   unpublishedSandboxSourceBase,
 } from './pods/sandbox-checkpoint-policy.js';
-import { sweepPreparedDependencySnapshots } from './pods/prepared-dependency-snapshot.js';
 import { SandboxOrphanReaper } from './pods/sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
