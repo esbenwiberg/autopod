@@ -14,6 +14,12 @@ import {
 } from './parent-evaluator-endpoint.js';
 import { evaluatorEnrollmentConfigSchema } from './parent-evaluator-enrollment.js';
 import type { ParentEvaluatorPorts } from './parent-exact-tree-evaluator.js';
+import {
+  brokeredReviewDeadlineMs,
+  nativeBrokerReviewer,
+  nativeReviewConfigurationDigest,
+  reviewBrokerSocketPath,
+} from './parent-review-broker.js';
 
 const absolute = z.string().min(1).max(2048).refine(path.isAbsolute);
 const serviceBase = z
@@ -23,14 +29,20 @@ const serviceBase = z
     stateDir: absolute,
     scratch: absolute,
     socket: absolute,
-    recipe: absolute,
   })
   .strict();
 const serviceSchema = z.union([
-  serviceBase.extend({ lease: parentEvaluatorLeaseSchema }),
+  serviceBase.extend({ recipe: absolute, lease: parentEvaluatorLeaseSchema }),
   serviceBase.extend({
+    recipe: absolute,
     enrollment: evaluatorEnrollmentConfigSchema,
     publishedMirror: absolute.optional(),
+  }),
+  serviceBase.extend({
+    role: z.literal('independentReview'),
+    reviewBrokerSocket: reviewBrokerSocketPath,
+    enrollment: evaluatorEnrollmentConfigSchema,
+    publishedMirror: absolute,
   }),
 ]);
 
@@ -126,9 +138,15 @@ export async function startParentEvaluatorService(configFile: string, credential
 
   // Only immutable role-owned code is executed. Never import code from a bundle
   // or resolve a module path provided by a caller. The exact module bytes are signed.
-  const source = await readProtected(cfg.recipe, 32768);
+  const broker =
+    'reviewBrokerSocket' in cfg ? nativeBrokerReviewer(cfg.reviewBrokerSocket) : undefined;
+  const source = 'recipe' in cfg ? await readProtected(cfg.recipe, 32768) : undefined;
   const authority = cfg.policy[cfg.role];
-  if (sha256(source) !== authority.configurationDigest)
+  const executionDigest =
+    'reviewBrokerSocket' in cfg
+      ? nativeReviewConfigurationDigest(cfg.reviewBrokerSocket)
+      : sha256(source!);
+  if (executionDigest !== authority.configurationDigest)
     throw new Error('evaluator-service-recipe-mismatch');
   const rawKey = await readProtected(
     path.join(credentialsDir, 'evaluator-receipt-key'),
@@ -148,17 +166,17 @@ export async function startParentEvaluatorService(configFile: string, credential
   )
     throw new Error('evaluator-service-receipt-key-mismatch');
 
-  const { evaluate } = (await import(
-    'data:text/javascript;base64,' + source.toString('base64')
-  )) as {
-    evaluate?: ParentEvaluatorPorts['evaluate'];
-  };
+  const { evaluate } =
+    broker ??
+    ((await import('data:text/javascript;base64,' + source!.toString('base64'))) as {
+      evaluate?: ParentEvaluatorPorts['evaluate'];
+    });
   if (typeof evaluate !== 'function') throw new Error('evaluator-service-recipe-invalid');
 
   const app = Fastify({
     logger: false,
     requestTimeout: 5000,
-    connectionTimeout: 10000,
+    connectionTimeout: broker ? brokeredReviewDeadlineMs : 10_000,
     forceCloseConnections: 'idle',
   });
   let accepting = false;
@@ -172,6 +190,7 @@ export async function startParentEvaluatorService(configFile: string, credential
       // No TCP listener and no HTTP header grants authority. The parent
       // directory must stay non-world-accessible; only the proxy group can connect.
       authorize: () => accepting,
+      ready: broker?.ready,
       ports: {
         evaluate,
         async sign(statement) {

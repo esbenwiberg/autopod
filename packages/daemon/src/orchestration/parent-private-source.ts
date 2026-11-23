@@ -84,7 +84,7 @@ export async function verifyParentPrivateSource(
         candidate: commit,
         expectedTree: tree,
         allowlist,
-        allowInheritedLinks: Boolean(delta),
+        allowInheritedPublishedEntries: Boolean(delta),
       });
     },
   );

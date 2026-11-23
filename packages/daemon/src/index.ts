@@ -926,6 +926,14 @@ const savedPilot =
           operatorSandboxScopeDigest: enrollment?.parent?.coding?.sandbox?.resourceScopeDigest,
           credentialsDirectory: process.env.CREDENTIALS_DIRECTORY,
           wakeupJournal: podRepo.sandboxWakeups,
+          nativeReview: {
+            readPod: (id) => podRepo.getOrThrow(id),
+            readLaunch: (id) => configuration.snapshots.get(id),
+            reviewer: {
+              parentQualification: (...args) =>
+                configuration.parentReviewer.parentQualification(...args),
+            },
+          },
           worktreeDirectory:
             process.env.AUTOPOD_WORKTREE_DIR ?? path.join(os.homedir(), '.autopod', 'worktrees'),
           readBranchHead: sources.branchRevision,
@@ -1622,8 +1630,22 @@ preparedDependencySweepTimer.unref();
 // Start listening
 try {
   if (savedPilot) {
-    app.addHook('onReady', () => savedPilot.registry.start());
-    app.addHook('onClose', () => savedPilot.registry.close());
+    app.addHook('onReady', async () => {
+      await savedPilot.pilot.openReviewBroker();
+      try {
+        await savedPilot.registry.start();
+      } catch (error) {
+        await savedPilot.pilot.closeReviewBroker();
+        throw error;
+      }
+    });
+    app.addHook('onClose', async () => {
+      try {
+        await savedPilot.registry.close();
+      } finally {
+        await savedPilot.pilot.closeReviewBroker();
+      }
+    });
   }
   await app.listen({ port: PORT, host: HOST });
   app.log.info({ port: PORT, host: HOST }, 'Autopod daemon started');

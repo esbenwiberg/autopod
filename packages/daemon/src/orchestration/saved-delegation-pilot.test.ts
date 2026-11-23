@@ -14,6 +14,7 @@ import { resign } from '../test-utils/managed-fixture.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
+import { nativeReviewConfigurationDigest } from './parent-review-broker.js';
 import {
   materializeSavedPilotWorktree,
   observeSavedPilotWorktree,
@@ -191,7 +192,33 @@ it('accepts a reusable published policy without seed or recipe files and determi
   expect(
     bindSavedWorkerRecipes((await f.read()).profiles, published.spec.policy, f.cp.commit),
   ).toEqual(first);
-  await f.write({ ...site, policy, source: { mode: 'published', mirror: reviewed.mirror.path } });
+  const source = { mode: 'published', mirror: reviewed.mirror.path };
+  await f.write({ ...site, policy, source });
+  await expect(f.read()).rejects.toThrow('published-policy-refused');
+  const reviewBroker = { socket: '/run/autopod-review/review.sock', groupId: 1234 };
+  const configurationDigest = nativeReviewConfigurationDigest(reviewBroker.socket);
+  const nativePolicy = {
+    ...policy,
+    reviewer: { ...policy.reviewer, policyDigest: configurationDigest },
+  };
+  const authorities = {
+    ...site.authorities,
+    independentReview: { ...site.authorities.independentReview, configurationDigest },
+  };
+  const native = {
+    ...site,
+    policy: nativePolicy,
+    source,
+    authorities,
+    evaluatorEnrollment: 'automatic',
+    reviewBroker,
+  };
+  await f.write(native);
+  expect((await f.read()).spec.reviewBroker).toEqual(reviewBroker);
+  await f.write({
+    ...native,
+    reviewBroker: { ...reviewBroker, socket: '/run/incorrect/review.sock' },
+  });
   await expect(f.read()).rejects.toThrow('published-policy-refused');
 });
 

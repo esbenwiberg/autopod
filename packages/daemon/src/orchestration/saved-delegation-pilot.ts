@@ -38,6 +38,16 @@ import {
 import { enrollParentEvaluators } from './parent-evaluator-enrollment.js';
 import { requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { loadParentEvaluatorTlsFetch } from './parent-evaluator-tls.js';
+import { parentIntegrationGateDigest } from './parent-integration-qualified.js';
+import {
+  type ParentNativeReviewPorts,
+  reviewAnchoredParentEvidence,
+} from './parent-isolated-review.js';
+import {
+  createParentReviewBroker,
+  nativeReviewConfigurationDigest,
+  parentReviewBrokerConfigSchema,
+} from './parent-review-broker.js';
 import {
   publishedBaseTransport,
   publishedDelegationSource,
@@ -97,6 +107,7 @@ const pilotSchema = z
     recipes: z.record(z.string(), z.unknown()).optional(),
     endpoints: parentEvaluatorEndpointsSchema,
     evaluatorEnrollment: z.literal('automatic').optional(),
+    reviewBroker: parentReviewBrokerConfigSchema.optional(),
     authorities: gatePinsSchema,
   })
   .strict();
@@ -179,7 +190,10 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     if (
       spec.recipes ||
       spec.evaluatorEnrollment !== 'automatic' ||
-      configured.mirror !== profiles.mirror.path
+      configured.mirror !== profiles.mirror.path ||
+      (spec.reviewBroker &&
+        nativeReviewConfigurationDigest(spec.reviewBroker.socket) !==
+          spec.authorities.independentReview.configurationDigest)
     )
       throw new Error('saved-delegation-published-policy-refused');
     // Site reviews reusable profile stages once. Validate their authority at startup.
@@ -195,6 +209,7 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
   }
   const recipes = spec.recipes;
   if (
+    spec.reviewBroker ||
     path.dirname(configured.bundlePath) !== path.dirname(file) ||
     (configured.resultTransport && spec.evaluatorEnrollment !== 'automatic') ||
     configured.commit !== profiles.mirror.baseRevision
@@ -284,6 +299,7 @@ export async function composeSavedDelegationPilot(input: {
   readBranchHead(repository: RepositoryConfig, branch: string): Promise<string>;
   observeParentSource: Parameters<typeof attachSavedDelegationRuntime>[0]['observeParentSource'];
   worktreeDirectory: string;
+  nativeReview?: ParentNativeReviewPorts;
 }) {
   const { db, issuer, logger } = input;
   const scratch = path.join(
@@ -326,7 +342,14 @@ export async function composeSavedDelegationPilot(input: {
     spec.sandbox.resourceScopeDigest === input.operatorSandboxScopeDigest
   )
     throw new Error('saved-delegation-pilot-target-refused');
-  const transport = await loadParentEvaluatorTlsFetch(spec.endpoints, input.credentialsDirectory);
+  const broker = spec.reviewBroker && createParentReviewBroker(spec.reviewBroker);
+  if (broker && (!published || !input.nativeReview))
+    throw new Error('saved-delegation-pilot-review-broker-required');
+  const transport = await loadParentEvaluatorTlsFetch(
+    spec.endpoints,
+    input.credentialsDirectory,
+    Boolean(broker),
+  );
   const dispatchKeys = await readEvaluatorDispatchKeys(input.credentialsDirectory);
   // Check the dispatch keys at boot, but derive the signer from each run's exact combined policy.
   createEvaluatorDispatchSigner(dispatchKeys, {
@@ -485,7 +508,7 @@ export async function composeSavedDelegationPilot(input: {
             },
             policy,
           );
-        else
+        if (spec.evaluatorEnrollment !== 'automatic' || broker)
           await requireEvaluatorReadiness(spec.endpoints, transport, signer, {
             ...binding,
             policyDigest: combinedPolicyDigest(policy),
@@ -518,6 +541,8 @@ export async function composeSavedDelegationPilot(input: {
   return {
     launchHost,
     principal,
+    openReviewBroker: () => broker?.open(),
+    closeReviewBroker: () => broker?.close(),
     /** Call only after the provision, ingress and recovery hooks have been installed. */
     advertise() {
       policies.installPilot(principal, spec.policyId, spec.policy);
@@ -551,12 +576,46 @@ export async function composeSavedDelegationPilot(input: {
         },
       );
       const gatePolicy = savedDelegationGatePolicy(plan);
-      const gates = createParentEvaluatorClient(
+      const remoteGates = createParentEvaluatorClient(
         spec.endpoints,
         gatePolicy,
         transport,
         createEvaluatorDispatchSigner(dispatchKeys, gatePolicy),
+        Boolean(broker),
       );
+      const source = plan.pins.source;
+      const gates =
+        broker && published && input.nativeReview
+          ? {
+              ...remoteGates,
+              independentReview: (() => {
+                const review = reviewAnchoredParentEvidence({
+                  ...input.nativeReview,
+                  db,
+                  run: plan.runId,
+                  excludedReviewerAccounts: spec.policy.workers.map((role) => role.accountId),
+                  scratch,
+                  delta: {
+                    base: source.commit,
+                    tree: source.tree,
+                    withBase: (use) => published.withBase(source, use),
+                  },
+                });
+                const send: typeof remoteGates.independentReview = (request, bundle) =>
+                  broker.withDispatch(
+                    {
+                      run: request.subject.run,
+                      inputDigest: parentIntegrationGateDigest(request),
+                      commit: request.subject.commit,
+                      tree: request.subject.tree,
+                    },
+                    () => review(request, bundle),
+                    () => remoteGates.independentReview(request, bundle),
+                  );
+                return send;
+              })(),
+            }
+          : remoteGates;
       let runtime: ReturnType<typeof attachSavedDelegationRuntime> | undefined;
       try {
         runtime = attachSavedDelegationRuntime({

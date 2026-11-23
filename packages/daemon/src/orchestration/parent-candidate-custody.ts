@@ -277,7 +277,7 @@ export async function inspectParentCandidate(
         candidate: receipt.newCommit,
         expectedTree: selection.expectedTree,
         allowlist: selection.allowlist,
-        allowInheritedLinks: Boolean(delta),
+        allowInheritedPublishedEntries: Boolean(delta),
       }),
   );
 

@@ -10,6 +10,7 @@ import {
   type ParentEvaluatorEndpoints,
   parentEvaluatorEndpointsSchema,
 } from './parent-evaluator-client.js';
+import { brokeredReviewDeadlineMs } from './parent-review-broker.js';
 
 const roles = ['checks', 'independentReview'] as const;
 const names = { checks: 'checks', independentReview: 'review' } as const;
@@ -37,6 +38,7 @@ export function createParentEvaluatorTlsFetch(
   endpoints: ParentEvaluatorEndpoints,
   materials: Readonly<Record<Role, Material>>,
   dial = httpsRequest,
+  nativeReview = false,
 ): typeof fetch {
   const bound = parentEvaluatorEndpointsSchema.parse(endpoints);
   const contexts = new Map<string, SecureContext>();
@@ -68,7 +70,9 @@ export function createParentEvaluatorTlsFetch(
 
     const url = new URL(input);
     const body = init.body;
-    const timeout = AbortSignal.timeout(30_000);
+    const timeout = AbortSignal.timeout(
+      nativeReview && input === bound.independentReview ? brokeredReviewDeadlineMs : 30_000,
+    );
     const signal = init.signal ? AbortSignal.any([timeout, init.signal]) : timeout;
     return new Promise<Response>((resolve, reject) => {
       const unavailable = () => reject(new Error('parent-evaluator-tls-response-unavailable'));
@@ -171,6 +175,7 @@ async function readCredential(directory: string, name: string, secret: boolean) 
 export async function loadParentEvaluatorTlsFetch(
   endpoints: ParentEvaluatorEndpoints,
   directory: string | undefined,
+  nativeReview = false,
 ) {
   const secrets: Buffer[] = [];
   try {
@@ -191,10 +196,15 @@ export async function loadParentEvaluatorTlsFetch(
       secrets.push(key);
       return { ca, cert, key };
     };
-    return createParentEvaluatorTlsFetch(endpoints, {
-      checks: await load('checks'),
-      independentReview: await load('independentReview'),
-    });
+    return createParentEvaluatorTlsFetch(
+      endpoints,
+      {
+        checks: await load('checks'),
+        independentReview: await load('independentReview'),
+      },
+      undefined,
+      nativeReview,
+    );
   } catch {
     throw new Error(credentialError);
   } finally {

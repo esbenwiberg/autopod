@@ -129,7 +129,7 @@ export async function buildParentIntegration(
       candidate: material.receipt.newCommit,
       expectedTree: selected.expectedTree,
       allowlist: selected.allowlist,
-      allowInheritedLinks: Boolean(delta),
+      allowInheritedPublishedEntries: Boolean(delta),
     });
   const rightScope = await restoreParentSource(
     withVerifiedCheckpointMirror,

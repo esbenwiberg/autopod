@@ -544,8 +544,10 @@ trusted, read-only `publishedMirror` containing the pinned commit. Both reject
 registration if the configured transport differs or the base is unavailable.
 The private worker submissions and final approved bundle then carry only
 objects after that base. The standalone evaluators reconstruct and verify the
-combined tree in scratch. Desktop shows the required base commit with the
-bundle; it is not a self-contained copy of the repository. A checkout that
+combined tree in scratch. Existing published symlinks and filenames containing
+`+` are allowed only when their path, Git mode and object ID are unchanged;
+workers cannot add or modify such entries. Desktop shows the required base
+commit with the bundle; it is not a self-contained copy of the repository. A checkout that
 already has that commit can import the approved bundle with
 `git fetch /path/to/result.bundle HEAD` without publishing anything. Existing
 fixed and self-contained runs are unchanged.
@@ -560,6 +562,37 @@ This suits scoped text changes, not workers that need a full build checkout.
 
 Published mode uses anchored results and scoped worker uploads automatically.
 The legacy staged-seed mode continues to support previously reviewed packets.
+
+### Use Autopod's isolated reviewer for the independent gate
+
+For the published lane, set `reviewBroker: { "socket": "/run/autopod-review/review.sock", "groupId": <numeric gid> }`
+in the pilot record. Create the socket's real parent directory under a trusted
+runtime path, owned by the non-root daemon user, with that dedicated group and
+mode `2750` (setgid). Put only the independent evaluator in this group; do not
+share it with checks, TLS proxies or workers. The daemon binds the socket in mode
+`0660`. Never expose it on the public daemon or proxy it over TCP.
+
+In the independent evaluator's service JSON, replace `recipe` with
+`reviewBrokerSocket` set to the same path. Keep `role: "independentReview"`,
+automatic `enrollment`, and the read-only `publishedMirror`. Its receipt
+key and persistent claim store remain separate from the daemon, checks, and
+workers. Use the same pin for the reviewer policy and the independent authority:
+`sha256:` plus the SHA-256 of the compact UTF-8 JSON array
+`["autopod.parent-review-recipe/v1","native-broker/v1","/run/autopod-review/review.sock"]`
+with the configured socket substituted, no trailing newline. Only checks
+continues to use the pinned executable recipe.
+
+After enrollment, a fresh admission requires both evaluators' authenticated
+readiness, including a broker connectivity probe that sends no source and
+runs no inference. During qualification, the review role verifies the Git
+tree and paths before requesting the daemon's single pending run and exact
+input. The daemon reconstructs the same tree from its own retained bundle,
+then resolves the prompt, account and budget from the frozen launch. Only
+the role service can sign a passing receipt. Keep the review proxy's response
+timeout at least 120 seconds and use an enrollment lease that covers the
+whole Task. Native inference is bounded to 90 seconds (plus transport and
+Git verification); checks and legacy evaluator request deadlines remain
+unchanged. A disconnect, timeout, or restart cannot rearm a dispatched review.
 
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and
