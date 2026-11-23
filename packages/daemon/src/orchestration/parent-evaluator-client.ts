@@ -34,13 +34,30 @@ const endpoint = z
       return false;
     }
   });
-export const parentEvaluatorEndpointsSchema = z
+const dnsEndpoints = z
   .object({
     checks: endpoint,
     independentReview: endpoint,
   })
   .strict()
   .refine((value) => new URL(value.checks).hostname !== new URL(value.independentReview).hostname);
+
+/** An explicitly configured same-host pair. No DNS, public ingress, arbitrary
+ * ports, or mixing one local role with a remote role. Each still uses mTLS. */
+export const localEvaluatorEndpoints = {
+  checks: 'https://127.0.0.1:18443/verify',
+  independentReview: 'https://127.0.0.1:19443/verify',
+} as const;
+
+export const parentEvaluatorEndpointsSchema = z.union([
+  dnsEndpoints,
+  z
+    .object({
+      checks: z.literal(localEvaluatorEndpoints.checks),
+      independentReview: z.literal(localEvaluatorEndpoints.independentReview),
+    })
+    .strict(),
+]);
 export type ParentEvaluatorEndpoints = z.infer<typeof parentEvaluatorEndpointsSchema>;
 
 const maxResponseBytes = 2048;

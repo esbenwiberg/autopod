@@ -81,7 +81,8 @@ export function createParentEvaluatorTlsFetch(
         {
           method: 'POST',
           secureContext: context,
-          servername: url.hostname,
+          // IP literals use the certificate IP SAN, without sending an IP as SNI.
+          ...(url.hostname === '127.0.0.1' ? {} : { servername: url.hostname }),
           rejectUnauthorized: true,
           agent: false,
           signal,

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { TLSSocket } from 'node:tls';
 import { expect, it, onTestFinished, vi } from 'vitest';
+import { localEvaluatorEndpoints } from './parent-evaluator-client.js';
 import {
   createParentEvaluatorTlsFetch,
   loadParentEvaluatorTlsFetch,
@@ -17,15 +18,15 @@ const endpoints = {
 };
 const post = { method: 'POST', body: '{"fixture":true}' };
 
-async function fixture() {
+async function fixture(loopback = false) {
   const dir = await mkdtemp(path.join(await realpath(tmpdir()), 'evaluator-mtls-'));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const openssl = (...args: string[]) =>
     execFileSync('openssl', args, { cwd: dir, timeout: 3000, stdio: 'pipe' });
 
   const role = async (name: string) => {
-    const host = new URL(name === 'checks' ? endpoints.checks : endpoints.independentReview)
-      .hostname;
+    const selected = loopback ? localEvaluatorEndpoints : endpoints;
+    const host = new URL(name === 'checks' ? selected.checks : selected.independentReview).hostname;
     const cn = 'fixture-' + name;
     openssl(
       'req',
@@ -75,7 +76,9 @@ async function fixture() {
         'extendedKeyUsage=' +
           purpose +
           'Auth\n' +
-          (purpose === 'server' ? 'subjectAltName=DNS:' + hostname + '\n' : ''),
+          (purpose === 'server'
+            ? 'subjectAltName=' + (hostname === '127.0.0.1' ? 'IP:' : 'DNS:') + hostname + '\n'
+            : ''),
       );
       openssl(
         'x509',
@@ -152,6 +155,41 @@ async function fixture() {
   const material = { checks: checks.client, independentReview: review.client };
   return { dir, checks, review, open, material };
 }
+
+it('requires a matching IP certificate and distinct mutual trust for the private loopback pair', async () => {
+  const f = await fixture(true);
+  const checks = await f.open(f.checks.server);
+  const review = await f.open(f.review.server);
+  let checkPort = checks.port;
+  const opts = vi.fn();
+  const dial: typeof request = ((
+    url: URL,
+    options: object,
+    handler: Parameters<typeof request>[2],
+  ) => {
+    opts(url.href, options);
+    return request(
+      url,
+      { ...options, port: url.href === localEvaluatorEndpoints.checks ? checkPort : review.port },
+      handler,
+    );
+  }) as typeof request;
+  const send = createParentEvaluatorTlsFetch(localEvaluatorEndpoints, f.material, dial);
+  await expect(send(localEvaluatorEndpoints.checks, post)).resolves.toMatchObject({ status: 200 });
+  await expect(send(localEvaluatorEndpoints.independentReview, post)).resolves.toMatchObject({
+    status: 200,
+  });
+  expect(opts.mock.calls.every(([, options]) => !options.servername)).toBe(true);
+  expect(checks.received.mock.calls).toEqual([['/verify', 'checks-client']]);
+  expect(review.received.mock.calls).toEqual([['/verify', 'review-client']]);
+  const wrongName = await f.open(f.checks.wrongName);
+  checkPort = wrongName.port;
+  await expect(send(localEvaluatorEndpoints.checks, post)).rejects.toThrow('response-unavailable');
+  expect(wrongName.received).not.toHaveBeenCalled();
+  checkPort = review.port;
+  await expect(send(localEvaluatorEndpoints.checks, post)).rejects.toThrow('response-unavailable');
+  expect(review.received).toHaveBeenCalledTimes(1);
+});
 
 it('uses separate private trust and client identities, without redirects or fallback', async () => {
   const f = await fixture();
