@@ -37,7 +37,7 @@ interface ClaudeToolUseResult {
   interrupted?: boolean;
 }
 
-interface ClaudeStreamEvent {
+export interface ClaudeStreamEvent {
   type: string;
   subtype?: string;
   // Claude CLI's stream-json wire format — `session_id`, not `pod_id`. The
@@ -88,7 +88,18 @@ function fileChangePath(input: Record<string, unknown>): string {
  */
 // biome-ignore lint/complexity/noStaticOnlyClass: used as a namespace with static methods matching CodexStreamParser pattern
 export class ClaudeStreamParser {
-  static async *parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
+  /**
+   * @param observe Optional raw-frame observer, called synchronously for every
+   *   parsed NDJSON frame (in stream order, before its mapped event is yielded).
+   *   Lets the runtime track frames that map to no AgentEvent, such as Claude's
+   *   background-task lifecycle (`system/task_*`, `background_tasks_changed`).
+   */
+  static async *parse(
+    stream: Readable,
+    podId: string,
+    logger: Logger,
+    observe?: (raw: ClaudeStreamEvent) => void,
+  ): AsyncIterable<AgentEvent> {
     const rl = createInterface({ input: stream });
     const referenceReads = new Set<string>();
 
@@ -114,6 +125,7 @@ export class ClaudeStreamParser {
         };
         continue;
       }
+      observe?.(event);
 
       if (event.type === 'assistant') {
         const ts = new Date().toISOString();

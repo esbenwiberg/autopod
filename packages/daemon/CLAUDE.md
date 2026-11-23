@@ -378,6 +378,24 @@ Each runtime in `src/runtimes/` implements the `Runtime` interface:
 activity union. See [Codex usage accounting](../../docs/codex-usage-accounting.md)
 for live counters, verified cap stops, finality, and non-waiving review deferral.
 
+### Claude turn finality
+
+One `claude -p` process can write several `result` frames: it waits for background
+tasks (Bash `run_in_background`, background agents) and continues in the same session
+on their notification, and a resumed session can settle leftover work first.
+`runtimes/claude-turn-finality.ts` therefore holds each result until it is final.
+More turn frames make it intermediate: no kill, and its usage is carried into the
+released `complete`. A result written with non-ambient background tasks pending,
+before `report_task_summary` in that invocation, while the pod is `running` with no
+pending human decision, waits for the CLI to continue. The wait is bounded by
+`AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS` (default 25 min, clamped 3 min below
+`AUTOPOD_STUCK_RUNNING_THRESHOLD_MS`). A turn that never finished yields a fatal
+`turnInterrupted` error after verified termination. The consumer then fails the pod
+without validation and settles the run as `turn_interrupted`. It preserves the
+workspace through the budget-stop owner, so `ap rework` continues without a retry
+authorization; Resume and Retry checks are refused. A final result keeps the 30 s
+`AUTOPOD_POST_COMPLETE_GRACE_MS` retained-completion behaviour.
+
 Stream parsers are the tricky part — each vendor's SSE format is different. When adding parser logic,
 add test cases to the co-located `.test.ts` covering partial chunks, multi-event lines, and error frames.
 

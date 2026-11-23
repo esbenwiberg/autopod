@@ -9,6 +9,7 @@ import {
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { assertBudgetCodingNotInterrupted } from './budget-stop.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
+import { assertAgentTurnNotInterrupted } from './interrupted-turn.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 import { sourceAdoptionError } from './source-adoption-repository.js';
 import { isTerminalState } from './state-machine.js';
@@ -94,7 +95,10 @@ export function createValidationRevalidationWorkflow(
     },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     const pod = podRepo.getOrThrow(podId);
-    if (!options?.adoptedSource) assertBudgetCodingNotInterrupted(pod);
+    if (!options?.adoptedSource) {
+      assertBudgetCodingNotInterrupted(pod);
+      assertAgentTurnNotInterrupted(podRepo, pod);
+    }
     if (podRepo.approvalRewrites?.latest(pod))
       rewriteError(
         'The selected rebase owns exact source checks. Ordinary revalidation cannot pull, reset budgets or replace its resource.',

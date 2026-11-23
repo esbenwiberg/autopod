@@ -108,6 +108,25 @@ describe('generateSystemInstructions', () => {
     }
   });
 
+  it.each([
+    'claude',
+    'codex',
+    'pi',
+    'copilot',
+  ] as const)('gives background-command guidance only to Claude workers (%s)', (runtime) => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ runtime }),
+      'http://localhost:8080/mcp/x',
+    );
+    const guidance =
+      'Prefer foreground commands. If you background a long command, do not end your turn until it has finished and you have reported. Poll or wait for it instead.';
+    if (runtime === 'claude') {
+      expect(md).toContain('## Background Commands');
+      expect(md).toContain(guidance);
+    } else expect(md).not.toContain('## Background Commands');
+  });
+
   it('does not add coding-edit guidance to research/artifact workflows', () => {
     const md = generateSystemInstructions(
       makeProfile({ outputMode: 'artifact' }),

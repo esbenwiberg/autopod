@@ -751,7 +751,15 @@ const validationEngine = createLocalValidationEngine(
 );
 
 const runtimeRegistry = createRuntimeRegistry([
-  new ClaudeRuntime(logger, runtimeContainerManager),
+  new ClaudeRuntime(logger, runtimeContainerManager, {
+    // A turn ending with background work pending may wait (bounded) for Claude to
+    // continue — but not while a human decision is pending: a retained run would
+    // only queue the reply instead of resuming the agent with it (#648).
+    awaitBackgroundTasks: (podId) => {
+      const pod = podRepo.getOrThrow(podId);
+      return pod.status === 'running' && !pod.pendingEscalation;
+    },
+  }),
   new CodexRuntime(logger, runtimeContainerManager, podRepo, eventBus),
   new CopilotRuntime(logger, runtimeContainerManager),
   new PiRuntime(logger, runtimeContainerManager),

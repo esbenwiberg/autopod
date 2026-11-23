@@ -208,6 +208,7 @@ export function generateSystemInstructions(
   // the task, not buried in the MCP server catalogue.
   generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
   if (profile.outputMode !== 'artifact') generateFileEditingRules(lines, pod.runtime);
+  generateBackgroundWorkRules(lines, pod.runtime);
 
   // Operating Environment section (adapts to profile config)
   generateOperatingEnvironment(
@@ -1205,6 +1206,22 @@ function generateFileEditingRules(lines: string[], runtime: Pod['runtime']): voi
       'Python, shell redirection, or scripted text replacement. Shell/script edits remain appropriate ' +
       'for generators, justified bulk transformations, or when no suitable native tool is available. ' +
       'Inspect the resulting diff and run relevant checks whichever editing path you use.',
+  );
+  lines.push('');
+}
+
+/**
+ * Claude Code can background long commands and end its turn while they run.
+ * The daemon waits only a bounded time for them and treats a turn that ended
+ * waiting on background work as interrupted (#648) — defence in depth.
+ */
+function generateBackgroundWorkRules(lines: string[], runtime: Pod['runtime']): void {
+  if (runtime !== 'claude') return;
+  lines.push('## Background Commands');
+  lines.push('');
+  lines.push(
+    'Prefer foreground commands. If you background a long command, do not end your turn until ' +
+      'it has finished and you have reported. Poll or wait for it instead.',
   );
   lines.push('');
 }

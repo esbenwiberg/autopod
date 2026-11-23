@@ -14,6 +14,7 @@ import {
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { assertNoInfrastructureBlocker, persistEscalation } from './escalation-coordinator.js';
+import { assertAgentTurnNotInterrupted, isInterruptedAgentTurn } from './interrupted-turn.js';
 import { resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
 import { isTerminalState } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
@@ -152,7 +153,10 @@ export function createValidationTriggerWorkflow(
     const lifecycleGeneration = pod.lifecycleGeneration;
     const lifecycleContainerId = pod.containerId;
     const force = options?.force ?? false;
-    if (!force || options?.validationOnly) assertBudgetCodingNotInterrupted(pod);
+    if (!force || options?.validationOnly) {
+      assertBudgetCodingNotInterrupted(pod);
+      assertAgentTurnNotInterrupted(podRepo, pod);
+    }
     const validationOnly =
       options?.validationOnly || pod.reworkReason === BUDGET_CONTINUATION_CHECKS_ONLY;
 
@@ -292,13 +296,23 @@ export function createValidationTriggerWorkflow(
       this.assertCanRework(podId);
       emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
+      // An interrupted turn whose verified-stop preservation did not complete still
+      // holds unfinished edits only inside its Docker container (#648). Preserve it
+      // like a sandbox before teardown; failure retains the container. The recorded
+      // reason is generation-independent, so a refused Rework can be retried.
+      const unpreservedInterruptedTurn =
+        !isInteractive &&
+        pod.executionTarget !== 'sandbox' &&
+        !pod.finalization?.sourcePreservedAt &&
+        isInterruptedAgentTurn(podRepo, pod);
+
       // Fence stale validation and agent cleanup before awaiting any teardown.
       const reworkGeneration = podRepo.incrementLifecycleGeneration(podId);
       validationAbortControllers.get(podId)?.abort();
 
       if (
         !isInteractive &&
-        pod.executionTarget === 'sandbox' &&
+        (pod.executionTarget === 'sandbox' || unpreservedInterruptedTurn) &&
         pod.containerId &&
         pod.worktreePath
       ) {

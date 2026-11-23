@@ -750,6 +750,266 @@ describe('ClaudeRuntime', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Turn finality (#648)
+  // ---------------------------------------------------------------------------
+
+  describe('turn finality (#648)', () => {
+    const SESSION = 'native-session';
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const init = () => ({ type: 'system', subtype: 'init', session_id: SESSION });
+    const result = (text: string, input = 10, output = 5, cost = 0.01) => ({
+      type: 'result',
+      subtype: 'success',
+      result: text,
+      total_cost_usd: cost,
+      usage: { input_tokens: input, output_tokens: output },
+    });
+    const toolUse = (name: string, input: Record<string, unknown> = {}) => ({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: `tu-${name}`, name, input }] },
+    });
+    const toolResult = (name: string) => ({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: `tu-${name}`, content: 'ok' }] },
+    });
+    const backgroundStarted = (id = 'bg-1', extra: Record<string, unknown> = {}) => ({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: id,
+      description: 'broad test suite',
+      task_type: 'local_bash',
+      is_backgrounded: true,
+      ...extra,
+    });
+    const backgroundDone = (id = 'bg-1') => ({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: id,
+      status: 'completed',
+      output_file: '/tmp/out',
+      summary: 'done',
+    });
+
+    function start(
+      kind: 'spawn' | 'resume',
+      options: { backgroundWaitMs?: number; awaitBackgroundTasks?: () => boolean } = {},
+    ) {
+      vi.stubEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', '60');
+      vi.stubEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', '50');
+      vi.stubEnv('AUTOPOD_RUNTIME_TERMINATION_TIMEOUT_MS', '200');
+      vi.stubEnv('AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS', String(options.backgroundWaitMs ?? 60_000));
+      const handle = createMockHandle();
+      handle.kill = vi.fn(async () => {
+        (handle.stdout as PassThrough).destroy();
+        (handle.stderr as PassThrough).destroy();
+        handle.finish(143);
+      });
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm, {
+        ...(options.awaitBackgroundTasks && { awaitBackgroundTasks: options.awaitBackgroundTasks }),
+      });
+      runtime.setClaudeSessionId('turn-pod', SESSION);
+      const source =
+        kind === 'resume'
+          ? runtime.resume('turn-pod', 'Plan approved', 'container-123')
+          : runtime.spawn({
+              podId: 'turn-pod',
+              task: 'Task',
+              model: 'opus',
+              reasoningEffort: 'auto',
+              workDir: '/workspace',
+              containerId: 'container-123',
+              env: {},
+            });
+      const events: AgentEvent[] = [];
+      const consumed = (async () => {
+        for await (const event of source) events.push(event);
+      })();
+      const emit = (...frames: unknown[]) => {
+        for (const frame of frames) emitLine(handle.stdout as PassThrough, frame);
+      };
+      return { handle, events, consumed, emit };
+    }
+    const completes = (events: AgentEvent[]) =>
+      events.filter((e): e is Extract<AgentEvent, { type: 'complete' }> => e.type === 'complete');
+    const errors = (events: AgentEvent[]) =>
+      events.filter((e): e is AgentErrorEvent => e.type === 'error');
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it.each([
+      'resume',
+      'spawn',
+    ] as const)('%s: an empty result followed by more tool events is not final and the agent is not killed', async (kind) => {
+      const { handle, events, consumed, emit } = start(kind);
+      emit(init(), result('', 3, 1, 0.001));
+      // The same session starts its real turn within the grace window, then keeps
+      // working for several grace windows: the old one-shot timer (armed by the
+      // first result) force-closed the stream and killed the agent mid-edit.
+      await sleep(20);
+      emit(init(), toolUse('mcp__escalation__check_messages'));
+      for (let i = 0; i < 5; i++) {
+        await sleep(40);
+        emit(
+          toolResult('mcp__escalation__check_messages'),
+          toolUse('Edit', { file_path: `/workspace/${i}.ts` }),
+        );
+      }
+      emit(
+        toolUse('mcp__escalation__report_task_summary'),
+        toolResult('mcp__escalation__report_task_summary'),
+        result('Phase 1 implemented', 20, 7, 0.02),
+      );
+      handle.finish(0);
+      await consumed;
+
+      expect(handle.kill).not.toHaveBeenCalled();
+      // The daemon never force-closed the stream; Claude ended it itself.
+      expect((handle.stdout as PassThrough).writableEnded).toBe(false);
+      const done = completes(events);
+      expect(done).toHaveLength(1);
+      // Intermediate accounting is carried, not dropped (parity with summing).
+      expect(done[0]).toMatchObject({
+        result: 'Phase 1 implemented',
+        totalInputTokens: 23,
+        totalOutputTokens: 8,
+      });
+      expect(done[0]?.costUsd).toBeCloseTo(0.021);
+      expect(errors(events)).toEqual([]);
+      expect(
+        events.some(
+          (e) => e.type === 'status' && e.message.includes('after an intermediate result'),
+        ),
+      ).toBe(true);
+      // The complete is the last event: nothing of the continued turn was lost.
+      expect(events.at(-1)?.type).toBe('complete');
+      expect(events.filter((e) => e.type === 'file_change')).toHaveLength(5);
+    });
+
+    it('waits for background work and lets Claude continue on its notification', async () => {
+      const { handle, events, consumed, emit } = start('spawn');
+      emit(init(), backgroundStarted(), toolUse('Monitor'), result('Waiting on the broad suite.'));
+      await sleep(200);
+      expect(handle.kill).not.toHaveBeenCalled();
+      expect(completes(events)).toEqual([]);
+      emit(
+        backgroundDone(),
+        init(),
+        toolUse('Bash', { command: 'git diff' }),
+        toolResult('Bash'),
+        toolUse('mcp__escalation__report_task_summary'),
+        toolResult('mcp__escalation__report_task_summary'),
+        result('Suite passed; summary reported.'),
+      );
+      handle.finish(0);
+      await consumed;
+      expect(handle.kill).not.toHaveBeenCalled();
+      expect(completes(events).map((e) => e.result)).toEqual(['Suite passed; summary reported.']);
+      expect(errors(events)).toEqual([]);
+    });
+
+    it('reports an interrupted turn when the bounded background wait expires', async () => {
+      const { handle, events, consumed, emit } = start('resume', { backgroundWaitMs: 200 });
+      emit(init(), backgroundStarted(), result('Waiting on the broad suite.'));
+      await consumed;
+      expect(handle.kill).toHaveBeenCalledOnce();
+      // The result is retained for accounting, then the turn is reported unfinished.
+      expect(completes(events)).toHaveLength(1);
+      const fatal = errors(events).filter((e) => e.fatal);
+      expect(fatal).toHaveLength(1);
+      expect(fatal[0]).toMatchObject({ turnInterrupted: true });
+      expect(fatal[0]?.message).toContain('1 background task was still running');
+      expect(fatal[0]?.message).toContain('exit code 143');
+      expect(fatal[0]?.message).toContain('was not validated');
+      expect(fatal[0]?.message).toContain('ap rework turn-pod');
+      expect(events.at(-1)).toBe(fatal[0]);
+      expect(errors(events).some((e) => e.message.includes('Completed turn retained'))).toBe(false);
+    });
+
+    it('reports an interrupted turn when background work finished but Claude never continued', async () => {
+      const { handle, events, consumed, emit } = start('spawn');
+      emit(init(), backgroundStarted(), result('Waiting.'));
+      await sleep(30);
+      emit(backgroundDone());
+      await consumed;
+      expect(handle.kill).toHaveBeenCalledOnce();
+      const fatal = errors(events).filter((e) => e.fatal);
+      expect(fatal).toHaveLength(1);
+      expect(fatal[0]?.turnInterrupted).toBe(true);
+      expect(fatal[0]?.message).toContain('the work finished but Claude did not continue');
+    });
+
+    it('treats a clean exit right after a background-pending, unreported result as interrupted', async () => {
+      const { handle, events, consumed, emit } = start('spawn');
+      emit(init(), backgroundStarted(), result('Waiting.'));
+      handle.finish(0);
+      await consumed;
+      expect(handle.kill).not.toHaveBeenCalled();
+      const fatal = errors(events).filter((e) => e.fatal);
+      expect(fatal).toHaveLength(1);
+      expect(fatal[0]).toMatchObject({ turnInterrupted: true });
+      expect(fatal[0]?.message).toContain('the process exited (code 0) before it continued');
+    });
+
+    it('reports a kill after an intermediate result and further activity as interrupted', async () => {
+      const { handle, events, consumed, emit } = start('resume');
+      emit(init(), result(''), init(), toolUse('Edit', { file_path: '/workspace/a.ts' }));
+      await sleep(20);
+      // stdout closes but the process does not exit: the daemon must terminate it.
+      (handle.stdout as PassThrough).push(null);
+      await consumed;
+      expect(handle.kill).toHaveBeenCalledOnce();
+      expect(completes(events)).toEqual([]);
+      const fatal = errors(events).filter((e) => e.fatal);
+      expect(fatal).toHaveLength(1);
+      expect(fatal[0]).toMatchObject({ turnInterrupted: true });
+      expect(fatal[0]?.message).toContain('while still working after an intermediate result');
+    });
+
+    it.each([
+      [
+        'a reported summary',
+        { awaitBackgroundTasks: undefined },
+        [toolUse('mcp__escalation__report_task_summary')],
+      ],
+      ['a pending human decision', { awaitBackgroundTasks: () => false }, []],
+      [
+        'a throwing pod lookup',
+        {
+          awaitBackgroundTasks: () => {
+            throw new Error('gone');
+          },
+        },
+        [],
+      ],
+    ] as const)('keeps the retained-completion grace after %s', async (_label, options, extra) => {
+      const { handle, events, consumed, emit } = start('spawn', {
+        ...(options.awaitBackgroundTasks && { awaitBackgroundTasks: options.awaitBackgroundTasks }),
+      });
+      emit(init(), backgroundStarted('dev-server'), ...extra, result('Done.'));
+      await consumed;
+      expect(handle.kill).toHaveBeenCalledOnce();
+      expect(completes(events).map((e) => e.result)).toEqual(['Done.']);
+      expect(errors(events).some((e) => e.fatal)).toBe(false);
+      expect(
+        errors(events)
+          .map((e) => e.message)
+          .join('\n'),
+      ).toContain('Completed turn retained');
+    });
+
+    it('does not wait for ambient housekeeping tasks', async () => {
+      const { handle, events, consumed, emit } = start('spawn');
+      emit(init(), backgroundStarted('watch', { ambient: true }), result('Done.'));
+      const started = Date.now();
+      await consumed;
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(handle.kill).toHaveBeenCalledOnce();
+      expect(errors(events).some((e) => e.fatal)).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // resume
   // ---------------------------------------------------------------------------
 

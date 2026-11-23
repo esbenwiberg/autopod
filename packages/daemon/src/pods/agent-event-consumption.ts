@@ -31,6 +31,7 @@ import {
   BUDGET_CONTINUATION_PENDING,
 } from './budget-stop.js';
 import { assertNoInfrastructureBlocker, isBlockingEscalation } from './escalation-coordinator.js';
+import { TURN_INTERRUPTED_FAILURE_CATEGORY } from './interrupted-turn.js';
 import type { PodUpdates } from './pod-repository.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
@@ -179,6 +180,8 @@ export function createAgentEventConsumption(
       }
     };
     let budgetStopVerified = false;
+    // The runtime proved this turn unfinished after verified termination (#648).
+    let turnInterrupted = false;
     let superseded = false;
     let accountFailover = false;
     let eventError: unknown;
@@ -757,6 +760,7 @@ export function createAgentEventConsumption(
           (event.fatal || event.executionTermination === 'unverified')
         ) {
           const pod = podRepo.getOrThrow(podId);
+          if (event.fatal && event.turnInterrupted) turnInterrupted = true;
           terminalClassification =
             event.classification ??
             ({
@@ -963,7 +967,11 @@ export function createAgentEventConsumption(
                 podRepo.taskExecutions?.finishRun(
                   taskRunId,
                   recordedOutcome,
-                  budgetStopVerified ? 'token_budget' : (terminalClassification?.category ?? null),
+                  budgetStopVerified
+                    ? 'token_budget'
+                    : turnInterrupted && recordedOutcome === 'failed'
+                      ? TURN_INTERRUPTED_FAILURE_CATEGORY
+                      : (terminalClassification?.category ?? null),
                 );
             }
             if (workerAdmissionId)
@@ -1020,6 +1028,47 @@ export function createAgentEventConsumption(
                     emitActivityStatus(
                       podId,
                       'Token-budget worker stopped, but preservation is incomplete. Original resources retained; coding continuation remains blocked.',
+                    );
+                  }
+                }
+              }
+            }
+            // An interrupted turn (#648) is a verified stop of unfinished coding:
+            // preserve its uncommitted/untracked source through the same owner as
+            // the budget stop before anything can replace the worker resource.
+            if (
+              turnInterrupted &&
+              recordedOutcome === 'failed' &&
+              !hasEventError &&
+              !superseded &&
+              ownsStoppedRun()
+            ) {
+              const stopped = podRepo.getOrThrow(podId);
+              const cycle = stopped.finalization?.cycle;
+              if (
+                stopped.status === 'failed' &&
+                cycle !== undefined &&
+                podRepo.taskExecutions?.hasSettledRun?.(
+                  stopped,
+                  cycle,
+                  TURN_INTERRUPTED_FAILURE_CATEGORY,
+                )
+              ) {
+                podRepo.completionJournal?.settle(stopped);
+                if (stopped.containerId && stopped.worktreePath) {
+                  try {
+                    await captured.preservePodWorkspace(stopped, 'interrupted agent turn');
+                    const current = podRepo.getOrThrow(podId);
+                    if (ownsStoppedRun() && current.finalization?.cycle === cycle)
+                      podRepo.completionJournal?.mark(current, 'ready', true);
+                  } catch (error) {
+                    logger.error(
+                      { error, podId },
+                      'Interrupted-turn preservation failed; retaining source',
+                    );
+                    emitActivityStatus(
+                      podId,
+                      'Interrupted agent turn: workspace preservation is incomplete. Original resources retained; Rework preserves the workspace again before replacing them.',
                     );
                   }
                 }
