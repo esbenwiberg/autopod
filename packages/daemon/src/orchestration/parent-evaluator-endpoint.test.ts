@@ -17,21 +17,31 @@ import { readinessDigest, requireEvaluatorReadiness } from './parent-evaluator-r
 import { startParentEvaluatorService } from './parent-evaluator-service.js';
 import { parentIntegrationGateDigest } from './parent-integration-qualified.js';
 
-async function fixture() {
+async function fixture(unexpectedCombinedPath = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'evaluator-endpoint-'));
   onTestFinished(() => rm(root, { recursive: true, force: true }));
   const repo = path.join(root, 'repo');
   await managedGit(root, ['init', '--bare', repo]);
-  const tree = (
-    await managedGitBytes(repo, ['mktree'], undefined, [], {
-      input: '',
-      timeout: 5000,
-      maxBuffer: 4096,
-    })
-  )
-    .toString('ascii')
-    .trim();
-  const commitTree = (name: string, parents: string[]) =>
+  const treeFor = async (input: string) =>
+    (
+      await managedGitBytes(repo, ['mktree'], undefined, [], {
+        input,
+        timeout: 5000,
+        maxBuffer: 4096,
+      })
+    )
+      .toString('ascii')
+      .trim();
+  const one = await managedGit(repo, ['hash-object', '-w', '--', '/dev/null']);
+  const countRow = `100644 blob ${one}\tcount.txt\n`;
+  const reasonRow = `100644 blob ${one}\treason.txt\n`;
+  const sampleTree = async (files: string, extra = '') =>
+    treeFor(`040000 tree ${await treeFor(files)}\tsample\n${extra}`);
+  const tree = await sampleTree(
+    countRow + reasonRow,
+    unexpectedCombinedPath ? `100644 blob ${one}\textra.txt\n` : '',
+  );
+  const commitTree = (name: string, parents: string[], tree: string) =>
     managedGit(repo, [
       '-c',
       'user.name=Fixture',
@@ -43,10 +53,10 @@ async function fixture() {
       '-m',
       name,
     ]);
-  const predecessor = await commitTree('base', []);
-  const left = await commitTree('left', [predecessor]);
-  const right = await commitTree('right', [predecessor]);
-  const commit = await commitTree('combined', [left, right]);
+  const predecessor = await commitTree('base', [], await treeFor(''));
+  const left = await commitTree('left', [predecessor], await sampleTree(countRow));
+  const right = await commitTree('right', [predecessor], await sampleTree(reasonRow));
+  const commit = await commitTree('combined', [left, right], tree);
   await managedGit(repo, ['update-ref', '--no-deref', 'HEAD', commit]);
   const bundlePath = path.join(root, 'combined.bundle');
   await managedGit(repo, ['bundle', 'create', bundlePath, 'HEAD']);
@@ -524,6 +534,59 @@ it('automatically enrolls two fresh Tasks with separate role keys and retains bo
     expect(evaluators[0]!.evaluate).toHaveBeenCalledTimes(1);
   } finally {
     clock.mockRestore();
+  }
+});
+
+it('rejects an extra path in the real combined tree even with correctly signed enrolled metadata', async () => {
+  const f = await fixture(true);
+  const c = generateKeyPairSync('ed25519');
+  const r = generateKeyPairSync('ed25519');
+  const authorize = createEvaluatorDispatchSigner(
+    { checks: c.privateKey, independentReview: r.privateKey },
+    f.policy,
+  );
+  const urls = {
+    checks: 'https://checks.fixture.example/verify',
+    independentReview: 'https://review.fixture.example/verify',
+  };
+  const checks = await f.endpoint('checks', {
+    enrollment: { dispatchPublicKey: c.publicKey.export({ format: 'jwk' }).x! },
+  });
+  const review = await f.endpoint('independentReview', {
+    enrollment: { dispatchPublicKey: r.publicKey.export({ format: 'jwk' }).x! },
+  });
+  const transport: typeof fetch = async (url, init) => {
+    const endpoint = url === urls.checks ? checks : review;
+    const result = await endpoint.app.inject({
+      method: 'POST',
+      url: '/verify',
+      headers: { 'content-type': 'application/json' },
+      payload: String(init?.body),
+    });
+    return new Response(result.body, { status: result.statusCode });
+  };
+  const { run, repository, predecessor, paths } = f.lease;
+  await enrollParentEvaluators(
+    urls,
+    transport,
+    authorize,
+    { run, repository, predecessor, paths, basePolicyDigest: f.policy.basePolicyDigest },
+    f.policy,
+  );
+  const input = parentIntegrationGateDigest(f.request);
+  for (const role of ['checks', 'independentReview'] as const) {
+    const result = await transport(urls[role], {
+      body: JSON.stringify({
+        request: f.request,
+        bundle: f.bundle.toString('base64'),
+        dispatch: authorize(role, input),
+      }),
+    });
+    expect(result.status).toBe(422);
+  }
+  for (const endpoint of [checks, review]) {
+    expect(endpoint.evaluate).not.toHaveBeenCalled();
+    expect(endpoint.sign).not.toHaveBeenCalled();
   }
 });
 

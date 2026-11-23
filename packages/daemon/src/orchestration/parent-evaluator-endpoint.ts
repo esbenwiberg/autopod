@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { canonical, sha256 } from '../managed/canonical.js';
 import { MAX_PRIVATE_HEAD_BYTES } from '../managed/private-head-export.js';
+import { managedGitBytes } from '../managed/source-git.js';
 import { type CombinedPolicy, combinedPolicyDigest, type Role } from './combined-attestation.js';
 import {
   createEvaluatorDispatchVerifier,
@@ -221,12 +222,38 @@ export function registerParentEvaluatorEndpoint(
       }
       try {
         if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
-        const receipt = await parentExactTreeEvaluator(
-          scratch,
-          policy,
-          role,
-          config.ports,
-        )(input, bytes);
+        const ports = store
+          ? {
+              ...config.ports,
+              async evaluate(selection: Parameters<ParentEvaluatorPorts['evaluate']>[0]) {
+                // Trust the enrolled scope, not a signed claim about the bundle contents.
+                const diff = await managedGitBytes(
+                  selection.mirror,
+                  [
+                    'diff-tree',
+                    '--no-commit-id',
+                    '--name-only',
+                    '--no-renames',
+                    '-r',
+                    '-z',
+                    selection.predecessor,
+                    selection.commit,
+                    '--',
+                  ],
+                  undefined,
+                  [],
+                  { input: '', timeout: 5000, maxBuffer: maxMetadata },
+                );
+                const paths = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+                  .decode(diff)
+                  .split('\0');
+                if (paths.pop() !== '' || canonical(paths.sort()) !== expectedPaths)
+                  throw new ParentEvaluatorVeto(role);
+                return config.ports.evaluate(selection);
+              },
+            }
+          : config.ports;
+        const receipt = await parentExactTreeEvaluator(scratch, policy, role, ports)(input, bytes);
         if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
         return receipt;
       } catch (error) {
