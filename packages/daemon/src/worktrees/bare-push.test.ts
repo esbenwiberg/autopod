@@ -193,6 +193,128 @@ describe('bare push via staging ref', () => {
     expect(staging.exitCode).not.toBe(0);
   });
 
+  async function divergeBareBranch(bare: string) {
+    const otherWt = path.join(tmpRoot, 'other-wt');
+    await git(tmpRoot, ['--git-dir', bare, 'worktree', 'add', '--force', otherWt, 'feature-x']);
+    await writeFile(path.join(otherWt, 'divergent.txt'), 'divergent\n');
+    await git(otherWt, ['add', '.']);
+    await git(otherWt, ['commit', '-m', 'divergent commit on bare side']);
+    return {
+      otherWt,
+      tip: (await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x'])).stdout.trim(),
+    };
+  }
+
+  it('promotes an authorized non-fast-forward tip with the captured CAS predecessor', async () => {
+    const { bare, container } = await buildFixture(tmpRoot);
+    const { tip: divergedTip } = await divergeBareBranch(bare);
+    const containerTip = (await git(container, ['rev-parse', 'HEAD'])).stdout.trim();
+    const seen: unknown[] = [];
+
+    const result = await pushCommitsToBareViaStagingRef(
+      runGitIn(container),
+      bare,
+      'pod-rewrite',
+      () => {},
+      {
+        authorizeRewrite: async (input) => {
+          seen.push(input);
+          return { authorized: true, evidence: { proof: 'ok' } };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      pushed: true,
+      rewrite: { from: divergedTip, to: containerTip, evidence: { proof: 'ok' } },
+    });
+    expect(seen).toEqual([
+      {
+        bareRepoPath: bare,
+        branch: 'feature-x',
+        expectedOld: divergedTip,
+        candidate: containerTip,
+      },
+    ]);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
+    expect(bareTip.trim()).toBe(containerTip);
+    const staging = await tryGit(tmpRoot, [
+      '--git-dir',
+      bare,
+      'rev-parse',
+      '--verify',
+      autopodStagingRef('pod-rewrite'),
+    ]);
+    expect(staging.exitCode).not.toBe(0);
+  });
+
+  it.each([
+    [
+      'refuses',
+      async () => ({ authorized: false as const, reason: 'not a rebase' }),
+      'not a rebase',
+    ],
+    [
+      'throws',
+      async (): Promise<never> => {
+        throw new Error('proof crashed');
+      },
+      'proof crashed',
+    ],
+  ] as const)('keeps the branch when the rewrite authority %s', async (_label, authorizeRewrite, why) => {
+    const { bare, container } = await buildFixture(tmpRoot);
+    const { tip: divergedTip } = await divergeBareBranch(bare);
+
+    const result = await pushCommitsToBareViaStagingRef(
+      runGitIn(container),
+      bare,
+      'pod-refused',
+      () => {},
+      { authorizeRewrite },
+    );
+
+    expect(result.pushed).toBe(false);
+    expect(result.reason).toContain('non-fast-forward');
+    expect(result.reason).toContain(`rewrite refused: ${why}`);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
+    expect(bareTip.trim()).toBe(divergedTip);
+    const staging = await tryGit(tmpRoot, [
+      '--git-dir',
+      bare,
+      'rev-parse',
+      '--verify',
+      autopodStagingRef('pod-refused'),
+    ]);
+    expect(staging.exitCode).not.toBe(0);
+  });
+
+  it('fails closed when the branch moves while a rewrite is being authorized', async () => {
+    const { bare, container } = await buildFixture(tmpRoot);
+    const { otherWt } = await divergeBareBranch(bare);
+    let racedTip = '';
+
+    const result = await pushCommitsToBareViaStagingRef(
+      runGitIn(container),
+      bare,
+      'pod-race',
+      () => {},
+      {
+        authorizeRewrite: async () => {
+          await writeFile(path.join(otherWt, 'race.txt'), 'race\n');
+          await git(otherWt, ['add', '.']);
+          await git(otherWt, ['commit', '-m', 'concurrent commit']);
+          racedTip = (await git(otherWt, ['rev-parse', 'HEAD'])).stdout.trim();
+          return { authorized: true };
+        },
+      },
+    );
+
+    expect(result.pushed).toBe(false);
+    expect(result.reason).toMatch(/^update-ref/);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
+    expect(bareTip.trim()).toBe(racedTip);
+  });
+
   it('refuses detached HEAD without leaving a staging ref behind', async () => {
     const { bare, container } = await buildFixture(tmpRoot);
     await git(container, ['checkout', '--detach', 'HEAD']);
