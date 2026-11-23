@@ -333,3 +333,21 @@ Approved as option A, with the following binding conditions:
 4. **Validation and fresh launches always prepare from scratch.** A test proves that validation
    preparation never consumes a snapshot.
 5. **Phase 1 is committed separately**, before Phase 2.
+
+## Implementation notes (2026-11-23)
+
+- Phase 2 was re-implemented after the earlier uncommitted attempt was lost with its pod.
+- The sweep keeps snapshots for `queued`, `provisioning` **and `paused`** pods, still bounded by the
+  24-hour hard age. A provider-limit continuation that could not be queued automatically parks
+  `paused`, and the operator's later `ap continue` consumes the snapshot. Any other status is removed
+  after the 15-minute capture grace. Terminal pods are removed by the startup sweep and the 15-minute
+  periodic sweep, and also immediately on kill and delete. There is no new per-transition hook.
+- The outside-workspace write check scans `$HOME`, `/usr/local`, `/opt` and `/workspace/.git`
+  (`/usr/local` and `/opt` catch global installs). It prunes all of `~/.npm`, the node-gyp headers
+  and the update-notifier configstore as re-downloadable. Any find error, or a missing marker,
+  reports `unverified`, which refuses reuse.
+- The dependency-input fingerprint also includes a repository `.npmrc` (registry/install options).
+- A restore that changes the tracked source fingerprint is refused (`source-changed-after-restore`)
+  and the full command runs.
+- Out of scope but needed for the PR gate: the `ap run/start --token-budget` preview tests on main
+  lacked the `previewDispatch` stub (a merge race between #653 and #656). It was fixed test-only.
