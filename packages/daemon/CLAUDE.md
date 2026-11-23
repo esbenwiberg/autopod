@@ -174,8 +174,11 @@ imported proof reverified against local objects and its pod-owned quarantine ref
 Never substitute `latestVerified` for the latest imported snapshot or claim host
 HEAD contains dirty sandbox work. Older source requires explicit selection.
 Independent preparation preserves originals; push uses an empty exact-ref lease.
-Uncertain effects reconcile positive exact evidence without replay. Keep the
-receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
+Uncertain effects reconcile positive exact evidence without replay. The
+publication scan (`saved-work-publication-scan.ts`) diffs against a verified
+target merge-base when available, otherwise scans the full tree, and records
+redacted `publicationScan` evidence with distinct blocked/incomplete/failed codes.
+Keep the receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
 `docs/saved-work-draft-pr.md`; preserve the dedicated suites and Mac verification.
 
 ### Retention-safe task continuation

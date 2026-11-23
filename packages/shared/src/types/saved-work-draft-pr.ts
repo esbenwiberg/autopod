@@ -1,3 +1,5 @@
+import type { ScanDecision, ScanDetectorName, ScanOutcome, ScanSeverity } from './security-scan.js';
+
 /** Review-only publication. None of these receipts authorize ordinary delivery. */
 export interface SavedWorkSource {
   id: string;
@@ -71,5 +73,51 @@ export interface SavedWorkDraftOperation {
     | 'published'
     | 'cancelled';
   message?: string;
+  /** Latest publication security scan for this operation's exact prepared bytes. */
+  publicationScan?: SavedWorkDraftPublicationScan;
   receipt: { url: string; draft: true; head: string; baseBranch: string; branch: string } | null;
+}
+
+/**
+ * Redacted publication-scan finding. It names the scanner, rule and location only;
+ * matched values and snippets are never recorded.
+ */
+export interface SavedWorkDraftPublicationScanFinding {
+  /** Scanner implementation, e.g. `secretlint`. */
+  scanner: string;
+  detector: ScanDetectorName;
+  ruleId: string | null;
+  severity: ScanSeverity;
+  file: string;
+  line: number | null;
+  /** Configured publication outcome for this detector. */
+  action: ScanOutcome;
+}
+
+export type SavedWorkDraftPublicationScanCode =
+  | 'SECURITY_SCAN_BLOCKED'
+  | 'SECURITY_SCAN_INCOMPLETE'
+  | 'SECURITY_SCAN_FAILED';
+
+export interface SavedWorkDraftPublicationScan {
+  /**
+   * `blocked`: a finding's configured outcome is block. `incomplete`: the scan ran
+   * but did not cover its required scope. `failed`: the scan could not run.
+   */
+  outcome: 'passed' | 'blocked' | 'incomplete' | 'failed';
+  code: SavedWorkDraftPublicationScanCode | null;
+  /** `diff` compares with `baseCommit` and ignores unchanged base findings. */
+  scope: 'diff' | 'full';
+  baseCommit: string | null;
+  decision: ScanDecision | null;
+  filesScanned: number;
+  filesSkipped: number;
+  findingCount: number;
+  /** Findings whose configured outcome is block. */
+  blockingCount: number;
+  /** Up to 20 findings, blocking first. */
+  findings: SavedWorkDraftPublicationScanFinding[];
+  /** Why coverage was incomplete or the scan could not run. */
+  reasons: string[];
+  scannedAt: string;
 }

@@ -8,6 +8,7 @@ import type {
   OperatorActor,
   SavedWorkDraftConfirm,
   SavedWorkDraftOperation,
+  SavedWorkDraftPublicationScan,
 } from '@autopod/shared';
 import { AuthError } from '@autopod/shared';
 import Fastify from 'fastify';
@@ -32,6 +33,23 @@ import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
 vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
 const exec = promisify(execFile);
 const actor: OperatorActor = { type: 'human', userId: 'human-reviewer' };
+const passedScan = (
+  overrides: Partial<SavedWorkDraftPublicationScan> = {},
+): SavedWorkDraftPublicationScan => ({
+  outcome: 'passed',
+  code: null,
+  scope: 'full',
+  baseCommit: null,
+  decision: 'pass',
+  filesScanned: 1,
+  filesSkipped: 0,
+  findingCount: 0,
+  blockingCount: 0,
+  findings: [],
+  reasons: [],
+  scannedAt: '2026-11-23T00:00:00.000Z',
+  ...overrides,
+});
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
@@ -126,7 +144,13 @@ async function fixture(sandbox = false) {
   let idle = true;
   let goal = false;
   let clock = Date.now();
-  const scanPublication = vi.fn(async () => {});
+  const scanPublication = vi.fn(
+    async (
+      _pod: unknown,
+      _worktree: string,
+      _options: { baseCommit: string | null },
+    ): Promise<SavedWorkDraftPublicationScan> => passedScan(),
+  );
   const deps = {
     scanPublication,
     podRepo: ctx.podRepo,
@@ -906,16 +930,113 @@ exec "$REAL_GIT" "$@"
     expect(f.scanPublication).toHaveBeenCalledWith(
       expect.objectContaining({ id: f.id }),
       path.join(f.root, 'drafts', op.id, 'worktree'),
+      { baseCommit: null },
     );
     expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
     expect(f.validationEngine.validate).not.toHaveBeenCalled();
     expect(f.podRepo.getOrThrow(f.id).lastValidationResult).toBeNull();
   });
 
+  it('explains a blocking publication scan on confirm and observe without secret values', async () => {
+    const f = await fixture();
+    const op = await f.prepare();
+    const blocked = passedScan({
+      outcome: 'blocked',
+      code: 'SECURITY_SCAN_BLOCKED',
+      decision: 'block',
+      findingCount: 1,
+      blockingCount: 1,
+      findings: [
+        {
+          scanner: 'secretlint',
+          detector: 'secrets',
+          ruleId: '@secretlint/secretlint-rule-basicauth',
+          severity: 'critical',
+          file: 'docs/guide.md',
+          line: 12,
+          action: 'block',
+        },
+      ],
+    });
+    f.scanPublication.mockResolvedValueOnce(blocked);
+    const error = await f
+      .controller()
+      .confirm(f.id, f.confirm(op), actor)
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'SECURITY_SCAN_BLOCKED', statusCode: 409 });
+    expect((error as Error).message).toContain(
+      'secretlint rule @secretlint/secretlint-rule-basicauth at docs/guide.md:12',
+    );
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    const observed = await f.controller().observe(f.id, op.requestId, actor);
+    expect(observed).toMatchObject({
+      state: 'prepared',
+      receipt: null,
+      publicationScan: blocked,
+      message: (error as Error).message,
+    });
+
+    // Once the scan passes, confirmation proceeds and the stale refusal is cleared.
+    const published = await f.controller().confirm(f.id, f.confirm(op), actor);
+    expect(published.state).toBe('published');
+    expect(published.publicationScan).toEqual(passedScan());
+    expect(published.message).toBeUndefined();
+  });
+
+  it.each([
+    ['could not run', 'failed', 'SECURITY_SCAN_FAILED', /could not run/],
+    ['incomplete', 'incomplete', 'SECURITY_SCAN_INCOMPLETE', /did not complete/],
+  ] as const)('reports a scan that %s with a distinct code', async (_label, outcome, code, text) => {
+    const f = await fixture();
+    const op = await f.prepare();
+    f.scanPublication.mockResolvedValueOnce(
+      passedScan({ outcome, code, decision: null, reasons: ['Scanner error: boom'] }),
+    );
+    const error = await f
+      .controller()
+      .confirm(f.id, f.confirm(op), actor)
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code });
+    expect((error as Error).message).toMatch(text);
+    expect((error as Error).message).toContain('Scanner error: boom');
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect((await f.controller().observe(f.id, op.requestId, actor)).publicationScan).toMatchObject(
+      { outcome, code },
+    );
+  });
+
+  it('scans against the verified target merge-base from the original tracking ref', async () => {
+    const f = await fixture();
+    const base = await f.git(f.source, 'rev-parse', 'HEAD');
+    await f.git(f.source, 'update-ref', 'refs/remotes/origin/main', base);
+    await writeFile(path.join(f.source, 'guide.md'), '# Guide\n');
+    await f.git(f.source, 'add', '.');
+    await f.git(f.source, 'commit', '-m', 'docs: add guide');
+    const op = await f.prepare();
+    await f.controller().confirm(f.id, f.confirm(op), actor);
+    expect(f.scanPublication).toHaveBeenLastCalledWith(expect.anything(), expect.any(String), {
+      baseCommit: base,
+    });
+  });
+
+  it('keeps full-tree publication scope when the original worktree is compromised', async () => {
+    const f = await fixture();
+    await f.git(f.source, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    f.podRepo.update(f.id, { worktreeCompromised: true });
+    const op = await f.prepare();
+    await f.controller().confirm(f.id, f.confirm(op), actor);
+    expect(f.scanPublication).toHaveBeenLastCalledWith(expect.anything(), expect.any(String), {
+      baseCommit: null,
+    });
+  });
+
   it('never admits a push if the confirmation expires during the full-tree scan', async () => {
     const f = await fixture();
     const op = await f.prepare();
-    f.scanPublication.mockImplementationOnce(async () => f.advance());
+    f.scanPublication.mockImplementationOnce(async () => {
+      f.advance();
+      return passedScan();
+    });
     await expect(f.controller().confirm(f.id, f.confirm(op), actor)).rejects.toThrow(
       /expired during publication checks/,
     );
