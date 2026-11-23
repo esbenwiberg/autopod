@@ -1,4 +1,4 @@
-import { type AgentEvent, AutopodError } from '@autopod/shared';
+import { AutopodError, type RuntimeEvent } from '@autopod/shared';
 import { isObservedExitCode } from '../containers/exec-exit-evidence.js';
 import {
   awaitExitCodeBounded,
@@ -28,11 +28,11 @@ export interface ObservedRuntimeExitOptions extends BoundedExitCodeOptions {
 }
 
 /** Finite CLI invocations must settle their process even when a consumer stops reading. */
-export async function* withObservedRuntimeExit(
-  source: AsyncIterable<AgentEvent>,
+export async function* withObservedRuntimeExit<T extends RuntimeEvent>(
+  source: AsyncIterable<T>,
   exitCode: Promise<number>,
   options: ObservedRuntimeExitOptions,
-): AsyncGenerator<AgentEvent, number> {
+): AsyncGenerator<T, number> {
   // A backend can reject before the stream drains. Retain that rejection for the
   // bounded check without allowing an unhandled rejection to kill the daemon.
   void exitCode.catch(() => {});

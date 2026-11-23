@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import type { AgentEvent } from '@autopod/shared';
+import type { RuntimeEvent } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
@@ -10,11 +10,11 @@ function fakeLogger() {
   return { debug: () => {}, info: () => {}, warn: () => {} } as unknown as import('pino').Logger;
 }
 
-/** Drive parse() over a sequence of NDJSON events, collecting all emitted AgentEvents. */
-async function collectFromEvents(...events: object[]): Promise<AgentEvent[]> {
+/** Drive parse() over a sequence of NDJSON events. */
+async function collectFromEvents(...events: object[]): Promise<RuntimeEvent[]> {
   const ndjson = events.map((e) => JSON.stringify(e)).join('\n');
   const stream = Readable.from([ndjson]);
-  const results: AgentEvent[] = [];
+  const results: RuntimeEvent[] = [];
   for await (const ev of ClaudeStreamParser.parse(stream, POD_ID, fakeLogger())) {
     results.push(ev);
   }
@@ -198,82 +198,63 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
-  it('extracts costUsd from total_cost_usd in result event', () => {
-    const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.0234 };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'complete', result: 'Done!', costUsd: 0.0234 });
-  });
-
-  it('leaves costUsd undefined when total_cost_usd is absent', () => {
-    const event = { type: 'result', subtype: 'success', result: 'Done!' };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'complete' });
-    expect((result as { costUsd?: number }).costUsd).toBeUndefined();
-  });
-
-  it('extracts input_tokens and output_tokens from result event', () => {
-    const event = {
+  it('separates raw cost observations from completion; tokens include both cache classes', async () => {
+    const [usage, complete] = await collectFromEvents({
       type: 'result',
       subtype: 'success',
       result: 'Done!',
+      session_id: 'test-session',
       total_cost_usd: 0.05,
-      input_tokens: 1234,
-      output_tokens: 567,
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({
-      type: 'complete',
-      costUsd: 0.05,
-      totalInputTokens: 1234,
-      totalOutputTokens: 567,
-    });
-  });
-
-  it('includes cache usage in total input while preserving native cost', () => {
-    const event = {
-      type: 'result',
-      subtype: 'success',
-      result: 'Done!',
-      total_cost_usd: 0.05,
+      model_usage_since_last_result: { sonnet: { costUSD: 0.004 }, haiku: { costUSD: 0.001 } },
+      input_tokens: 111,
+      output_tokens: 222,
       usage: {
         input_tokens: 8000,
         output_tokens: 3000,
         cache_creation_input_tokens: 2000,
         cache_read_input_tokens: 5000,
       },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({
-      type: 'complete',
-      costUsd: 0.05,
+    });
+    expect(usage).toMatchObject({
+      type: 'claude_result_usage',
+      sessionId: 'test-session',
+      cumulativeCostUsd: 0.05,
+      resultCostUsd: 0.005,
       totalInputTokens: 15000,
       totalOutputTokens: 3000,
       cachedInputTokens: 5000,
       cacheCreationInputTokens: 2000,
     });
+    expect(complete).toMatchObject({ type: 'complete', result: 'Done!' });
+    expect(complete).not.toHaveProperty('costUsd');
   });
 
-  it('prefers usage object over top-level token fields when both present', () => {
-    const event = {
+  it('emits usage for a failed result, distinguishing zero, missing and invalid observations', async () => {
+    const [usage, error] = await collectFromEvents({
       type: 'result',
-      subtype: 'success',
-      result: 'Done!',
-      total_cost_usd: 0.05,
-      input_tokens: 111,
-      output_tokens: 222,
-      usage: { input_tokens: 8000, output_tokens: 3000 },
-    };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ totalInputTokens: 8000, totalOutputTokens: 3000 });
+      is_error: true,
+      result: 'rate limit',
+      total_cost_usd: -1,
+      model_usage_since_last_result: { model: { costUSD: 0.004 }, malformed: {} },
+      input_tokens: 0,
+      output_tokens: 123,
+    });
+    expect(usage).toMatchObject({
+      type: 'claude_result_usage',
+      cumulativeCostUsd: undefined,
+      resultCostUsd: undefined,
+      totalInputTokens: 0,
+      totalOutputTokens: 123,
+    });
+    expect(error).toMatchObject({ type: 'error', fatal: true });
+    const [missing] = await collectFromEvents({ type: 'result' });
+    expect(missing).toMatchObject({ totalInputTokens: undefined, totalOutputTokens: undefined });
   });
 
-  it('leaves totalInputTokens and totalOutputTokens undefined when absent from result event', () => {
-    const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.01 };
-    const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'complete', costUsd: 0.01 });
-    type CompleteEvent = { totalInputTokens?: number; totalOutputTokens?: number };
-    expect((result as CompleteEvent).totalInputTokens).toBeUndefined();
-    expect((result as CompleteEvent).totalOutputTokens).toBeUndefined();
+  it('does not emit the same result UUID twice', async () => {
+    const result = { type: 'result', uuid: 'result-1', result: 'Done!' };
+    const events = await collectFromEvents(result, result);
+    expect(events.map((e) => e.type)).toEqual(['claude_result_usage', 'complete']);
   });
 
   it('maps error event to fatal error', () => {
@@ -521,7 +502,7 @@ describe('ClaudeStreamParser.parse raw-frame observer', () => {
     ];
     const ndjson = `${frames.map((e) => JSON.stringify(e)).join('\n')}\nnot json\n`;
     const observed: unknown[] = [];
-    const mapped: AgentEvent[] = [];
+    const mapped: RuntimeEvent[] = [];
     for await (const ev of ClaudeStreamParser.parse(
       Readable.from([ndjson]),
       POD_ID,
@@ -532,6 +513,11 @@ describe('ClaudeStreamParser.parse raw-frame observer', () => {
     }
     expect(observed).toEqual(frames);
     // Mapping is unchanged by the observer: task frames still yield nothing.
-    expect(mapped.map((e) => e.type)).toEqual(['status', 'complete', 'status']);
+    expect(mapped.map((e) => e.type)).toEqual([
+      'status',
+      'claude_result_usage',
+      'complete',
+      'status',
+    ]);
   });
 });

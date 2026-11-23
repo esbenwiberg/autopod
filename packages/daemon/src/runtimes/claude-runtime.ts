@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentEvent, ReasoningEffort, Runtime, SpawnConfig } from '@autopod/shared';
+import type {
+  AgentEvent,
+  ReasoningEffort,
+  Runtime,
+  RuntimeEvent,
+  SpawnConfig,
+} from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
   CLAUDE_DEFAULT_MODEL,
@@ -62,6 +68,7 @@ interface ClaudeInvocationResult {
   /** The daemon had to terminate the process tree to observe the exit. */
   terminated: boolean;
   verdict: ClaudeTurnVerdict;
+  sessionNotFound: boolean;
 }
 
 /**
@@ -94,7 +101,7 @@ export class ClaudeRuntime implements Runtime {
     this.options = options;
   }
 
-  async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+  async *spawn(config: SpawnConfig): AsyncIterable<RuntimeEvent> {
     // A fresh segment must not expose an earlier resource's native session.
     this.claudeSessionIds.delete(config.podId);
     // Write MCP config to a file inside the container so Claude CLI can read it
@@ -139,7 +146,7 @@ export class ClaudeRuntime implements Runtime {
     message: string,
     containerId: string,
     env?: Record<string, string>,
-  ): AsyncIterable<AgentEvent> {
+  ): AsyncIterable<RuntimeEvent> {
     const claudeSessionId = this.claudeSessionIds.get(podId);
     // Re-write the MCP config into the (potentially new) container before launching Claude.
     // Without this, recovery spawns a fresh container that never has the config file, causing
@@ -173,15 +180,10 @@ export class ClaudeRuntime implements Runtime {
 
     this.handles.set(podId, handle);
 
-    // Tracks whether Claude's stderr signalled an unknown-session failure.
-    // If set, we throw `ResumeSessionNotFoundError` after the stream drains so
-    // pod-manager can fall back to a fresh spawn with recovery context.
-    const resumeFailure = { sessionNotFound: false };
+    // Only hand off to a fresh spawn after the missing-session process exits.
     try {
-      const run = yield* this.runInvocation(podId, containerId, handle, (text) => {
-        if (text.includes(RESUME_SESSION_NOT_FOUND_MARKER)) resumeFailure.sessionNotFound = true;
-      });
-      if (resumeFailure.sessionNotFound) {
+      const run = yield* this.runInvocation(podId, containerId, handle, claudeSessionId);
+      if (run.sessionNotFound) {
         this.claudeSessionIds.delete(podId);
         throw new ResumeSessionNotFoundError(podId, claudeSessionId);
       }
@@ -200,14 +202,23 @@ export class ClaudeRuntime implements Runtime {
     podId: string,
     containerId: string,
     handle: StreamingExecResult,
-    onStderrText?: (text: string) => void,
-  ): AsyncGenerator<AgentEvent, ClaudeInvocationResult> {
+    resumedSessionId?: string,
+  ): AsyncGenerator<RuntimeEvent, ClaudeInvocationResult> {
+    let sessionNotFound = false;
+    const observeDiagnostic = (text: unknown) => {
+      if (
+        resumedSessionId &&
+        typeof text === 'string' &&
+        text.includes(`${RESUME_SESSION_NOT_FOUND_MARKER}: ${resumedSessionId}`)
+      )
+        sessionNotFound = true;
+    };
     // Emit stderr lines in real-time as error events so they appear in the TUI immediately
     const stderrEvents: AgentEvent[] = [];
     handle.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8').trim();
       if (!text) return;
-      onStderrText?.(text);
+      observeDiagnostic(text);
       this.logger.warn(
         { component: 'claude-runtime', podId, stderr: text.slice(0, 500) },
         'claude stderr',
@@ -228,18 +239,29 @@ export class ClaudeRuntime implements Runtime {
     });
     const claudeSessionIds = this.claudeSessionIds;
     const podLogger = this.logger;
-    const enriched = (async function* parseWithEnrichments(): AsyncIterable<AgentEvent> {
-      const parsed = ClaudeStreamParser.parse(handle.stdout, podId, podLogger, finality.observeRaw);
+    const enriched = (async function* parseWithEnrichments(): AsyncIterable<RuntimeEvent> {
+      const parsed = ClaudeStreamParser.parse(
+        handle.stdout,
+        podId,
+        podLogger,
+        (raw) => {
+          finality.observeRaw(raw);
+          if (raw.type === 'result' && raw.is_error && Array.isArray(raw.errors))
+            for (const diagnostic of raw.errors) observeDiagnostic(diagnostic);
+        },
+        resumedSessionId,
+      );
       for await (const event of finality.wrap(parsed)) {
         // Flush any stderr events that arrived before the next stdout event
         for (const e of stderrEvents.splice(0)) yield e;
+        // Newer CLIs emit a zero-usage error result as well as stderr on a
+        // missing session. Do not seed its cursor or give the consumer a fatal
+        // event that stops it before the verified-exit fallback can run.
+        if (sessionNotFound && (event.type === 'claude_result_usage' || event.type === 'error'))
+          continue;
         // Capture Claude's session ID from init events for resume support
-        if (event.type === 'status' && event.message.includes('Claude pod initialized')) {
-          const match = event.message.match(/\(([^)]+)\)$/);
-          if (match?.[1]) {
-            claudeSessionIds.set(podId, match[1]);
-          }
-        }
+        if (event.type === 'status' && event.sessionId)
+          claudeSessionIds.set(podId, event.sessionId);
         yield event;
       }
       // Flush any remaining stderr events after stdout closes
@@ -259,7 +281,12 @@ export class ClaudeRuntime implements Runtime {
       handle.exitCode,
       this.observedExitOptions(podId, handle, lifecycle),
     );
-    return { exitCode, terminated: lifecycle.terminated, verdict: finality.verdict() };
+    return {
+      exitCode,
+      terminated: lifecycle.terminated,
+      verdict: finality.verdict(),
+      sessionNotFound,
+    };
   }
 
   /**
@@ -289,8 +316,8 @@ export class ClaudeRuntime implements Runtime {
     const { exitCode, terminated, verdict } = run;
     const interrupted = describeInterruptedClaudeTurn(verdict, exitCode, podId);
     if (interrupted) {
-      // Never report an unfinished turn as completed (#648): a preceding
-      // `complete` is accounting only. Emitted after verified termination.
+      // Never report an unfinished turn as completed (#648).
+      // Observed result usage has already been forwarded; exit is now verified.
       this.logger.warn(
         { component: 'claude-runtime', podId, exitCode, verdict: verdict.kind },
         'Claude turn interrupted before it finished',

@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
-import type { AgentEvent } from '@autopod/shared';
+import type { AgentEvent, ClaudeResultUsageEvent, RuntimeEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
 import { isReferenceInput, toolInputSummary, toolResultSummary } from './tool-result-summary.js';
@@ -78,6 +78,57 @@ function stringField(input: Record<string, unknown>, keys: string[]): string | n
   return null;
 }
 
+function observedNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function observedTokens(value: unknown): number | undefined {
+  const count = observedNumber(value);
+  return Number.isSafeInteger(count) ? count : undefined;
+}
+
+function resultCost(models: unknown): number | undefined {
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return undefined;
+  let cost = 0;
+  for (const model of Object.values(models as Record<string, unknown>)) {
+    if (!model || typeof model !== 'object' || !('costUSD' in model)) return undefined;
+    const entry = observedNumber(model.costUSD);
+    if (entry === undefined) return undefined;
+    cost += entry;
+  }
+  return observedNumber(cost);
+}
+
+function resultUsage(
+  event: ClaudeStreamEvent,
+  sessionId: string | undefined,
+  resumedSessionId: string | undefined,
+): ClaudeResultUsageEvent {
+  const usage = event.usage as Record<string, unknown> | undefined;
+  const tokens = (key: string) => observedTokens(usage?.[key]) ?? observedTokens(event[key]);
+  const direct = tokens('input_tokens');
+  const cachedInputTokens = tokens('cache_read_input_tokens');
+  const cacheCreationInputTokens = tokens('cache_creation_input_tokens');
+  const totalInputTokens =
+    direct !== undefined ||
+    cachedInputTokens !== undefined ||
+    cacheCreationInputTokens !== undefined
+      ? observedTokens((direct ?? 0) + (cachedInputTokens ?? 0) + (cacheCreationInputTokens ?? 0))
+      : undefined;
+  return {
+    type: 'claude_result_usage',
+    timestamp: new Date().toISOString(),
+    sessionId,
+    freshSession: resumedSessionId === undefined || sessionId !== resumedSessionId,
+    cumulativeCostUsd: observedNumber(event.total_cost_usd),
+    resultCostUsd: resultCost(event.model_usage_since_last_result),
+    totalInputTokens,
+    totalOutputTokens: tokens('output_tokens'),
+    cachedInputTokens,
+    cacheCreationInputTokens,
+  };
+}
+
 function fileChangePath(input: Record<string, unknown>): string {
   return stringField(input, ['file_path', 'path', 'relative_path']) ?? 'unknown';
 }
@@ -99,9 +150,12 @@ export class ClaudeStreamParser {
     podId: string,
     logger: Logger,
     observe?: (raw: ClaudeStreamEvent) => void,
-  ): AsyncIterable<AgentEvent> {
+    resumedSessionId?: string,
+  ): AsyncIterable<RuntimeEvent> {
     const rl = createInterface({ input: stream });
     const referenceReads = new Set<string>();
+    const resultIds = new Set<string>();
+    let sessionId = resumedSessionId;
 
     for await (const line of rl) {
       const trimmed = line.trim();
@@ -125,7 +179,31 @@ export class ClaudeStreamParser {
         };
         continue;
       }
+      if (!event || typeof event !== 'object') continue;
+      if (event.type === 'result' && typeof event.uuid === 'string') {
+        if (resultIds.has(event.uuid)) continue;
+        resultIds.add(event.uuid);
+      }
       observe?.(event);
+      if (
+        event.type === 'system' &&
+        event.subtype === 'init' &&
+        typeof event.session_id === 'string'
+      )
+        sessionId = event.session_id;
+      if (event.type === 'result') {
+        const observation = resultUsage(event, event.session_id ?? sessionId, resumedSessionId);
+        // Startup failures can emit zero counters before loading any conversation.
+        // They are not a reliable baseline for a later resume.
+        if (
+          !event.is_error ||
+          observation.cumulativeCostUsd ||
+          observation.resultCostUsd ||
+          observation.totalInputTokens ||
+          observation.totalOutputTokens
+        )
+          yield observation;
+      }
 
       if (event.type === 'assistant') {
         const ts = new Date().toISOString();
@@ -268,48 +346,7 @@ export class ClaudeStreamParser {
             classification,
           };
         }
-        const costUsd = typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
-        const directInputTokens =
-          typeof event.usage?.input_tokens === 'number'
-            ? event.usage.input_tokens
-            : typeof event.input_tokens === 'number'
-              ? event.input_tokens
-              : undefined;
-        const cachedInputTokens =
-          typeof event.usage?.cache_read_input_tokens === 'number'
-            ? event.usage.cache_read_input_tokens
-            : typeof event.cache_read_input_tokens === 'number'
-              ? event.cache_read_input_tokens
-              : undefined;
-        const cacheCreationInputTokens =
-          typeof event.usage?.cache_creation_input_tokens === 'number'
-            ? event.usage.cache_creation_input_tokens
-            : typeof event.cache_creation_input_tokens === 'number'
-              ? event.cache_creation_input_tokens
-              : undefined;
-        const hasInputTelemetry =
-          directInputTokens !== undefined ||
-          cachedInputTokens !== undefined ||
-          cacheCreationInputTokens !== undefined;
-        const totalInputTokens = hasInputTelemetry
-          ? (directInputTokens ?? 0) + (cachedInputTokens ?? 0) + (cacheCreationInputTokens ?? 0)
-          : undefined;
-        const totalOutputTokens =
-          typeof event.usage?.output_tokens === 'number'
-            ? event.usage.output_tokens
-            : typeof event.output_tokens === 'number'
-              ? event.output_tokens
-              : undefined;
-        return {
-          type: 'complete',
-          timestamp: ts,
-          result: typeof resultText === 'string' ? resultText : String(resultText),
-          costUsd,
-          totalInputTokens,
-          totalOutputTokens,
-          ...(cachedInputTokens !== undefined && { cachedInputTokens }),
-          ...(cacheCreationInputTokens !== undefined && { cacheCreationInputTokens }),
-        };
+        return { type: 'complete', timestamp: ts, result: resultText };
       }
 
       case 'error': {

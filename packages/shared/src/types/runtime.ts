@@ -90,7 +90,24 @@ export type AgentEvent =
   | AgentReasoningEvent;
 
 /** Internal runtime transport metadata is not part of the public agent-activity union. */
-export type RuntimeEvent = AgentEvent | AgentUsageEvent;
+export type RuntimeEvent = AgentEvent | AgentUsageEvent | ClaudeResultUsageEvent;
+
+/** Claude stream-json result accounting, independent of turn completion. */
+export interface ClaudeResultUsageEvent {
+  type: 'claude_result_usage';
+  timestamp: string;
+  sessionId?: string;
+  /** The CLI started a new native session rather than resuming this one. */
+  freshSession: boolean;
+  /** Session-wide balance, not a billable delta. */
+  cumulativeCostUsd?: number;
+  /** Sum of native per-model cost since the previous result, when available. */
+  resultCostUsd?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
 
 export interface AgentStatusEvent {
   type: 'status';
@@ -173,7 +190,7 @@ export interface AgentErrorEvent {
   /**
    * Trusted runtime adapter evidence, set only after verified process exit, that the
    * agent's turn ended unfinished (stopped mid-turn or while waiting on background
-   * work). A preceding `complete` is accounting only, never a finished turn.
+   * work). Previously observed usage does not imply a finished turn.
    */
   turnInterrupted?: true;
 }
