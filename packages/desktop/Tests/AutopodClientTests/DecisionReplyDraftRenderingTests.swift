@@ -425,9 +425,20 @@ struct DecisionReplyDraftRenderingTests {
       try await view.type("one line")
       let single = try #require(view.field?.frame.height)
       try await view.type(long)
-      try await view.wait("reply field grows") { (view.field?.frame.height ?? 0) > single * 2 }
+      // Compare against an additional native text line, not a ratio of control
+      // frames: AppKit includes style-dependent insets in the single-line height.
+      let font = try #require(view.field?.font)
+      let line = NSLayoutManager().defaultLineHeight(for: font)
+      try await view.wait("reply field grows from \(single)pt by a text line") {
+        (view.field?.frame.height ?? 0) >= single + line - 1
+      }
       #expect(view.field?.stringValue == long)
       try view.capture("long-\(surface)-wrapped")
+      try await view.type("one line")
+      try await view.wait("reply field returns to its single-line height") {
+        guard let height = view.field?.frame.height else { return false }
+        return abs(height - single) < 1
+      }
     }
   }
 
