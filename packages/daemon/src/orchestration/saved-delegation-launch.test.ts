@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,8 +11,18 @@ import { configurationDigest, resolveLaunch } from '../configuration/launch-reso
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
 import { runMigrationsWithBackups } from '../db/migrate.js';
-import { digest, sha256 } from '../managed/canonical.js';
+import { ArtifactExports } from '../managed/artifact-exports.js';
+import { ManagedArtifactPipeline } from '../managed/artifact-pipeline.js';
+import { MemoryArtifactStore } from '../managed/artifact-store.js';
+import { canonical, digest, sha256 } from '../managed/canonical.js';
+import { ManagedControls } from '../managed/managed-controls.js';
 import { ManagedPodService } from '../managed/managed-service.js';
+import {
+  PRIVATE_COMMIT_EFFECTS,
+  PRIVATE_PARENT_VERIFIER,
+  PRIVATE_SUBMISSION_FILE,
+} from '../managed/private-commit-policy.js';
+import { managedGit, managedGitBytes } from '../managed/source-git.js';
 import {
   createTestConfiguration,
   insertConfigurationTestPod,
@@ -21,22 +32,27 @@ import {
   MIGRATIONS_DIR,
   openTestDiskDatabase,
 } from '../test-utils/disk-database.js';
+import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { resign } from '../test-utils/managed-fixture.js';
 import { createTestDb, logger } from '../test-utils/mock-helpers.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { OrchestrationContinuations } from './continuations.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
+import { parentExactTreeEvaluator } from './parent-exact-tree-evaluator.js';
+import { readQualifiedParentIntegration } from './parent-integration-qualified.js';
 import { ParentReportResults } from './parent-report-results.js';
 import {
   admitSavedDelegationLaunch,
   readSavedDelegationAdmission,
   savedDelegationAttemptRun,
+  savedDelegationGatePolicy,
 } from './saved-delegation-admission.js';
 import { prepareSavedDelegationLaunch } from './saved-delegation-launch.js';
 import {
   createSavedDelegationPolicyStore,
   type DelegationPrincipal,
 } from './saved-delegation-policy.js';
+import { attachSavedDelegationRuntime } from './saved-delegation-runtime.js';
 
 const owner = {
   oid: 'owner',
@@ -70,6 +86,12 @@ const seed = {
   reviewer: { accountId: 'review', tokenBudget: 8000, policyDigest: pin('e') },
 };
 
+const checksSigner = fixtureSigner('checks', 'saved-fixture-checks', seed.checksDigest);
+const reviewSigner = fixtureSigner(
+  'independentReview',
+  'saved-fixture-review',
+  seed.reviewer.policyDigest,
+);
 const recipeBinding = ({
   role,
   recipeId,
@@ -82,6 +104,7 @@ const recipeBinding = ({
   recipeRevision,
   recipeDigest,
   accountId,
+  executionSpecDigest: pin('6'),
 });
 
 function fixture(db = createTestDb()) {
@@ -115,6 +138,7 @@ function fixture(db = createTestDb()) {
         bundleDigest: pin('3'),
       },
       workers: [recipeBinding(policy.workers[0]), recipeBinding(policy.workers[1])],
+      authorities: { checks: checksSigner.authority, independentReview: reviewSigner.authority },
       checksDigest: policy.checksDigest,
       reviewPolicyDigest: policy.reviewer.policyDigest,
       runtimeDigest: pin('4'),
@@ -661,3 +685,269 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
     rmSync(root, { recursive: true, force: true });
   }
 }, 25_000);
+
+it('executes two saved roles from private pinned source and qualifies once across a daemon DB reopen', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-runtime-'));
+  const dbPath = path.join(root, 'state.db');
+  let db = createHistoricalDiskDatabase(dbPath, [{ dir: MIGRATIONS_DIR, through: 282 }]);
+  let runtime: ReturnType<typeof attachSavedDelegationRuntime> | undefined;
+  try {
+    const f = await admissionFixture(db);
+    const template = structuredClone(f.source.request);
+    template.task.kind = 'implementation';
+    template.validation.verifierPolicy = PRIVATE_PARENT_VERIFIER;
+    const profile = template.profileSnapshot;
+    for (const route of [profile.route, template.route, template.effectiveGrant.route]) {
+      route.executionTarget = 'sandbox';
+      route.providerAccountId = 'child';
+    }
+    profile.scope = {
+      ...profile.scope,
+      allowedEffects: [...PRIVATE_COMMIT_EFFECTS],
+      identityBindings: [],
+      network: { ...profile.scope.network, destinations: [] },
+      repositories: [
+        {
+          enrollmentId: 'repo-a',
+          access: 'write',
+          baseRevision: f.source.cp.commit,
+          remote: 'private',
+          branchNamespace: 'autopod/',
+        },
+      ],
+    };
+    template.effectiveGrant.scope = structuredClone(profile.scope);
+    for (const budget of [profile.budget, template.effectiveGrant.budget]) {
+      if (!('maxProviderRequests' in budget)) throw new Error('fixture budget');
+      budget.maxProviderRequests = 6;
+      budget.maxObservedTokens = 36_000;
+    }
+    const { snapshotDigest: _, ...profileBody } = profile;
+    profile.snapshotDigest = template.effectiveGrant.profileSnapshotDigest = digest(profileBody);
+    template.outputs.source = {
+      mode: 'commit',
+      repository: 'repo-a',
+      remote: 'private',
+      base: 'main',
+      head: 'autopod/private',
+    };
+    template.outputs.artifacts.mode = 'required';
+    template.outputs.artifacts.include = template.outputs.artifacts.requiredPaths = [
+      PRIVATE_SUBMISSION_FILE,
+    ];
+    template.outputs.artifacts.limits = { maxFiles: 1, maxFileBytes: 16384, maxTotalBytes: 16384 };
+    resign(template);
+    const pins = f.pins.getMockImplementation()!;
+    f.pins.mockImplementation(async (...args) => {
+      const result = await pins(...args);
+      result.workers[0].executionSpecDigest = result.workers[1].executionSpecDigest =
+        template.executionSpecDigest;
+      return result;
+    });
+    const receipt = await f.submit(await f.reviewed());
+    const { podId, plan, checkpoint } = receipt;
+    const keyPath = path.join(root, 'pod-key');
+    writeFileSync(keyPath, Buffer.alloc(32, 81), { mode: 0o600, flag: 'wx' });
+    const issuer = createPodTokenIssuer(keyPath);
+    db.prepare("UPDATE pods SET status='running',container_id='fixture-parent' WHERE id=?").run(
+      podId,
+    );
+    const gatePolicy = savedDelegationGatePolicy(plan);
+    const seen: Array<{ role: string; tree: string; commit: string }> = [];
+    const gates = {
+      policy: gatePolicy,
+      checks: parentExactTreeEvaluator(root, gatePolicy, 'checks', {
+        async evaluate({ mirror, commit, tree }) {
+          seen.push({ role: 'checks', tree, commit });
+          const passed =
+            (await managedGitBytes(mirror, ['show', commit + ':sample/count.txt'])).equals(
+              Buffer.from('24\n'),
+            ) &&
+            (await managedGitBytes(mirror, ['show', commit + ':sample/reason.txt'])).equals(
+              Buffer.from('24 is twice 12\n'),
+            );
+          return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+        },
+        async sign(statement) {
+          return checksSigner.attest(statement);
+        },
+      }),
+      independentReview: parentExactTreeEvaluator(root, gatePolicy, 'independentReview', {
+        async evaluate({ mirror, commit, tree, predecessor }) {
+          seen.push({ role: 'review', tree, commit });
+          const passed =
+            predecessor === checkpoint.commit &&
+            (await managedGit(mirror, ['diff-tree', '--name-only', '-r', predecessor, commit])) ===
+              'sample/count.txt\nsample/reason.txt';
+          return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+        },
+        async sign(statement) {
+          return reviewSigner.attest(statement);
+        },
+      }),
+    };
+    const pinnedWorkerSource = new AsyncLocalStorage<string>();
+    const launches: string[] = [];
+    const exited = new Set<string>();
+    const parentCheckout = path.join(root, 'parent');
+    let wrongParentCheckout = true;
+    const attach = (recipe = template) => {
+      const service = new ManagedPodService(
+        db,
+        {
+          ...f.source.f.admission,
+          targets: ['sandbox'],
+          profiles: new Map([[profile.snapshotDigest, profile]]),
+          enrollmentCeiling: profile.scope,
+          identityCeiling: profile.scope,
+          backendCeiling: profile.scope,
+        },
+        {
+          ...f.source.f.runtime,
+          async ensure(...args) {
+            const mirror = pinnedWorkerSource.getStore();
+            if (!mirror) throw new Error('fixture worker requires a private mirror');
+            const checkout = path.join(root, args[0]);
+            await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, checkout]);
+            await managedGit(checkout, ['checkout', '--detach', checkpoint.commit]);
+            expect(await managedGit(checkout, ['rev-parse', 'HEAD^{tree}'])).toBe(checkpoint.tree);
+            launches.push(args[0]);
+            return f.source.f.runtime.ensure(...args);
+          },
+          async observe(ref) {
+            return exited.has(ref)
+              ? { state: 'stopped', exitCode: 0, consumedTokens: 100 }
+              : f.source.f.runtime.observe(ref);
+          },
+        },
+        () => 100,
+        true,
+        [],
+        (owner) => owner === 'native.' + plan.runId,
+      );
+      new ManagedArtifactPipeline(
+        service,
+        new ArtifactExports(db, new MemoryArtifactStore()),
+        path.join(root, 'artifacts'),
+        new ManagedControls(service),
+      );
+      return attachSavedDelegationRuntime({
+        db,
+        podId,
+        principal: owner,
+        scratch: path.join(root, 'scratch'),
+        issuer,
+        runtimeDigest: plan.pins.runtimeDigest,
+        recipes: { count: recipe, reason: template },
+        gates,
+        service,
+        collector: {
+          async exportPrivateHead() {
+            throw new Error('fixture must use explicit submission');
+          },
+          async readPrivateSubmission(ref, child, _spec, current) {
+            current();
+            expect(exited.has(ref)).toBe(true);
+            const scope = String(
+              db
+                .prepare(`SELECT q.private_scope_json FROM parent_managed_requests q
+              JOIN orchestration_continuations c ON c.run_id=q.run_id AND c.start_key=q.start_key WHERE c.pod_id=?`)
+                .pluck()
+                .get(child),
+            );
+            const [{ path }] = JSON.parse(scope);
+            return Buffer.from(
+              JSON.stringify({
+                version: 1,
+                files: [
+                  { path, content: path === 'sample/count.txt' ? '24\n' : '24 is twice 12\n' },
+                ],
+              }),
+            );
+          },
+        },
+        withWorkerSource: (mirror, _run, use) => pinnedWorkerSource.run(mirror, use),
+        async observeParentSource() {
+          if (wrongParentCheckout) return { commit: checkpoint.predecessor, tree: checkpoint.tree };
+          return {
+            commit: await managedGit(parentCheckout, ['rev-parse', 'HEAD']),
+            tree: await managedGit(parentCheckout, ['rev-parse', 'HEAD^{tree}']),
+          };
+        },
+      });
+    };
+    const altered = resign({
+      ...structuredClone(template),
+      task: { ...template.task, objective: 'Different recipe content' },
+    });
+    expect(() => attach(altered)).toThrow('saved-delegation-recipe-binding');
+    runtime = attach();
+    expect(() => attach()).toThrow('saved-delegation-runtime-already-attached');
+    await expect(runtime.provision()).rejects.toThrow('saved-delegation-parent-checkout-mismatch');
+    expect(db.prepare('SELECT count(*) FROM orchestration_kickoffs').pluck().get()).toBe(0);
+    await runtime.withPinnedParentSource(async (mirror) => {
+      await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, parentCheckout]);
+      await managedGit(parentCheckout, ['checkout', '--detach', checkpoint.commit]);
+    });
+    wrongParentCheckout = false;
+    const beforeRestart = await runtime.provision();
+    const first = { requestKey: 'reason-work', recipe: 'reason', brief: 'Explain why.' };
+    await expect(
+      runtime.commission(beforeRestart, { ...first, recipe: 'not-approved' }),
+    ).rejects.toThrow('saved-delegation-role-refused');
+    await runtime.commission(beforeRestart, first);
+    await runtime.tick();
+    expect(launches).toHaveLength(1);
+    const remaining = () =>
+      db
+        .prepare('SELECT remaining FROM orchestration_request_balances WHERE id=?')
+        .pluck()
+        .get(plan.runId);
+    expect(remaining()).toBe(6);
+    await runtime.close();
+    db.close();
+    db = openTestDiskDatabase(dbPath);
+    runtime = attach();
+    await runtime.tick();
+    expect(launches).toHaveLength(1);
+    expect(remaining()).toBe(6);
+    const current = await runtime.provision();
+    await expect(runtime.commission(beforeRestart, first)).rejects.toThrow('parent-session-stale');
+    await runtime.commission(current, first);
+    await expect(
+      runtime.commission(current, { ...first, requestKey: 'duplicate-role' }),
+    ).rejects.toThrow('saved-delegation-role-already-reserved');
+    await runtime.commission(current, {
+      requestKey: 'count-work',
+      recipe: 'count',
+      brief: 'Write the count.',
+    });
+    await runtime.tick();
+    expect(launches).toHaveLength(2);
+    expect(remaining()).toBe(0);
+    for (const child of launches) exited.add(child);
+    await runtime.tick();
+    const qualified = db
+      .prepare('SELECT status,evidence_digest FROM parent_qualification_jobs WHERE run_id=?')
+      .get(plan.runId) as { status: string; evidence_digest: string };
+    expect(qualified?.status).toBe('ready');
+    const result = readQualifiedParentIntegration(db, plan.runId, qualified.evidence_digest);
+    expect(seen).toEqual([
+      { role: 'checks', commit: result.checkpoint.commit, tree: result.checkpoint.tree },
+      { role: 'review', commit: result.checkpoint.commit, tree: result.checkpoint.tree },
+    ]);
+    expect(result.gateRequest.paths).toEqual(['sample/count.txt', 'sample/reason.txt']);
+    expect((await runtime.results(current, {})).results.map((item) => item.report.status)).toEqual([
+      'private-candidate-retained',
+      'private-candidate-retained',
+    ]);
+    await runtime.tick();
+    expect(launches).toHaveLength(2);
+    expect(seen).toHaveLength(2);
+    expect(db.prepare('SELECT count(*) FROM parent_review_approvals').pluck().get()).toBe(0);
+  } finally {
+    await runtime?.close();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);

@@ -84,6 +84,7 @@ export class ParentReportResults {
           AND (p.state IN ('killed','failed','complete')
               OR (q.private_scope_json IS NOT NULL AND p.state='review_required'))
           AND (p.state <> 'complete' OR a.artifact_id IS NOT NULL
+            OR (q.private_scope_json IS NOT NULL AND private.pod_id IS NOT NULL)
             OR json_extract(c.request_json,'$.outputs.artifacts.mode') <> 'required')
           AND NOT EXISTS(SELECT 1 FROM orchestration_child_outcomes o WHERE o.run_id=c.run_id AND o.start_key=c.start_key)
         ORDER BY c.rowid`)

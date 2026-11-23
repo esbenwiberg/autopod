@@ -6,12 +6,21 @@ import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
+import { combinedPolicyDigest } from './combined-attestation.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { prepareSavedDelegationLaunch, savedDelegationRunId } from './saved-delegation-launch.js';
 import { type DelegationPrincipal, delegationOwnerDigest } from './saved-delegation-policy.js';
 
 type Planning = Parameters<typeof prepareSavedDelegationLaunch>[0];
-type Plan = Awaited<ReturnType<typeof prepareSavedDelegationLaunch>>['plan'];
+export type SavedDelegationPlan = Awaited<ReturnType<typeof prepareSavedDelegationLaunch>>['plan'];
+type Plan = SavedDelegationPlan;
+
+export function savedDelegationGatePolicy(plan: Plan) {
+  return {
+    ...plan.pins.authorities,
+    basePolicyDigest: digest(['saved-delegation-authority/v1', plan.digest]),
+  };
+}
 
 function describeSeed(plan: Plan) {
   const { predecessor, commit, tree, bundleDigest } = plan.pins.source;
@@ -21,7 +30,7 @@ function describeSeed(plan: Plan) {
     predecessor,
     commit,
     tree,
-    policyDigest: digest(['saved-delegation-authority/v1', plan.digest]),
+    policyDigest: combinedPolicyDigest(savedDelegationGatePolicy(plan)),
   };
   // Verifies origin and exact Git bytes, not checks/review of a combined result.
   const manifest = canonical({

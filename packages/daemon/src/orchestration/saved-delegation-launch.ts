@@ -7,6 +7,7 @@ import {
   resolveLaunch,
 } from '../configuration/launch-resolver.js';
 import { canonical, digest } from '../managed/canonical.js';
+import { gatePinsSchema, gatePolicySchema } from './combined-attestation.js';
 import {
   type DelegationPrincipal,
   delegationOwnerDigest,
@@ -23,6 +24,7 @@ const recipeBinding = z
     recipeRevision: z.number().int().positive(),
     recipeDigest: delegationPin,
     accountId: z.string().min(1).max(160),
+    executionSpecDigest: delegationPin,
   })
   .strict();
 const verifiedPinsSchema = z
@@ -38,6 +40,7 @@ const verifiedPinsSchema = z
       })
       .strict(),
     workers: z.tuple([recipeBinding, recipeBinding]),
+    authorities: gatePinsSchema,
     checksDigest: delegationPin,
     reviewPolicyDigest: delegationPin,
     // Exact sandbox/image/runtime boundary, resolved by the privileged host, not a caller.
@@ -159,7 +162,12 @@ export async function prepareSavedDelegationLaunch(input: {
   if (
     pins.source.repositoryDigest !== configurationDigest(config.repository?.config) ||
     pins.source.ref !== 'refs/heads/' + saved.policy.sourceBranch ||
-    canonical(pins.workers) !== canonical(workers) ||
+    canonical(pins.workers.map(({ executionSpecDigest: _, ...binding }) => binding)) !==
+      canonical(workers) ||
+    pins.authorities.checks.configurationDigest !== saved.policy.checksDigest ||
+    pins.authorities.independentReview.configurationDigest !== saved.policy.reviewer.policyDigest ||
+    !gatePolicySchema.safeParse({ ...pins.authorities, basePolicyDigest: saved.policyDigest })
+      .success ||
     pins.checksDigest !== saved.policy.checksDigest ||
     pins.reviewPolicyDigest !== saved.policy.reviewer.policyDigest
   )

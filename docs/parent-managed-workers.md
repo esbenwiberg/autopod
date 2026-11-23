@@ -445,12 +445,22 @@ attempt-scoped lookup binds worker operations to the running Task and its
 current lifecycle generation. Fixture tests cover sibling-run cursor and budget
 isolation using the real continuation ledger.
 
-The public ordinary launch paths still reject saved-policy opt-in with
-`SAVED_DELEGATION_UNAVAILABLE` rather than starting a nondelegated Task. The
-internal write path does not dispatch anything. Before enabling it, compose a
-per-run runtime that consumes the retained plan and seed, provisions only the
-reviewed recipes and scoped credentials, and restores watchdogs after restart.
-No public policy editor or new evaluator permission is enabled here.
+The local saved-policy runtime attaches to one retained Task. It requires the
+reviewed worker execution-spec digests and the exact public pins of both
+independent signers. A parent gets an attempt credential only after a trusted
+checkout observation matches the retained commit and tree. Each worker role can
+be reserved once, with its own file scope and budget. The watchdog is scoped to
+that installation, uses verified private mirrors, collects explicit submissions,
+and qualifies the combined tree through the existing two-receipt gate. On
+reattachment, recorded worker identities and reservations are reused; uncertain
+evaluation claims are fenced instead of replayed.
+
+The normal Desktop and CLI launch paths still reject saved-policy opt-in with
+`SAVED_DELEGATION_UNAVAILABLE`. The local fixture supplies the runtime, checkout
+and signer ports without cloud calls. Before enabling normal launch, the daemon
+must supply those concrete runtime ports, bind the scoped delegate bridge and
+reattach the watchdog on startup. No policy editor or new evaluator permission
+is enabled here.
 
 ## Evidence and remaining milestones
 
