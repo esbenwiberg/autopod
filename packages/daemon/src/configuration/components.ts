@@ -47,6 +47,7 @@ import { ReviewerBudgetRevisions } from '../validation/reviewer-budget-revisions
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
 import { assertLaunchAgentAccount, resolveLaunchAgentRoute } from './agent-route-resolution.js';
 import { assertAnalysisWorkspace } from './analysis-workspace.js';
+import { ExecutionCapacityUnverifiedError } from './backend-capabilities.js';
 import { configurationError, createConfigurationStore } from './configuration-store.js';
 import { resolveLaunchCredentialReferences } from './credential-references.js';
 import type { ConfigurationCredentialStore } from './credential-store.js';
@@ -372,6 +373,16 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     executionSettings: (config) =>
       resolveLaunchExecutionSettings(config, { image: config.resolvedEnvironment.pinnedBase }),
     assertCurrentCapabilities: assertCurrent,
+    // Provisioning gate (#665): new containers need a live or recently reported Docker
+    // host size. Unverified is transient, so the caller keeps the pod queued.
+    async assertExecutionCapacity(config) {
+      if (config.execution.target === 'local') {
+        const capabilities = await options.ports.executionCapabilities('local');
+        if (capabilities.hostCapacity?.state === 'unverified')
+          throw new ExecutionCapacityUnverifiedError(capabilities.hostCapacity);
+      }
+      await assertCurrent(config);
+    },
     async previewRetainedExecution(podId, profileId, previewOptions) {
       const parent = snapshots.get(podId);
       if (!parent?.repository)

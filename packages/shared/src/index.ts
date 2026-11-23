@@ -64,6 +64,10 @@ export {
   ValidationError,
 } from './errors.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
+export {
+  describeExecutionCapacityProbeFailure,
+  describeExecutionCapacityWait,
+} from './execution-capacity.js';
 // ID generation utility
 export { generateId, generatePodId } from './id.js';
 export * from './managed-protocol.js';
@@ -401,6 +405,7 @@ export type {
   CompactPodPage,
   CostEvidence,
   CreatePodRequest,
+  ExecutionCapacityInfrastructureFailure,
   FixFeedback,
   PhaseTokenUsage,
   Pod,
