@@ -401,6 +401,7 @@ export type {
 } from './types/notification.js';
 export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
 export type { GuardedOperatorAction, OperatorTarget } from './types/operator-target.js';
+export type { PartialResearchReport } from './types/partial-research.js';
 export * from './types/pim.js';
 export type {
   CompactPod,

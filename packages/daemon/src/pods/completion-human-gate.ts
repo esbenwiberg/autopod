@@ -1,9 +1,17 @@
 import type { Pod, ReportBlockerPayload } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { atomicPodChange } from '../db/unit-of-work.js';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import {
+  capturePartialResearchReport,
+  captureSandboxPartialResearchReport,
+  isPartialResearchPod,
+  type PartialResearchCapture,
+} from './partial-research-report.js';
 import type { PodRepository } from './pod-repository.js';
+import type { createWorkspacePreservation } from './workspace-preservation.js';
 
 interface CompletionHumanGateDependencies {
   podRepo: Pick<
@@ -12,7 +20,7 @@ interface CompletionHumanGateDependencies {
   >;
   escalationRepo?: Pick<EscalationRepository, 'listBySession'>;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
-  preservePodWorkspace(pod: Pod, reason: string): Promise<void>;
+  preservePodWorkspace: ReturnType<typeof createWorkspacePreservation>['preservePodWorkspace'];
   ownsArtifactCompletion(
     pod: Pod,
     allowRemovedContainer?: boolean,
@@ -60,16 +68,59 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
     return;
   }
 
+  async function preserveHeldWorkspace(
+    pod: Pod,
+    reason: string,
+    captureReport: boolean,
+  ): Promise<PartialResearchCapture | undefined> {
+    if (captureReport && pod.executionTarget === 'sandbox') {
+      let checkpoint: WorkspaceCheckpointResult | undefined;
+      await preservePodWorkspace(pod, reason, (verified) => {
+        checkpoint = verified;
+      });
+      return captureSandboxPartialResearchReport(checkpoint);
+    }
+    await preservePodWorkspace(pod, reason);
+    if (captureReport && pod.worktreePath) return capturePartialResearchReport(pod.worktreePath);
+  }
+
+  // Optional evidence must not weaken or roll back a hold. Record it only for
+  // the cycle whose workspace we just preserved, after the failed state commits.
+  function recordPartialReport(
+    original: Pod,
+    current: Pod,
+    cycle: number | undefined,
+    capture: PartialResearchCapture | undefined,
+  ): void {
+    if (
+      !capture ||
+      cycle === undefined ||
+      current.worktreePath !== original.worktreePath ||
+      current.executionTarget !== original.executionTarget
+    )
+      return;
+    try {
+      podRepo.completionJournal?.recordPartialResearch(current, cycle, capture);
+    } catch (error) {
+      logger.error({ error, podId: current.id }, 'Could not record partial research report');
+    }
+  }
+
   async function holdForQueuedGuidance(pod: Pod): Promise<void> {
     const podId = pod.id;
     // A recorded answer is not proof that the settled worker collected it.
     // Preserve source but retain the queue and resources for explicit Rework.
-    podRepo.completionJournal?.settle(pod);
+    const settlement = podRepo.completionJournal?.settle(pod);
+    let capture: PartialResearchCapture | undefined;
     let preserved = false;
     let preservationFailure = '';
     try {
       if (pod.containerId && pod.worktreePath) {
-        await preservePodWorkspace(pod, 'uncollected human guidance after agent settlement');
+        capture = await preserveHeldWorkspace(
+          pod,
+          'uncollected human guidance after agent settlement',
+          Boolean(settlement && isPartialResearchPod(pod)),
+        );
         preserved = true;
       }
     } catch (err) {
@@ -86,17 +137,23 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
       podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
       transition(current, 'failed', { failureReason: reason });
     });
+    recordPartialReport(pod, current, settlement?.cycle, capture);
     emitActivityStatus(podId, reason);
     return;
   }
 
   async function holdForInfrastructure(pod: Pod, report: ReportBlockerPayload): Promise<void> {
-    podRepo.completionJournal?.settle(pod);
+    const settlement = podRepo.completionJournal?.settle(pod);
+    let capture: PartialResearchCapture | undefined;
     let preserved = false;
     let detail = '';
     try {
       if (pod.containerId && pod.worktreePath) {
-        await preservePodWorkspace(pod, 'infrastructure blocker after agent settlement');
+        capture = await preserveHeldWorkspace(
+          pod,
+          'infrastructure blocker after agent settlement',
+          Boolean(settlement && isPartialResearchPod(pod)),
+        );
         preserved = true;
       }
     } catch (error) {
@@ -114,6 +171,7 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
       podRepo.completionJournal?.mark(current, 'ready', preserved);
       transition(current, 'failed', { failureReason: reason });
     });
+    recordPartialReport(pod, current, settlement?.cycle, capture);
     emitActivityStatus(pod.id, reason);
   }
 
