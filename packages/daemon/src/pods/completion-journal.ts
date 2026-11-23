@@ -1,6 +1,7 @@
 import { AutopodError, type OperatorActor, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
+import type { PartialResearchCapture, PartialResearchRecord } from './partial-research-report.js';
 
 type Finalization = NonNullable<Pod['finalization']>;
 export interface CompletionJournal {
@@ -9,6 +10,12 @@ export interface CompletionJournal {
   begin(pod: Pod): void;
   settle(pod: Pod, result?: string): Finalization;
   mark(pod: Pod, phase: Finalization['phase'], sourcePreserved?: boolean): void;
+  recordPartialResearch(pod: Pod, cycle: number, capture: PartialResearchCapture): void;
+  getPartialResearch(
+    podId: string,
+    generation: number,
+    cycle: number,
+  ): PartialResearchRecord | null;
   recoveryContext(pod: Pod): string;
   replyWatermark(podId: string): number;
   recordReply(pod: Pod, message: string, actor: OperatorActor): void;
@@ -62,6 +69,36 @@ export function createCompletionJournal(db: Database.Database): CompletionJourna
           )
           .get(podId) as { watermark: number }
       ).watermark;
+    },
+    recordPartialResearch(pod, cycle, capture) {
+      const entry = get(pod.id, pod.lifecycleGeneration);
+      if (
+        !current(pod) ||
+        !entry?.agentSettledAt ||
+        !entry.sourcePreservedAt ||
+        entry.cycle !== cycle
+      )
+        return;
+      db.prepare(`INSERT INTO pod_partial_research_reports
+        (pod_id, generation, cycle, captured_at, content, sha256, unavailable_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (pod_id, generation, cycle) DO NOTHING`).run(
+        pod.id,
+        pod.lifecycleGeneration,
+        cycle,
+        new Date().toISOString(),
+        capture.content ?? null,
+        capture.sha256 ?? null,
+        capture.unavailableReason ?? null,
+      );
+    },
+    getPartialResearch(podId, generation, cycle) {
+      return (
+        (db
+          .prepare(`SELECT captured_at AS capturedAt, content, sha256,
+        unavailable_reason AS unavailableReason FROM pod_partial_research_reports
+        WHERE pod_id = ? AND generation = ? AND cycle = ?`)
+          .get(podId, generation, cycle) as PartialResearchRecord | undefined) ?? null
+      );
     },
     recoveryContext(pod) {
       const size = db

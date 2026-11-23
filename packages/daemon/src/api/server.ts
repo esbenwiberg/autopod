@@ -356,7 +356,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   }
 
   // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
-  filesRoutes(app, deps.podManager, deps.containerManagerFactory);
+  filesRoutes(app, deps.podManager, deps.containerManagerFactory, deps.podRepo?.completionJournal);
   fileRecoveryRoutes(app, deps.podManager);
 
   // Screenshot routes — serve proof-of-work PNG screenshots by pod/source/filename

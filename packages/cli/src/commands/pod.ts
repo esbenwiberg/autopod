@@ -1241,9 +1241,27 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .command('files <id>')
     .description('Read preserved pod files without waking the worker')
     .option('--path <path>', 'Read one relative file path')
+    .option(
+      '--partial',
+      'Read the captured, incomplete research-output.md of a failed research pod',
+    )
     .option('--json', 'Output full content as JSON')
-    .action(async (id: string, opts: { path?: string; json?: boolean }) => {
+    .action(async (id: string, opts: { path?: string; partial?: boolean; json?: boolean }) => {
+      if (opts.partial && opts.path)
+        throw new Error('--partial selects research-output.md; omit --path');
       const client = getClient();
+      if (opts.partial) {
+        const report = await client.getPartialResearch(id);
+        if (opts.json) console.log(JSON.stringify(report));
+        else {
+          const { podId, generation, cycle, capturedAt, sha256 } = report.provenance;
+          console.error(
+            `Incomplete / unreviewed — ${podId}, generation ${generation}, cycle ${cycle}, captured ${capturedAt} (SHA-256 ${sha256})`,
+          );
+          process.stdout.write(report.content);
+        }
+        return;
+      }
       const result = opts.path
         ? await client.getPodFile(id, opts.path)
         : await client.listPodFiles(id);
