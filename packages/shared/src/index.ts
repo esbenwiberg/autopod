@@ -579,6 +579,7 @@ export type {
   AgentTaskSummaryEvent,
   AgentToolUseEvent,
   AgentUsageEvent,
+  ClaudeResultUsageEvent,
   HttpMcpServerConfig,
   McpServerConfig,
   ProviderFailureCategory,

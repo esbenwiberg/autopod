@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent, SpawnConfig } from '@autopod/shared';
+import type { AgentErrorEvent, RuntimeEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -657,7 +657,7 @@ describe('ClaudeRuntime', () => {
           });
           // Deliberately do NOT close stdout or resolve the exit code.
         }, 10);
-        const events: AgentEvent[] = [];
+        const events: RuntimeEvent[] = [];
         const start = Date.now();
         const source =
           kind === 'resume'
@@ -821,7 +821,7 @@ describe('ClaudeRuntime', () => {
               containerId: 'container-123',
               env: {},
             });
-      const events: AgentEvent[] = [];
+      const events: RuntimeEvent[] = [];
       const consumed = (async () => {
         for await (const event of source) events.push(event);
       })();
@@ -830,9 +830,10 @@ describe('ClaudeRuntime', () => {
       };
       return { handle, events, consumed, emit };
     }
-    const completes = (events: AgentEvent[]) =>
-      events.filter((e): e is Extract<AgentEvent, { type: 'complete' }> => e.type === 'complete');
-    const errors = (events: AgentEvent[]) =>
+    const completes = (events: RuntimeEvent[]) => events.filter((e) => e.type === 'complete');
+    const usage = (events: RuntimeEvent[]) =>
+      events.filter((e) => e.type === 'claude_result_usage');
+    const errors = (events: RuntimeEvent[]) =>
       events.filter((e): e is AgentErrorEvent => e.type === 'error');
 
     afterEach(() => vi.unstubAllEnvs());
@@ -868,13 +869,17 @@ describe('ClaudeRuntime', () => {
       expect((handle.stdout as PassThrough).writableEnded).toBe(false);
       const done = completes(events);
       expect(done).toHaveLength(1);
-      // Intermediate accounting is carried, not dropped (parity with summing).
-      expect(done[0]).toMatchObject({
-        result: 'Phase 1 implemented',
-        totalInputTokens: 23,
-        totalOutputTokens: 8,
-      });
-      expect(done[0]?.costUsd).toBeCloseTo(0.021);
+      expect(done[0]).toMatchObject({ result: 'Phase 1 implemented' });
+      expect(usage(events)).toMatchObject([
+        {
+          cumulativeCostUsd: 0.001,
+          totalInputTokens: 3,
+          totalOutputTokens: 1,
+          freshSession: kind === 'spawn',
+          sessionId: SESSION,
+        },
+        { cumulativeCostUsd: 0.02, totalInputTokens: 20, totalOutputTokens: 7 },
+      ]);
       expect(errors(events)).toEqual([]);
       expect(
         events.some(
@@ -913,8 +918,9 @@ describe('ClaudeRuntime', () => {
       emit(init(), backgroundStarted(), result('Waiting on the broad suite.'));
       await consumed;
       expect(handle.kill).toHaveBeenCalledOnce();
-      // The result is retained for accounting, then the turn is reported unfinished.
-      expect(completes(events)).toHaveLength(1);
+      // The usage is retained for accounting, without completing the turn.
+      expect(usage(events)).toHaveLength(1);
+      expect(completes(events)).toEqual([]);
       const fatal = errors(events).filter((e) => e.fatal);
       expect(fatal).toHaveLength(1);
       expect(fatal[0]).toMatchObject({ turnInterrupted: true });
@@ -964,6 +970,7 @@ describe('ClaudeRuntime', () => {
       expect(fatal).toHaveLength(1);
       expect(fatal[0]).toMatchObject({ turnInterrupted: true });
       expect(fatal[0]?.message).toContain('while still working after an intermediate result');
+      expect(usage(events)).toMatchObject([{ cumulativeCostUsd: 0.01, totalInputTokens: 10 }]);
     });
 
     it.each([
@@ -1224,7 +1231,10 @@ describe('ClaudeRuntime', () => {
       ).toBe(false);
     });
 
-    it('throws ResumeSessionNotFoundError when Claude reports the session is missing', async () => {
+    it.each([
+      false,
+      true,
+    ])('falls back on a missing session (error result: %s)', async (errorResult) => {
       // Regression: a fresh container has no `~/.claude/projects/<id>.jsonl`,
       // so `--resume <id>` prints "No conversation found with session ID: …"
       // to stderr and exits. Without this throw, pod-manager's fallback to a
@@ -1236,19 +1246,30 @@ describe('ClaudeRuntime', () => {
       runtime.setClaudeSessionId('sess-missing', 'stale-session-uuid');
 
       setTimeout(() => {
-        handle.stderr.write('No conversation found with session ID: stale-session-uuid\n');
+        const message = 'No conversation found with session ID: stale-session-uuid';
+        if (errorResult)
+          emitLine(handle.stdout as PassThrough, {
+            type: 'result',
+            is_error: true,
+            errors: [message],
+            total_cost_usd: 0,
+            session_id: 'stale-session-uuid',
+          });
+        handle.stderr.write(`${message}\n`);
         handle.finish(1);
       }, 10);
 
       let caught: unknown;
+      const events: RuntimeEvent[] = [];
       try {
-        for await (const _ of runtime.resume('sess-missing', 'msg', 'c1')) {
-          /* consume */
-        }
+        for await (const event of runtime.resume('sess-missing', 'msg', 'c1')) events.push(event);
       } catch (err) {
         caught = err;
       }
 
+      expect(
+        events.some((e) => e.type === 'claude_result_usage' || (e.type === 'error' && e.fatal)),
+      ).toBe(false);
       expect(caught).toBeInstanceOf(ResumeSessionNotFoundError);
       expect((caught as ResumeSessionNotFoundError).claudeSessionId).toBe('stale-session-uuid');
       // The stale ID is dropped from the in-memory map so any retry doesn't reuse it.

@@ -49,6 +49,7 @@ import {
   type ApprovalSourceRewriteRepository,
   createApprovalSourceRewriteRepository,
 } from './approval-source-rewrite-repository.js';
+import { createClaudeCostCursor } from './claude-cost-cursor.js';
 import {
   COMPACT_JSON_FIELDS,
   COMPACT_POD_COLUMNS,
@@ -383,6 +384,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   deletionOwnership?: DeletionOwnership;
   fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
+  claudeCostCursor?: ReturnType<typeof createClaudeCostCursor>;
   hasUnansweredDecision?(podId: string): boolean;
   hasInfrastructureBlocker?(podId: string): boolean;
   insert(pod: NewPod): void;
@@ -953,6 +955,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     dispatchPreflight,
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,
+    claudeCostCursor: createClaudeCostCursor(db),
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     hasInfrastructureBlocker: (podId) =>
       Boolean(

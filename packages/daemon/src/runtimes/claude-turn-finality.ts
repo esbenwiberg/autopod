@@ -1,4 +1,4 @@
-import type { AgentCompleteEvent, AgentEvent } from '@autopod/shared';
+import type { AgentCompleteEvent, RuntimeEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { resolveStuckRunningThresholdMs } from '../util/stuck-running-threshold.js';
 import type { ClaudeStreamEvent } from './claude-stream-parser.js';
@@ -183,32 +183,6 @@ function isTurnFrame(raw: ClaudeStreamEvent): boolean {
   );
 }
 
-type Usage = Pick<
-  AgentCompleteEvent,
-  | 'totalInputTokens'
-  | 'totalOutputTokens'
-  | 'cachedInputTokens'
-  | 'cacheCreationInputTokens'
-  | 'costUsd'
->;
-const USAGE_KEYS = [
-  'totalInputTokens',
-  'totalOutputTokens',
-  'cachedInputTokens',
-  'cacheCreationInputTokens',
-  'costUsd',
-] as const;
-
-function addUsage(base: Usage | null, next: Usage): Usage {
-  const sum: Usage = {};
-  for (const key of USAGE_KEYS) {
-    const a = base?.[key];
-    const b = next[key];
-    if (a !== undefined || b !== undefined) sum[key] = (a ?? 0) + (b ?? 0);
-  }
-  return sum;
-}
-
 /**
  * Claude-only turn finality (#648).
  *
@@ -217,8 +191,8 @@ function addUsage(base: Usage | null, next: Usage): Usage {
  * resumed session can settle leftover work before the new prompt. A `result` is
  * therefore *held* rather than forwarded:
  *
- * - more turn frames after it → it was intermediate: no kill, its usage is
- *   carried into the next released `complete`, and a status notice is emitted;
+ * - more turn frames after it → it was intermediate: no kill, and a status
+ *   notice is emitted. Result usage is forwarded independently of finality;
  * - pending non-ambient background work, no `report_task_summary` in this
  *   invocation and `awaitBackground()` → bounded wait for the CLI to continue;
  *   when the work drains, the CLI gets one grace window to start the next turn;
@@ -234,7 +208,7 @@ export function createClaudeTurnFinality(options: ClaudeTurnFinalityOptions) {
   let held: AgentCompleteEvent | null = null;
   let heldForBackground = false;
   let heldPendingTasks = 0;
-  let carried: Usage | null = null;
+  let continued = false;
   let continuationNotice = false;
   let reported = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -277,8 +251,7 @@ export function createClaudeTurnFinality(options: ClaudeTurnFinalityOptions) {
   };
 
   const hold = (event: AgentCompleteEvent) => {
-    held = carried ? { ...event, ...addUsage(carried, event) } : event;
-    carried = null;
+    held = event;
     closedBy = null;
     heldPendingTasks = tasks.size;
     heldForBackground =
@@ -302,7 +275,7 @@ export function createClaudeTurnFinality(options: ClaudeTurnFinalityOptions) {
     const changed = tasks.observe(raw);
     if (held && isTurnFrame(raw)) {
       // The session continued: the held result was intermediate.
-      carried = addUsage(null, held);
+      continued = true;
       held = null;
       heldForBackground = false;
       clearTimer();
@@ -315,7 +288,7 @@ export function createClaudeTurnFinality(options: ClaudeTurnFinalityOptions) {
     }
   }
 
-  async function* wrap(source: AsyncIterable<AgentEvent>): AsyncIterable<AgentEvent> {
+  async function* wrap(source: AsyncIterable<RuntimeEvent>): AsyncIterable<RuntimeEvent> {
     try {
       for await (const event of source) {
         if (continuationNotice) {
@@ -349,10 +322,9 @@ export function createClaudeTurnFinality(options: ClaudeTurnFinalityOptions) {
                 };
         else verdict = { kind: 'final' };
         held = null;
-        // Released for accounting and the result text; an interrupted verdict is
-        // reported as a fatal error after verified termination.
-        yield final;
-      } else if (carried) {
+        // Only a finished turn may settle completion, validation or a soft budget pause.
+        if (verdict.kind === 'final') yield final;
+      } else if (continued) {
         verdict = { kind: 'active' };
       }
     } finally {

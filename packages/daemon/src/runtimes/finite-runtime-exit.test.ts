@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import { type AgentEvent, AutopodError } from '@autopod/shared';
+import { AutopodError, type RuntimeEvent } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -57,7 +57,7 @@ describe('finite CLI exit evidence', () => {
     rejected,
   }) => {
     const { stdout, stderr, events } = fixture(kind, rejected);
-    const retained: AgentEvent[] = [];
+    const retained: RuntimeEvent[] = [];
     const consume = (async () => {
       for await (const event of events) retained.push(event);
     })();
