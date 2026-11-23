@@ -55,7 +55,14 @@ struct DecisionReplySheet: View {
           HStack(alignment: .bottom, spacing: 8) {
             TextField("Type your reply…", text: Binding(get: { interaction.snapshot.text }, set: { interaction.edit($0) }), axis: .vertical)
               .lineLimit(1...8)
-              .textFieldStyle(.roundedBorder).disabled(!snapshot.canEdit)
+              // Match the multiline Overview editor. Leave the question's ScrollView
+              // to absorb height changes instead of compressing the reply.
+              .textFieldStyle(.plain)
+              .fixedSize(horizontal: false, vertical: true)
+              .padding(8)
+              .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+              .layoutPriority(1)
+              .disabled(!snapshot.canEdit)
               .onSubmit { submit(interaction) }
             Button { submit(interaction) } label: { Image(systemName: "paperplane.fill") }
               .buttonStyle(.borderedProminent).tint(.orange)
