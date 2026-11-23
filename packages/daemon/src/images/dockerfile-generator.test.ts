@@ -90,14 +90,18 @@ describe('getBaseImage', () => {
 describe('base image templates', () => {
   it('pins managed and system-decision OpenAI runtimes too', () => {
     const templatesDir = path.resolve(import.meta.dirname, '../../../../templates');
-    expect(fs.readFileSync(path.join(templatesDir, 'managed/Dockerfile.codex-local'), 'utf-8'))
-      .toContain('@openai/codex@0.171.0');
+    expect(
+      fs.readFileSync(path.join(templatesDir, 'managed/Dockerfile.codex-local'), 'utf-8'),
+    ).toContain('@openai/codex@0.171.0');
     for (const name of ['managed/Dockerfile.codex-portfolio', 'system/Dockerfile.decision']) {
       const content = fs.readFileSync(path.join(templatesDir, name), 'utf-8');
       expect(content, name).toContain('ARG CODEX_VERSION=0.171.0');
       expect(content, name).toContain('@openai/codex@${CODEX_VERSION}');
     }
-    const decision = fs.readFileSync(path.join(templatesDir, 'system/Dockerfile.decision'), 'utf-8');
+    const decision = fs.readFileSync(
+      path.join(templatesDir, 'system/Dockerfile.decision'),
+      'utf-8',
+    );
     expect(decision).toContain('ARG PI_VERSION=1.6.0');
     expect(decision).toContain('@earendil-works/pi-coding-agent@${PI_VERSION}');
   });

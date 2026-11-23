@@ -6,6 +6,41 @@ import { inspectExecutionPreflight } from './execution-preflight.js';
 const pod = { runtime: 'claude', model: 'test', options: { validate: true } } as Pod;
 const profile = { containerMemoryGb: 4 } as Profile;
 afterEach(() => vi.useRealTimers());
+it.each([
+  'worker',
+  'reviewer',
+] as const)('blocks a stale GPT-6.2 %s image before launch and admits the pinned CLI', async (subject) => {
+  for (const model of ['gpt-6.2-sol', 'gpt-6.2-astra']) {
+    for (const version of ['0.170.9', '0.171.0']) {
+      const cm = createMockContainerManager();
+      const original = cm.execInContainer;
+      cm.execInContainer = vi.fn(async (id, command, options) =>
+        command[0] === 'codex' && command[1] === '--version'
+          ? { stdout: `codex-cli ${version}\n`, stderr: '', exitCode: 0 }
+          : original(id, command, options),
+      );
+      const result = await inspectExecutionPreflight(
+        cm,
+        'container',
+        { ...pod, runtime: 'codex', model },
+        profile,
+        subject === 'reviewer' ? 'review' : 'coding',
+        subject,
+      );
+      if (version === '0.170.9') {
+        expect(result.status).toBe('blocked');
+        expect(result.diagnostics).toContainEqual({
+          code: 'PREFLIGHT_RUNTIME_INCOMPATIBLE',
+          detail: `Codex CLI ${version} is incompatible with ${model}; Autopod requires 0.171.0 or newer. Rebuild the codex base/warm image.`,
+        });
+      } else {
+        expect(result.status).toBe('checked');
+        expect(result.cliVersion).toBe('0.171.0');
+      }
+    }
+  }
+});
+
 it('blocks known insufficient memory and unknown explicitly required CPU without pretending metadata is verified', async () => {
   const cm = createMockContainerManager();
   cm.getExecutionMetadata = vi.fn().mockResolvedValue({
