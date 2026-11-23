@@ -17,7 +17,7 @@ RUN chmod 0755 /usr/local/bin/autopod-check-git \
     && git config --system gc.auto 0
 RUN usermod -l autopod node && groupmod -n autopod node \
     && usermod -d /home/autopod -m autopod
-RUN npm install -g @openai/codex@0.160.1
+RUN npm install -g @openai/codex@0.171.0
 USER autopod
 RUN autopod-check-git
 RUN autopod-check-jq

@@ -24,7 +24,7 @@ export const COMPILED_PROVIDER_MANIFEST = {
   manifestVersion: PROVIDER_MANIFEST_VERSION,
   piCompatibility: {
     packageName: '@earendil-works/pi-coding-agent',
-    packageVersion: '0.80.6',
+    packageVersion: '1.6.0',
     source: 'pinned-distribution',
   },
   providers: [
