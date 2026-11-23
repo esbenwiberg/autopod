@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { TURN_INTERRUPTED_FAILURE_CATEGORY } from './interrupted-turn.js';
 
 export const WORKER_RETRY_BACKOFFS_MS = [1_000, 5_000] as const;
 
@@ -136,6 +137,10 @@ export function workerRetryFailure(
         return 'transient';
       // Quota continuation is governed separately by the frozen failover policy.
       if (row.failure_category === 'quota_exhausted') return null;
+      // A verified daemon stop of an unfinished turn (#648) is not a worker
+      // failure: manual Rework continues it as after a completed turn. Nothing
+      // retries it automatically.
+      if (row.failure_category === TURN_INTERRUPTED_FAILURE_CATEGORY) return null;
       // Missing classification cannot grant an unrestricted retry. An unstarted
       // reservation still inherits its original failure rather than masking it.
       if (row.started_at !== null || row.previous_failure_id === null) return 'unknown';

@@ -15,6 +15,7 @@ import type {
   ContinuationResumeCalls,
 } from './continuation-ports.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
+import { assertAgentTurnNotInterrupted } from './interrupted-turn.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
@@ -157,6 +158,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
     assertBudgetCodingNotInterrupted(pod);
+    assertAgentTurnNotInterrupted(podRepo, pod);
     assertFailedValidationRecoverable(pod, podRepo.validationExecutions?.isSettled(pod));
     if (!pod.containerId)
       throw new AutopodError(
@@ -266,6 +268,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     }
     const pod = podRepo.getOrThrow(podId);
     assertBudgetCodingNotInterrupted(pod);
+    assertAgentTurnNotInterrupted(podRepo, pod);
     if (validationResumeRuns.has(podId)) {
       logger.info({ podId }, 'Coalesced duplicate validation Resume');
       return { action: 'revalidate' };

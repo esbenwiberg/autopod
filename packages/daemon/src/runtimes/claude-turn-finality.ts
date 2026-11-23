@@ -108,7 +108,7 @@ function positiveNumber(raw: string | undefined): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function resolveClaudeGraceMs(env: Record<string, string | undefined> = process.env) {
+function resolveClaudeGraceMs(env: Record<string, string | undefined> = process.env) {
   return positiveNumber(env.AUTOPOD_POST_COMPLETE_GRACE_MS) ?? DEFAULT_GRACE_MS;
 }
 
