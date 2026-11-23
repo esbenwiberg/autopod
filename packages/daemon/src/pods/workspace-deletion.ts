@@ -4,6 +4,7 @@ import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState } from '../runtimes/codex-state-store.js';
 import { runDeletionCleanup } from './deletion-cleanup.js';
 import { deletionOwnershipError } from './deletion-ownership.js';
+import { cleanupPreparedDependencies } from './prepared-dependency-snapshot.js';
 import { isTerminalState } from './state-machine.js';
 import { assertValidationDeletionAllowed } from './validation-recovery-policy.js';
 import type { WorkspaceDeletionCaptured } from './workspace-contracts.js';
@@ -134,6 +135,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
           name: 'runtime state',
           run: async () => {
             await runtimeStateDirs[pod.runtime]?.(podId);
+            await cleanupPreparedDependencies(podId);
           },
         },
       ],

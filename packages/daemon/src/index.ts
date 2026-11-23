@@ -85,6 +85,7 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { sweepPreparedDependencySnapshots } from './pods/prepared-dependency-snapshot.js';
 import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
 import { assertFinalizationPathAvailable } from './pods/retained-finalization-repository.js';
 import {
@@ -1484,6 +1485,22 @@ const sandboxOrphanReaperTimer = sandboxOrphanReaper
   : null;
 sandboxOrphanReaperTimer?.unref();
 
+// Prepared-dependency snapshots (#644) live only between a continuation teardown and the
+// next provisioning. Remove any whose pod is missing or settled, or that went stale.
+const sweepPreparedDependencies = (phase: string) =>
+  sweepPreparedDependencySnapshots((id) => podRepo.getOrThrow(id))
+    .then((removed) => {
+      if (removed.length)
+        logger.info({ removed, phase }, 'Removed stale prepared dependency snapshots');
+    })
+    .catch((err) => logger.warn({ err, phase }, 'Prepared dependency snapshot sweep failed'));
+void sweepPreparedDependencies('startup');
+const preparedDependencySweepTimer = setInterval(
+  () => void sweepPreparedDependencies('periodic'),
+  15 * 60 * 1000,
+);
+preparedDependencySweepTimer.unref();
+
 // Start listening
 try {
   await app.listen({ port: PORT, host: HOST });
@@ -1670,6 +1687,7 @@ async function shutdown(signal: string) {
   if (systemSandboxReaper) clearInterval(systemSandboxReaper);
   if (sandboxTerminalReaperTimer) clearInterval(sandboxTerminalReaperTimer);
   if (sandboxOrphanReaperTimer) clearInterval(sandboxOrphanReaperTimer);
+  clearInterval(preparedDependencySweepTimer);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

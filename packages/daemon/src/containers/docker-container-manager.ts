@@ -1,6 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
+  createReadStream,
+  createWriteStream,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -12,7 +14,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { PassThrough, Writable } from 'node:stream';
+import { PassThrough, Transform, Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -860,6 +863,78 @@ export class DockerContainerManager implements ContainerManager {
 
       (archiveStream as NodeJS.ReadableStream).pipe(extract);
     });
+  }
+
+  async exportPathArchive(
+    containerId: string,
+    containerPath: string,
+    hostFile: string,
+    options: { maxBytes: number; timeoutMs: number },
+  ): Promise<{ bytes: number; sha256: string }> {
+    this.assertNotRetained(containerId);
+    const deadline = Date.now() + options.timeoutMs;
+    const archive = (await boundedDockerCall(
+      this.docker.getContainer(containerId).getArchive({ path: containerPath }),
+      {
+        label: 'container.getArchive (exportPathArchive)',
+        timeoutMs: Math.min(DOCKER_CALL_TIMEOUTS.getArchive, options.timeoutMs),
+        logger: this.logger,
+        containerId,
+      },
+    )) as NodeJS.ReadableStream & { destroy?(error?: Error): void };
+    const hash = createHash('sha256');
+    let bytes = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length;
+        if (bytes > options.maxBytes) {
+          callback(new Error('Archive exceeds its byte limit'));
+          return;
+        }
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new Error('Archive export timed out')),
+      Math.max(0, deadline - Date.now()),
+    );
+    timer.unref?.();
+    try {
+      await pipeline(archive, limiter, createWriteStream(hostFile, { mode: 0o600 }), {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      archive.destroy?.();
+      throw controller.signal.aborted ? new Error('Archive export timed out') : error;
+    } finally {
+      clearTimeout(timer);
+    }
+    return { bytes, sha256: hash.digest('hex') };
+  }
+
+  async importPathArchive(
+    containerId: string,
+    hostFile: string,
+    containerDir: string,
+    options: { timeoutMs: number },
+  ): Promise<void> {
+    this.assertNotRetained(containerId);
+    const source = createReadStream(hostFile);
+    try {
+      await boundedDockerCall(
+        this.docker.getContainer(containerId).putArchive(source, { path: containerDir }),
+        {
+          label: 'container.putArchive (importPathArchive)',
+          timeoutMs: options.timeoutMs,
+          logger: this.logger,
+          containerId,
+        },
+      );
+    } finally {
+      source.destroy();
+    }
   }
 
   async extractManagedOutput(

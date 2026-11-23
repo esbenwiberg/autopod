@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ExecutionProvenance } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
@@ -9,9 +13,18 @@ import { createTestConfiguration } from '../test-utils/configuration-helpers.js'
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
 import { IsolatedReviewer } from '../validation/isolated-reviewer.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
-import { PREPARATION_SOURCE_PROBE } from './repository-preparation.js';
+import {
+  capturePreparedDependencySnapshot,
+  preparedDependenciesDirForPod,
+} from './prepared-dependency-snapshot.js';
+import {
+  OUTSIDE_WORKSPACE_WRITES_SCRIPT,
+  PREPARATION_DEPENDENCY_PROBE,
+  PREPARATION_SOURCE_PROBE,
+} from './repository-preparation.js';
 
 const fixtures: ReturnType<typeof createProvisioningFixture>[] = [];
+const readdirSyncSafe = (dir: string) => readdirSync(dir);
 afterEach(() => {
   vi.restoreAllMocks();
   for (const f of fixtures.splice(0).reverse()) f.close();
@@ -58,6 +71,7 @@ async function admitted(command: string | null = 'repo-owned-serial-prepare') {
     source: { head: 'a'.repeat(40), fingerprint: 'b'.repeat(64) },
     exitCode: 0 as number | undefined,
     prepareCalls: 0,
+    deps: 'e'.repeat(64),
     metadataCalls: 0,
     onPrepare: async () => {},
     onMetadata: () => {},
@@ -66,7 +80,17 @@ async function admitted(command: string | null = 'repo-owned-serial-prepare') {
   vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
     if (args[1][2] === PREPARATION_SOURCE_PROBE)
       return { exitCode: 0, stdout: JSON.stringify(state.source), stderr: '' };
-    if (args[1].some((arg) => arg.includes('set -e\nrepo-owned-serial-prepare'))) {
+    if (args[1][2] === PREPARATION_DEPENDENCY_PROBE)
+      return { exitCode: 0, stdout: JSON.stringify({ fingerprint: state.deps }), stderr: '' };
+    if (args[1][2] === OUTSIDE_WORKSPACE_WRITES_SCRIPT)
+      return { exitCode: 0, stdout: 'none\n', stderr: '' };
+    if (args[1][2]?.startsWith('find /workspace'))
+      return { exitCode: 0, stdout: '/workspace/node_modules\n', stderr: '' };
+    if (
+      args[1].some(
+        (arg) => arg.startsWith('set -e\n') && arg.endsWith('\nrepo-owned-serial-prepare'),
+      )
+    ) {
       state.prepareCalls++;
       await state.onPrepare();
       return {
@@ -154,6 +178,130 @@ describe('repository readiness production runtime admission', () => {
     expect(t.rows().at(-1)?.repositoryPreparation).toMatchObject({
       status: 'passed',
       source: t.state.source,
+    });
+    // #644: per-stage timing is durable in provenance and summarized in pod activity.
+    const preparation = t.f.podRepo.executionProvenance?.latest(t.id)?.repositoryPreparation;
+    expect(preparation?.timing).toMatchObject({
+      commandMs: expect.any(Number),
+      preflightMs: expect.any(Number),
+      stages: [{ index: 1, label: 'repo-owned-serial-prepare' }],
+    });
+    const events = JSON.stringify(t.f.db.prepare('SELECT payload FROM events').all());
+    expect(events).toContain('Repository preparation passed in');
+  });
+
+  describe('prepared dependency snapshots (#644)', () => {
+    const previous = process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR;
+    let dir: string;
+    afterEach(() => {
+      if (previous === undefined) delete process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR;
+      else process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR = previous;
+      rmSync(dir, { recursive: true, force: true });
+    });
+    function useSnapshotStore() {
+      dir = mkdtempSync(join(tmpdir(), 'readiness-snapshots-'));
+      process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR = dir;
+    }
+    function staleSnapshot(podId: string) {
+      const snapshot = preparedDependenciesDirForPod(podId);
+      mkdirSync(snapshot, { recursive: true });
+      writeFileSync(join(snapshot, 'manifest.json'), '{}');
+      return snapshot;
+    }
+    function archiveSeam(t: Awaited<ReturnType<typeof admitted>>) {
+      const imports: string[] = [];
+      Object.assign(t.f.cm, {
+        exportPathArchive: vi.fn(async (_id: string, _path: string, file: string) => {
+          writeFileSync(file, 'tar');
+          return { bytes: 3, sha256: createHash('sha256').update('tar').digest('hex') };
+        }),
+        importPathArchive: vi.fn(async (_id: string, _file: string, target: string) => {
+          imports.push(target);
+        }),
+      });
+      return imports;
+    }
+
+    it('fresh launches discard a stale snapshot and prepare in full', async () => {
+      useSnapshotStore();
+      const t = await admitted();
+      const imports = archiveSeam(t);
+      const snapshot = staleSnapshot(t.id);
+      await t.manager.processPod(t.id);
+      expect(t.state.prepareCalls).toBe(1);
+      expect(imports).toEqual([]);
+      expect(() => readdirSyncSafe(snapshot)).toThrow();
+      expect(t.rows().at(-1)?.repositoryPreparation?.reuse).toBeUndefined();
+    });
+
+    it('validation preparation never consumes a snapshot', async () => {
+      useSnapshotStore();
+      const t = await admitted();
+      const imports = archiveSeam(t);
+      t.f.podRepo.update(t.id, {
+        status: 'failed',
+        containerId: 'container-123',
+        worktreePath: '/tmp/readiness-final-source',
+        startCommitSha: 'a'.repeat(40),
+      });
+      const snapshot = staleSnapshot(t.id);
+      await t.manager.revalidateSession(t.id, { force: true, checksOnly: true });
+      expect(t.state.prepareCalls).toBe(1);
+      expect(imports).toEqual([]);
+      expect(readdirSyncSafe(snapshot)).toEqual(['manifest.json']);
+      expect(
+        t
+          .rows()
+          .filter((row) => row.repositoryPreparation)
+          .every((row) => row.repositoryPreparation?.reuse === undefined),
+      ).toBe(true);
+    });
+
+    it('a continuation on the same worktree reuses unchanged dependencies; a lockfile change forces preparation', async () => {
+      useSnapshotStore();
+      for (const lockChanged of [false, true]) {
+        const t = await admitted();
+        const imports = archiveSeam(t);
+        await t.manager.processPod(t.id);
+        expect(t.state.prepareCalls).toBe(1);
+        const provenance = t.f.podRepo.executionProvenance?.latest(t.id);
+        const captured = await capturePreparedDependencySnapshot({
+          podId: t.id,
+          executionTarget: 'local',
+          containerId: 'container-123',
+          cm: t.f.cm,
+          evidence: provenance?.repositoryPreparation,
+          imageDigest: provenance?.imageDigest,
+        });
+        expect(captured).toMatchObject({ status: 'captured' });
+        if (lockChanged) t.state.deps = '9'.repeat(64);
+        const worktreePath = t.f.podRepo.getOrThrow(t.id).worktreePath;
+        t.f.podRepo.update(t.id, {
+          status: 'queued',
+          containerId: null,
+          recoveryWorktreePath: worktreePath,
+        });
+        await t.manager.processPod(t.id);
+        const preparation = t.rows().at(-1)?.repositoryPreparation;
+        if (lockChanged) {
+          expect(t.state.prepareCalls).toBe(2);
+          expect(imports).toEqual([]);
+          expect(preparation?.reuse).toEqual({
+            decision: 'refused',
+            reason: 'dependency-inputs-changed',
+          });
+        } else {
+          expect(t.state.prepareCalls).toBe(1);
+          expect(imports).toEqual(['/workspace']);
+          expect(preparation).toMatchObject({
+            status: 'passed',
+            reuse: { decision: 'reused', sourceContainerId: 'container-123' },
+          });
+          const events = JSON.stringify(t.f.db.prepare('SELECT payload FROM events').all());
+          expect(events).toContain('Reusing prepared dependencies from the previous container');
+        }
+        expect(() => readdirSyncSafe(preparedDependenciesDirForPod(t.id))).toThrow();
+      }
     });
   });
 

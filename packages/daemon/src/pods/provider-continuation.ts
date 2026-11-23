@@ -7,6 +7,10 @@ import type {
 import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import type { ContinuationCaptured, ContinuationLiveDependencies } from './continuation-ports.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
+import {
+  capturePreparedDependencySnapshot,
+  logCaptureResult,
+} from './prepared-dependency-snapshot.js';
 import { writeProviderFailoverHandoff } from './recovery-context.js';
 import { workerBindingHash } from './worker-retry-history.js';
 
@@ -103,6 +107,30 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
       visibleProviderHandoffActivity(pod.id),
     );
     assertNoInfrastructureBlocker(podRepo, pod.id);
+  }
+
+  /**
+   * Save the torn-down container's prepared dependencies for the continuation (#644).
+   * Best effort and self-bounded; it never fails or blocks the continuation beyond the
+   * capture bound, and a skipped capture just means the next provisioning prepares in full.
+   */
+  async function capturePreparedDependencies(pod: Pod, containerId: string): Promise<void> {
+    try {
+      const provenance = podRepo.executionProvenance?.latest(pod.id) ?? null;
+      const evidence = provenance?.repositoryPreparation;
+      if (!evidence || evidence.status === 'not-configured') return;
+      const result = await capturePreparedDependencySnapshot({
+        podId: pod.id,
+        executionTarget: pod.executionTarget,
+        containerId,
+        cm: containerManagerFactory.get(pod.executionTarget),
+        evidence,
+        imageDigest: provenance?.imageDigest ?? null,
+      });
+      emitActivityStatus(pod.id, logCaptureResult(logger, pod.id, result));
+    } catch (err) {
+      logger.warn({ err, podId: pod.id }, 'Prepared dependency snapshot capture failed');
+    }
   }
 
   /**
@@ -227,6 +255,8 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         logger.warn({ err, podId }, 'Provider-limit worktree synchronization failed; pausing');
         return 'not_queued';
       }
+      await capturePreparedDependencies(source, source.containerId);
+      assertNoInfrastructureBlocker(podRepo, podId);
     }
     if (source.containerId) {
       const cm = containerManagerFactory.get(source.executionTarget);
@@ -499,6 +529,8 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
           pod.id,
           pod.executionTarget,
         );
+        assertNoInfrastructureBlocker(podRepo, podId);
+        await capturePreparedDependencies(pod, pod.containerId);
         assertNoInfrastructureBlocker(podRepo, podId);
         await stopSandboxPreviewProxy(pod.id);
         assertNoInfrastructureBlocker(podRepo, podId);

@@ -404,6 +404,87 @@ describe('provider continuation', () => {
     expect(f.pod()).toMatchObject({ status: 'queued', containerId: null });
     expect(f.captured.enqueueSession).toHaveBeenCalledOnce();
   });
+  describe('prepared dependency capture (#644)', () => {
+    const previous = process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR;
+    afterEach(() => {
+      if (previous === undefined) delete process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR;
+      else process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR = previous;
+    });
+    function withPreparedContainer(f: ReturnType<typeof fixture>, failExport = false) {
+      process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR = join(f.directory, '.snapshots');
+      Object.assign(f.podRepo, {
+        executionProvenance: {
+          record: vi.fn(),
+          latest: () => ({
+            imageDigest: `sha256:${'f'.repeat(64)}`,
+            repositoryPreparation: {
+              status: 'passed',
+              containerId: 'container',
+              commandHash: 'a'.repeat(64),
+              configurationHash: 'b'.repeat(64),
+              source: { head: 'c'.repeat(40), fingerprint: 'd'.repeat(64) },
+              exitCode: 0,
+              dependencyInputs: 'e'.repeat(64),
+              outsideWorkspaceWrites: 'none',
+            },
+          }),
+        },
+      });
+      vi.mocked(f.cm.execInContainer).mockImplementation(async () => ({
+        exitCode: 0,
+        stdout: '/workspace/node_modules\n',
+        stderr: '',
+      }));
+      Object.assign(f.cm, {
+        importPathArchive: vi.fn(),
+        exportPathArchive: vi.fn(async (_id: string, _path: string, file: string) => {
+          f.order.push('capture');
+          if (failExport) throw new Error('docker unavailable');
+          writeFileSync(file, 'tar');
+          return { bytes: 3, sha256: '0'.repeat(64) };
+        }),
+      });
+      vi.mocked(f.runtime.abort).mockImplementationOnce(async () => {
+        f.order.push('abort');
+      });
+      vi.mocked(f.cm.kill).mockImplementationOnce(async () => {
+        f.order.push('kill');
+      });
+    }
+
+    it('captures after the runtime drain and sync-back, before the automatic teardown', async () => {
+      const f = fixture();
+      withPreparedContainer(f);
+      expect(await f.c.handleProviderLimit('continuation', classification)).toBe('queued');
+      const relevant = f.order.filter((step) =>
+        ['abort', 'sync', 'capture', 'kill'].includes(step),
+      );
+      expect(relevant).toEqual(['abort', 'sync', 'capture', 'kill']);
+      expect(f.order.some((line) => line.startsWith('Prepared dependencies saved'))).toBe(true);
+      expect(
+        readFileSync(join(f.directory, '.snapshots', 'continuation', 'manifest.json'), 'utf8'),
+      ).toContain('"sourceContainerId":"container"');
+    });
+
+    it('captures before the operator-selected teardown', async () => {
+      const f = fixture();
+      withPreparedContainer(f);
+      await f.c.continueProvider('continuation', target);
+      expect(f.order.filter((step) => ['abort', 'sync', 'capture', 'kill'].includes(step))).toEqual(
+        ['abort', 'sync', 'capture', 'kill'],
+      );
+      expect(f.pod().status).toBe('queued');
+    });
+
+    it('never blocks the continuation when capture fails', async () => {
+      const f = fixture();
+      withPreparedContainer(f, true);
+      expect(await f.c.handleProviderLimit('continuation', classification)).toBe('queued');
+      expect(f.order).toContain('kill');
+      expect(f.order).toContain('Prepared dependencies not saved for continuation — export-failed');
+      expect(f.pod()).toMatchObject({ status: 'queued', containerId: null });
+    });
+  });
   it.each([
     'same',
     'alternate',
