@@ -43,6 +43,19 @@ npm install --prefix /tmp/happy-falcon-pi-before --no-audit --no-fund \
   @earendil-works/pi-coding-agent@0.80.6
 ```
 
+From the repository root, reproduce the credential-free version, catalog and
+paused Goal checks with:
+
+```sh
+node scripts/check-gpt62-runtime-packages.mjs /tmp/happy-falcon-runtimes
+AUTOPOD_CODEX_GOAL_FIXTURE_CLI=/tmp/happy-falcon-runtimes/node_modules/.bin/codex \
+  npx pnpm --filter @autopod/daemon exec vitest run src/runtimes/codex-goal-protocol.native.test.ts
+```
+
+Both checks also passed on macOS with Node 24.22.1. The native Goal fixture
+verifies that a paused Goal persists across fresh app-server processes without
+resuming it. These checks do not exercise inference.
+
 - Codex reports `codex-cli 0.171.0`; Pi reports `1.6.0`.
   Codex `debug models --bundled` contains both explicit IDs. App-server stdio
   `initialize` followed by `model/list` succeeds without credentials and lists both.

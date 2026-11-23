@@ -16,6 +16,7 @@ describe('verifyAgentCli', () => {
   it.each([
     'gpt-6.2-sol',
     'gpt-6.2-astra',
+    'gpt-6.2',
   ])('rejects stale images for %s and admits the supported boundary', async (model) => {
     for (const version of ['0.160.1', '0.170.9']) {
       await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).rejects.toMatchObject({
@@ -53,7 +54,14 @@ describe('verifyAgentCli', () => {
     await expect(verifyAgentCli(codexAt('0.159.9'), 'c', 'codex', 'gpt-6-astra')).rejects.toThrow(
       '0.160.1 or newer',
     );
-    for (const model of ['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-terra'])
+    for (const model of [
+      'gpt-6-sol',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-6.1-sol',
+      'gpt-6.1-astra',
+      'gpt-6.1-terra',
+    ])
       for (const version of ['0.160.1', '0.161.0', '1.0.0'])
         await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).resolves.toMatchObject({
           cliVersion: version,

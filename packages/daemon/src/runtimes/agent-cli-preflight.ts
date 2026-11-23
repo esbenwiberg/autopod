@@ -13,7 +13,7 @@ const minimumCodexVersionForGpt6 = [0, 160, 1] as const;
 /** Supported image pin containing the GPT-6.2 Sol and Astra catalogs. */
 const minimumCodexVersionForGpt62 = [0, 171, 0] as const;
 const codexMinimum = (model: string | null | undefined) =>
-  model?.startsWith('gpt-6.2-')
+  model?.startsWith('gpt-6.2-') || model === 'gpt-6.2'
     ? minimumCodexVersionForGpt62
     : model?.startsWith('gpt-6')
       ? minimumCodexVersionForGpt6
