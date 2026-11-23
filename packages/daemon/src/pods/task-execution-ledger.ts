@@ -84,6 +84,16 @@ export interface TaskExecutionLedger
     cycle: number,
     failureCategory?: string,
   ): boolean;
+  /** Most recent worker run recorded for this pod lifecycle, settled or not. */
+  latestRun?(
+    podId: string,
+    generation: number,
+  ): {
+    cycle: number;
+    outcome: 'completed' | 'failed' | 'paused' | 'stopped' | null;
+    failureCategory: string | null;
+    endedAt: string | null;
+  } | null;
   /** Prevent application deletion from erasing unresolved ownership anywhere in this task. */
   assertCanDelete(podId: string): void;
   /** Across this logical task, including retained failed runs in linked pods. */
@@ -678,6 +688,22 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       } catch {
         return false;
       }
+    },
+    latestRun(podId, generation) {
+      return (
+        (db
+          .prepare(`SELECT cycle, outcome, failure_category AS failureCategory, ended_at AS endedAt
+          FROM task_agent_runs WHERE pod_id = ? AND generation = ?
+          ORDER BY cycle DESC, started_at DESC, id DESC LIMIT 1`)
+          .get(podId, generation) as
+          | {
+              cycle: number;
+              outcome: 'completed' | 'failed' | 'paused' | 'stopped' | null;
+              failureCategory: string | null;
+              endedAt: string | null;
+            }
+          | undefined) ?? null
+      );
     },
     assertCanDelete(podId) {
       const retained = db

@@ -57,6 +57,68 @@ it('does not route a hard budget stop into validation-only Resume, including leg
   expect(f.calls.handleCompletion).not.toHaveBeenCalled();
   expect(f.captured.enqueueSession).not.toHaveBeenCalled();
 });
+describe('agent-stage failure Resume gate (#670)', () => {
+  function failedRun(
+    f: ReturnType<typeof fixture>,
+    outcome: 'completed' | 'failed' | 'paused',
+    category: string | null = 'unknown',
+  ) {
+    const pod = f.pod();
+    f.pods.completionJournal?.begin(pod);
+    const cycle = f.pods.completionJournal?.get(pod.id, pod.lifecycleGeneration)?.cycle ?? 1;
+    const run = f.pods.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, cycle, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    if (!run) throw new Error('Missing run ledger');
+    f.pods.taskExecutions?.finishRun(run, outcome, outcome === 'completed' ? null : category);
+  }
+
+  it.each([
+    'failed',
+    'paused',
+  ] as const)('refuses validation-only Resume after a %s worker run and points to coding continuation', async (outcome) => {
+    const f = fixture();
+    failedRun(f, outcome);
+    const resume = f.c.resumePod.call(f.calls, 'control');
+    await expect(resume).rejects.toMatchObject({ code: 'AGENT_STAGE_FAILED', statusCode: 409 });
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toThrow(
+      /ap rework control.*ap continue-provider control --primary/,
+    );
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+    expect(f.captured.pushAndCreatePr).not.toHaveBeenCalled();
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+  });
+
+  it('refuses push-only Resume too, even with an older passing validation', async () => {
+    const f = fixture();
+    f.pods.update('control', {
+      lastValidationResult: validation(),
+    });
+    failedRun(f, 'failed');
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toMatchObject({
+      code: 'AGENT_STAGE_FAILED',
+    });
+    expect(f.captured.pushAndCreatePr).not.toHaveBeenCalled();
+  });
+
+  it('names the preservation state in the refusal', async () => {
+    const f = fixture();
+    failedRun(f, 'failed');
+    f.pods.completionJournal?.settle(f.pod());
+    f.pods.completionJournal?.mark(f.pod(), 'ready', true);
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toThrow(/Source saved: \d{4}-/);
+  });
+
+  it('still revalidates a pod whose worker completed and failed in validation', async () => {
+    const f = fixture();
+    failedRun(f, 'completed');
+    f.pods.completionJournal?.mark(f.pod(), 'finalizing');
+    await f.c.resumePod.call(f.calls, 'control');
+    expect(f.calls.revalidateSession).toHaveBeenCalledWith('control', { force: true });
+  });
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) close();
