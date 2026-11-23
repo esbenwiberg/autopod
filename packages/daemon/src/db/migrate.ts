@@ -85,6 +85,29 @@ function inspectMigrations(db: Database.Database, migrationsDir: string) {
     }
   }
 
+  // The isolated parent trial used 273–276 before main assigned those numbers
+  // to unrelated migrations. Refuse that lineage before running any SQL from
+  // the renumbered parent chain (including when the trial is only partly applied).
+  if (namesByVersion.get(277) === '277_parent_private_candidates.sql' && currentVersion >= 273) {
+    const recorded = db.prepare('SELECT 1 FROM schema_version WHERE version=?');
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
+    const mainline = [
+      [273, 'sandbox_compute_cost'],
+      [274, 'retained_allocation_births'],
+      [275, 'retained_cleanup_requests'],
+      [276, 'unmeasured_usage_acceptances'],
+    ] as const;
+    if (
+      mainline.some(
+        ([version, root]) =>
+          currentVersion >= version && (!recorded.get(version) || !table.get(root)),
+      ) ||
+      (table.get('parent_private_candidates') && !recorded.get(277))
+    ) {
+      throw new Error('Unpublished or mixed parent migration lineage; database retained unchanged');
+    }
+  }
+
   // No released database has pre-269 orchestration runs. Even an empty/missing
   // custody table does not establish that such a run was nonoperator. Do not
   // guess ownership when upgrading a populated unpublished intermediate build.

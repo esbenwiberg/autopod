@@ -6,6 +6,7 @@ import { canonical } from './canonical.js';
 import { signalLocalRun } from './local-run-signals.js';
 import type { ManagedControls } from './managed-controls.js';
 import type { ManagedPodService } from './managed-service.js';
+import { isPrivateParentCommit, isPrivateSubmission } from './private-commit-policy.js';
 
 /** Attempt completion packages intentional output only after observed writer exit. */
 export class ManagedArtifactPipeline {
@@ -32,6 +33,8 @@ export class ManagedArtifactPipeline {
       throw new Error('artifact-writer-not-observed-exited');
     if (!['validating', 'validated', 'review_required'].includes(row.state)) return;
     const spec = JSON.parse(row.request_json) as ManagedPodRequest;
+    const privateCommit = isPrivateParentCommit(spec);
+    if (privateCommit && row.state !== 'validating') return;
     const storedLimitations = this.service.db
       .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
       .get(podId) as { limitations_json: string } | undefined;
@@ -58,6 +61,15 @@ export class ManagedArtifactPipeline {
       .get(podId);
     let stage = 'artifact-export';
     try {
+      // The explicit submission is a private source input, not a generic
+      // downloadable artifact. Read it only through the claimed collector.
+      if (isPrivateSubmission(spec) && row.exit_code === 0) {
+        stage = 'private-collection';
+        if (!this.service.privateCommit) throw new Error('parent-private-commit-unavailable');
+        await this.service.privateCommit.finish(installation, podId);
+        return;
+      }
+      if (isPrivateSubmission(spec)) throw new Error('managed-agent-exit-failed');
       if (!frozen && spec.outputs.artifacts.mode !== 'none') {
         if (!this.service.runtime.extractOutput) throw new Error('managed-output-unavailable');
         await mkdir(this.stagingRoot, { recursive: true, mode: 0o700 });
@@ -76,6 +88,13 @@ export class ManagedArtifactPipeline {
       );
       // Preserve intentional worker artifacts even when validation subsequently fails.
       // Committed artifacts alone never establish acceptance or source-delivery authority.
+      if (privateCommit) {
+        stage = 'private-collection';
+        if (!this.service.privateCommit) throw new Error('parent-private-commit-unavailable');
+        await this.service.privateCommit.finish(installation, podId);
+        await rm(staging, { recursive: true, force: true }).catch(() => {});
+        return;
+      }
       if (spec.validation.autopod) {
         stage = 'source-candidate';
         if (!this.service.source || !this.service.validation)
@@ -156,7 +175,11 @@ export class ManagedArtifactPipeline {
       const limitation =
         error instanceof Error && error.message === 'managed-agent-exit-failed'
           ? 'agent-runtime-failed'
-          : `${stage}-incomplete`;
+          : privateCommit &&
+              error instanceof Error &&
+              error.message === 'parent-private-collection-uncertain'
+            ? 'private-collection-uncertain'
+            : `${stage}-incomplete`;
       const stored = this.service.db
         .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
         .get(podId) as { limitations_json: string } | undefined;
@@ -166,7 +189,8 @@ export class ManagedArtifactPipeline {
         ON CONFLICT(pod_id) DO UPDATE SET limitations_json=excluded.limitations_json`)
         .run(podId, canonical([...new Set([...limitations, limitation])]));
       this.service.db
-        .prepare("UPDATE managed_pods SET state='review_required' WHERE pod_id=?")
+        .prepare(`UPDATE managed_pods SET state='review_required' WHERE pod_id=?
+          ${privateCommit ? "AND state='validating' AND revoked=0 AND stop_requested=0" : ''}`)
         .run(podId);
       signalLocalRun(this.service.db, installation);
       throw new Error(

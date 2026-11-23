@@ -224,6 +224,8 @@ public struct SessionResponse: Codable, Sendable {
   public let runningAt: String?
   public let completedAt: String?
   public let failureReason: String?
+  /// "budget" | "manual" | "provider_limit" while paused; nil otherwise or on older daemons.
+  public let pauseReason: String?
   public let updatedAt: String
   public let userId: String
   public let filesChanged: Int
@@ -323,7 +325,7 @@ public struct SessionResponse: Codable, Sendable {
     case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt, retainedDockerCustody
     case completionPolicy, researchFindings
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
-    case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
+    case createdAt, startedAt, runningAt, completedAt, failureReason, pauseReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
     case mergeBlockReason, plan, progress, reviewProgress, validationPhaseProgress, contract, claudeSessionId
     case outputMode

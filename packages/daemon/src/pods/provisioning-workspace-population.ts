@@ -7,6 +7,7 @@ import {
 import type { PrMergeStatus } from '../interfaces/index.js';
 import { shellQuote } from '../util/shell-quote.js';
 import { recoveryFileExclusions } from '../worktrees/recovery-fork-source.js';
+import { PORTABLE_GIT_EXCLUDES } from '../worktrees/source-adoption-git.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { renderPiHandoffFile } from './continuation-policy.js';
 import type { ContainerPrepared } from './provisioning-container.js';
@@ -24,6 +25,25 @@ type Captured = Pick<
   ProvisioningCaptured,
   'buildPrFixTask' | 'podRepo' | 'fixFeedbackRepo' | 'logger' | 'transition'
 >;
+
+function providerHandoffGuard(afterCleanup: boolean): string {
+  const file = `/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`;
+  const pattern = shellQuote(`/${PROVIDER_FAILOVER_HANDOFF_PATH}`);
+  const missing = `Missing pending provider failover handoff${afterCleanup ? ' after workspace cleanup' : ''}: ${file}`;
+  return [
+    'set -e',
+    `if [ ! -f ${shellQuote(file)} ]; then`,
+    `  printf '%s\\n' ${shellQuote(missing)} >&2`,
+    '  exit 1',
+    'fi',
+    'mkdir -p /workspace/.git/info',
+    'touch /workspace/.git/info/exclude',
+    `if ! grep -qFx ${pattern} /workspace/.git/info/exclude; then`,
+    `  printf '\\n%s\\n%s\\n' '# autopod: provider failover handoff' ${pattern} >> /workspace/.git/info/exclude`,
+    'fi',
+    `GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -c ${shellQuote(PORTABLE_GIT_EXCLUDES)} -C /workspace check-ignore -q -- ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
+  ].join('\n');
+}
 
 export function createProvisioningWorkspacePopulation(
   deps: Pick<ProvisioningLiveDependencies, 'providerAttemptRepo' | 'launchConfiguration'>,
@@ -185,26 +205,9 @@ export function createProvisioningWorkspacePopulation(
         deps.providerAttemptRepo?.list(podId),
       );
       if (hasPendingHandoff) {
-        const marker = '# autopod: provider failover handoff';
         const guard = await containerManager.execInContainer(
           containerId,
-          [
-            'sh',
-            '-c',
-            [
-              'set -e',
-              `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
-              `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
-              '  exit 1',
-              'fi',
-              'mkdir -p /workspace/.git/info',
-              'touch /workspace/.git/info/exclude',
-              `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
-              `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
-              'fi',
-              `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
-            ].join('\n'),
-          ],
+          ['sh', '-c', providerHandoffGuard(false)],
           { timeout: setupTimeout(10_000) },
         );
         if (guard.exitCode !== 0) {
@@ -346,26 +349,9 @@ export function createProvisioningWorkspacePopulation(
       }
 
       if (hasPendingHandoff) {
-        const marker = '# autopod: provider failover handoff';
         const guard = await containerManager.execInContainer(
           containerId,
-          [
-            'sh',
-            '-c',
-            [
-              'set -e',
-              `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
-              `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff after workspace cleanup: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
-              '  exit 1',
-              'fi',
-              'mkdir -p /workspace/.git/info',
-              'touch /workspace/.git/info/exclude',
-              `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
-              `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
-              'fi',
-              `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
-            ].join('\n'),
-          ],
+          ['sh', '-c', providerHandoffGuard(true)],
           { timeout: setupTimeout(10_000) },
         );
         if (guard.exitCode !== 0) {

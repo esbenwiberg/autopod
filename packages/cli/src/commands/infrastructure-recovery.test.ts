@@ -7,7 +7,9 @@ import type { AutopodClient } from '../api/client.js';
 import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
 
 const client = {
-  getCheckpointRecoveries: vi.fn(async () => ({ operations: [] })),
+  getCheckpointRecoveries: vi.fn(
+    async (): Promise<{ operations: []; recoveryHint?: string }> => ({ operations: [] }),
+  ),
   previewRetainedExecution: vi.fn(async () => ({ digest: 'd'.repeat(64) })),
   recoverInfrastructure: vi.fn(async () => ({ operation: { id: 'stable-request' } })),
 };
@@ -40,6 +42,14 @@ describe('preservation-safe infrastructure recovery CLI', () => {
   it('only inspects by default', async () => {
     await run();
     expect(client.getCheckpointRecoveries).toHaveBeenCalledWith('retained-pod');
+    expect(client.recoverInfrastructure).not.toHaveBeenCalled();
+  });
+  it('returns the read-only dirty-source hint to the operator', async () => {
+    const recoveryHint = 'Ask the agent to inspect the preserved worktree: ap rework retained-pod';
+    client.getCheckpointRecoveries.mockResolvedValueOnce({ operations: [], recoveryHint });
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    await run();
+    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toMatchObject({ recoveryHint });
     expect(client.recoverInfrastructure).not.toHaveBeenCalled();
   });
   it('previews separately from admission', async () => {

@@ -14,6 +14,7 @@ import {
   mergeReconciliation,
 } from '../worktrees/merge-source-identity.js';
 import type { DeliveryPollingCaptured } from './delivery-contracts.js';
+import { hasActionablePrFailures } from './fix-policy.js';
 import type { MergeJournalEntry } from './merge-journal.js';
 import type { PollOwnership } from './polling-coordinator.js';
 
@@ -144,10 +145,11 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
             ),
           );
           if (!status.merged) {
-            if (status.headSha)
+            // A conflict repair is bound to the exact provider-observed head and base.
+            if (status.headSha || status.mergeConflict)
               assertMergeSource(entry.request.config.expectedHeadSha, status.headSha);
-            if (status.sourceTarget)
-              assertMergeTarget(entry.request.config.expectedTarget, status.sourceTarget);
+            if (status.sourceTarget || status.mergeConflict)
+              assertMergeTarget(entry.request.config.expectedTarget, status.sourceTarget ?? {});
             if (pod.fixPodId) {
               const fix = podRepo.getOrThrow(pod.fixPodId);
               const handoff = podRepo.sourcePublications?.fixForMerge(pod);
@@ -188,7 +190,7 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
                     worktreeManager,
                   ),
             );
-            if (!status.ciFailures.length && !status.reviewComments.length) {
+            if (!hasActionablePrFailures(status)) {
               const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
               const methodBlocked = status.squashRequired && !entry.request.config.squash;
               if (methodBlocked) status.blockReason = 'Branch policy requires squash merge';
@@ -309,7 +311,8 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
           emitActivityStatus(podId, `Merge pending: ${status.blockReason}`);
         }
 
-        // Actionable failures → enqueue a sanitized summary, then ensure the
+        // Actionable failures (CI, review feedback or merge conflicts) →
+        // enqueue a sanitized summary, then ensure the
         // canonical fix pod is alive to drain it. The queue carries the
         // content so the drain at fix-pod start can build the task from a
         // minimal status (see processPod).
@@ -321,7 +324,7 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
         // is byte-identical to the one we'd add. A new failure signature still
         // gets through.
         assertCurrent();
-        if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
+        if (hasActionablePrFailures(status)) {
           const summary = buildActionableFailureSummary(status, profile);
           const latest = fixFeedbackRepo.peekLatest(podId);
           if (latest?.message !== summary) {

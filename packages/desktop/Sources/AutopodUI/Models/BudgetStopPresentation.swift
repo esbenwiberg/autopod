@@ -7,4 +7,8 @@ extension Pod {
     [.failed, .reviewRequired].contains(status)
       && errorSummary?.hasPrefix("Token budget exceeded (") == true
   }
+
+  /// Paused on a soft token limit and awaiting human approval (`ap budget --continue`).
+  /// Presentation hint only; the daemon rejects approval when the pod is not budget-paused.
+  var isBudgetPaused: Bool { status == .paused && pauseReason == "budget" }
 }

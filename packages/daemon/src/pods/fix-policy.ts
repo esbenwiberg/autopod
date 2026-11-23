@@ -9,6 +9,35 @@ export const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
 
 export const FIX_DELIVERY_FAILED_PREFIX = 'Validated fix could not be pushed';
 
+const SAFE_BRANCH_NAME = /^[A-Za-z0-9._/-]{1,255}$/;
+
+/** Provider evidence a fix pod can act on: CI failures, review feedback or merge conflicts. */
+export function hasActionablePrFailures(status: PrMergeStatus): boolean {
+  return (
+    status.ciFailures.length > 0 ||
+    status.reviewComments.length > 0 ||
+    status.mergeConflict === true
+  );
+}
+
+function mergeConflictSection(status: PrMergeStatus): string[] {
+  if (!status.mergeConflict) return [];
+  const observed = status.sourceTarget?.baseBranch;
+  const base =
+    observed && observed.trim() === observed && SAFE_BRANCH_NAME.test(observed) ? observed : null;
+  const baseRef = base ? `\`origin/${base}\`` : "the PR's base branch under `origin/`";
+  const command = base ? ` (\`git merge origin/${base}\`)` : '';
+  return [
+    '## Merge Conflicts\n',
+    `The pull request cannot merge: its branch conflicts with ${base ? `\`${base}\`` : 'its base branch'}.`,
+    `- Merge ${baseRef} into the PR branch${command}. Do not rebase or amend existing commits: the daemon needs a fast-forward from the current PR head.`,
+    '- Resolve every conflict so both the branch changes and the incoming base changes keep their intent. Never discard either side wholesale.',
+    '- Re-run the checks relevant to the conflicted files and commit the result. Leave no conflict markers or unfinished rebase/merge state.',
+    `- If ${baseRef} is missing from the checkout, call \`report_blocker\` instead of guessing.`,
+    '',
+  ];
+}
+
 export function buildPrFixTask(
   pod: Pod,
   status: PrMergeStatus,
@@ -57,7 +86,7 @@ export function buildPrFixTask(
     '',
     `Original task: ${rootTask}`,
     '',
-    'Your job is to evaluate the failures listed below, fix the ones that make engineering sense, and push commits to the existing branch.',
+    'Evaluate the failures below, fix the ones that make engineering sense, and commit to the existing branch. The daemon validates and publishes your changes; do not push.',
     'Treat CI failures as objective unless you can show they are unrelated or flaky.',
     'Treat reviewer comments as feedback to assess: fix valid comments; for stale, incorrect, harmful, or out-of-scope comments, leave the code unchanged and explain why.',
     'Do NOT create a new PR — one already exists.',
@@ -65,6 +94,8 @@ export function buildPrFixTask(
     'Use outcome `fixed` only when the requested change was actually made and verified. Only `fixed` means the daemon may resolve that PR review conversation; `not_applicable`, `needs_reviewer_decision`, and `could_not_verify` leave it open with your explanation.',
     '',
   ];
+
+  sections.push(...mergeConflictSection(status));
 
   if (status.ciFailures.length > 0) {
     sections.push('## CI Check Failures\n');
@@ -99,7 +130,9 @@ export function buildPrFixTask(
     sections.push('');
   }
 
-  sections.push('After pushing your fixes, the PR will be re-evaluated automatically.');
+  sections.push(
+    'After the daemon publishes your fixes, the PR will be re-evaluated automatically.',
+  );
   return sections.join('\n');
 }
 
@@ -113,7 +146,7 @@ export function buildActionableFailureSummary(
       sanitization: profile.contentProcessing?.sanitization ?? { preset: 'standard' },
     }).text;
 
-  const sections: string[] = [];
+  const sections: string[] = [...mergeConflictSection(status)];
 
   if (status.ciFailures.length > 0) {
     sections.push('## CI Check Failures\n');

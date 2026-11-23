@@ -6127,6 +6127,11 @@ describe('PodManager', () => {
       .mock.calls.map(([, command]) => command.join(' '))
       .filter((script) => script.includes('# autopod: provider failover handoff'));
     expect(handoffGuardScripts).toHaveLength(2);
+    for (const script of handoffGuardScripts) {
+      expect(script).toContain("grep -qFx '/.autopod/provider-failover.md'");
+      expect(script).toContain('GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null');
+      expect(script).toContain('core.excludesFile=/dev/null');
+    }
     expect(handoffGuardScripts[0]).toContain(
       'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
     );
@@ -28173,6 +28178,63 @@ describe('validation inputs compatibility', () => {
         ['diff', 'log', 'paths'].includes(stage) ? 'review_required' : 'failed',
       );
       expect(f.ctx.containerManager.stop).toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  function dirtySource(f: ReturnType<typeof fixture>, persistent: boolean) {
+    const blocked = new AutopodError(
+      'Source branch/cleanliness unavailable; preserve and reconcile it before adoption.',
+      'SOURCE_ADOPTION_BLOCKED',
+      409,
+    );
+    const adoption = f.ctx.worktreeManager.inspectSourceAdoption;
+    if (!adoption) throw new Error('Missing source adoption fixture');
+    const inspect = vi.mocked(adoption);
+    if (persistent) inspect.mockRejectedValue(blocked);
+    else inspect.mockRejectedValueOnce(blocked);
+    f.ctx.worktreeManager.inspectSourcePreservation = vi.fn(async (_path, branch) => ({
+      branch,
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      worktreeClean: false,
+      changes: { untracked: ['thoughts/'], changed: [] },
+    }));
+  }
+
+  it('returns dirty review source to the live agent with the exact paths', async () => {
+    const f = fixture();
+    try {
+      dirtySource(f, false);
+      await f.manager.triggerValidation(f.pod.id);
+      const resumes = vi.mocked(f.ctx.runtime.resume).mock.calls;
+      expect(resumes).toHaveLength(1);
+      expect(resumes[0]?.[1]).toContain('Workspace not clean — validation did not run');
+      expect(resumes[0]?.[1]).toContain('- `thoughts/`');
+      expect(resumes[0]?.[1]).toContain('.git/info/exclude');
+      // After the agent finishes, completion re-enters validation on clean source.
+      expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(f.manager.getSession(f.pod.id).status).not.toBe('review_required');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('parks dirty review source with a sanitized cause once no attempt remains', async () => {
+    const f = fixture();
+    try {
+      f.ctx.podRepo.update(f.pod.id, { maxValidationAttempts: 1 });
+      dirtySource(f, true);
+      await f.manager.triggerValidation(f.pod.id);
+      const parked = f.manager.getSession(f.pod.id);
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(parked.status).toBe('review_required');
+      expect(parked.validationAttempts).toBe(0);
+      expect(parked.failureReason).toContain(
+        'Review source has uncommitted files (untracked: 1 path under thoughts/)',
+      );
     } finally {
       f.ctx.db.close();
     }

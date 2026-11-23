@@ -704,15 +704,19 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.ciFailures).toEqual([]);
     expect(status.blockReason).toBeNull();
     expect(status.mergeBlocked).toBe(false);
+    expect(status.mergeConflict).toBeUndefined();
     expect(status.open).toBe(true);
     expect(status.merged).toBe(false);
   });
 
-  it('reports merge conflicts in blockReason', async () => {
+  it('reports merge conflicts in blockReason and as an actionable conflict', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch([
-        { ok: true, body: { ...ACTIVE_PR, mergeStatus: 'conflicts' } },
+        {
+          ok: true,
+          body: { ...ACTIVE_PR, mergeStatus: 'conflicts', targetRefName: 'refs/heads/main' },
+        },
         { ok: true, body: { value: [] } }, // no policy failures
         { ok: true, body: { value: [] } }, // no threads
       ]),
@@ -722,6 +726,8 @@ describe('AdoPrManager.getPrStatus', () => {
     const status = await manager.getPrStatus({ prUrl: PR_URL });
 
     expect(status.blockReason).toContain('Merge conflicts');
+    expect(status.mergeBlocked).toBe(true);
+    expect(status.mergeConflict).toBe(true);
     expect(status.ciFailures).toEqual([]);
   });
 

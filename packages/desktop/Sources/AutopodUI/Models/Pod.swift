@@ -946,6 +946,9 @@ public struct Pod: Identifiable, Sendable {
     public var phase: PhaseProgress?
     public var latestActivity: String?
     public var errorSummary: String?
+    /// Daemon pause reason ("budget" | "manual" | "provider_limit") from full REST
+    /// detail; nil for compact snapshots and older daemons.
+    public var pauseReason: String? = nil
     /// Full REST evidence only; fleet previews and socket activity are never saved reasons.
     public var failureDetail: FailureDetail? = nil
     /// Recorded restart/wakeup hold, not a timer-based inference of process exit.

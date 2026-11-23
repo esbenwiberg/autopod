@@ -157,6 +157,7 @@ async function fixture(
     network,
     runs,
     service,
+    pod: () => pod,
     assertAllowed,
     execute: service.executor(pod, config, selection.route, advisor ? 'advisor' : 'review'),
     setPod: (patch: Partial<Pod>) => {
@@ -166,6 +167,64 @@ async function fixture(
 }
 
 describe('isolated reviewer execution', () => {
+  it('runs one packet-only review after parent exit with a current qualification claim', async () => {
+    const f = await fixture();
+    f.setPod({ status: 'complete', containerId: null });
+    const assertCurrent = vi.fn();
+    const digest = 'sha256:' + 'a'.repeat(64);
+    const execute = f.service.parentQualification(f.pod(), f.config, digest, assertCurrent);
+    await expect(f.execute({ prompt: 'ordinary review', timeout: 5000 })).rejects.toThrow(/owns/);
+    await expect(execute({ prompt: 'exact integration', timeout: 5000 })).resolves.toMatchObject({
+      stdout: 'Review complete',
+    });
+    expect(f.manager.spawn).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.manager.spawn).mock.calls[0]?.[0].volumes).toEqual([]);
+    expect(f.manager.kill).toHaveBeenCalledExactlyOnceWith('review-container');
+    expect(f.runs.list('pod')[0]).toMatchObject({ state: 'completed', cleanup: 'clean' });
+    expect(assertCurrent.mock.calls.length).toBeGreaterThan(2);
+    await expect(execute({ prompt: 'exact integration', timeout: 5000 })).rejects.toThrow(
+      /refused/,
+    );
+    expect(f.manager.spawn).toHaveBeenCalledOnce();
+    const reopened = f.service.parentQualification(f.pod(), f.config, digest, assertCurrent);
+    await expect(reopened({ prompt: 'exact integration', timeout: 5000 })).rejects.toThrow(
+      /already reserved/,
+    );
+    expect(f.manager.spawn).toHaveBeenCalledOnce();
+  });
+
+  it('rejects failover and stops before reviewer CLI launch on a revoked qualification', async () => {
+    const alternate = await fixture(true);
+    expect(() =>
+      alternate.service.parentQualification(
+        alternate.pod(),
+        alternate.config,
+        'sha256:' + 'b'.repeat(64),
+        () => {},
+      ),
+    ).toThrow(/fixed reviewer route/);
+    const f = await fixture();
+    f.setPod({ status: 'complete', containerId: null });
+    let current = true;
+    vi.mocked(f.manager.spawn).mockImplementationOnce(async (input) => {
+      input.onCreated?.('review-container');
+      current = false;
+      return 'review-container';
+    });
+    const execute = f.service.parentQualification(
+      f.pod(),
+      f.config,
+      'sha256:' + 'c'.repeat(64),
+      () => {
+        if (!current) throw new Error('qualification revoked');
+      },
+    );
+    await expect(execute({ prompt: 'exact integration', timeout: 5000 })).rejects.toThrow(
+      'qualification revoked',
+    );
+    expect(f.manager.execStreaming).not.toHaveBeenCalled();
+    expect(f.manager.kill).toHaveBeenCalledExactlyOnceWith('review-container');
+  });
   it('bounds appended reference context before inference and binds the frozen packet identity', async () => {
     let context = 'first reference';
     const f = await fixture(false, false, true, () => ({ context, images: [] }));

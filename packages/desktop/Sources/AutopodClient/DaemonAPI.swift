@@ -1,6 +1,13 @@
 import CryptoKit
 import Foundation
 
+private final class RefuseDaemonRedirect: NSObject, URLSessionTaskDelegate {
+  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+    completionHandler(nil)
+  }
+}
+
 /// Async REST client for the Autopod daemon API.
 /// Actor-isolated for thread safety — all methods are safe to call from any context.
 public actor DaemonAPI {
@@ -238,7 +245,8 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(podId)/configuration")
   }
   public func launchPod(_ body: ComposableLaunchRequest) async throws -> SessionResponse {
-    try await request("POST", "/pods", body: encode(body))
+    try body.validateParentEnrollment()
+    return try await request("POST", "/pods", body: encode(body), delegate: body.requireParentEnrollment == true ? RefuseDaemonRedirect() : nil)
   }
   public func discoverGitHubRepositories() async throws -> [ConfigurationJSON] {
     try await request("GET", "/configuration/github/repositories")
@@ -297,6 +305,68 @@ public actor DaemonAPI {
     } catch DaemonError.serverError(let status, _) where status == 403 {
       return nil
     }
+  }
+
+  // MARK: - Owner-only private parent bundle handoff
+
+  public func previewParentBundle(
+    _ selection: ParentBundleSelection,
+    beforeSend: (@MainActor @Sendable () throws -> Void)? = nil
+  ) async throws -> ParentBundleReview {
+    let review: ParentBundleReview = try await request(
+      "GET", selection.reviewPath + "/preview", delegate: RefuseDaemonRedirect(), beforeSend: beforeSend
+    )
+    guard review.matches(selection) else { throw URLError(.badServerResponse) }
+    return review
+  }
+
+  public func approveParentBundle(
+    _ selection: ParentBundleSelection, review: ParentBundleReview,
+    beforeSend: (@MainActor @Sendable () throws -> Void)? = nil
+  ) async throws -> ParentBundleApproval {
+    guard review.matches(selection) else { throw URLError(.badServerResponse) }
+    let decision = ParentBundleDecision(evidenceDigest: review.evidenceDigest, expectedReviewDigest: review.reviewDigest)
+    let approval: ParentBundleApproval = try await request(
+      "POST", selection.reviewPath + "/approve", body: encode(decision),
+      delegate: RefuseDaemonRedirect(), beforeSend: beforeSend
+    )
+    guard approval.matches(review) else { throw URLError(.badServerResponse) }
+    return approval
+  }
+
+  public func downloadParentBundle(
+    _ selection: ParentBundleSelection, approval: ParentBundleApproval,
+    beforeSend: (@MainActor @Sendable () throws -> Void)? = nil
+  ) async throws -> Data {
+    let review = approval.review
+    guard review.matches(selection), approval.matches(review) else { throw URLError(.badServerResponse) }
+    let endpoint = selection.reviewPath + "/bundle"
+    var req = URLRequest(url: try makeRequestURL(endpoint), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
+    req.httpMethod = "GET"
+    req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
+    if let beforeSend { try await beforeSend() }
+    try Task.checkCancellation()
+    let (stream, response) = try await pod.bytes(for: req, delegate: RefuseDaemonRedirect())
+    defer { stream.task.cancel() }
+    guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+    let limit = 64 * 1024 * 1024 // daemon MAX_CANDIDATE_BYTES
+    switch http.statusCode {
+    case 200: break
+    case 401: throw DaemonError.unauthorized(nil)
+    case 404: throw DaemonError.notFound(endpoint)
+    default: throw DaemonError.serverError(http.statusCode, "Private bundle unavailable")
+    }
+    guard http.mimeType == "application/octet-stream",
+      http.value(forHTTPHeaderField: "x-autopod-bundle-digest") == review.bundleDigest,
+      http.expectedContentLength <= Int64(limit) else { throw URLError(.badServerResponse) }
+    var data = Data()
+    for try await byte in stream {
+      guard data.count < limit else { throw URLError(.dataLengthExceedsMaximum) }
+      data.append(byte)
+    }
+    guard !data.isEmpty, Self.sha256(data) == review.bundleDigest else { throw URLError(.badServerResponse) }
+    return data
   }
 
   public func listCompactPodPage(
@@ -768,6 +838,12 @@ public actor DaemonAPI {
 
   public func raiseTaskBudget(_ id: String, request input: TaskBudgetChangeRequest) async throws -> TaskExecutionSummary {
     try await request("POST", "/pods/\(id)/budget", body: encode(input))
+  }
+
+  /// Approve one soft token-budget extension for a pod paused on its token budget
+  /// (the CLI's `ap budget <pod> <n> --continue`). Validation continues in the background.
+  public func continueBudget(_ id: String) async throws -> BudgetContinuationResponse {
+    try await request("POST", "/pods/\(id)/continue-budget")
   }
 
   /// GET /pods/scores — persisted quality-score leaderboard.
@@ -1495,7 +1571,9 @@ public actor DaemonAPI {
     body: Data? = nil,
     timeout: TimeInterval = 30,
     contentType: String = "application/json",
-    recoveryForkRejection: (podId: String, request: RecoveryForkRequest)? = nil
+    recoveryForkRejection: (podId: String, request: RecoveryForkRequest)? = nil,
+    delegate: (any URLSessionTaskDelegate)? = nil,
+    beforeSend: (@MainActor @Sendable () throws -> Void)? = nil
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1510,10 +1588,14 @@ public actor DaemonAPI {
       req.httpBody = body
     }
 
+    if let beforeSend {
+      try await beforeSend()
+      try Task.checkCancellation()
+    }
     let data: Data
     let response: URLResponse
     do {
-      (data, response) = try await pod.data(for: req)
+      (data, response) = try await pod.data(for: req, delegate: delegate)
     } catch {
       throw DaemonError.networkError(error.localizedDescription)
     }

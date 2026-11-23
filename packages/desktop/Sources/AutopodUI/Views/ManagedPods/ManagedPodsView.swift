@@ -58,9 +58,17 @@ public struct ManagedPodsView: View {
 
       if pods.isEmpty && isLoading {
         ProgressView("Loading managed inventory…").frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if dispatcherUnavailable {
+        ContentUnavailableView(
+          "Dispatcher inventory unavailable",
+          systemImage: "shippingbox",
+          description: Text("To see workers delegated by a Task, open its Overview → Delegated workers.")
+        )
+      } else if pods.isEmpty && error != nil {
+        ContentUnavailableView("Couldn’t load Dispatcher attempts", systemImage: "exclamationmark.triangle")
       } else if pods.isEmpty && !isLoading {
         ContentUnavailableView(
-          "No Managed Pods",
+          "No Dispatcher attempts",
           systemImage: "shippingbox",
           description: Text("No Dispatcher attempts are visible for this installation.")
         )
@@ -101,11 +109,15 @@ public struct ManagedPodsView: View {
     }
   }
 
+  private var dispatcherUnavailable: Bool {
+    pods.isEmpty && error == DaemonError.notFound("/managed/pods").localizedDescription
+  }
+
   private var header: some View {
     VStack(spacing: 10) {
       if !embedded {
       HStack(spacing: 10) {
-        Text("Managed Pods")
+        Text("Dispatcher attempts")
           .font(.title3.weight(.semibold))
         Text(pods.count.formatted())
           .font(.caption2.weight(.semibold))
@@ -172,7 +184,7 @@ public struct ManagedPodsView: View {
           }
         }.controlSize(.small)
       }
-      if let error {
+      if let error, !dispatcherUnavailable {
         Label(error, systemImage: "exclamationmark.triangle.fill")
           .font(.caption)
           .foregroundStyle(.orange)

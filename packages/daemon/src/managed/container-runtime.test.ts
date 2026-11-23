@@ -11,6 +11,12 @@ import {
   STOP_SUPERVISOR,
 } from './container-runtime.js';
 
+import {
+  PRIVATE_COMMIT_EFFECTS,
+  PRIVATE_PARENT_VERIFIER,
+  PRIVATE_SUBMISSION_FILE,
+} from './private-commit-policy.js';
+
 function fixture() {
   const request: ManagedPodRequest = JSON.parse(
     readFileSync(
@@ -60,6 +66,96 @@ function fixture() {
   );
   return { request, config, runtime, ensure, exec, binding };
 }
+
+it.each([
+  'valid',
+  'wrong-exit',
+  'bad-bytes',
+])('reads only an explicit bounded submission from the settled sandbox (%s)', async (kind) => {
+  const f = fixture();
+  f.request.route.executionTarget = 'sandbox';
+  f.binding.sandboxCodingCheckpoints = true;
+  f.request.task.kind = 'implementation';
+  f.request.validation = { verifierPolicy: PRIVATE_PARENT_VERIFIER };
+  const scope = f.request.effectiveGrant.scope;
+  const repository = scope.repositories[0];
+  if (!repository) throw new Error('missing fixture repository');
+  repository.remote = 'private';
+  repository.access = 'write';
+  scope.identityBindings = [];
+  scope.network.destinations = [];
+  scope.allowedEffects = [...PRIVATE_COMMIT_EFFECTS];
+  f.request.effectiveGrant.budget = {
+    mode: 'request-time',
+    maxProviderRequests: 6,
+    maxDurationSeconds: 180,
+    expiresAt: 200,
+  };
+  f.request.outputs.source = {
+    mode: 'commit',
+    remote: 'private',
+    repository: repository.enrollmentId,
+    head: 'autopod/fixture',
+    base: 'main',
+  };
+  f.request.outputs.artifacts = {
+    ...f.request.outputs.artifacts,
+    mode: 'required',
+    include: [PRIVATE_SUBMISSION_FILE],
+    requiredPaths: [PRIVATE_SUBMISSION_FILE],
+    limits: { maxFiles: 1, maxFileBytes: 512, maxTotalBytes: 512 },
+  };
+  const runtime = new ManagedContainerRuntime(
+    [f.binding],
+    () => ({
+      request: f.request,
+      podId: 'pod-one',
+      createdAt: 100,
+      observedExit: true,
+    }),
+    'fixture-supervisor',
+  );
+  const bytes = Buffer.from('{"version":1,"files":[]}');
+  f.exec
+    .mockResolvedValueOnce({
+      exitCode: 0,
+      stderr: '',
+      stdout: JSON.stringify({
+        state: 'exited',
+        observedExit: true,
+        specDigest: kind === 'wrong-exit' ? 'wrong' : f.request.executionSpecDigest,
+        exitCode: 0,
+      }),
+    })
+    .mockResolvedValueOnce({
+      exitCode: 0,
+      stderr: '',
+      stdout: kind === 'bad-bytes' ? 'invalid!' : bytes.toString('base64'),
+    });
+  const call = runtime.readPrivateSubmission(
+    'owned',
+    'pod-one',
+    f.request.executionSpecDigest,
+    () => {},
+  );
+  if (kind === 'valid') await expect(call).resolves.toEqual(bytes);
+  else
+    await expect(call).rejects.toThrow(/parent-private-(?:export-runtime|submission-unavailable)/);
+  expect(f.exec).toHaveBeenCalledTimes(kind === 'wrong-exit' ? 1 : 2);
+  if (kind !== 'wrong-exit')
+    expect(f.exec).toHaveBeenLastCalledWith(
+      'owned',
+      [
+        'python3',
+        '-I',
+        '-c',
+        expect.stringContaining('O_NOFOLLOW'),
+        PRIVATE_SUBMISSION_FILE,
+        '512',
+      ],
+      expect.objectContaining({ user: 'autopod', maxOutputBytes: 684, requireObservedExit: true }),
+    );
+});
 
 it('tears down an exited sandbox after its execution profile is retired without enabling its route', async () => {
   const f = fixture();
@@ -345,6 +441,34 @@ it('projects only an allowlisted channel request-limit diagnostic after exit', a
     consumedTokens: 12,
     exitCode: 1,
     limitation: 'agent-request-limit-reached',
+  });
+});
+
+it.each([0, 1])('reports a provider request stop only on a nonzero exit: %s', async (exitCode) => {
+  const f = fixture();
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec
+    .mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        observedExit: true,
+        state: 'exited',
+        consumedTokens: 12,
+        specDigest: f.request.executionSpecDigest,
+        exitCode,
+      }),
+      stderr: '',
+    })
+    .mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify({ phase: 'provider', reason: 'request-limit' }),
+      stderr: '',
+    });
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 12,
+    exitCode,
+    ...(exitCode ? { limitation: 'agent-provider-request-limit-reached' } : {}),
   });
 });
 

@@ -30,7 +30,7 @@ const subjectSchema = z
     policyDigest: sha,
   })
   .strict();
-const gateRequestSchema = z
+export const parentIntegrationGateRequestSchema = z
   .object({
     subject: subjectSchema,
     inputs: z
@@ -50,7 +50,7 @@ const gateRequestSchema = z
     bundleDigest: sha,
   })
   .strict();
-export type ParentIntegrationGateRequest = z.infer<typeof gateRequestSchema>;
+export type ParentIntegrationGateRequest = z.infer<typeof parentIntegrationGateRequestSchema>;
 
 const retainedSchema = z
   .object({
@@ -60,7 +60,7 @@ const retainedSchema = z
     verification: z
       .object({
         subjectDigest: sha,
-        gateRequest: gateRequestSchema,
+        gateRequest: parentIntegrationGateRequestSchema,
         inputDigest: sha,
         gatePolicy: gatePolicySchema,
         checks: z
@@ -152,7 +152,13 @@ export function readQualifiedParentIntegration(
     independentReview.receiptDigest !== verification.independentReview.receiptDigest
   )
     throw new Error('parent-integration-custody-binding');
-  return { checkpoint: { ...subject, evidenceDigest }, gateRequest, checks, independentReview };
+  return {
+    checkpoint: { ...subject, evidenceDigest },
+    gateRequest,
+    checks,
+    independentReview,
+    bundle: row.bundle,
+  };
 }
 
 /** Host-only qualification using trusted evaluator ports. No worker or HTTP surface. */
@@ -163,6 +169,7 @@ export async function qualifyParentIntegration(
   run: string,
   inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
   gates: ParentIntegrationGates,
+  onRetained?: (evidenceDigest: string) => void,
 ): Promise<ContinuationCheckpoint> {
   if (!host.usesDatabase(db)) throw new Error('parent-integration-database-mismatch');
   const policy = gatePolicySchema.parse(gates.policy);
@@ -183,7 +190,7 @@ export async function qualifyParentIntegration(
       throw new Error('parent-integration-policy-mismatch');
     integration.assertCurrent();
   };
-  const request = gateRequestSchema.parse({
+  const request = parentIntegrationGateRequestSchema.parse({
     subject: {
       run,
       repository: runBinding.repository,
@@ -228,5 +235,6 @@ export async function qualifyParentIntegration(
     // database. Re-read them under the custody write transaction. Scratch files
     // are disposable and cannot change the retained in-memory bundle.
     assertCurrent,
+    onRetained,
   );
 }

@@ -369,10 +369,31 @@ describe('GhPrManager', () => {
       prUrl: 'https://github.com/org/repo/pull/42',
     });
     expect(result.mergeBlocked).toBe(blocked);
+    expect(result.mergeConflict).toBeUndefined();
     if (checks[0] && 'context' in checks[0] && blocked)
       expect(result.blockReason).toContain('Vercel');
     expect(execCalls).toHaveLength(1);
     expect(execCalls[0]?.[1]).toEqual(expect.arrayContaining(['view']));
+  });
+
+  it('reports a DIRTY merge gate as an actionable merge conflict', async () => {
+    execResponses.push({
+      stdout: JSON.stringify({
+        state: 'OPEN',
+        mergeStateStatus: 'DIRTY',
+        baseRefName: 'main',
+        statusCheckRollup: [],
+        reviewDecision: '',
+      }),
+      stderr: '',
+    });
+    const result = await new GhPrManager({ logger, githubAuth }).getPrStatus({
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+    expect(result.mergeBlocked).toBe(true);
+    expect(result.blockReason).toContain('GitHub merge gate: DIRTY');
+    expect(result.mergeConflict).toBe(true);
+    expect(result.ciFailures).toEqual([]);
   });
 
   it('can be instantiated', () => {
@@ -915,6 +936,41 @@ describe('GitHubApiPrManager', () => {
           }
         : undefined,
     );
+  });
+
+  it.each([
+    { mergeableState: 'dirty', conflict: true },
+    { mergeableState: 'clean', conflict: false },
+    { mergeableState: 'unknown', conflict: false },
+    { mergeableState: 'behind', conflict: false },
+  ])('flags only a dirty mergeable_state as a merge conflict (%j)', async ({
+    mergeableState,
+    conflict,
+  }) => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        {
+          ok: true,
+          body: {
+            number: 42,
+            state: 'open',
+            merged: false,
+            mergeable_state: mergeableState,
+            head: { sha: 'a'.repeat(40), ref: 'feature', repo: { full_name: 'org/repo' } },
+            base: { ref: 'main', repo: { full_name: 'org/repo' } },
+          },
+        },
+        { ok: true, body: { check_runs: [] } },
+        { ok: true, body: [] },
+      ]),
+    );
+    const status = await new GitHubApiPrManager({ pat: 'local-token', logger }).getPrStatus({
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+    expect(status.mergeConflict).toBe(conflict ? true : undefined);
+    expect(status.mergeBlocked).toBe(conflict ? true : undefined);
+    if (conflict) expect(status.blockReason).toContain('Merge conflicts');
   });
 
   it('sends the expected source SHA to the GitHub merge condition and preserves the branch', async () => {

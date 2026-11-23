@@ -408,6 +408,8 @@ export class GhPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      briefTitle: config.briefTitle,
+      contractTitle: config.contractTitle,
       deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
@@ -799,6 +801,7 @@ export class GhPrManager implements PrManager {
       open: true,
       mergeBlocked,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+      ...(pr.mergeStateStatus === 'DIRTY' ? { mergeConflict: true } : {}),
       ciFailures,
       reviewComments,
       reviewDecision: pr.reviewDecision || undefined,
@@ -1007,6 +1010,8 @@ export class GitHubApiPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      briefTitle: config.briefTitle,
+      contractTitle: config.contractTitle,
       deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
@@ -1182,6 +1187,7 @@ export class GitHubApiPrManager implements PrManager {
       state: string;
       merged: boolean;
       draft?: boolean;
+      mergeable_state?: string;
       head: { sha: string };
     };
     let sourceTarget: MergePrTarget | undefined;
@@ -1392,13 +1398,16 @@ export class GitHubApiPrManager implements PrManager {
       // Best-effort — leave reviewComments and reviewDecision empty
     }
 
+    const mergeConflict = pr.mergeable_state === 'dirty';
+    if (mergeConflict) reasons.push('Merge conflicts');
     return {
       headSha: sourceCommit(pr.head?.sha),
       sourceTarget,
       merged: false,
       open: true,
-      mergeBlocked: pr.draft === true || undefined,
+      mergeBlocked: pr.draft === true || mergeConflict || undefined,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
+      ...(mergeConflict ? { mergeConflict: true } : {}),
       ciFailures,
       reviewComments,
       reviewDecision,

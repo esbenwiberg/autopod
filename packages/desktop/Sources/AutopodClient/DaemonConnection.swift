@@ -3,6 +3,7 @@ import Foundation
 public enum DaemonConnectionAuthKind: String, Codable, Sendable {
   case manualToken
   case entra
+  case previewOwner
 }
 
 /// Persisted daemon connection metadata.

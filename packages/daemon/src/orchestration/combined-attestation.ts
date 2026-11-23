@@ -13,9 +13,11 @@ const base64url = (bytes: number) =>
 const authority = z
   .object({ identity, configurationDigest: hash, publicKey: base64url(32) })
   .strict();
-export const gatePolicySchema = z
-  .object({ basePolicyDigest: hash, checks: authority, independentReview: authority })
-  .strict()
+export const gatePinsSchema = z
+  .object({ checks: authority, independentReview: authority })
+  .strict();
+export const gatePolicySchema = gatePinsSchema
+  .extend({ basePolicyDigest: hash })
   .refine(
     (p) =>
       p.checks.identity !== p.independentReview.identity &&

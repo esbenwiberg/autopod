@@ -162,11 +162,12 @@ public struct ComposableLaunchRequest: Codable, Equatable, Sendable {
   public var referenceRepositories: [LaunchReferenceRepository]?
   public var expectedDigest: String?
   public var requestId: String?
+  public var requireParentEnrollment: Bool?
   public init(repositoryId: String? = nil, profileId: String? = nil, task: String = "") {
     self.repositoryId = repositoryId; self.profileId = profileId; self.task = task
   }
   public mutating func select(_ kind: ConfigurationKind, id: String?) {
-    expectedDigest = nil; requestId = nil
+    if requireParentEnrollment != true { expectedDigest = nil; requestId = nil }
     if selections == nil { selections = LaunchSelections() }
     switch kind {
     case .repository: repositoryId = id; repositorySetupId = nil; emptyWorkspace = nil
@@ -205,7 +206,7 @@ public extension ComposableLaunchRequest {
   static func decodeJSON(_ data: Data) throws -> Self {
     let value = try JSONDecoder().decode(ConfigurationJSON.self, from: data)
     guard let fields = value.object else { throw LaunchJSONError.invalid("Launch configuration must be an object") }
-    let allowed: Set<String> = ["source", "repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "task", "work", "intent", "selections", "overrides", "requiredSidecarIds", "referenceRepositories", "expectedDigest", "requestId"]
+    let allowed: Set<String> = ["source", "repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "task", "work", "intent", "selections", "overrides", "requiredSidecarIds", "referenceRepositories", "expectedDigest", "requestId", "requireParentEnrollment"]
     guard Set(fields.keys).isSubset(of: allowed) else { throw LaunchJSONError.invalid("Unknown launch fields: \(Set(fields.keys).subtracting(allowed).sorted().joined(separator: ", "))") }
     for (key, field) in fields where field == .null { throw LaunchJSONError.invalid("\(key) cannot be null; omit it to use its default") }
     if let source = fields["source"] {
@@ -225,7 +226,19 @@ public extension ComposableLaunchRequest {
       guard Set(selections.keys).isSubset(of: keys) else { throw LaunchJSONError.invalid("Unknown preset selection") }
       for (key, field) in selections where field == .null && key != "githubAccessId" { throw LaunchJSONError.invalid("\(key) cannot be null") }
     }
-    return try JSONDecoder().decode(Self.self, from: data)
+    let request = try JSONDecoder().decode(Self.self, from: data)
+    try request.validateParentEnrollment()
+    return request
+  }
+
+  func validateParentEnrollment() throws {
+    guard let requireParentEnrollment else { return }
+    guard requireParentEnrollment, let requestId, UUID(uuidString: requestId) != nil,
+      let expectedDigest, expectedDigest.utf8.count == 64,
+      expectedDigest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+      intent == "task", !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw LaunchJSONError.invalid("Parent enrollment requires a Task, its exact request UUID, and its enrolled launch digest.")
+    }
   }
 }
 public enum LaunchJSONError: LocalizedError {

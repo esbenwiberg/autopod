@@ -27,7 +27,11 @@ interface ValidationInputsDependencies {
   logger: Logger;
   worktreeManager: Pick<
     WorktreeManager,
-    'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase' | 'inspectSourceAdoption'
+    | 'getDiff'
+    | 'getCommitLog'
+    | 'getChangedPathsAgainstBase'
+    | 'inspectSourceAdoption'
+    | 'inspectSourcePreservation'
   >;
   podRepo: Pick<
     PodRepository,
@@ -129,6 +133,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       validationDefaultBranch,
       isolatedReviewDiffLimit(pod.launchConfigDigest),
       diffSinceCommit,
+      { warn: (details, message) => logger.warn({ podId, ...details }, message) },
     );
     assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 

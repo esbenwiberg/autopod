@@ -156,9 +156,12 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                     preserve = False
                     if failure_file.exists():
                         prior = json.loads(failure_file.read_text())
-                        preserve = prior.get('phase') == 'request' and prior.get('reason') in {
-                            'request-limit', 'unsupported-auto-compaction'
-                        }
+                        preserve = (
+                            (prior.get('phase') == 'request' and prior.get('reason') in {
+                                'request-limit', 'unsupported-auto-compaction'
+                            })
+                            or prior == {'phase': 'provider', 'reason': 'request-limit'}
+                        )
                     if not preserve:
                         atomic(failure_file, value)
                     self.reply(204)

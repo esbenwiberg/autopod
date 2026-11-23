@@ -385,6 +385,7 @@ export function createValidationRevalidationWorkflow(
           revalDefaultBranch,
           isolatedReviewDiffLimit(pod.launchConfigDigest),
           pod.startCommitSha ?? undefined,
+          { warn: (details, message) => logger.warn({ podId, ...details }, message) },
         ),
       );
       assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);

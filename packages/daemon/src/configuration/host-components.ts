@@ -141,6 +141,7 @@ export function createHostConfigurationComponents(
     | 'podManager'
     | 'admissionReady'
     | 'authorizeParentLaunch'
+    | 'parentCandidate'
   > & {
     cipher: CredentialsCipher;
     githubAuth: DaemonGitHubAuth;

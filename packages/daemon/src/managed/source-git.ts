@@ -92,6 +92,7 @@ export async function managedGitBytes(
   args: string[],
   credential?: ManagedGitCredential,
   trustedDirectories: readonly string[] = [],
+  boundedInput?: { input: string; maxBuffer: number; timeout: number },
 ): Promise<Buffer> {
   const configRoot = await mkdtemp(path.join(tmpdir(), 'autopod-managed-git-config-'));
   const configPath = path.join(configRoot, 'config');
@@ -100,11 +101,11 @@ export async function managedGitBytes(
       mode: 0o600,
       flag: 'wx',
     });
-    const result = await exec('git', [...managedGitArguments(cwd, trustedDirectories), ...args], {
+    const command = exec('git', [...managedGitArguments(cwd, trustedDirectories), ...args], {
       cwd,
       encoding: 'buffer',
-      maxBuffer: MAX_CANDIDATE_BYTES,
-      timeout: 60000,
+      maxBuffer: boundedInput?.maxBuffer ?? MAX_CANDIDATE_BYTES,
+      timeout: boundedInput?.timeout ?? 60000,
       env: {
         PATH: process.env.PATH,
         HOME: '/nonexistent',
@@ -123,7 +124,12 @@ export async function managedGitBytes(
           : {}),
       },
     });
-    return result.stdout;
+    if (boundedInput) {
+      // A bounded one-line revision on stdin, never a shell or inherited stream.
+      command.child.stdin?.on('error', () => {});
+      command.child.stdin?.end(boundedInput.input);
+    }
+    return (await command).stdout;
   } catch {
     throw new Error('managed-git-operation-failed');
   } finally {

@@ -32,6 +32,16 @@ final class ParentFamilyModel {
     return family
   }
 
+  func bundleTarget(for scope: ParentFamilyScope?) -> ParentBundleTarget? {
+    guard let scope, let family = family(for: scope), let review = family.review else { return nil }
+    let display = ParentReviewPresentation(review, isStale: isStale)
+    guard let evidence = display.evidence, let commit = display.commit,
+      let selection = ParentBundleSelection(
+        parentId: scope.parent, run: family.run, evidenceDigest: evidence, commit: commit
+      ) else { return nil }
+    return ParentBundleTarget(scope: scope, selection: selection)
+  }
+
   func invalidate() {
     requestID = UUID()
     scope = nil
@@ -123,7 +133,19 @@ struct ParentManagedChildPresentation: Equatable {
   let symbol: String
   let tone: ParentManagedChildTone
 
+  let collection: String?
+
   init(_ child: ParentManagedChild) {
+    if child.status == .exited && child.exitCode == 0 {
+      switch child.collectionStatus {
+      case "collected": collection = "Commit collected"
+      case "pending": collection = "Collecting commit"
+      case "unavailable": collection = "No commit collected"
+      default: collection = nil
+      }
+    } else {
+      collection = nil
+    }
     switch child.status {
     case .reserved:
       title = "Reserved"
@@ -137,9 +159,16 @@ struct ParentManagedChildPresentation: Equatable {
       tone = .started
     case .exited:
       title = "Exited"
-      detail = "Child task exited"
-      symbol = "stop.circle.fill"
-      tone = .exited
+      let limitReached = child.exitReason == "provider-request-limit"
+      if limitReached {
+        detail = "Child used all allowed model requests before finishing."
+      } else if let code = child.exitCode, (0...255).contains(code) {
+        detail = "Exit code \(code)"
+      } else {
+        detail = "Child task exited"
+      }
+      symbol = limitReached ? "exclamationmark.circle.fill" : "stop.circle.fill"
+      tone = limitReached ? .limited : .exited
     case .unknown:
       title = "Unknown"
       detail = "Daemon could not determine child state"
@@ -150,5 +179,54 @@ struct ParentManagedChildPresentation: Equatable {
 }
 
 enum ParentManagedChildTone: Equatable {
-  case reserved, started, exited, unknown
+  case reserved, started, exited, limited, unknown
+}
+
+struct ParentReviewPresentation: Equatable {
+  let title: String
+  let detail: String
+  let commit: String?
+  let evidence: String?
+
+  init(_ review: ParentManagedReview, isStale: Bool) {
+    let ready = !isStale && review.status == .ready
+      && Self.isHex(review.commit, prefix: "", count: 40)
+      && Self.isHex(review.evidenceDigest, prefix: "sha256:", count: 64)
+    commit = ready ? review.commit : nil
+    evidence = ready ? review.evidenceDigest : nil
+    if isStale {
+      (title, detail) = ("Review status not current", "Refresh the family to check the latest review state.")
+      return
+    }
+    switch review.status {
+    case .waiting:
+      (title, detail) = ("Waiting for coding results", "Checks start after both coding results are retained.")
+    case .reserved:
+      (title, detail) = ("Checks queued", "The exact pair of coding results is reserved for checks.")
+    case .checks:
+      (title, detail) = ("Running checks", "The checks evaluator is assessing the integrated change.")
+    case .independentReview:
+      (title, detail) = ("Independent review", "Checks passed. Independent review is in progress.")
+    case .ready where ready:
+      (title, detail) = ("Tested change ready for review", "Checks and independent review passed. Nothing was published.")
+    case .failed:
+      (title, detail) = ("Qualification stopped", "No tested change is available from this run.")
+    case .notSent:
+      (title, detail) = ("Evaluation not sent", "The daemon restarted before sending the request. No retry was started.")
+    case .unknown:
+      (title, detail) = ("Evaluation outcome unknown", "The daemon could not confirm the result. No retry was started.")
+    case .candidateUnavailable:
+      (title, detail) = ("Coding result unavailable", "At least one coding child has no verified result for checks.")
+    case .notConfigured:
+      (title, detail) = ("Automatic checks not configured", "This run does not have automatic qualification enabled.")
+    case .ready, .unavailable, .unsupported:
+      (title, detail) = ("Review unavailable", "There is no current verified change to review.")
+    }
+  }
+
+  private static func isHex(_ value: String?, prefix: String, count: Int) -> Bool {
+    guard let value, value.hasPrefix(prefix) else { return false }
+    let hex = value.utf8.dropFirst(prefix.utf8.count)
+    return hex.count == count && hex.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+  }
 }

@@ -4,7 +4,7 @@ import { sha256 } from '../managed/canonical.js';
 import { parseManagedCliConfig } from '../managed/cli-config.js';
 import { admitManagedRequest, REQUIRED_ENFORCEMENT } from '../managed/grants.js';
 import { parseManagedProfileSetConfig } from '../managed/profile-set-config.js';
-import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
+import { sandboxTreeEntries, withSandboxCodingProjection } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import {
   combinedPolicyDigest,
@@ -69,11 +69,13 @@ export async function checkInspectionDraft(
   )
     throw new Error('inspection-bundle-mismatch');
   await withVerifiedCheckpointMirror(tmpdir(), draft.source, bundle, (mirror) =>
-    sandboxTreeEntries(
-      mirror,
-      draft.source.commit,
-      profiles.profiles.flatMap((stage) => (stage.caseDirectory ? [stage.caseDirectory] : [])),
-    ),
+    draft.parent?.coding?.sandbox
+      ? withSandboxCodingProjection(mirror, draft.source.commit, async () => {})
+      : sandboxTreeEntries(
+          mirror,
+          draft.source.commit,
+          profiles.profiles.flatMap((stage) => (stage.caseDirectory ? [stage.caseDirectory] : [])),
+        ).then(() => {}),
   );
   const run = operatorRunId(enrolledOperator(draft, cli, profiles), draft.slot);
   return {

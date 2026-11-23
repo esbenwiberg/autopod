@@ -58,6 +58,8 @@ export interface SandboxExecOptions {
   beforeSend?: () => void;
   /** Cleanup must not spend the normal data-plane rejection/backoff budget. */
   singleAttempt?: boolean;
+  /** Opt-in bounded, one-send execution; unsupported clients must not receive it. */
+  maxOutputBytes?: number;
   onProcessCreated?: (identity: NativeGoalProcessIdentity) => void;
   onProcessStarted?: (identity: NativeGoalProcessIdentity) => void;
   cwd?: string;
@@ -203,7 +205,9 @@ export interface SandboxResourceAllocation {
 
 export interface SandboxApiClient {
   readonly executionResourceScope?: string;
+  readonly readyDiskImageId?: string;
   readonly supportsExecRecovery?: boolean;
+  readonly supportsBoundedExec?: boolean;
   terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Fresh sandbox-to-disk link and immutable provider image source; null when unverified. */
   getImageDigest?(sandboxId: string): Promise<string | null>;

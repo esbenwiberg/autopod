@@ -210,7 +210,7 @@ public struct SidebarView: View {
                     redesignedRow(.history, "clock.arrow.circlepath", "History", 0)
                     redesignedRow(.analytics, "chart.bar", "Analytics", 0)
                     redesignedRow(.memory, "brain", "Memory", pendingMemoryCount)
-                    redesignedRow(.managedPods, "shippingbox", "Managed pods", managedPodCount)
+                    redesignedRow(.managedPods, "shippingbox", "Dispatcher attempts", managedPodCount)
                     if !profiles.isEmpty {
                         DisclosureGroup("Filter by profile") {
                             ForEach(profiles, id: \.self) { name in
@@ -382,7 +382,7 @@ public enum SidebarItem: Hashable {
         case .seriesAll: "Series"
         case .completed: "Completed"
         case .all: "Browse"
-        case .managedPods: "Managed Pods"
+        case .managedPods: "Dispatcher attempts"
         case .profilesWorkspace: "Profiles"
         case .settingsWorkspace: "Settings"
         case .village: "Village"

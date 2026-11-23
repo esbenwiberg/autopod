@@ -17,6 +17,11 @@ import { createManagedArtifactStore, type ManagedCliConfig } from './cli-config.
 import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
 import type { ManagedGitHubReadConfig } from './github-read-gateway.js';
 import { REQUIRED_ENFORCEMENT } from './grants.js';
+import {
+  isPrivateParentCommit,
+  PRIVATE_PARENT_VERIFIER,
+  PRIVATE_SUBMISSION_FILE,
+} from './private-commit-policy.js';
 import { composeManagedRuntime } from './runtime-composition.js';
 import { ManagedGitBroker } from './source-git.js';
 import { GitHubDraftBroker } from './source-github.js';
@@ -37,6 +42,7 @@ const stageSchema = z
     ]),
     artifactPath: z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/),
     inputNames: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)).max(8),
+    privateCommit: z.literal(true).optional(),
     caseDirectory: z
       .string()
       .regex(/^[A-Z][A-Z0-9_]{0,31}$/)
@@ -136,6 +142,25 @@ export function parseManagedProfileSetConfig(
       const scope = stage.profileSnapshot.scope;
       const repository = scope.repositories[0];
       if (
+        stage.privateCommit &&
+        (parsed.source ||
+          parsed.githubRead ||
+          parsed.catalogArtifacts ||
+          parsed.mirror.dependencyCachePath ||
+          parsed.mirror.remote !== 'private' ||
+          stage.caseDirectory ||
+          stage.validation ||
+          stage.sourceMode !== 'commit' ||
+          stage.taskKind !== 'implementation' ||
+          (stage.artifactPath !== 'report.md' &&
+            !(
+              stage.artifactPath === PRIVATE_SUBMISSION_FILE &&
+              stage.profileSnapshot.route.executionTarget === 'sandbox'
+            )) ||
+          stage.inputNames.length)
+      )
+        throw new Error('invalid-private-coding-profile');
+      if (
         stage.caseDirectory &&
         (stage.taskKind !== 'research' ||
           stage.sourceMode !== 'none' ||
@@ -174,7 +199,7 @@ export function parseManagedProfileSetConfig(
         scope.allowedEffects.includes('github.issue.read') !==
           (scope.identityBindings.length === 1) ||
         (stage.sourceMode === 'none') !== (repository.access === 'read') ||
-        (stage.sourceMode !== 'none' && !parsed.source) ||
+        (stage.sourceMode !== 'none' && !stage.privateCommit && !parsed.source) ||
         (stage.validation !== undefined &&
           (stage.taskKind !== 'implementation' ||
             stage.sourceMode === 'none' ||
@@ -192,7 +217,9 @@ export function parseManagedProfileSetConfig(
       )
         throw new Error('invalid');
     }
-    const sourceStages = profiles.filter((stage) => stage.sourceMode !== 'none');
+    const sourceStages = profiles.filter(
+      (stage) => stage.sourceMode !== 'none' && !stage.privateCommit,
+    );
     const identityStages = profiles.filter(
       (stage) => stage.profileSnapshot.scope.identityBindings.length > 0,
     );
@@ -258,7 +285,14 @@ export function profileSetRequestPolicy(
       stages.length !== 1 ||
       request.task.kind !== stage.taskKind ||
       request.outputs.source.mode !== stage.sourceMode ||
+      Boolean(stage.privateCommit) !== isPrivateParentCommit(request) ||
+      (stage.privateCommit &&
+        (request.outputs.source.mode !== 'commit' ||
+          request.outputs.source.remote !== 'private' ||
+          request.outputs.source.repository !== config.mirror.enrollmentId ||
+          request.validation.verifierPolicy !== PRIVATE_PARENT_VERIFIER)) ||
       (stage.sourceMode !== 'none' &&
+        !stage.privateCommit &&
         (!config.source ||
           request.outputs.source.repository !== config.source.repository ||
           request.outputs.source.remote !== config.source.remote ||
@@ -283,11 +317,16 @@ export function composeManagedProfileSet(
     manager: ContainerManager | undefined;
     ownsInstallation?: (installation: string) => boolean;
     sandboxCheckpoints?: boolean;
+    sandboxCoding?: { resourceScopeDigest: string; readyDiskImageId: string };
     networkManager?: ManagedLocalNetwork;
     providerAccounts: ManagedProviderAccountReader;
     githubAuth: DaemonGitHubAuth;
   },
-): ManagedAcceptanceRuntime & Pick<ReturnType<typeof composeManagedRuntime>, 'withCheckpoint'> {
+): ManagedAcceptanceRuntime &
+  Pick<ReturnType<typeof composeManagedRuntime>, 'withCheckpoint'> & {
+    privateRuntime: ReturnType<typeof composeManagedRuntime>['runtime'];
+    sandboxCoding?: { resourceScopeDigest: string; readyDiskImageId: string };
+  } {
   const manager = dependencies.manager;
   if (
     !cli ||
@@ -295,7 +334,20 @@ export function composeManagedProfileSet(
     !cli.bindings.some((item) => item.installationId === config.installationId)
   )
     throw new Error('managed-profile-set-cli-binding-required');
+  if (config.profiles.some((stage) => stage.privateCommit) && !dependencies.ownsInstallation)
+    throw new Error('parent-private-runtime-partition-required');
   const target = config.profiles[0]!.profileSnapshot.route.executionTarget;
+  const sandboxCoding = dependencies.sandboxCoding;
+  const privateCoding = config.profiles.some((s) => s.privateCommit);
+  if (
+    Boolean(sandboxCoding) !== (privateCoding && target === 'sandbox') ||
+    (sandboxCoding &&
+      (!dependencies.sandboxCheckpoints ||
+        !manager.executionResourceScope ||
+        digest(manager.executionResourceScope) !== sandboxCoding.resourceScopeDigest ||
+        manager.readyDiskImageId !== sandboxCoding.readyDiskImageId))
+  )
+    throw new Error('parent-sandbox-coding-runtime-mismatch');
   const caseReports = config.profiles.some((s) => s.caseDirectory);
   if (
     caseReports &&
@@ -353,6 +405,7 @@ export function composeManagedProfileSet(
     db: dependencies.db,
     ownsInstallation: dependencies.ownsInstallation,
     sandboxCheckpoints: dependencies.sandboxCheckpoints,
+    sandboxCodingCheckpoints: Boolean(sandboxCoding),
     store,
     enabled: true,
     source,
@@ -402,14 +455,19 @@ export function composeManagedProfileSet(
               '--reasoning',
               route.reasoning,
             ]
-          : codexAgentCommand(
-              route,
-              config.mirror.enrollmentId,
-              stage.artifactPath,
-              stage.sourceMode !== 'none',
-              stage.inputNames,
-              githubRead?.repository,
-            ),
+          : [
+              ...codexAgentCommand(
+                route,
+                config.mirror.enrollmentId,
+                stage.artifactPath,
+                stage.sourceMode !== 'none',
+                stage.inputNames,
+                githubRead?.repository,
+              ),
+              ...(stage.privateCommit && stage.artifactPath === PRIVATE_SUBMISSION_FILE
+                ? ['--private-change-submission']
+                : []),
+            ],
         ...(config.mirror.dependencyCachePath
           ? {
               dependencyCache: {
@@ -465,6 +523,8 @@ export function composeManagedProfileSet(
   return {
     components,
     withCheckpoint: components.withCheckpoint,
+    privateRuntime: components.runtime,
+    sandboxCoding,
     config: { db: dependencies.db, store },
     bindings: cli.bindings,
     resume: (profileIds?: ReadonlySet<string>) => components.resume(profileIds),

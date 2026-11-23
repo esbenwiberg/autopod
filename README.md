@@ -75,7 +75,8 @@ filters; the action-response filtering above is a separate path.
 - **Keep lessons, not every chat.** Scoped, human-approved memory carries useful
   knowledge forward with source evidence and usage history.
 - **Close the loop around the PR.** Configured issue watchers can turn labeled
-  issues into work; bounded fix pods can respond to CI failures and review comments.
+  issues into work; bounded fix pods can respond to CI failures, review comments
+  and merge conflicts.
 - **Bring the awkward parts of your stack.** Private npm/NuGet feeds, warmed
   images, injected MCP tools, and skills fit into repository-specific setups.
 - **Set allowances, not just reminders.** Optional whole-task token budgets help

@@ -48,17 +48,15 @@ async function changes(mirror: string, base: string, tip: string) {
   return rows;
 }
 
-/** Private offline preview only, never admission or delivery authority. */
-export async function buildParentIntegration(
+function readIntegrationPair(
   db: Database.Database,
-  scratch: string,
   run: string,
-  inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
+  inputs: readonly Readonly<ParentCandidateSelection>[],
 ) {
-  if (inputs.length !== 2 || inputs[0].requestKey === inputs[1].requestKey)
+  const [left, right] = inputs;
+  if (inputs.length !== 2 || !left || !right || left.requestKey === right.requestKey)
     throw new Error('parent-integration-distinct-inputs-required');
-  const [left, right] = structuredClone(inputs);
-  const readPair = db.transaction(() => {
+  return db.transaction(() => {
     const context = db
       .prepare(`SELECT r.accepted_commit, r.accepted_evidence, r.policy_digest,
       p.policy_digest AS parent_policy, p.pod_id FROM orchestration_runs r
@@ -70,8 +68,46 @@ export async function buildParentIntegration(
       a: readParentCandidate(db, run, left),
       b: readParentCandidate(db, run, right),
     };
-  });
+  })();
+}
+
+/** Rebind an already qualified integration without rebuilding or rerunning checks. */
+export function assertParentIntegrationBinding(
+  db: Database.Database,
+  run: string,
+  inputs: readonly Readonly<Omit<ParentIntegrationInput, 'allowlist'> & { scopeDigest: string }>[],
+  expected: string,
+) {
+  const { fingerprint, a, b } = readIntegrationPair(db, run, inputs);
+  if (
+    [a, b].some(
+      (value, index) =>
+        value.scopeDigest !== inputs[index]?.scopeDigest ||
+        value.tree !== inputs[index]?.expectedTree,
+    ) ||
+    digest([fingerprint, a.authorityDigest, b.authorityDigest]) !== expected
+  )
+    throw new Error('parent-integration-stale');
+}
+
+/** Private offline preview only, never admission or delivery authority. */
+export async function buildParentIntegration(
+  db: Database.Database,
+  scratch: string,
+  run: string,
+  inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
+) {
+  const frozen = structuredClone(inputs);
+  const [left, right] = frozen;
+  const readPair = () => readIntegrationPair(db, run, frozen);
   const { a, b, fingerprint } = readPair();
+  if (
+    a.scopeDigest !== digest(left.allowlist) ||
+    a.tree !== left.expectedTree ||
+    b.scopeDigest !== digest(right.allowlist) ||
+    b.tree !== right.expectedTree
+  )
+    throw new Error('parent-candidate-scope-mismatch');
   if (a.base !== b.base || a.receipt.newCommit === b.receipt.newCommit)
     throw new Error('parent-integration-base-or-candidate-mismatch');
   const base = a.base;
@@ -192,7 +228,12 @@ export async function buildParentIntegration(
     canonical(before.receipt) === canonical(after.receipt) &&
     before.bundle.equals(after.bundle);
   const assertCurrent = () => {
-    const final = readPair();
+    let final: ReturnType<typeof readPair>;
+    try {
+      final = readPair();
+    } catch (cause) {
+      throw new Error('parent-integration-stale', { cause });
+    }
     if (final.fingerprint !== fingerprint || !isSame(a, final.a) || !isSame(b, final.b))
       throw new Error('parent-integration-stale');
   };

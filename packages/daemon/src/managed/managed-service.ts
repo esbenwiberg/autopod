@@ -13,6 +13,7 @@ import type { ManagedArtifactInputs } from './artifact-inputs.js';
 import type { ManagedArtifactPipeline } from './artifact-pipeline.js';
 import { canonical } from './canonical.js';
 import { admitManagedRequest, type ManagedAdmission, validateManagedRequest } from './grants.js';
+import { isPrivateParentCommit } from './private-commit-policy.js';
 import type { ManagedSourceDelivery } from './source-delivery.js';
 import type { ManagedValidationRunner } from './validation.js';
 
@@ -42,6 +43,7 @@ export interface ManagedRuntimePort {
     exitCode?: number;
     limitation?:
       | 'agent-request-limit-reached'
+      | 'agent-provider-request-limit-reached'
       | 'agent-quota-feed-unavailable'
       | 'agent-auto-compaction-unsupported'
       | 'agent-context-window-exceeded'
@@ -95,6 +97,15 @@ export class ManagedPodService {
   artifactPipeline?: ManagedArtifactPipeline;
   inputs?: ManagedArtifactInputs;
   source?: ManagedSourceDelivery;
+  privateCommit?: {
+    authorize: (
+      installation: string | undefined,
+      request: ManagedPodRequest,
+      proposal?: true,
+    ) => void;
+    finish: (installation: string, podId: string) => Promise<void>;
+    assertSubmittedCleanup: (installation: string, podId: string) => void;
+  };
   validation?: ManagedValidationRunner;
   onTransition?: (row: ManagedPodRow, key: string, kind: ManagedPodEvent['kind']) => void;
   private readonly starts: Map<string, Promise<ManagedPodHandle>>;
@@ -142,7 +153,11 @@ export class ManagedPodService {
       enabled: this.enabled,
     };
   }
-  async preflight(raw: unknown, installation?: string): Promise<ManagedPodRequest> {
+  async preflight(
+    raw: unknown,
+    installation?: string,
+    proposal?: true,
+  ): Promise<ManagedPodRequest> {
     if (!this.enabled) throw new Error('managed-lane-disabled');
     const request = validateManagedRequest(raw);
     this.catalog?.assertInstallation(request, installation);
@@ -154,7 +169,10 @@ export class ManagedPodService {
       if (!this.inputs || !installation) throw new Error('artifact-input-unavailable');
       await this.inputs.check(installation, request);
     }
-    if (request.outputs.source.mode !== 'none') {
+    if (isPrivateParentCommit(request)) {
+      if (!this.privateCommit) throw new Error('parent-private-commit-unavailable');
+      this.privateCommit.authorize(installation, request, proposal);
+    } else if (request.outputs.source.mode !== 'none') {
       if (!this.source || !this.source.verifierIdentities.has(request.validation.verifierPolicy))
         throw new Error('source-verifier-unavailable');
       const binding = this.source.git.binding(request.outputs.source);

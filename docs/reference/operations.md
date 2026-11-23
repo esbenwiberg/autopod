@@ -352,4 +352,12 @@ These states have the following effects:
 
 There are no active probes. Health comes only from runs that were actually refused.
 
+An enrolled Task's **Delegated workers** section in Desktop Overview shows its
+own children; **Dispatcher attempts** is a separate, installation-scoped inventory.
+Worker exit and commit collection are shown separately when the daemon has
+those facts. A collected commit is not a pass for the combined change.
+A child that uses all of its allowed model requests before finishing is shown
+as exited with a request-limit explanation. This per-child allowance is
+independent of the parent's task token budget.
+
 Node24 worker release, real-image smoke checks, migration and rollback: [operator runbook](../node24-environments.md). Explicit Node22 templates remain available for compatibility.

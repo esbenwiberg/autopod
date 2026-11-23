@@ -272,6 +272,36 @@ describe('launch admission retries', () => {
       db.close();
     }
   });
+  it('awaits resource preflight before inserting a new launch, without rechecking replay', async () => {
+    const db = createTestDb();
+    try {
+      const { store, services } = createTestConfiguration(db);
+      const snapshots = createLaunchSnapshotRepository(db, store);
+      const createPod = vi.fn(() => insertConfigurationTestPod(db, 'preflight-child'));
+      const assertResolved = vi
+        .fn(async () => {})
+        .mockRejectedValueOnce(new Error('Only one subnet'));
+      const input = {
+        request: { repositoryId: 'repo-a', task: 'Prepared', requestId: 'capacity-launch' },
+        actorId: 'user',
+        services,
+        snapshots,
+        createPod,
+        assertResolved,
+      };
+      await expect(admitLaunch(input)).rejects.toThrow('Only one subnet');
+      expect(createPod).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT count(*) FROM pod_launch_snapshots').pluck().get()).toBe(0);
+      const first = await admitLaunch(input);
+      assertResolved.mockRejectedValue(new Error('Capacity changed'));
+      expect(await admitLaunch(input)).toEqual({ ...first, created: false });
+      expect(assertResolved).toHaveBeenCalledTimes(2);
+      expect(createPod).toHaveBeenCalledOnce();
+    } finally {
+      db.close();
+    }
+  });
+
   it('runs async insertion preflight once and skips it on exact saved replay', async () => {
     const db = createTestDb();
     try {

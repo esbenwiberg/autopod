@@ -15,6 +15,7 @@ struct WorkTab: View {
 
     @State private var quality: PodQualitySignals? = nil
     @State private var cost: PodCostBreakdownResponse? = nil
+    @State private var costFailedPodId: String? = nil
     @State private var selectedSection: WorkSection = .task
     @State private var factWaiverPopoverFactId: String? = nil
     @State private var factWaiverReason: String = ""
@@ -182,15 +183,39 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
-            Group {
+            VStack(alignment: .leading, spacing: 20) {
                 if let cost, cost.podId == pod.id {
                     SessionCostCard(breakdown: cost, showResources: pod.executionTarget == "sandbox")
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("work-cost-metrics")
                 } else {
-                    emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+                    costPlaceholder
                 }
+                // The task budget loads independently, so it stays available (with its
+                // own loading/unavailable state) when cost telemetry is missing.
+                TaskTokenLimitCostSection(pod: pod, actions: actions.taskBudget)
+                    .id("\(pod.id).\(actions.taskBudget.scope)")
             }
             .task(id: pod.id) { await fetchCost() }
         }
+    }
+
+    private var costPlaceholder: some View {
+        let failed = costFailedPodId == pod.id
+        return HStack(spacing: 10) {
+            Image(systemName: failed ? "exclamationmark.triangle" : "dollarsign.circle")
+                .font(.system(size: 18))
+                .foregroundStyle(.tertiary)
+            Text(failed ? "Cost metrics unavailable" : "No cost data yet")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("work-cost-placeholder")
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func emptyWorkSection(_ text: String, icon: String) -> some View {
@@ -219,9 +244,17 @@ struct WorkTab: View {
 
     private func fetchCost() async {
         guard let loadCost else { return }
-        let result = try? await loadCost(pod.id)
-        guard !Task.isCancelled else { return }
-        cost = result
+        let podId = pod.id
+        do {
+            let result = try await loadCost(podId)
+            guard !Task.isCancelled else { return }
+            cost = result
+            costFailedPodId = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            cost = nil
+            costFailedPodId = podId
+        }
     }
 
     // MARK: - Prompt

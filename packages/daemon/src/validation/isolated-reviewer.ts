@@ -201,6 +201,56 @@ export class IsolatedReviewer {
     return execute;
   }
 
+  /** Host-only, one-shot packet review. The durable qualification fence replaces
+   * live Task status, not the immutable launch, account, budget or cleanup checks. */
+  parentQualification(
+    pod: Pod,
+    config: EffectiveLaunchConfig,
+    inputDigest: string,
+    assertQualificationCurrent: () => void,
+  ): ReviewerExecutor {
+    if (!/^sha256:[0-9a-f]{64}$/.test(inputDigest))
+      configurationError('Parent reviewer digest refused', 'REVIEWER_INPUT_INVALID');
+    const selection = config.ai.reviewer;
+    if (
+      config.intent !== 'task' ||
+      config.work.inputBundle ||
+      selection.mode !== 'independent' ||
+      selection.route.providerAccountId === config.ai.main.providerAccountId ||
+      config.ai.main.failover.some(
+        (route) => route.providerAccountId === selection.route.providerAccountId,
+      ) ||
+      selection.route.failover.length ||
+      selection.route.maxHops !== 0
+    )
+      configurationError(
+        'Parent requires a separate fixed reviewer route',
+        'REVIEWER_INPUT_INVALID',
+      );
+    const route = structuredClone(selection.route);
+    let used = false;
+    return async (input) => {
+      if (used || input.images?.length || input.timeout > 120_000)
+        configurationError('Parent reviewer request refused', 'REVIEWER_INPUT_INVALID');
+      assertQualificationCurrent();
+      used = true;
+      return this.attemptExecutor(
+        pod,
+        config,
+        route,
+        'review',
+        { requestId: inputDigest, ordinal: 0, deadline: Date.now() + input.timeout },
+        {
+          assertCurrent: assertQualificationCurrent,
+          reservationId: 'review-parent-' + inputDigest.slice(7, 55),
+        },
+      )({
+        ...input,
+        ...(input.outputContract ? { outputContract: structuredClone(input.outputContract) } : {}),
+      });
+    };
+  }
+
   /**
    * Operator closure of an uncertain run. Unconfirmed cleanup is retried first; inference is never
    * retried. Without usage, the run's spend is accepted as unknown.
@@ -252,6 +302,7 @@ export class IsolatedReviewer {
     route: AgentRoute,
     purpose: 'review' | 'memory' | 'advisor',
     attempt: { requestId: string; ordinal: number; deadline: number },
+    qualification?: { assertCurrent: () => void; reservationId: string },
   ): ReviewerExecutor {
     return async (input) => {
       const deps = this.options;
@@ -275,7 +326,11 @@ export class IsolatedReviewer {
         Buffer.byteLength(input.prompt) > MAX_ISOLATED_REVIEW_INPUT_BYTES
       )
         configurationError('Reviewer input exceeds the execution bounds', 'REVIEWER_INPUT_INVALID');
-      const id = `${purpose === 'advisor' ? 'advisor' : 'review'}-${randomUUID()}`;
+      // The primary key is reserved before allocation. Even a new adapter in
+      // another daemon lifetime cannot allocate or dispatch this review again.
+      const id =
+        qualification?.reservationId ??
+        `${purpose === 'advisor' ? 'advisor' : 'review'}-${randomUUID()}`;
       const manager = deps.manager(config.execution.target);
       const image = await deps.image(config.execution.target);
       if (!/@sha256:[a-f0-9]{64}$/.test(image))
@@ -285,25 +340,27 @@ export class IsolatedReviewer {
           503,
         );
       const assertCurrent = () => {
+        qualification?.assertCurrent();
         const current = deps.readPod(pod.id);
         if (
           current.lifecycleGeneration !== pod.lifecycleGeneration ||
           current.launchConfigDigest !== config.digest ||
-          (!(
-            purpose === 'memory'
-              ? [
-                  'provisioning',
-                  'running',
-                  'validating',
-                  'failed',
-                  'review_required',
-                  'complete',
-                  'killed',
-                ]
-              : purpose === 'advisor'
-                ? ['running', 'validating', 'awaiting_input']
-                : ['running', 'validating']
-          ).includes(current.status) &&
+          (!qualification &&
+            !(
+              purpose === 'memory'
+                ? [
+                    'provisioning',
+                    'running',
+                    'validating',
+                    'failed',
+                    'review_required',
+                    'complete',
+                    'killed',
+                  ]
+                : purpose === 'advisor'
+                  ? ['running', 'validating', 'awaiting_input']
+                  : ['running', 'validating']
+            ).includes(current.status) &&
             !artifactChecksReviewAllowed(current))
         )
           configurationError(
@@ -325,6 +382,12 @@ export class IsolatedReviewer {
       if (Date.now() >= attempt.deadline) throw timedOut();
       assertCurrent();
       const images = freezeReviewerImages(input.images);
+      if (qualification && deps.runs.get(pod.id, id))
+        configurationError(
+          'Parent reviewer already reserved',
+          'REVIEWER_RECONCILIATION_REQUIRED',
+          409,
+        );
       deps.runs.reserve(id, deps.readPod(pod.id), config, route, attempt, {
         promptSha256: createHash('sha256')
           .update(imageContextPrompt(input.prompt, images))

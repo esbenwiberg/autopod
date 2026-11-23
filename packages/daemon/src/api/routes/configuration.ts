@@ -62,6 +62,14 @@ export interface ConfigurationRouteDependencies {
   securityPolicy?: ConfigurationSecurityPolicyStore;
   /** Reports actually enabled features. Supplying configuration routes never enables creation. */
   capabilities: () => unknown;
+  previewLaunch?: (raw: unknown, principal: JwtPayload) => Promise<EffectiveLaunchConfig>;
+  /** Candidate-only, read-only comparison of the authenticated Desktop connection to the frozen owner. */
+  candidateOwnerStatus?: (principal: Pick<JwtPayload, 'oid' | 'iss' | 'aud'>) => {
+    uniqueSlot: boolean;
+    objectMatches: boolean;
+    issuerMatches: boolean;
+    audienceMatches: boolean;
+  };
   goals?: {
     get(podId: string): import('@autopod/shared').PodGoal | null;
     control(
@@ -180,7 +188,19 @@ export function configurationRoutes(
     }
     return config;
   });
-  app.get('/configuration/capabilities', async () => deps.capabilities());
+  app.get('/configuration/capabilities', async (request) => {
+    if (deps.candidateOwnerStatus && request.user) {
+      try {
+        request.log.info(
+          deps.candidateOwnerStatus(request.user),
+          'candidate connection owner check',
+        );
+      } catch {
+        // Observability is not an admission gate and must not interrupt capability discovery.
+      }
+    }
+    return deps.capabilities();
+  });
   if (deps.deployments) {
     const deployments = deps.deployments;
     app.get('/deployments', async (request) => deployments.list(request.user.oid));
@@ -348,7 +368,9 @@ export function configurationRoutes(
   app.post(
     '/launch/resolve',
     async (request): Promise<EffectiveLaunchConfig> =>
-      resolveLaunch(request.body, deps.resolution, request.user.oid),
+      deps.previewLaunch
+        ? deps.previewLaunch(request.body, request.user)
+        : resolveLaunch(request.body, deps.resolution, request.user.oid),
   );
   app.post('/launch/dispatch-preview', async (request): Promise<DispatchPreview> => {
     const config = await resolveLaunch(request.body, deps.resolution, request.user.oid);

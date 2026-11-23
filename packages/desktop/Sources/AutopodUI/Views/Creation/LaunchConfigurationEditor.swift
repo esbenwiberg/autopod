@@ -98,7 +98,11 @@ struct LaunchConfigurationEditor: View {
       if jsonDirty { Text("Unapplied JSON edits. Apply or reload before previewing or launching.").foregroundStyle(.orange).font(.caption) }
       HStack {
         Button("Apply JSON") {
-          do { request = try followUpSelectionOnly ? FollowUpSelectionJSON.decode(advanced, preserving: request) : LaunchComposerJSON.decode(advanced, selectionOnly: selectionOnly, task: request.task); jsonDirty = false; error = nil }
+          do {
+            let edited = try followUpSelectionOnly ? FollowUpSelectionJSON.decode(advanced, preserving: request) : LaunchComposerJSON.decode(advanced, selectionOnly: selectionOnly, task: request.task)
+            request = try LaunchComposerJSON.applyTaskEdit(edited, preserving: request)
+            jsonDirty = false; error = nil
+          }
           catch { self.error = error.localizedDescription }
         }
         Button("Reload current values") { updateAdvanced(); jsonDirty = false; error = nil }

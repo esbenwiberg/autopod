@@ -25,16 +25,23 @@ enum LaunchRequestJournal {
     return url
   }
   static func save(_ request: ComposableLaunchRequest, directory: URL? = nil) throws -> URL {
+    try request.validateParentEnrollment()
     guard let id = request.requestId, !id.isEmpty, id.range(of: #"^[a-zA-Z0-9_.-]{1,128}$"#, options: .regularExpression) != nil else {
       throw LaunchJSONError.invalid("A stable launch request ID is required")
     }
     let folder = directory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".autopod/launches", isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    let url = folder.appendingPathComponent("\(id).json")
+    let filename = request.requireParentEnrollment == true ? id.lowercased() : id
+    let url = folder.appendingPathComponent("\(filename).json")
     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     let data = try encoder.encode(request)
     if FileManager.default.fileExists(atPath: url.path) {
       guard try ComposableLaunchRequest.decodeJSON(Data(contentsOf: url)) == request else { throw LaunchJSONError.invalid("This request ID belongs to a different saved launch") }
+      // Written before POST. Even after a crash or lost response this launch
+      // may have been accepted, so the same enrollment cannot be sent again.
+      if request.requireParentEnrollment == true {
+        throw LaunchJSONError.invalid("This enrolled Task was already recorded for submission. Check the original daemon; do not resend it.")
+      }
       return url
     }
     // Foundation's exclusive create prevents overwriting a different request with the same key.

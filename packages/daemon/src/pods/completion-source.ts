@@ -5,6 +5,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
+import { AutoCommitIgnoreError } from '../worktrees/source-adoption-git.js';
 import type { PodRepository } from './pod-repository.js';
 
 export interface CompletionSourcePreparation {
@@ -42,7 +43,7 @@ interface CompletionSourceDependencies {
   ): Promise<boolean>;
   parkOnWorktreeSyncFailure(podId: string, reason: string): void;
   handleDeletionGuardError(podId: string, err: unknown): boolean;
-  transition(pod: Pod, to: 'failed'): Pod;
+  transition(pod: Pod, to: 'failed', updates?: Partial<Pod>): Pod;
   executionForPod(pod: Pod): PodExecutionSettings;
   emitActivityStatus(podId: string, message: string): void;
   logger: Pick<Logger, 'info' | 'warn' | 'error'>;
@@ -68,6 +69,23 @@ export function createCompletionSource(deps: CompletionSourceDependencies): {
     emitActivityStatus,
     logger,
   } = deps;
+
+  function parkOnInconsistentExcludes(expected: Pod, error: unknown): boolean {
+    if (!(error instanceof AutoCommitIgnoreError)) return false;
+    const current = podRepo.getOrThrow(expected.id);
+    if (
+      current.status === 'running' &&
+      current.lifecycleGeneration === expected.lifecycleGeneration &&
+      current.containerId === expected.containerId &&
+      current.worktreePath === expected.worktreePath
+    ) {
+      logger.warn({ podId: current.id, code: error.code }, error.message);
+      transition(current, 'failed', { failureReason: error.message });
+      emitActivityStatus(current.id, error.message);
+    }
+    // Never fall through to “no changes” or delivery on a refused staging scan.
+    return true;
+  }
 
   async function prepareSourceForCompletion(
     pod: Pod,
@@ -213,6 +231,7 @@ export function createCompletionSource(deps: CompletionSourceDependencies): {
           logger.info({ podId }, 'Auto-committed uncommitted agent changes');
         }
       } catch (err) {
+        if (parkOnInconsistentExcludes(pod, err)) return;
         if (err instanceof DeletionGuardError && pod.containerId && pod.worktreePath) {
           logger.warn({ podId }, 'Deletion guard fired — attempting live container recovery');
           const cm = getContainerManager(pod.executionTarget);
@@ -233,6 +252,7 @@ export function createCompletionSource(deps: CompletionSourceDependencies): {
               );
               logger.info({ podId }, 'Auto-committed after live container recovery');
             } catch (retryErr) {
+              if (parkOnInconsistentExcludes(pod, retryErr)) return;
               logger.error({ err: retryErr, podId }, 'Commit after worktree recovery also failed');
               if (handleDeletionGuardError(podId, retryErr)) {
                 const compromised = podRepo.getOrThrow(podId);

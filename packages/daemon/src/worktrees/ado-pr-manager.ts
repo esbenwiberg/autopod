@@ -335,6 +335,8 @@ export class AdoPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      briefTitle: config.briefTitle,
+      contractTitle: config.contractTitle,
       deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
@@ -894,6 +896,7 @@ export class AdoPrManager implements PrManager {
       mergeBlocked: reasons.length > 0,
       squashRequired,
       reviewDecision,
+      ...(pr.mergeStatus === 'conflicts' ? { mergeConflict: true } : {}),
       ciFailures,
       reviewComments,
     };

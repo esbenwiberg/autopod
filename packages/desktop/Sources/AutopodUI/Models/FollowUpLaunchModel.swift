@@ -156,7 +156,7 @@ internal enum FollowUpFailure {
 }
 
 internal enum FollowUpSelectionJSON {
-  static let managed: Set<String> = ["repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "intent", "source", "task", "work", "requestId", "expectedDigest", "origin"]
+  static let managed: Set<String> = ["repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "intent", "source", "task", "work", "requestId", "expectedDigest", "origin", "requireParentEnrollment"]
   static func value(_ request: ComposableLaunchRequest) -> ConfigurationJSON {
     .object((LaunchComposerJSON.value(request).object ?? [:]).filter { !managed.contains($0.key) })
   }

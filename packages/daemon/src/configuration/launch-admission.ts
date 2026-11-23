@@ -24,10 +24,13 @@ export async function admitLaunch(input: {
   authorize?: (
     requestId: string | undefined,
   ) => ((podId: string, config: EffectiveLaunchConfig) => void) | undefined;
+  assertRequest?: (request: ReturnType<typeof launchRequestSchema.parse>) => void;
+  assertResolved?: (config: EffectiveLaunchConfig) => void | Promise<void>;
   /** Optional read-only async preflight; its returned insertion rechecks observations synchronously. */
   preparePod?: (config: EffectiveLaunchConfig) => Promise<() => string>;
 }): Promise<{ podId: string; created: boolean; config: EffectiveLaunchConfig }> {
   const request = launchRequestSchema.parse(input.request);
+  input.assertRequest?.(request);
   const bind = input.authorize?.(request.requestId);
   if (request.requireParentEnrollment && !bind) {
     configurationError(
@@ -56,6 +59,7 @@ export async function admitLaunch(input: {
     const frozen = { ...resolved, origin: input.origin };
     config = { ...frozen, digest: configurationDigest(frozen) };
   }
+  if (input.assertResolved) await input.assertResolved(config);
   const createPod = input.preparePod
     ? await input.preparePod(config)
     : () => input.createPod(config);

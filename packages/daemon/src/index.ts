@@ -22,6 +22,7 @@ import {
 } from './configuration/host-components.js';
 import { boundedDockerCall } from './containers/docker-bounds.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
+import { inspectNetworkCapacity } from './containers/docker-network-capacity.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { createRetainedCleanupDocker } from './containers/retained-cleanup-docker.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
@@ -60,6 +61,7 @@ import {
   parseOperatorEnrollment,
 } from './orchestration/operator-enrollment.js';
 import { operatorPartition } from './orchestration/operator-partition.js';
+import { composeOperatorSandboxTarget } from './orchestration/operator-sandbox-target.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -143,7 +145,14 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-loadDotenv(); // load .env if present (no-op if missing)
+const candidateSelected = process.argv.slice(2).includes('--parent-candidate');
+if (candidateSelected && process.argv.length !== 3)
+  throw new Error('parent-candidate-entrypoint-arguments');
+if (!candidateSelected) loadDotenv(); // never inherit the ordinary dotenv in candidate mode
+const enrollment = parseOperatorEnrollment(process.env.AUTOPOD_OPERATOR_ENROLLMENT);
+const candidate = await (
+  await import('./orchestration/parent-candidate-host.js')
+).prepareParentCandidate(candidateSelected, process.env, enrollment);
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_DEV = process.env.NODE_ENV !== 'production';
@@ -242,6 +251,7 @@ const PINO_BASE_OPTIONS = {
 const logger = IS_DEV
   ? pino(PINO_BASE_OPTIONS, (await import('pino-pretty')).build({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
+if (candidate) logger.info({ receiptTrust: candidate.receiptTrust }, 'Isolated parent candidate');
 const githubAuth = new GhCliDaemonGitHubAuth();
 const azureDevOpsAuth = createAzureDevOpsAuth(logger, {
   tenantId: AZURE_DEVOPS_TENANT_ID,
@@ -709,16 +719,18 @@ const systemDecisionRunner = new SystemDecisionRunner({
 const systemDecisionExecutionTarget = resolveSystemDecisionExecutionTarget(
   Boolean(sandboxContainerManager),
 );
-const systemSandboxReaper = setInterval(
-  () =>
-    systemDecisionRunner
-      .reapLeakedRuns(new Date(Date.now() - 65 * 60 * 1000).toISOString())
-      .catch((err) => {
-        logger.error({ err }, 'Periodic system sandbox reaping failed');
-      }),
-  5 * 60 * 1000,
-);
-systemSandboxReaper.unref();
+const systemSandboxReaper = candidate
+  ? undefined
+  : setInterval(
+      () =>
+        systemDecisionRunner
+          .reapLeakedRuns(new Date(Date.now() - 65 * 60 * 1000).toISOString())
+          .catch((err) => {
+            logger.error({ err }, 'Periodic system sandbox reaping failed');
+          }),
+      5 * 60 * 1000,
+    );
+systemSandboxReaper?.unref();
 
 // Validation execs against the pod's existing container (pod.containerId), so it
 // MUST route by execution target exactly like the runtimes do — otherwise a
@@ -823,6 +835,32 @@ const reviewerRegistry = acr;
 let parentManaged:
   | import('./orchestration/parent-managed-launch.js').ParentManagedLaunch
   | undefined;
+const settings = hostConfigurationSettingsSchema.parse(
+  fs.existsSync(configurationHostPath)
+    ? JSON.parse(fs.readFileSync(configurationHostPath, 'utf8'))
+    : {},
+);
+function getParentCandidateBinding():
+  | ReturnType<NonNullable<typeof candidate>['bind']>
+  | undefined {
+  return candidate?.bind(settings.reviewerImages.local, {
+    readPod: (id) => podRepo.getOrThrow(id),
+    readLaunch: (id) => configuration.snapshots.get(id),
+    reviewer: {
+      parentQualification: (...args) => configuration.parentReviewer.parentQualification(...args),
+    },
+  });
+}
+if (
+  candidate &&
+  (settings.deploymentTargets.length ||
+    settings.pimAccount ||
+    settings.referenceRendererImage ||
+    settings.skillRoots.length ||
+    settings.nativeGoalEvidence.length)
+)
+  throw new Error('parent-candidate-host-settings-refused');
+const candidateBinding = getParentCandidateBinding();
 const configuration = createHostConfigurationComponents({
   db,
   logger,
@@ -851,11 +889,16 @@ const configuration = createHostConfigurationComponents({
           }),
       }
     : {}),
-  settings: hostConfigurationSettingsSchema.parse(
-    fs.existsSync(configurationHostPath)
-      ? JSON.parse(fs.readFileSync(configurationHostPath, 'utf8'))
-      : {},
-  ),
+  settings,
+  parentCandidate: candidate &&
+    candidateBinding && {
+      requireLaunch: candidate.requireLaunch,
+      assertLaunch: candidateBinding.assertLaunch,
+      assertNetworkHeadroom: () =>
+        candidate.requireNetworkHeadroom(async () =>
+          docker ? (await inspectNetworkCapacity({ docker })).addressPools.free : null,
+        ),
+    },
   podManager: () => podManager,
   admissionReady: configurationAdmissionReady,
   authorizeParentLaunch: (requestId, principal) =>
@@ -1087,8 +1130,10 @@ const memoryCandidateRecorder = createMemoryCandidateRecorder({
   containerManagerFactory,
   logger,
 });
-preCleanupMemoryExtraction = (podId) => memoryCandidateRecorder.extractNow(podId);
-memoryCandidateRecorder.start();
+if (!candidate) {
+  preCleanupMemoryExtraction = (podId) => memoryCandidateRecorder.extractNow(podId);
+  memoryCandidateRecorder.start();
+}
 
 // Issue watcher (polls GitHub Issues / ADO Work Items for labeled issues)
 import { createIssueWatcherRepository } from './issue-watcher/issue-watcher-repository.js';
@@ -1111,7 +1156,7 @@ const issueWatcherService = createIssueWatcherService({
   githubAuth,
   azureDevOpsAuth,
 });
-issueWatcherService.start();
+if (!candidate) issueWatcherService.start();
 
 const podsitterActionExecutor = new PodsitterActionExecutor(podsitterRepo, podManager, {
   async dismissValidationFinding(podId, findingId, reason) {
@@ -1166,11 +1211,11 @@ const podsitterService = createPodsitterService({
   },
   reapLeakedSandboxes: () => systemDecisionRunner.reapLeakedRuns(),
 });
-await podsitterService.start().catch((err) => {
-  logger.error({ err }, 'Podsitter startup reconciliation failed');
-});
-
-const enrollment = parseOperatorEnrollment(process.env.AUTOPOD_OPERATOR_ENROLLMENT);
+if (!candidate) {
+  await podsitterService.start().catch((err) => {
+    logger.error({ err }, 'Podsitter startup reconciliation failed');
+  });
+}
 const separateProfiles = parseManagedProfileSetConfig(process.env.AUTOPOD_OPERATOR_PROFILE_SET);
 const operatorProfiles = separateProfiles ?? managedProfileSetConfig;
 const partition = operatorPartition(
@@ -1178,6 +1223,7 @@ const partition = operatorPartition(
   managedCliConfig,
   managedProfileSetConfig,
   separateProfiles,
+  !!candidate,
 );
 if (
   enrollment &&
@@ -1232,6 +1278,15 @@ const managedRuntime =
         worktrees: worktreeManager,
       })
     : legacyManagedRuntime;
+const sandboxCoding = enrollment?.parent?.coding?.sandbox;
+if (sandboxCoding && partition?.target !== 'sandbox')
+  throw new Error('parent-sandbox-coding-runtime-mismatch');
+// The ordinary manager, router and reapers never receive the operator target.
+const operatorSandboxManager =
+  composeOperatorSandboxTarget(process.env.AUTOPOD_OPERATOR_SANDBOX_TARGET, sandboxCoding, logger, {
+    managedDatabase: db,
+    wakeupJournal: podRepo.sandboxWakeups,
+  }) ?? sandboxContainerManager;
 const separateRuntime =
   separateProfiles && partition && managedCliConfig
     ? composeManagedProfileSet(
@@ -1247,8 +1302,9 @@ const separateRuntime =
         {
           db,
           databasePath: DB_PATH,
-          manager: partition.target === 'sandbox' ? sandboxContainerManager : containerManager,
+          manager: partition.target === 'sandbox' ? operatorSandboxManager : containerManager,
           sandboxCheckpoints: partition.target === 'sandbox',
+          sandboxCoding,
           networkManager,
           providerAccounts: providerAccountStore,
           githubAuth,
@@ -1261,6 +1317,28 @@ const operatorRuns = enrollment
       db,
       databasePath: DB_PATH,
       isolatedArtifacts: !!partition,
+      parentHostGates: candidateBinding?.ports,
+      trustedEvaluatorPins:
+        candidate?.pins ??
+        (sandboxCoding
+          ? await (
+              await import('./orchestration/evaluator-public-pins.js')
+            ).readEvaluatorPublicPins(process.env.AUTOPOD_EVALUATOR_PUBLIC_POLICY)
+          : undefined),
+      evaluatorFetch:
+        sandboxCoding?.authorizeEvaluatorDispatch && enrollment.parent?.coding?.evaluation
+          ? await (
+              await import('./orchestration/parent-evaluator-tls.js')
+            ).loadParentEvaluatorTlsFetch(
+              enrollment.parent.coding.evaluation,
+              process.env.CREDENTIALS_DIRECTORY,
+            )
+          : undefined,
+      evaluatorDispatchKeys: sandboxCoding?.authorizeEvaluatorDispatch
+        ? await (
+            await import('./orchestration/parent-evaluator-dispatch.js')
+          ).readEvaluatorDispatchKeys(process.env.CREDENTIALS_DIRECTORY)
+        : undefined,
       profiles: operatorProfiles,
       cli: managedCliConfig,
       runtime: separateRuntime ?? profileRuntime,
@@ -1290,7 +1368,17 @@ if (operatorRuns?.slots.some((s) => s.parent)) {
 // Server
 const app = await createServer({
   parentManaged,
-  configuration: configuration.routes,
+  configuration: {
+    ...configuration.routes,
+    ...(candidate &&
+      enrollment?.parent &&
+      parentManaged && {
+        candidateOwnerStatus: parentManaged.inspectLaunchOwner.bind(
+          parentManaged,
+          enrollment.parent.requestId,
+        ),
+      }),
+  },
   pim: configuration.scopedTools.pimRoutes,
   authModule,
   operatorRuns: operatorRuns && {
@@ -1301,7 +1389,9 @@ const app = await createServer({
       finishOutputs: () => separateRuntime.components.pipeline.tick(),
     },
   },
-  managed: managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH),
+  managed: candidate
+    ? undefined
+    : (managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH)),
   podManager,
   profileStore,
   providerAccountStore,
@@ -1356,13 +1446,14 @@ const app = await createServer({
   backupManager,
 });
 
-const sandboxTerminalReaper = sandboxContainerManager
-  ? new SandboxTerminalReaper({
-      podRepo,
-      sandboxContainerManager,
-      logger: logger.child({ component: 'sandbox-terminal-reaper' }),
-    })
-  : null;
+const sandboxTerminalReaper =
+  !candidate && sandboxContainerManager
+    ? new SandboxTerminalReaper({
+        podRepo,
+        sandboxContainerManager,
+        logger: logger.child({ component: 'sandbox-terminal-reaper' }),
+      })
+    : null;
 const sandboxTerminalReaperTimer = sandboxTerminalReaper
   ? setInterval(() => {
       void sandboxTerminalReaper.runSweep().catch((err) => {
@@ -1376,14 +1467,15 @@ sandboxTerminalReaperTimer?.unref();
 // references at all. The terminal reaper walks from the DB and so cannot see a
 // sandbox whose pod row is gone, whose container_id was cleared, or that was
 // never recorded — and an unreferenced sandbox bills cold storage forever.
-const sandboxOrphanReaper = sandboxContainerManager
-  ? new SandboxOrphanReaper({
-      podRepo,
-      sandboxContainerManager,
-      minAgeMs: SANDBOX_ORPHAN_REAPER_MIN_AGE_MS,
-      logger: logger.child({ component: 'sandbox-orphan-reaper' }),
-    })
-  : null;
+const sandboxOrphanReaper =
+  !candidate && sandboxContainerManager
+    ? new SandboxOrphanReaper({
+        podRepo,
+        sandboxContainerManager,
+        minAgeMs: SANDBOX_ORPHAN_REAPER_MIN_AGE_MS,
+        logger: logger.child({ component: 'sandbox-orphan-reaper' }),
+      })
+    : null;
 const sandboxOrphanReaperTimer = sandboxOrphanReaper
   ? setInterval(() => {
       void sandboxOrphanReaper.runSweep().catch((err) => {
@@ -1470,13 +1562,13 @@ if (securityMlEnabled && modelManager) {
 }
 
 // Start screenshot retention sweeper — runs immediately then hourly
-screenshotRetention.start();
+if (!candidate) screenshotRetention.start();
 
 // Start scheduled job scheduler AFTER server is listening
-scheduledJobScheduler.start();
+if (!candidate) scheduledJobScheduler.start();
 
-// Reconcile sandbox pods after startup (non-blocking — errors are logged, not fatal)
-if (sandboxContainerManager) {
+// Reconcile only the ordinary sandbox fleet; candidate allocations are operator-owned.
+if (!candidate && sandboxContainerManager) {
   const { reconcileSandboxSessions } = await import('./pods/reconciler.js');
   await workspaceCheckpointController.reconcileIncomplete();
   reconcileSandboxSessions({
@@ -1506,33 +1598,35 @@ if (sandboxContainerManager) {
 // and kills any pod whose worktree doesn't exist yet — exactly the state a
 // freshly-enqueued pod is in for the first few milliseconds. Awaiting here
 // drains reconcile fully before rehydrate touches the queue.
-try {
-  const { reconcileLocalSessions } = await import('./pods/local-reconciler.js');
-  const result = await reconcileLocalSessions({
-    podRepo,
-    readNativeGoal: configuration.launchConfiguration.goals?.get,
-    finishCancelledGoal: (id) => podManager.killSession(id),
-    reconcileInfrastructureBlocker: (id) => podManager.reconcileInfrastructureBlocker(id),
-    eventBus,
-    containerManager,
-    enqueueSession: (id) => podQueue.enqueue(id),
-    validationRepo,
-    cleanupPodResources: (id) => podManager.cleanupPodResourcesForRecovery(id),
-    logger,
-  });
-  if (result.recovered.length > 0) {
-    logger.info({ recovered: result.recovered }, 'Local pods recovered');
+if (!candidate)
+  try {
+    const { reconcileLocalSessions } = await import('./pods/local-reconciler.js');
+    const result = await reconcileLocalSessions({
+      podRepo,
+      readNativeGoal: configuration.launchConfiguration.goals?.get,
+      finishCancelledGoal: (id) => podManager.killSession(id),
+      reconcileInfrastructureBlocker: (id) => podManager.reconcileInfrastructureBlocker(id),
+      eventBus,
+      containerManager,
+      enqueueSession: (id) => podQueue.enqueue(id),
+      validationRepo,
+      cleanupPodResources: (id) => podManager.cleanupPodResourcesForRecovery(id),
+      logger,
+    });
+    if (result.recovered.length > 0) {
+      logger.info({ recovered: result.recovered }, 'Local pods recovered');
+    }
+    if (result.killed.length > 0) {
+      logger.warn({ killed: result.killed }, 'Unrecoverable local pods killed');
+    }
+  } catch (err) {
+    logger.error({ err }, 'Local pod reconciliation failed');
   }
-  if (result.killed.length > 0) {
-    logger.warn({ killed: result.killed }, 'Unrecoverable local pods killed');
-  }
-} catch (err) {
-  logger.error({ err }, 'Local pod reconciliation failed');
-}
 
 // Prune orphan pod networks and sidecars left behind by a previous crashed run.
 // Runs after pod reconciliation so the active pod ID set reflects the true state.
-{
+// A separate candidate DB has no authority over other containers' networks or sidecars.
+if (!candidate) {
   const activePodIds = new Set(podRepo.listNonTerminalPodIds());
   if (networkManager) {
     networkManager
@@ -1558,17 +1652,17 @@ try {
 
 // Re-trigger any queued series pods whose parents are already done (e.g. after
 // a daemon restart or after the approveSession bug that omitted this call).
-podManager.rehydrateDependentSessions();
+if (!candidate) podManager.rehydrateDependentSessions();
 
 // Watchdog: auto-fail running pods whose agent stream went silent so the
 // concurrency slot frees up. Threshold via AUTOPOD_STUCK_RUNNING_THRESHOLD_MS.
-podManager.startStuckPodWatchdog();
+if (!candidate) podManager.startStuckPodWatchdog();
 
 // Sleep detector: publishes host.resumed events when the daemon's event loop
 // resumes after a long process suspension (laptop sleep). Drives wake-recovery
 // in pod-manager (brief 02). Threshold via AUTOPOD_SLEEP_DETECT_THRESHOLD_MS.
 const { startSleepDetector } = await import('./pods/sleep-detector.js');
-const stopSleepDetector = startSleepDetector(eventBus, logger);
+const stopSleepDetector = candidate ? undefined : startSleepDetector(eventBus, logger);
 
 // Graceful shutdown
 async function shutdown(signal: string) {
@@ -1590,14 +1684,14 @@ async function shutdown(signal: string) {
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
-  clearInterval(systemSandboxReaper);
+  if (systemSandboxReaper) clearInterval(systemSandboxReaper);
   if (sandboxTerminalReaperTimer) clearInterval(sandboxTerminalReaperTimer);
   if (sandboxOrphanReaperTimer) clearInterval(sandboxOrphanReaperTimer);
   clearInterval(preparedDependencySweepTimer);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();
-  stopSleepDetector();
+  stopSleepDetector?.();
 
   // Drain pod queue
   await podQueue.drain();
