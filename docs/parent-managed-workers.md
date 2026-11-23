@@ -499,9 +499,12 @@ uncertain and is not replayed.
 
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and
-reattaches its original workers and watchdog on daemon restart. This first
-pilot does not support silently restaging a changed policy, selecting another
-repo, or automatic Worktree recovery/reuse. It never publishes or merges.
+reattaches its original workers and watchdog on daemon restart. Killing the
+parent in Desktop fences its pending starts and revokes its live workers; the
+run-scoped watchdog stops them. Task history, private custody and spent request
+reservations are retained. This first pilot does not support silently restaging a
+changed policy, selecting another repo, or automatic worktree recovery/reuse.
+It never publishes or merges.
 
 ## Evidence and remaining milestones
 
