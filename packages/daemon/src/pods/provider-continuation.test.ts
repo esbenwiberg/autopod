@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderFailureClassification } from '@autopod/shared';
-import { PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
+import { PROVIDER_FAILOVER_HANDOFF_PATH, WORKSPACE_PRESERVATION_FAILED } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/connection.js';
@@ -239,10 +239,17 @@ describe('provider continuation', () => {
       });
     // Effects already admitted before the report remain truthful; no later
     // teardown, target attempt, or queue admission is allowed after the hold.
+    // A completed sync before the hold is a truthful preservation receipt (#670).
+    const synced = !['before', 'abort', 'sync'].includes(stage);
     expect(f.pod()).toEqual({
       ...before,
       containerId: stage === 'handoff' ? null : before.containerId,
       ...(stage === 'handoff' ? { updatedAt: expect.any(String) } : {}),
+      ...(synced
+        ? {
+            finalization: expect.objectContaining({ sourcePreservedAt: expect.any(String) }),
+          }
+        : {}),
     });
     expect(f.repo.list('continuation')).toEqual(attempts);
     expect(f.runtime.abort).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
@@ -403,6 +410,63 @@ describe('provider continuation', () => {
     expect(f.order.slice(0, 5)).toEqual(['abort', 'sync', 'preview-stop', 'deny-stop', 'kill']);
     expect(f.pod()).toMatchObject({ status: 'queued', containerId: null });
     expect(f.captured.enqueueSession).toHaveBeenCalledOnce();
+  });
+  describe('workspace preservation receipts (#670)', () => {
+    const syncContainerOnlyWork = (f: ReturnType<typeof fixture>) =>
+      f.captured.syncWorkspaceBack.mockImplementationOnce(async () => {
+        f.order.push('sync');
+        writeFileSync(join(f.directory, 'phase2-untracked.ts'), 'uncommitted phase 2\n');
+        return { pushed: false };
+      });
+
+    it('records Source saved after the provider-limit sync, before teardown', async () => {
+      const f = fixture();
+      syncContainerOnlyWork(f);
+      let preservedBeforeKill: string | null | undefined;
+      vi.mocked(f.cm.kill).mockImplementationOnce(async () => {
+        preservedBeforeKill = f.pod().finalization?.sourcePreservedAt;
+        f.order.push('kill');
+      });
+      expect(await f.c.handleProviderLimit('continuation', classification)).toBe('queued');
+      expect(f.order.indexOf('sync')).toBeLessThan(f.order.indexOf('kill'));
+      expect(preservedBeforeKill).toEqual(expect.any(String));
+      expect(readFileSync(join(f.directory, 'phase2-untracked.ts'), 'utf8')).toBe(
+        'uncommitted phase 2\n',
+      );
+      expect(f.pod()).toMatchObject({ status: 'queued', recoveryWorktreePath: f.directory });
+    });
+
+    it('records an explicit preservation failure and keeps the container when sync fails', async () => {
+      const f = fixture();
+      f.captured.syncWorkspaceBack.mockRejectedValueOnce(new Error('sync-back exec failed'));
+      expect(await f.c.handleProviderLimit('continuation', classification)).toBe('not_queued');
+      expect(f.cm.kill).not.toHaveBeenCalled();
+      expect(f.pod()).toMatchObject({ status: 'paused', containerId: 'container' });
+      expect(f.pod().finalization?.sourcePreservedAt ?? null).toBeNull();
+      expect(f.pod().failureReason).toContain(WORKSPACE_PRESERVATION_FAILED);
+      expect(f.pod().failureReason).toContain('container retained');
+      expect(f.captured.emitActivityStatus).toHaveBeenCalledWith(
+        'continuation',
+        expect.stringContaining('original container is retained'),
+      );
+    });
+
+    it('records Source saved for an operator continue-provider and its failure', async () => {
+      const ok = fixture();
+      syncContainerOnlyWork(ok);
+      await ok.c.continueProvider('continuation', target);
+      expect(ok.pod().status).toBe('queued');
+      expect(existsSync(join(ok.directory, 'phase2-untracked.ts'))).toBe(true);
+
+      const failed = fixture();
+      failed.captured.syncWorkspaceBack.mockRejectedValueOnce(new Error('sync-back exec failed'));
+      await expect(failed.c.continueProvider('continuation', target)).rejects.toMatchObject({
+        code: 'PROVIDER_CONTINUATION_UNSAFE',
+      });
+      expect(failed.cm.kill).not.toHaveBeenCalled();
+      expect(failed.pod().containerId).toBe('container');
+      expect(failed.pod().failureReason).toContain(WORKSPACE_PRESERVATION_FAILED);
+    });
   });
   describe('prepared dependency capture (#644)', () => {
     const previous = process.env.AUTOPOD_PREPARED_DEPENDENCIES_DIR;

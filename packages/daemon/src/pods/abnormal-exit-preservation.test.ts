@@ -105,6 +105,34 @@ describe('workspace preservation on abnormal worker exit (#670)', () => {
     expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
   });
 
+  it('preserves through the provider-limit pause path before the container is torn down', async () => {
+    const f = setup(async function* () {
+      yield statusEvent('Writing phase 2');
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        fatal: true,
+        message: "You've hit your 5-hour limit",
+        classification: {
+          category: 'quota_exhausted',
+          definitive: true,
+          sanitizedMessage: "You've hit your 5-hour limit",
+        },
+      };
+    });
+    let treeAtKill = false;
+    vi.mocked(f.ctx.containerManager.kill).mockImplementation(async () => {
+      treeAtKill = fs.existsSync(path.join(f.worktree, 'phase2-snapshot.ts'));
+    });
+    await f.manager.processPod(f.pod.id);
+    const paused = f.ctx.podRepo.getOrThrow(f.pod.id);
+    expect(paused).toMatchObject({ status: 'paused', pauseReason: 'provider_limit' });
+    expect(f.syncCalls).toEqual(['container-123']);
+    expect(treeAtKill).toBe(true);
+    expectPreservedTree(f.worktree);
+    expect(paused.finalization?.sourcePreservedAt).toEqual(expect.any(String));
+  });
+
   it('preserves when a fatal error arrives after a complete event in the same run', async () => {
     const f = setup(async function* () {
       yield statusEvent('Writing phase 2');

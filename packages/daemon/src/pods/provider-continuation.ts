@@ -13,6 +13,10 @@ import {
 } from './prepared-dependency-snapshot.js';
 import { writeProviderFailoverHandoff } from './recovery-context.js';
 import { workerBindingHash } from './worker-retry-history.js';
+import {
+  recordWorkspacePreservationFailure,
+  recordWorkspacePreserved,
+} from './workspace-preservation-outcome.js';
 
 type Captured = Pick<
   ContinuationCaptured,
@@ -253,8 +257,18 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         assertNoInfrastructureBlocker(podRepo, podId);
       } catch (err) {
         logger.warn({ err, podId }, 'Provider-limit worktree synchronization failed; pausing');
+        // The container is not torn down below; say so where the operator looks.
+        if (!(err instanceof AutopodError && err.code === 'INFRASTRUCTURE_BLOCKED')) {
+          recordWorkspacePreservationFailure(podRepo, podId, err);
+          emitActivityStatus(
+            podId,
+            'Provider limit reached, but the workspace could not be preserved — the original container is retained as the only copy.',
+          );
+        }
         return 'not_queued';
       }
+      // Only after the post-sync infrastructure fence: a hold admits no later effects.
+      recordWorkspacePreserved(podRepo, source);
       await capturePreparedDependencies(source, source.containerId);
       assertNoInfrastructureBlocker(podRepo, podId);
     }
@@ -522,14 +536,20 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
       try {
         await runtimeRegistry.get(pod.runtime).abort(podId);
         assertNoInfrastructureBlocker(podRepo, podId);
-        await syncWorkspaceBack(
-          pod.containerId,
-          pod.worktreePath,
-          containerManagerFactory.get(pod.executionTarget),
-          pod.id,
-          pod.executionTarget,
-        );
+        try {
+          await syncWorkspaceBack(
+            pod.containerId,
+            pod.worktreePath,
+            containerManagerFactory.get(pod.executionTarget),
+            pod.id,
+            pod.executionTarget,
+          );
+        } catch (err) {
+          if (pod.worktreePath) recordWorkspacePreservationFailure(podRepo, podId, err);
+          throw err;
+        }
         assertNoInfrastructureBlocker(podRepo, podId);
+        if (pod.worktreePath) recordWorkspacePreserved(podRepo, pod);
         await capturePreparedDependencies(pod, pod.containerId);
         assertNoInfrastructureBlocker(podRepo, podId);
         await stopSandboxPreviewProxy(pod.id);
