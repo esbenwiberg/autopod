@@ -369,6 +369,47 @@ describe('ls command', () => {
     }
   });
 
+  it.each([
+    [
+      'preserved',
+      { sourcePreservedAt: '2026-11-23T08:00:00Z' },
+      'Agent failed: provider error',
+      '2026-11-23T08:00:00Z',
+    ],
+    [
+      'not preserved',
+      { sourcePreservedAt: null },
+      'Agent failed: provider error Workspace preservation failed: sync exec failed. Original container c1 retained — it is the only copy of uncommitted work. Next: ap rework abcd1234 retries preservation',
+      'NOT saved — original container retained',
+    ],
+  ] as const)('shows Source saved for an abnormal worker exit (%s, #670)', async (_label, saved, failureReason, expected) => {
+    const baseline = await mockClient.getSession('abcd1234');
+    vi.mocked(mockClient.getSession).mockResolvedValueOnce({
+      ...baseline,
+      status: 'failed',
+      failureReason,
+      finalization: {
+        generation: 1,
+        cycle: 1,
+        phase: 'running',
+        agentSettledAt: null,
+        pendingDecisionId: null,
+        result: null,
+        ...saved,
+      },
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+      const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(output).toContain('Source saved:');
+      expect(output).toContain(expected);
+      if (saved.sourcePreservedAt === null) expect(output).toContain('ap rework abcd1234');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('rejects unsupported status before listing pods', async () => {
     await expect(program.parseAsync(['node', 'ap', 'ls', '--status', 'blocked'])).rejects.toThrow(
       /Unsupported pod status: blocked.*Supported statuses:/,

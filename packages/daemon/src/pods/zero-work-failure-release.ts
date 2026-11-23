@@ -1,4 +1,9 @@
-import type { EffectiveLaunchConfig, Pod, ProviderAttempt } from '@autopod/shared';
+import {
+  type EffectiveLaunchConfig,
+  type Pod,
+  type ProviderAttempt,
+  WORKSPACE_PRESERVATION_FAILED,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
@@ -54,7 +59,9 @@ export function createZeroWorkFailureRelease(deps: ZeroWorkFailureReleaseDepende
       podRepo.retainedCoding?.isOwner(podId) ||
       podRepo.recoveryForks?.child(podId) ||
       podRepo.taskExecutions?.hasActiveRun(podId) ||
-      deps.providerAttemptRepo?.getActive(podId)
+      deps.providerAttemptRepo?.getActive(podId) ||
+      // An unpreserved workspace keeps its container as the only copy.
+      pod.failureReason?.includes(WORKSPACE_PRESERVATION_FAILED)
     )
       return false;
     const assessment = assessZeroWorkProviderAccountFailure(pod, deps);

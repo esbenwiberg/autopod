@@ -54,7 +54,7 @@ export function createAgentProcessWorkflow(
     appendDecisionContext,
     ownsLifecycle,
     persistRuntimeCredentialsForPod,
-    preserveSandboxAfterAgentFailure,
+    preserveWorkspaceAfterAgentFailure,
     releaseZeroWorkFailure,
     hasDurableAgentExecutionEvidence,
     tryRecoverTransientSandboxFailure,
@@ -738,7 +738,7 @@ export function createAgentProcessWorkflow(
         visibleFailurePhase = 'completion';
         await this.handleCompletion(podId);
       } else if (outcome === 'failed') {
-        await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
+        await preserveWorkspaceAfterAgentFailure(podId, 'fatal agent exit');
         await releaseZeroWorkFailure(podId, lifecycleGeneration, containerId);
       }
     } catch (err) {
@@ -847,7 +847,7 @@ export function createAgentProcessWorkflow(
         visibleFailurePhase === 'agent' &&
         !(err instanceof SandboxInfrastructureError && !runtimeEventObserved)
       ) {
-        await preserveSandboxAfterAgentFailure(podId, 'agent processing error');
+        await preserveWorkspaceAfterAgentFailure(podId, 'agent processing error');
       }
       const attemptHistory = deps.providerAttemptRepo?.list(podId) ?? [];
       const activeContinuityAttempt = deps.providerAttemptRepo?.getActive(podId);

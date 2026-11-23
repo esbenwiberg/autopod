@@ -90,7 +90,7 @@ export interface AgentProcessCaptured {
   persistRuntimeCredentialsForPod: ReturnType<
     typeof createWorkerRuntimeCredentials
   >['persistRuntimeCredentialsForPod'];
-  preserveSandboxAfterAgentFailure: (podId: string, reason: string) => Promise<void>;
+  preserveWorkspaceAfterAgentFailure: (podId: string, reason: string) => Promise<void>;
   releaseZeroWorkFailure: (
     podId: string,
     generation: number,

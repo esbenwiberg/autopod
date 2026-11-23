@@ -727,7 +727,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logger,
     emitActivityStatus,
   });
-  const { preserveSandboxAfterAgentFailure, tryRecoverAfterWorkspaceSyncFailure } =
+  const { preserveWorkspaceAfterAgentFailure, tryRecoverAfterWorkspaceSyncFailure } =
     createWorkspacePreservationRecovery({
       podRepo,
       preservePodWorkspace,
@@ -1119,7 +1119,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     appendDecisionContext,
     ownsLifecycle,
     persistRuntimeCredentialsForPod,
-    preserveSandboxAfterAgentFailure,
+    preserveWorkspaceAfterAgentFailure,
     releaseZeroWorkFailure,
     hasDurableAgentExecutionEvidence,
     tryRecoverTransientSandboxFailure,
