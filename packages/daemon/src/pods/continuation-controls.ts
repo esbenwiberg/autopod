@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { AutopodError, type Pod } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
-import { assertAgentStageNotInterrupted } from './agent-stage-interruption.js';
+import { describeSourceSavedState, isAgentStageInterrupted } from './agent-stage-interruption.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
@@ -16,6 +16,7 @@ import type {
   ContinuationResumeCalls,
 } from './continuation-ports.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
+import type { PodRepository } from './pod-repository.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
@@ -49,6 +50,45 @@ type Captured = Pick<
   | 'reconcilePendingPublication'
   | 'transition'
 >;
+
+/**
+ * Resume only re-checks or publishes finished work. A failed pod whose current
+ * worker cycle never settled (provider limit, crash, restart) has unfinished
+ * source; validating or publishing it would treat partial work as the result.
+ * The cycle phase leaves `running` once the worker settles or the pod enters
+ * validation; `agentSettledAt` alone is only written with usage evidence.
+ *
+ * With the run ledger, a settled cycle whose latest worker run still ended
+ * failed/paused/stopped before validation (#670: provider failure after a
+ * completion event, or a complete-then-fatal interrupted turn) is refused too.
+ */
+export function assertAgentRunSettledForResume(
+  pod: Pick<
+    Pod,
+    'id' | 'status' | 'lifecycleGeneration' | 'finalization' | 'options' | 'failureReason'
+  >,
+  repo?: Pick<PodRepository, 'taskExecutions'>,
+): void {
+  if (pod.status !== 'failed' || pod.options?.agentMode === 'interactive') return;
+  const cycle = pod.finalization;
+  const unsettled =
+    !!cycle &&
+    cycle.generation === pod.lifecycleGeneration &&
+    cycle.phase === 'running' &&
+    cycle.agentSettledAt === null;
+  if (unsettled)
+    throw new AutopodError(
+      `The agent did not finish its last run, so Resume would check unfinished work. Continue the agent with Rework (ap rework ${pod.id}).`,
+      'AGENT_RUN_UNFINISHED',
+      409,
+    );
+  if (repo && isAgentStageInterrupted(repo, pod))
+    throw new AutopodError(
+      `The agent's last run failed before it finished, so Resume would check unfinished work. Continue the agent with Rework (ap rework ${pod.id}), or on the profile primary provider (ap continue-provider ${pod.id} --primary). ${describeSourceSavedState(pod)}`,
+      'AGENT_RUN_UNFINISHED',
+      409,
+    );
+}
 
 /** Names the control that continues a paused pod when Resume does not apply. */
 export function pausedResumeHint(pod: Pick<Pod, 'id' | 'status' | 'pauseReason'>): string {
@@ -461,7 +501,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     }
 
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
-    assertAgentStageNotInterrupted(podRepo, pod);
+    assertAgentRunSettledForResume(pod, podRepo);
 
     // Path 1: validation already passed, downstream step (push / PR) blew up.
     // Push + open PR, no agent rework, no validation rerun. Cheapest possible recovery.

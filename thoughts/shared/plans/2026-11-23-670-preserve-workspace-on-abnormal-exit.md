@@ -164,3 +164,12 @@ Deviations and refinements:
 - **Zero-work release guarded.** `releaseZeroWorkFailure` also refuses to remove a container whose preservation failed.
 - **No separate `latestRun` unit test.** It is covered with real SQLite by `agent-stage-interruption.test.ts` and `continuation-controls.test.ts`.
 - **Pre-existing failures.** Five `pod-manager.test.ts > approveSession` tests fail identically on the base commit `5e544da`. They are unrelated to this change.
+
+### Follow-up: reconciled with #674 and #676 (parent decision, option A)
+
+- **Single gate.** `AGENT_STAGE_FAILED` is dropped. The run-ledger condition is folded into #674's `assertAgentRunSettledForResume(pod, repo?)` under its `AGENT_RUN_UNFINISHED` code. The helper body was written from the origin/main text the parent supplied, because fetching is not available in the worker. The call sits at #674's call site in `resumePod`.
+- **Both refusals use the same code with different guidance.**
+  - Unsettled `running` cycle (#674): its original message is unchanged.
+  - Settled cycle whose latest run ended failed, paused or stopped before validation (#670 incident shape, #648 complete-then-fatal shape): the message names `ap rework <id>` and `ap continue-provider <id> --primary`, plus the Source saved state.
+- **#676 untouched.** #676's `assertAgentTurnNotInterrupted` is not in this branch and was not changed.
+- **Expected merge conflict.** A small textual conflict in `continuation-controls.ts` (a duplicate helper definition and the call site) is expected when the daemon or parent rebases. Keep this branch's version of the helper, which is a superset of #674's.

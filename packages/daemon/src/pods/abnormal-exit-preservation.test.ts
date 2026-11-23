@@ -146,6 +146,11 @@ describe('workspace preservation on abnormal worker exit (#670)', () => {
     expect(failed.finalization?.agentSettledAt).toEqual(expect.any(String));
     expect(failed.finalization?.sourcePreservedAt).toEqual(expect.any(String));
     expect(failed.containerId).toBe('container-123');
+    // The settled cycle is not proof the worker finished: Resume refuses.
+    await expect(f.manager.resumePod(f.pod.id)).rejects.toMatchObject({
+      code: 'AGENT_RUN_UNFINISHED',
+      message: expect.stringContaining(`ap rework ${f.pod.id}`),
+    });
   });
 
   it('preserves after a thrown runtime error', async () => {
