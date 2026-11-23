@@ -371,7 +371,7 @@ export interface PodManager {
   forceApprove(podId: string, reason?: string, actor?: OperatorActor): Promise<void>;
   extendPrAttempts(podId: string, additionalAttempts: number): Promise<void>;
   pauseSession(podId: string): Promise<void>;
-  nudgeSession(podId: string, message: string): void;
+  nudgeSession(podId: string, message: string, expectedTarget?: string): void;
   killSession(podId: string): Promise<void>;
   completeSession(
     podId: string,

@@ -34,6 +34,8 @@ import type { createValidationWorkflowState } from './validation-workflow-state.
 import type { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
 
 export interface BudgetApprovalOptions {
+  /** Exact external observation; checked at the owning message boundary. */
+  expectedTarget?: string;
   /**
    * Acknowledge once the approval and `running` transition are recorded and
    * continue completion (validation) in the background. HTTP callers opt in;

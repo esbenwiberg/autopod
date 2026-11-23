@@ -400,6 +400,7 @@ export type {
   PodValidatedNotification,
 } from './types/notification.js';
 export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
+export type { GuardedOperatorAction, OperatorTarget } from './types/operator-target.js';
 export * from './types/pim.js';
 export type {
   CompactPod,

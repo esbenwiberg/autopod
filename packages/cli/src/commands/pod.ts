@@ -35,6 +35,11 @@ import { budgetContinuedMessage, registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
 import { registerLaunchCommand } from './launch.js';
+import {
+  type GuardFlags,
+  registerOperatorTargetCommand,
+  runGuardedOperatorAction,
+} from './operator-target.js';
 import { registerRepairContinuationCommand } from './repair-continuation.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
 import { registerRetainedFinalizationCommand } from './retained-finalization.js';
@@ -183,6 +188,7 @@ export function printRepositoryPreparation(
 }
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
+  registerOperatorTargetCommand(program, getClient);
   registerGoalCommands(program, getClient);
   registerBudgetCommand(program, getClient);
   registerReviewerRunsCommand(program, getClient);
@@ -1134,8 +1140,16 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('nudge <id> <message>')
     .description('Send a soft message to a running agent (picked up via check_messages)')
-    .action(async (id: string, message: string) => {
+    .option(
+      '--expected-target <sha256>',
+      'Require the exact operator-target observation (no legacy fallback)',
+    )
+    .option('--actor <session-id>', 'Automation session label; requires --expected-target')
+    .option('--json', 'Output guarded action receipt as JSON')
+    .action(async (id: string, message: string, opts: GuardFlags) => {
       const client = getClient();
+      if (opts.expectedTarget || opts.actor)
+        return runGuardedOperatorAction(client, id, 'nudge', opts, message);
       const resolvedId = await resolvePodId(client, id);
       await withSpinner('Sending nudge...', () => client.nudgeSession(resolvedId, message));
       console.log(
@@ -1242,8 +1256,16 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('tell <id> <message>')
     .description('Send a message to a pod (for escalations or guidance)')
-    .action(async (id: string, message: string) => {
+    .option(
+      '--expected-target <sha256>',
+      'Require the exact operator-target observation (no legacy fallback)',
+    )
+    .option('--actor <session-id>', 'Automation session label; requires --expected-target')
+    .option('--json', 'Output guarded action receipt as JSON')
+    .action(async (id: string, message: string, opts: GuardFlags) => {
       const client = getClient();
+      if (opts.expectedTarget || opts.actor)
+        return runGuardedOperatorAction(client, id, 'reply', opts, message);
       const resolvedId = await resolvePodId(client, id);
       const result = await withSpinner('Sending message...', () =>
         client.sendMessage(resolvedId, message),
@@ -1268,11 +1290,29 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--squash', 'Squash commits on merge')
     .option('--reason <reason>', 'Reason for approving readiness that needs review')
     .option('--all-validated', 'Approve all validated pods')
+    .option(
+      '--expected-target <sha256>',
+      'Require the exact operator-target observation (no legacy fallback)',
+    )
+    .option('--actor <session-id>', 'Automation session label; requires --expected-target')
+    .option('--json', 'Output guarded action receipt as JSON')
     .action(
       async (
         id: string | undefined,
-        opts: { squash?: boolean; reason?: string; allValidated?: boolean; publishOnly?: boolean },
+        opts: GuardFlags & {
+          squash?: boolean;
+          reason?: string;
+          allValidated?: boolean;
+          publishOnly?: boolean;
+        },
       ) => {
+        if (opts.expectedTarget || opts.actor) {
+          if (!id || opts.allValidated || opts.publishOnly || opts.reason || opts.squash)
+            throw new Error(
+              'Guarded approval requires one exact pod and no waiver, bulk, publication-only or squash flags',
+            );
+          return runGuardedOperatorAction(getClient(), id, 'approve', opts);
+        }
         if (
           opts.publishOnly &&
           (opts.allValidated || opts.squash || !opts.reason || opts.reason.trim().length < 10)

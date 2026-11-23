@@ -1,11 +1,13 @@
 import type { EscalationRequest } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type { OperatorBulkCalls, OperatorControlsCaptured } from './operator-contracts.js';
+import { assertOperatorTarget } from './operator-target.js';
 import { canNudge } from './state-machine.js';
 export function createOperatorControls(captured: OperatorControlsCaptured) {
   const { podRepo, nudgeRepo, emitActivityStatus, logger, transition } = captured;
-  function nudgeSession(podId: string, message: string): void {
+  function nudgeSession(podId: string, message: string, expectedTarget?: string): void {
     const pod = podRepo.getOrThrow(podId);
+    assertOperatorTarget(pod, expectedTarget);
     if (!canNudge(pod.status)) {
       throw new AutopodError(
         `Cannot nudge pod ${podId} in status ${pod.status}`,

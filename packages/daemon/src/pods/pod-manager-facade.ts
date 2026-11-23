@@ -625,8 +625,8 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       return operatorPause.pauseSession(podId);
     },
 
-    nudgeSession(podId: string, message: string): void {
-      operatorControls.nudgeSession(podId, message);
+    nudgeSession(podId: string, message: string, expectedTarget?: string): void {
+      operatorControls.nudgeSession(podId, message, expectedTarget);
     },
 
     killSession(podId: string): Promise<void> {
