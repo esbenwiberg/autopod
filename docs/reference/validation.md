@@ -72,6 +72,27 @@ it merges the base into the PR branch without rewriting existing commits. The
 daemon validates the result before publishing to the existing branch. The cycle
 is limited by `maxPrFixAttempts` (default: 3).
 
+If the agent of a PR fix pod on a local Docker target rebases instead of
+merging, the daemon adopts the rebased branch only when it can prove the rebase:
+
+- The pod is the parent's PR fix pod and the branch is unchanged.
+- The branch does not move backwards on `origin/<base>`.
+- Every earlier commit is either patch-equivalent or matched by author, author
+  date and subject. At most 500 commits are checked.
+
+The pod's activity log records the old and new heads, the base tip and fork
+points, how the commits were accounted for, and the authorizing policy. Delivery
+force-pushes with a lease against the recorded PR head. Any other divergence
+between the host worktree and the container still blocks validation and marks
+the worktree compromised.
+
+Force approve is refused (409 `WORKTREE_COMPROMISED`) while a worktree is
+compromised, because approval cannot deliver compromised source. Recover the
+worktree (`POST /pods/:podId/recover-worktree`, or **Recover worktree** in the
+desktop app) and revalidate, or kill the pod and deliver the branch manually.
+Pods that reached **Validated** with a compromised worktree before this check
+existed have no automated way out; kill them and deliver manually.
+
 ### Validation Pipeline
 
 Validation is a multi-phase pipeline with two loops — each phase must pass before the next runs:

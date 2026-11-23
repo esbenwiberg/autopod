@@ -647,6 +647,39 @@ describe('Integration', () => {
       });
     });
 
+    it('POST /pods/:id/force-approve refuses a compromised worktree with 409 and leaves the pod unchanged', async () => {
+      podRepo.insert({
+        id: 'compromised-663',
+        profileName: 'test-app',
+        task: 'Resolve conflicts',
+        status: 'failed',
+        model: 'test',
+        runtime: 'claude',
+        executionTarget: 'local',
+        branch: 'fix-branch',
+        userId: testUser.oid,
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      podRepo.update('compromised-663', { worktreeCompromised: true });
+      const before = podRepo.getOrThrow('compromised-663');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/compromised-663/force-approve',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { reason: 'ship it' },
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({
+        error: 'WORKTREE_COMPROMISED',
+        message: expect.stringContaining('recover-worktree'),
+      });
+      expect(podRepo.getOrThrow('compromised-663')).toEqual(before);
+    });
+
     it('POST /pods creates a pod', async () => {
       const res = await app.inject({
         method: 'POST',
