@@ -278,7 +278,17 @@ import Testing
     }
 
     @Test func historyOpensArchivedPodAndClearsFleetFiltersWithTabRetained() async throws {
-        let host = try DesktopSelectionPerformanceHost()
+        // Keep the static fixture ordering, but anchor its dates to this run so
+        // History's real 30-day default doesn't hide the target as fixtures age.
+        let runDate = Date().addingTimeInterval(-86_400)
+        let host = try DesktopSelectionPerformanceHost { main in
+            main.pods = main.pods.map { original in
+                var pod = original
+                pod.startedAt = runDate.addingTimeInterval(
+                    original.startedAt.timeIntervalSince(DesktopPerformanceFixtures.date))
+                return pod
+            }
+        }
         defer { host.close() }
         func firstNode(where predicate: (NSObject) -> Bool) -> NSObject? {
             func visit(_ node: NSObject) -> NSObject? {
