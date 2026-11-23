@@ -570,6 +570,7 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
   try {
     const a = await f.submit(await f.reviewed());
     const b = await f.submit(await f.reviewed(secondId));
+    const c = await f.submit(await f.reviewed(randomUUID()));
     const secret = path.join(f.source.root, 'pod-key');
     writeFileSync(secret, Buffer.alloc(32, 59), { mode: 0o600, flag: 'wx' });
     const issuer = createPodTokenIssuer(secret);
@@ -624,7 +625,7 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
       true,
     );
     const ledger = new OrchestrationContinuations(f.db, async (cp, use) => {
-      const parent = [a, b].find((parent) => parent.plan.runId === cp.run);
+      const parent = [a, b, c].find((parent) => parent.plan.runId === cp.run);
       if (!parent) throw new Error('fixture-run-mismatch');
       const stored = readSavedDelegationAdmission(f.db, parent.podId, owner);
       expect(cp).toEqual(stored.checkpoint);
@@ -635,7 +636,7 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
         () => use(service),
       );
     });
-    for (const admission of [a, b])
+    for (const admission of [a, b, c])
       await ledger.kickoff(admission.checkpoint, { implement: template });
     const balance = (run: string) =>
       f.db
@@ -692,6 +693,35 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
       .prepare('UPDATE pods SET lifecycle_generation=lifecycle_generation+1 WHERE id=?')
       .run(a.podId);
     await expect(results.results({}, sessionA.run)).rejects.toThrow('parent-session-stale');
+
+    const sessionC = session(c);
+    await reserve(c, sessionC, 'live-child');
+    expect(await ledger.recover(c.plan.runId)).toEqual({ blocked: [] });
+    await reserve(c, sessionC, 'pending-child');
+    f.db.prepare("UPDATE pods SET status='killing' WHERE id=?").run(c.podId);
+    expect(await ledger.recover(c.plan.runId)).toEqual({ blocked: [] });
+    expect(
+      f.db.prepare('SELECT canceled FROM orchestration_runs WHERE id=?').pluck().get(c.plan.runId),
+    ).toBe(1);
+    expect(
+      f.db
+        .prepare(
+          'SELECT revoked,stop_requested FROM managed_pods WHERE dispatcher_installation_id=?',
+        )
+        .all('native.' + c.plan.runId),
+    ).toEqual([{ revoked: 1, stop_requested: 1 }]);
+    expect(
+      f.db
+        .prepare(
+          "SELECT pod_id FROM orchestration_continuations WHERE run_id=? AND start_key='pending-child'",
+        )
+        .pluck()
+        .get(c.plan.runId),
+    ).toBeNull();
+    expect(balance(c.plan.runId)).toBe(0);
+    expect(
+      f.db.prepare('SELECT canceled FROM orchestration_runs WHERE id=?').pluck().get(b.plan.runId),
+    ).toBe(0);
   } finally {
     f.db.close();
     rmSync(root, { recursive: true, force: true });
