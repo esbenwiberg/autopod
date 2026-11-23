@@ -29,7 +29,11 @@ interface WorkspacePreservationDependencies {
 
 /** Preserve source through existing transfer paths; callers retain lifecycle authority. */
 export function createWorkspacePreservation(deps: WorkspacePreservationDependencies): {
-  preservePodWorkspace(pod: Pod, reason: string): Promise<void>;
+  preservePodWorkspace(
+    pod: Pod,
+    reason: string,
+    observeSandboxCheckpoint?: (checkpoint: WorkspaceCheckpointResult) => void,
+  ): Promise<void>;
   checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult>;
 } {
   const {
@@ -45,7 +49,11 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
   // One immutable checkpoint per pod makes duplicate requests observationally identical.
   const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
 
-  async function preservePodWorkspace(pod: Pod, reason: string): Promise<void> {
+  async function preservePodWorkspace(
+    pod: Pod,
+    reason: string,
+    observeSandboxCheckpoint?: (checkpoint: WorkspaceCheckpointResult) => void,
+  ): Promise<void> {
     const assertCurrent = deps.captureAuthority(pod);
     assertCurrent();
     if (!pod.containerId || !pod.worktreePath) return;
@@ -67,6 +75,7 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
       if (!checkpoint.promoted || !checkpoint.materialized || !checkpoint.lineageVerified) {
         throw new Error(checkpoint.error?.message ?? 'sandbox checkpoint was not fully verified');
       }
+      observeSandboxCheckpoint?.(checkpoint);
       emitActivityStatus(pod.id, `Verified workspace checkpoint before ${reason}.`);
       return;
     }

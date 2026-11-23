@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,12 +17,47 @@ it.each([
   'report',
   'missing',
   'symlink',
+  'sandbox-report',
+  'sandbox-ignored',
 ] as const)('serves only verified partial research after a detached infrastructure-held reply (%s)', async (kind) => {
   const ctx = createTestContext();
   const workspace = await mkdtemp(path.join(tmpdir(), 'partial-research-'));
   const app = Fastify();
   const pending = new PendingRequests();
   try {
+    const reportPath = path.join(workspace, 'research-output.md');
+    const report = '# Partial research\nOne verified observation: æøå.\n';
+    const sandbox = kind === 'sandbox-report' || kind === 'sandbox-ignored';
+    if (sandbox) {
+      const git = (...args: string[]) =>
+        execFileSync('git', args, { cwd: workspace, encoding: 'utf8' }).trim();
+      git('init', '-q');
+      if (kind === 'sandbox-report') {
+        await writeFile(reportPath, report);
+        git('add', 'research-output.md');
+      } else {
+        await writeFile(path.join(workspace, '.gitignore'), 'research-output.md\n');
+        git('add', '.gitignore');
+      }
+      const snapshotTree = git('write-tree');
+      // The host may have a stale ignored file or differing materialized bytes.
+      await writeFile(reportPath, 'not the checkpoint report');
+      ctx.deps.sandboxWorkspaceCheckpoint = async ({ sequence }) => ({
+        sequence,
+        sourceHead: '',
+        sourceTree: '',
+        snapshotCommit: '',
+        snapshotTree,
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: true,
+        materialized: true,
+        quarantineRef: '',
+        objectStore: path.join(workspace, '.git'),
+      });
+    }
     ctx.deps.pendingRequestsByPod = new Map();
     const manager = createPodManager(ctx.deps);
     const { id } = manager.createSession(
@@ -33,6 +69,8 @@ it.each([
     const runs = ctx.podRepo.taskExecutions;
     if (!journal || !runs) throw new Error('Missing test journals');
     ctx.db.prepare("UPDATE pods SET completion_policy = 'accept-findings' WHERE id = ?").run(id);
+    if (sandbox)
+      ctx.db.prepare("UPDATE pods SET execution_target = 'sandbox' WHERE id = ?").run(id);
     ctx.podRepo.update(id, {
       status: 'running',
       options: { agentMode: 'auto', output: 'artifact', validate: false },
@@ -50,8 +88,6 @@ it.each([
       providerAccountId: null,
       resource: { containerId: running.containerId, executionTarget: running.executionTarget },
     });
-    const reportPath = path.join(workspace, 'research-output.md');
-    const report = '# Partial research\nOne verified observation: æøå.\n';
     if (kind === 'report') await writeFile(reportPath, report);
     if (kind === 'symlink') await symlink('/etc/hosts', reportPath);
     const question = {
@@ -129,7 +165,7 @@ it.each([
     const calls = ctx.containerManager.execInContainer;
     const execs = vi.mocked(calls).mock.calls.length;
     const res = await app.inject({ url, headers });
-    if (kind === 'report') {
+    if (kind === 'report' || kind === 'sandbox-report') {
       expect(res.statusCode).toBe(200);
       expect(res.headers['cache-control']).toBe('no-store');
       expect(res.json()).toEqual({
@@ -160,7 +196,13 @@ it.each([
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({
         error: 'PARTIAL_RESEARCH_UNAVAILABLE',
-        message: expect.stringContaining(kind === 'missing' ? 'was not found' : 'symbolic link'),
+        message: expect.stringContaining(
+          kind === 'sandbox-ignored'
+            ? 'not in the verified sandbox checkpoint'
+            : kind === 'missing'
+              ? 'was not found'
+              : 'symbolic link',
+        ),
       });
     }
     const normal = await app.inject({

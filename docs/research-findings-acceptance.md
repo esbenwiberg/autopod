@@ -73,7 +73,9 @@ ap files <full-pod-id> --partial --json
 
 When the completion gate successfully preserves a workspace before parking it for
 uncollected guidance or an infrastructure blocker, it captures the root
-`research-output.md` as bounded UTF-8 text (up to 5 MiB, no links). This separate
+`research-output.md` as bounded UTF-8 text (up to 5 MiB, no links). For a sandbox,
+only the verified checkpoint's Git blob is eligible; an ignored or unmatched host
+file is not evidence. This separate
 capture is labeled **incomplete / unreviewed**. It is tied to the exact pod,
 lifecycle generation and settlement cycle; the reader checks the saved bytes
 against their recorded SHA-256 digest. The text CLI prints provenance to stderr

@@ -1,8 +1,14 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { AutopodError, type PartialResearchReport, type Pod } from '@autopod/shared';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
+
+const execFileAsync = promisify(execFile);
+const GIT_OID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 const REPORT_PATH = 'research-output.md';
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -66,10 +72,7 @@ export async function capturePartialResearchReport(
         currentRoot.ino !== root.ino
       )
         return { unavailableReason: `${REPORT_PATH} or its workspace changed during capture.` };
-      const content = buffer.subarray(0, offset);
-      if (!Buffer.from(content.toString('utf8'), 'utf8').equals(content))
-        return { unavailableReason: `${REPORT_PATH} is not valid UTF-8.` };
-      return { content, sha256: sha256(content) };
+      return sealReport(buffer.subarray(0, offset));
     } finally {
       await handle.close();
     }
@@ -84,6 +87,88 @@ export async function capturePartialResearchReport(
             : `${REPORT_PATH} could not be read from the preserved workspace.`,
     };
   }
+}
+
+/** A sandbox checkout may contain ignored host files that were never checkpointed,
+ * or checkout filters may change materialized content. Only the proven tree is evidence. */
+export async function captureSandboxPartialResearchReport(
+  checkpoint: WorkspaceCheckpointResult | undefined,
+): Promise<PartialResearchCapture> {
+  if (
+    !checkpoint?.objectStore ||
+    !checkpoint.transferVerified ||
+    !checkpoint.bundleVerified ||
+    !checkpoint.hostImported ||
+    !checkpoint.lineageVerified ||
+    !checkpoint.promoted ||
+    !checkpoint.materialized ||
+    !GIT_OID.test(checkpoint.snapshotTree)
+  )
+    return {
+      unavailableReason: 'No verified sandbox checkpoint tree is available for this report.',
+    };
+
+  const { objectStore, snapshotTree } = checkpoint;
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+  );
+  async function git(...args: string[]): Promise<Buffer> {
+    return (
+      await execFileAsync(
+        'git',
+        ['--no-replace-objects', '--literal-pathspecs', '--git-dir', objectStore, ...args],
+        {
+          env: {
+            ...env,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_CONFIG_GLOBAL: '/dev/null',
+            GIT_NO_LAZY_FETCH: '1',
+            GIT_TERMINAL_PROMPT: '0',
+          },
+          encoding: 'buffer',
+          maxBuffer: MAX_BYTES,
+          timeout: 5_000,
+        },
+      )
+    ).stdout;
+  }
+
+  try {
+    const entry = (await git('ls-tree', '-z', snapshotTree, '--', REPORT_PATH)).toString('utf8');
+    if (!entry)
+      return { unavailableReason: `${REPORT_PATH} is not in the verified sandbox checkpoint.` };
+    const [metadata, name] = entry.split('\t');
+    const [mode, type, oid] = metadata?.split(' ') ?? [];
+    if (
+      name !== `${REPORT_PATH}\0` ||
+      (mode !== '100644' && mode !== '100755') ||
+      type !== 'blob' ||
+      !oid ||
+      !GIT_OID.test(oid)
+    )
+      return {
+        unavailableReason: `${REPORT_PATH} must be a regular file in the sandbox checkpoint.`,
+      };
+    const size = Number((await git('cat-file', '-s', oid)).toString('utf8').trim());
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid checkpoint blob size');
+    if (size > MAX_BYTES)
+      return { unavailableReason: `${REPORT_PATH} exceeds the 5 MiB capture limit.` };
+    const bytes = await git('cat-file', 'blob', oid);
+    const actualOid = createHash(oid.length === 40 ? 'sha1' : 'sha256')
+      .update(`blob ${bytes.length}\0`)
+      .update(bytes)
+      .digest('hex');
+    if (bytes.length !== size || actualOid !== oid) throw new Error('Invalid checkpoint blob');
+    return sealReport(bytes);
+  } catch {
+    return { unavailableReason: `${REPORT_PATH} could not be verified in the sandbox checkpoint.` };
+  }
+}
+
+function sealReport(content: Buffer): PartialResearchCapture {
+  if (!Buffer.from(content.toString('utf8'), 'utf8').equals(content))
+    return { unavailableReason: `${REPORT_PATH} is not valid UTF-8.` };
+  return { content, sha256: sha256(content) };
 }
 
 function sha256(content: Buffer): string {

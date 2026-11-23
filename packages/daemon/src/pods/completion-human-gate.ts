@@ -1,14 +1,17 @@
 import type { Pod, ReportBlockerPayload } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { atomicPodChange } from '../db/unit-of-work.js';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import {
   capturePartialResearchReport,
+  captureSandboxPartialResearchReport,
   isPartialResearchPod,
   type PartialResearchCapture,
 } from './partial-research-report.js';
 import type { PodRepository } from './pod-repository.js';
+import type { createWorkspacePreservation } from './workspace-preservation.js';
 
 interface CompletionHumanGateDependencies {
   podRepo: Pick<
@@ -17,7 +20,7 @@ interface CompletionHumanGateDependencies {
   >;
   escalationRepo?: Pick<EscalationRepository, 'listBySession'>;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
-  preservePodWorkspace(pod: Pod, reason: string): Promise<void>;
+  preservePodWorkspace: ReturnType<typeof createWorkspacePreservation>['preservePodWorkspace'];
   ownsArtifactCompletion(
     pod: Pod,
     allowRemovedContainer?: boolean,
@@ -65,6 +68,22 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
     return;
   }
 
+  async function preserveHeldWorkspace(
+    pod: Pod,
+    reason: string,
+    captureReport: boolean,
+  ): Promise<PartialResearchCapture | undefined> {
+    if (captureReport && pod.executionTarget === 'sandbox') {
+      let checkpoint: WorkspaceCheckpointResult | undefined;
+      await preservePodWorkspace(pod, reason, (verified) => {
+        checkpoint = verified;
+      });
+      return captureSandboxPartialResearchReport(checkpoint);
+    }
+    await preservePodWorkspace(pod, reason);
+    if (captureReport && pod.worktreePath) return capturePartialResearchReport(pod.worktreePath);
+  }
+
   // Optional evidence must not weaken or roll back a hold. Record it only for
   // the cycle whose workspace we just preserved, after the failed state commits.
   function recordPartialReport(
@@ -97,10 +116,12 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
     let preservationFailure = '';
     try {
       if (pod.containerId && pod.worktreePath) {
-        await preservePodWorkspace(pod, 'uncollected human guidance after agent settlement');
+        capture = await preserveHeldWorkspace(
+          pod,
+          'uncollected human guidance after agent settlement',
+          Boolean(settlement && isPartialResearchPod(pod)),
+        );
         preserved = true;
-        if (settlement && isPartialResearchPod(pod))
-          capture = await capturePartialResearchReport(pod.worktreePath);
       }
     } catch (err) {
       preservationFailure = ` Workspace preservation failed: ${err instanceof Error ? err.message : String(err)}.`;
@@ -128,10 +149,12 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
     let detail = '';
     try {
       if (pod.containerId && pod.worktreePath) {
-        await preservePodWorkspace(pod, 'infrastructure blocker after agent settlement');
+        capture = await preserveHeldWorkspace(
+          pod,
+          'infrastructure blocker after agent settlement',
+          Boolean(settlement && isPartialResearchPod(pod)),
+        );
         preserved = true;
-        if (settlement && isPartialResearchPod(pod))
-          capture = await capturePartialResearchReport(pod.worktreePath);
       }
     } catch (error) {
       detail = ` Workspace preservation failed: ${error instanceof Error ? error.message : String(error)}.`;
