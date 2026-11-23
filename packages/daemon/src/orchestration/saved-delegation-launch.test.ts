@@ -16,6 +16,7 @@ import { createConfigurationCredentialStore } from '../configuration/credential-
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { configurationDigest, resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
+import { createSavedDelegationLaunchLane } from '../configuration/saved-delegation-launch-lane.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
 import { runMigrationsWithBackups } from '../db/migrate.js';
 import { ArtifactExports } from '../managed/artifact-exports.js';
@@ -519,6 +520,40 @@ it('verifies the bytes and Git tree before insertion and rolls back every admiss
   }
 }, 15_000);
 
+it.each([
+  'pins',
+  'seed',
+] as const)('refuses fresh admission if readiness is lost during %s resolution', async (stage) => {
+  const f = await admissionFixture();
+  try {
+    const request = await f.reviewed();
+    let available = true;
+    const lane = createSavedDelegationLaunchLane(f.db, f.services, {
+      available: () => available,
+      scratch: path.join(f.source.root, 'readiness-race'),
+      async readVerifiedPins(...args) {
+        const pins = await f.pins(...args);
+        if (stage === 'pins') available = false;
+        return pins;
+      },
+      async readSeedBundle() {
+        const bundle = await f.readSeedBundle();
+        if (stage === 'seed') available = false;
+        return bundle;
+      },
+    });
+    await expect(lane.admit(request, owner, owner.oid, f.insertPod)).rejects.toMatchObject({
+      code: 'SAVED_DELEGATION_UNAVAILABLE',
+    });
+    expect(f.insertPod).not.toHaveBeenCalled();
+    if (stage === 'pins') expect(f.readSeedBundle).not.toHaveBeenCalled();
+    for (const table of ['pods', 'saved_delegation_admissions', 'orchestration_runs'])
+      expect(f.db.prepare(`SELECT count(*) FROM ${table}`).pluck().get()).toBe(0);
+  } finally {
+    f.db.close();
+  }
+}, 15_000);
+
 it('reopens the exact admission after restart without reading mutable policy or touching the runtime', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-admission-restart-'));
   const file = path.join(root, 'state.db');
@@ -533,18 +568,28 @@ it('reopens the exact admission after restart without reading mutable policy or 
     const fail = vi.fn(() => {
       throw new Error('restart must not rerun admission');
     });
-    const replay = await admitSavedDelegationLaunch({
-      request,
-      principal: owner,
+    const lane = createSavedDelegationLaunchLane(
       db,
-      policies: createSavedDelegationPolicyStore(db),
-      launch: { ...f.services, store: createConfigurationStore(db) },
-      scratch: root,
-      readVerifiedPins: fail,
-      readSeedBundle: fail,
-      insertPod: fail,
-    });
+      { ...f.services, store: createConfigurationStore(db) },
+      {
+        available: () => false,
+        scratch: root,
+        readVerifiedPins: fail,
+        readSeedBundle: fail,
+      },
+    );
+    const replay = await lane.admit(request, owner, owner.oid, fail);
     expect(replay).toEqual({ ...admitted, created: false });
+    expect(fail).not.toHaveBeenCalled();
+    await expect(
+      lane.admit(request, { ...owner, oid: 'other' }, owner.oid, fail),
+    ).rejects.toMatchObject({ code: 'DELEGATION_OWNER_REQUIRED' });
+    await expect(
+      lane.admit({ ...request, task: 'Changed' }, owner, owner.oid, fail),
+    ).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+    await expect(
+      lane.admit({ ...request, requestId: secondId }, owner, owner.oid, fail),
+    ).rejects.toMatchObject({ code: 'SAVED_DELEGATION_UNAVAILABLE' });
     expect(fail).not.toHaveBeenCalled();
     expect(db.prepare('SELECT count(*) FROM managed_pods').pluck().get()).toBe(0);
     db.prepare('UPDATE orchestration_checkpoint_custody SET bundle=? WHERE run_id=?').run(
@@ -736,6 +781,7 @@ it('executes two saved roles from private pinned source and qualifies once acros
   let registry: ReturnType<typeof createSavedDelegationRegistry> | undefined;
   let daemonOwner: ReturnType<typeof claimDaemonLifetime> | undefined;
   try {
+    await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
     const f = await admissionFixture(db);
     const template = structuredClone(f.source.request);
     template.task.kind = 'implementation';
@@ -899,11 +945,52 @@ it('executes two saved roles from private pinned source and qualifies once acros
       expect((await submit(reviewed.delegationPreview.digest)).statusCode).toBe(503);
       expect(f.insertPod).not.toHaveBeenCalled();
       available = true;
+      const trustedPins = f.pins.getMockImplementation()!;
+      f.pins.mockImplementationOnce(async (...args) => {
+        const pins = await trustedPins(...args);
+        return { ...pins, source: { ...pins.source, commit: '9'.repeat(40) } };
+      });
+      const drifted = await submit(reviewed.delegationPreview.digest);
+      expect(drifted.statusCode, drifted.body).toBe(409);
+      expect(drifted.json().error).toBe('DELEGATION_PREVIEW_CHANGED');
+      expect(f.insertPod).not.toHaveBeenCalled();
       const launched = await submit(reviewed.delegationPreview.digest);
       expect(launched.statusCode, launched.body).toBe(201);
       podId = launched.json().id as string;
       expect((await submit(reviewed.delegationPreview.digest)).json().id).toBe(podId);
       expect(f.insertPod).toHaveBeenCalledOnce();
+      // Losing a launch dependency after acceptance must not hide the exact receipt.
+      available = false;
+      f.pins.mockClear();
+      f.readSeedBundle.mockClear();
+      const replay = await submit(reviewed.delegationPreview.digest);
+      expect(replay.statusCode, replay.body).toBe(201);
+      expect(replay.json().id).toBe(podId);
+      expect(f.pins).not.toHaveBeenCalled();
+      expect(f.readSeedBundle).not.toHaveBeenCalled();
+      expect(f.insertPod).toHaveBeenCalledOnce();
+      const ordinaryRequest = {
+        ...launchRequest,
+        requestId: randomUUID(),
+        delegation: undefined,
+        task: 'An ordinary unaffected Task',
+      };
+      const ordinaryPreview = await app.inject({
+        method: 'POST',
+        url: '/launch/resolve',
+        payload: ordinaryRequest,
+      });
+      expect(ordinaryPreview.statusCode, ordinaryPreview.body).toBe(200);
+      expect(ordinaryPreview.json().delegationPreview).toBeUndefined();
+      const ordinary = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        payload: { ...ordinaryRequest, expectedDigest: ordinaryPreview.json().digest },
+      });
+      expect(ordinary.statusCode, ordinary.body).toBe(201);
+      expect(ordinary.json().id).not.toBe(podId);
+      expect(f.insertPod).toHaveBeenCalledTimes(2);
+      expect(db.prepare('SELECT count(*) FROM saved_delegation_admissions').pluck().get()).toBe(1);
     } finally {
       await app.close();
     }

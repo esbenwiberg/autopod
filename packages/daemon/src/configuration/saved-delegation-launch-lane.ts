@@ -84,7 +84,6 @@ export function createSavedDelegationLaunchLane(
       actorId: string,
       insertPod: (config: EffectiveLaunchConfig) => string,
     ) {
-      ready();
       if (!principal || principal.oid !== actorId)
         configurationError(
           'Saved delegation requires the authenticated Task owner',
@@ -98,8 +97,20 @@ export function createSavedDelegationLaunchLane(
         policies,
         launch,
         scratch: host.scratch,
-        readVerifiedPins: host.readVerifiedPins,
-        readSeedBundle: host.readSeedBundle,
+        // Admission checks retained exact requests before invoking these fresh-launch
+        // ports. A dependency outage must not hide an already committed receipt.
+        readVerifiedPins: async (...args) => {
+          ready();
+          const pins = await host.readVerifiedPins(...args);
+          ready();
+          return pins;
+        },
+        readSeedBundle: async (plan) => {
+          ready();
+          const bundle = await host.readSeedBundle(plan);
+          ready();
+          return bundle;
+        },
         insertPod: (config) => {
           ready();
           return insertPod(config);
