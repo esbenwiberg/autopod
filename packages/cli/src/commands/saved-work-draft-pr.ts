@@ -1,3 +1,4 @@
+import { AutopodError, type SavedWorkDraftPublicationScan } from '@autopod/shared';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
@@ -103,6 +104,9 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
                     : await client.inspectSavedWorkDraft(podId);
           withJsonOutput(opts, value, (result) => {
             console.log(JSON.stringify(result, null, 2));
+            const scan = (result as { publicationScan?: SavedWorkDraftPublicationScan })
+              .publicationScan;
+            if (scan) for (const line of publicationScanLines(scan)) console.log(line);
             console.log(
               'Draft only. Original retained. No approval, passing checks or successful task completion is claimed.',
             );
@@ -111,6 +115,16 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
             );
           });
         } catch (error) {
+          // A publication-scan refusal is definitive: the daemon admitted no push.
+          if (
+            opts.confirm &&
+            error instanceof AutopodError &&
+            PUBLICATION_SCAN_CODES.has(error.code)
+          )
+            throw new Error(
+              `Request ${opts.requestId} was not published (${error.code}): ${error.message} The operation stays prepared; ap draft-pr ${podId} --observe --request-id ${opts.requestId} shows the recorded scan detail.`,
+              { cause: error },
+            );
           if (opts.prepare || opts.confirm)
             throw new Error(
               `Request ${opts.requestId} outcome unconfirmed: ${error instanceof Error ? error.message : 'request failed'}. Observe with ap draft-pr ${podId} --observe --request-id ${opts.requestId}; do not automatically resubmit.`,
@@ -120,4 +134,29 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
         }
       },
     );
+}
+
+const PUBLICATION_SCAN_CODES = new Set([
+  'SECURITY_SCAN_BLOCKED',
+  'SECURITY_SCAN_INCOMPLETE',
+  'SECURITY_SCAN_FAILED',
+]);
+
+/** Human summary of redacted publication-scan evidence. */
+export function publicationScanLines(scan: SavedWorkDraftPublicationScan): string[] {
+  const scope =
+    scan.scope === 'diff' && scan.baseCommit
+      ? `changes since ${scan.baseCommit.slice(0, 12)}`
+      : 'full tree';
+  const lines = [
+    `Publication security scan: ${scan.outcome}${scan.code ? ` (${scan.code})` : ''}; scope ${scope}; ${scan.filesScanned} file(s) scanned.`,
+  ];
+  for (const f of scan.findings)
+    lines.push(
+      `  ${f.action}: ${f.scanner} rule ${f.ruleId ?? f.detector} at ${f.file}${f.line === null ? '' : `:${f.line}`} (value redacted)`,
+    );
+  if (scan.findingCount > scan.findings.length)
+    lines.push(`  …and ${scan.findingCount - scan.findings.length} more finding(s).`);
+  for (const reason of scan.reasons) lines.push(`  reason: ${reason}`);
+  return lines;
 }

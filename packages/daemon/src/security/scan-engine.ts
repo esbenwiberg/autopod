@@ -53,6 +53,8 @@ export interface RepoScanResult {
   filesScanned: number;
   filesSkipped: number;
   scanIncomplete: boolean;
+  /** Human-readable causes when `scanIncomplete` is true. */
+  incompleteReasons: string[];
   findings: ScanFinding[];
   decision: ScanDecision;
   warningSection: InjectedClaudeMdSection | null;
@@ -86,6 +88,7 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
           filesScanned: 0,
           filesSkipped: 0,
           scanIncomplete: false,
+          incompleteReasons: [],
           findings: [],
           decision: 'pass',
           warningSection: null,
@@ -103,6 +106,7 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
           filesScanned: 0,
           filesSkipped: 0,
           scanIncomplete: false,
+          incompleteReasons: [],
           findings: [],
           decision: 'pass',
           warningSection: null,
@@ -110,7 +114,8 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
       }
 
       // Resolve the file set for this checkpoint.
-      const { fileSet, errors, scopeDegraded, resolvedBaseRef } = await resolveFileSet(input);
+      const { fileSet, errors, scopeDegraded, listingFailed, resolvedBaseRef } =
+        await resolveFileSet(input);
       for (const err of errors) {
         deps.logger.warn({ err, podId: input.podId }, 'Scan file resolution warning');
       }
@@ -138,10 +143,22 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
       // any usable base ref — we scanned the alwaysScanPaths fallback only.
       // Surface that to callers via scanIncomplete so a scope-degraded scan
       // doesn't read as a clean full-coverage pass.
-      let scanIncomplete = scopeDegraded;
+      const reasons = new Set<string>();
+      if (scopeDegraded)
+        reasons.add(
+          'No usable base ref for the diff scan; only always-scan instruction files were scanned.',
+        );
+      // A full-scope scan that could not list tracked files scanned nothing.
+      // That is not a clean pass.
+      if (listingFailed) reasons.add('Could not list repository files to scan.');
+      let scanIncomplete = scopeDegraded || listingFailed;
+      const failedDetectors = new Set<string>();
       for (const file of scanFiles) {
         if (Date.now() > deadline) {
           scanIncomplete = true;
+          reasons.add(
+            `Scan budget of ${Math.round(budgetMs / 1000)}s exceeded after ${scanned} of ${scanFiles.length} file(s).`,
+          );
           deps.logger.warn(
             {
               podId: input.podId,
@@ -154,11 +171,15 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
         }
         for (const detector of activeDetectors) {
           try {
-            const baselineCapable =
-              resolvedBaseRef !== undefined && detector.scanWithBaselineIdentity !== undefined;
-            const identified = baselineCapable
-              ? await detector.scanWithBaselineIdentity?.(file)
+            // The identity-bearing scan reports detector failure as null, which
+            // `scan()` would hide as "no findings". Use it whenever available.
+            const identified = detector.scanWithBaselineIdentity
+              ? await detector.scanWithBaselineIdentity(file)
               : undefined;
+            if (identified === null) {
+              scanIncomplete = true;
+              failedDetectors.add(detector.name);
+            }
             let detFindings =
               identified === undefined || identified === null
                 ? await detector.scan(file)
@@ -167,15 +188,18 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
             if (identified && resolvedBaseRef && detector.scanWithBaselineIdentity) {
               if (Date.now() > deadline) {
                 scanIncomplete = true;
+                reasons.add('Scan budget exceeded while comparing findings with the base.');
               } else {
                 const baseFile = await loadScanFileAtRef(input.workdir, resolvedBaseRef, file.path);
                 if (baseFile) {
                   if (Date.now() > deadline) {
                     scanIncomplete = true;
+                    reasons.add('Scan budget exceeded while comparing findings with the base.');
                   } else {
                     const baseFindings = await detector.scanWithBaselineIdentity(baseFile);
                     if (Date.now() > deadline) {
                       scanIncomplete = true;
+                      reasons.add('Scan budget exceeded while comparing findings with the base.');
                     } else if (baseFindings) {
                       detFindings = subtractBaseline(identified, baseFindings);
                     }
@@ -187,6 +211,8 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
               if (passesThreshold(f, input.policy)) findings.push(f);
             }
           } catch (err) {
+            scanIncomplete = true;
+            failedDetectors.add(detector.name);
             deps.logger.warn(
               { err, podId: input.podId, detector: detector.name, file: file.path },
               'Detector threw on file — skipping',
@@ -195,6 +221,8 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
         }
         scanned += 1;
       }
+      for (const name of failedDetectors)
+        reasons.add(`Detector '${name}' failed on one or more files; their findings are unknown.`);
 
       const decision = decide({
         findings,
@@ -213,6 +241,7 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
         filesScanned: scanned,
         filesSkipped: skipped,
         scanIncomplete,
+        incompleteReasons: [...reasons],
         findings,
         decision,
         warningSection,
@@ -261,6 +290,8 @@ interface ResolvedFileSet {
    *  silently degraded to alwaysScanPaths only. Callers should surface this
    *  via `scanIncomplete` so the scan isn't read as full-coverage. */
   scopeDegraded: boolean;
+  /** True when a full-scope scan could not list tracked files. */
+  listingFailed: boolean;
   /** Present only for a successfully resolved push diff scan. */
   resolvedBaseRef?: string;
 }
@@ -271,6 +302,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
   const errors: unknown[] = [];
   const set = new Set<string>();
   let scopeDegraded = false;
+  let listingFailed = false;
   let resolvedBaseRef: string | undefined;
 
   const alwaysScanPaths =
@@ -289,6 +321,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
       for (const p of tracked) set.add(p);
     } catch (err) {
       errors.push(err);
+      listingFailed = true;
     }
   }
 
@@ -338,7 +371,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
     }
   }
 
-  return { fileSet: set, errors, scopeDegraded, resolvedBaseRef };
+  return { fileSet: set, errors, scopeDegraded, listingFailed, resolvedBaseRef };
 }
 
 function subtractBaseline(

@@ -255,6 +255,39 @@ export async function inspectSavedWorkSources(
   return { sources: candidates, blockers };
 }
 
+/**
+ * Merge-base of the selected source with the frozen target branch, read from the
+ * original's remote-tracking ref and proven present in the independent checkout as
+ * an ancestor of the source. Read-only. Returns null when any step is unavailable,
+ * so callers keep full-tree publication scanning.
+ */
+export async function savedPublicationBase(args: {
+  original: string;
+  checkout: string;
+  baseBranch: string;
+  commit: string;
+}): Promise<string | null> {
+  try {
+    const original = savedGit(await savedRoot(args.original));
+    await original(['check-ref-format', `refs/heads/${args.baseBranch}`]);
+    const tip = (
+      await original([
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        `refs/remotes/origin/${args.baseBranch}^{commit}`,
+      ])
+    ).stdout.trim();
+    if (!oid.test(tip)) return null;
+    const base = (await original(['merge-base', tip, args.commit])).stdout.trim();
+    if (!oid.test(base)) return null;
+    await savedGit(args.checkout)(['merge-base', '--is-ancestor', base, args.commit]);
+    return base;
+  } catch {
+    return null;
+  }
+}
+
 /** New independent object store and checkout; no original refs, index or files change. */
 export async function prepareSavedSource(args: {
   worktree: string;
