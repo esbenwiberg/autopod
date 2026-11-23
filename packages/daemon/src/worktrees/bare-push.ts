@@ -34,6 +34,30 @@ export interface PushResult {
   pushed: boolean;
   /** Failure category — useful when distinguishing push, branch-resolve, and promote errors. */
   reason?: string;
+  /** Present only when an authorized non-fast-forward rewrite replaced the branch tip. */
+  rewrite?: { from: string; to: string; evidence?: unknown };
+}
+
+export interface RewriteAuthorizationInput {
+  bareRepoPath: string;
+  branch: string;
+  /** Branch tip captured before the push; the promote is CAS-bound to it. */
+  expectedOld: string;
+  /** Resolved staging tip that would replace `expectedOld`. */
+  candidate: string;
+}
+
+export type RewriteAuthorization =
+  | { authorized: true; evidence?: unknown }
+  | { authorized: false; reason: string };
+
+export interface PushToBareOptions {
+  /**
+   * Optional authority for a non-fast-forward staging tip. Without it every
+   * non-fast-forward is refused (the historical behaviour). When it authorizes,
+   * the same CAS `update-ref <branch> <staging> <expectedOld>` promote is used.
+   */
+  authorizeRewrite?(input: RewriteAuthorizationInput): Promise<RewriteAuthorization>;
 }
 
 export interface RunGitResult {
@@ -71,6 +95,7 @@ export async function pushCommitsToBareViaStagingRef(
   bareRepoPath: string,
   podId: string,
   assertCurrent: () => void = () => {},
+  options: PushToBareOptions = {},
 ): Promise<PushResult> {
   const owned = async <T>(operation: () => Promise<T>): Promise<T> => {
     assertCurrent();
@@ -126,6 +151,7 @@ export async function pushCommitsToBareViaStagingRef(
     return { pushed: false, reason: `push: ${push.stderr.trim() || 'non-zero exit'}` };
   }
 
+  let rewrite: PushResult['rewrite'];
   if (expectedOld !== EMPTY_OID) {
     try {
       await owned(() =>
@@ -139,11 +165,37 @@ export async function pushCommitsToBareViaStagingRef(
         ]),
       );
     } catch {
-      await cleanupStaging();
-      return {
-        pushed: false,
-        reason: `non-fast-forward: staging tip is not a descendant of ${expectedOld.slice(0, 7)}`,
-      };
+      const refused = `non-fast-forward: staging tip is not a descendant of ${expectedOld.slice(0, 7)}`;
+      if (!options.authorizeRewrite) {
+        await cleanupStaging();
+        return { pushed: false, reason: refused };
+      }
+      let candidate: string;
+      let authorization: RewriteAuthorization;
+      try {
+        candidate = (
+          await owned(() =>
+            execFileAsync('git', ['--git-dir', bareRepoPath, 'rev-parse', '--verify', stagingRef]),
+          )
+        ).stdout.trim();
+        const authorizeRewrite = options.authorizeRewrite;
+        authorization = await owned(() =>
+          authorizeRewrite({ bareRepoPath, branch, expectedOld, candidate }),
+        );
+      } catch (err) {
+        await cleanupStaging();
+        // A superseded owner must surface as such, not as an ordinary refusal.
+        assertCurrent();
+        return {
+          pushed: false,
+          reason: `${refused}; rewrite refused: ${(err as Error).message}`,
+        };
+      }
+      if (!authorization.authorized) {
+        await cleanupStaging();
+        return { pushed: false, reason: `${refused}; rewrite refused: ${authorization.reason}` };
+      }
+      rewrite = { from: expectedOld, to: candidate, evidence: authorization.evidence };
     }
   }
 
@@ -164,5 +216,5 @@ export async function pushCommitsToBareViaStagingRef(
   }
 
   await cleanupStaging();
-  return { pushed: true };
+  return rewrite ? { pushed: true, rewrite } : { pushed: true };
 }

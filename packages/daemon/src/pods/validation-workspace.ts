@@ -21,6 +21,17 @@ export interface ValidationWorkspaceDependencies {
     podId: string,
     executionTarget: ExecutionTarget,
   ): Promise<{ pushed: boolean }>;
+  /**
+   * Promote the container branch into the host bare without mirroring files,
+   * only when the pod has rewrite authority and the rewrite is a proven rebase.
+   * Returns true when the host branch now matches the container HEAD.
+   */
+  adoptContainerHistoryRewrite?(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ): Promise<boolean>;
 }
 
 export class ValidationWorkspaceReconcileError extends Error {
@@ -31,7 +42,7 @@ export class ValidationWorkspaceReconcileError extends Error {
 }
 
 export function createValidationWorkspace(deps: ValidationWorkspaceDependencies) {
-  const { logger, syncWorkspaceBack } = deps;
+  const { logger, syncWorkspaceBack, adoptContainerHistoryRewrite } = deps;
 
   async function readHostWorktreeHead(worktreePath: string): Promise<string | null> {
     try {
@@ -457,8 +468,28 @@ export function createValidationWorkspace(deps: ValidationWorkspaceDependencies)
     // True divergence: neither HEAD is an ancestor of the other. On sandbox the
     // container is authoritative and the host worktree's tree is the agent state
     // we want to validate, so recover by grafting rather than quarantining the
-    // worktree. Docker pods keep the strict throw — their host worktree is
-    // bind-mounted and should stay linear, so a divergence there is a real anomaly.
+    // worktree. On Docker the container is authoritative too, but the host tree
+    // is only a mirror, so a graft would prove nothing: the only accepted
+    // divergence is a canonical PR fix pod's proven rebase, adopted into the
+    // host branch (no file mirroring until it is adopted). Everything else keeps
+    // the strict throw — a divergence there is a real anomaly.
+    if (executionTarget === 'local' && adoptContainerHistoryRewrite) {
+      const adopted = await adoptContainerHistoryRewrite(containerId, worktreePath, cm, podId);
+      if (adopted) {
+        await syncWorkspaceBack(containerId, worktreePath, cm, podId, executionTarget);
+        const syncedHead = await readHostWorktreeHead(worktreePath);
+        if (syncedHead === containerHead) {
+          logger.info(
+            { podId, hostHead, containerHead },
+            'Adopted proven container rebase before validation',
+          );
+          return;
+        }
+        throw new ValidationWorkspaceReconcileError(
+          `Host worktree HEAD ${syncedHead ?? 'unknown'} does not match adopted container HEAD ${containerHead}`,
+        );
+      }
+    }
     if (executionTarget === 'sandbox') {
       const reconciled = await reconcileDivergedSandboxWorkspace(
         containerId,

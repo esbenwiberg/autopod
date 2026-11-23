@@ -122,6 +122,10 @@ import { createFixAdmission } from './fix-admission.js';
 import { createFixControls } from './fix-controls.js';
 import { createFixDelivery } from './fix-delivery.js';
 import { createFixFeedback } from './fix-feedback.js';
+import {
+  describeAdoptedHistoryRewrite,
+  historyRewritePolicyForPod,
+} from './fix-history-rewrite-policy.js';
 import { createFixParking } from './fix-parking.js';
 import { createFixProviderBinding } from './fix-provider-binding.js';
 import { createOperatorControls } from './operator-controls.js';
@@ -631,15 +635,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     getEffectiveReviewerConfig,
   });
 
-  const { syncWorkspaceBack, recoverWorktreeFromContainer } = createWorkspaceTransfer({
-    logger,
-    captureAuthority: (podId, containerId, worktreePath) => {
-      const pod = podRepo.getOrThrow(podId);
-      if (pod.containerId !== containerId || pod.worktreePath !== worktreePath)
-        throw new ValidationSupersededError();
-      return captureValidationMutationGuard(podRepo, pod);
-    },
-  });
+  const { syncWorkspaceBack, recoverWorktreeFromContainer, adoptContainerHistoryRewrite } =
+    createWorkspaceTransfer({
+      logger,
+      captureAuthority: (podId, containerId, worktreePath) => {
+        const pod = podRepo.getOrThrow(podId);
+        if (pod.containerId !== containerId || pod.worktreePath !== worktreePath)
+          throw new ValidationSupersededError();
+        return captureValidationMutationGuard(podRepo, pod);
+      },
+      historyRewritePolicy: (podId) => {
+        const pod = podRepo.getOrThrow(podId);
+        if (!pod.linkedPodId) return null;
+        try {
+          const parent = podRepo.getOrThrow(pod.linkedPodId);
+          return historyRewritePolicyForPod(pod, parent, executionForPod(pod).defaultBranch);
+        } catch {
+          // Missing parent or execution settings: no rewrite authority (fail closed).
+          return null;
+        }
+      },
+      onHistoryRewriteAdopted: (podId, adoption) =>
+        emitActivityStatus(podId, describeAdoptedHistoryRewrite(adoption)),
+    });
 
   const continuationContext = createContinuationContext(deps, {
     podRepo,
@@ -716,6 +734,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const { prepareWorkspaceForValidation } = createValidationWorkspace({
     logger,
     syncWorkspaceBack,
+    adoptContainerHistoryRewrite,
   });
 
   const { preservePodWorkspace, checkpointSandboxWorkspaceForPod } = createWorkspacePreservation({
