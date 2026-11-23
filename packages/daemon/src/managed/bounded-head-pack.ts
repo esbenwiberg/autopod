@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { addAbortSignal } from 'node:stream';
 import { createInflate } from 'node:zlib';
 import { MAX_CANDIDATE_BYTES } from './source-git.js';
 
@@ -11,7 +12,7 @@ const maxExportObjects = 4096;
 const maxExpansionMs = 30_000;
 
 async function inflateObject(input: Buffer, size: number, signal: AbortSignal): Promise<number> {
-  const inflater = createInflate({ chunkSize: 16 * 1024, signal });
+  const inflater = addAbortSignal(signal, createInflate({ chunkSize: 16 * 1024 }));
   let expanded = 0;
   try {
     inflater.end(input);
@@ -33,9 +34,28 @@ async function inflateObject(input: Buffer, size: number, signal: AbortSignal): 
   }
 }
 
+const sha1 = /^[a-f0-9]{40}$/;
+
+export function anchoredHeadHeader(predecessor: string, commit: string) {
+  if (!sha1.test(predecessor) || !sha1.test(commit) || predecessor === commit)
+    throw new Error('parent-private-source-pack-format');
+  return Buffer.from(`# v2 git bundle\n-${predecessor} Autopod pinned base\n${commit} HEAD\n\n`);
+}
+
+export async function assertBoundedAnchoredHeadPack(
+  bundle: Buffer,
+  predecessor: string,
+  commit: string,
+) {
+  return assertBoundedPack(bundle, anchoredHeadHeader(predecessor, commit));
+}
+
 export async function assertBoundedHeadPack(bundle: Buffer, commit: string) {
-  if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('parent-private-source-pack-format');
-  const header = Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`);
+  if (!sha1.test(commit)) throw new Error('parent-private-source-pack-format');
+  return assertBoundedPack(bundle, Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`));
+}
+
+async function assertBoundedPack(bundle: Buffer, header: Buffer) {
   const packEnd = bundle.length - 20;
   if (
     !bundle.subarray(0, header.length).equals(header) ||
