@@ -2,6 +2,46 @@ import AutopodClient
 import Foundation
 import SwiftUI
 
+struct FactRequestPresentation {
+  let factId: String
+  let request: FactDeviationItem?
+  let evidence: FactCheckDetail?
+}
+
+func currentFactRequests(
+  deviations: [FactDeviationItem], evidence: [FactCheckDetail]
+) -> [FactRequestPresentation] {
+  let pending = deviations.filter { $0.decision == nil }
+  var rows = pending.map { request in
+    FactRequestPresentation(factId: request.factId, request: request,
+      evidence: evidence.first { $0.factId == request.factId })
+  }
+  for fact in evidence where fact.status == "pending_human" {
+    if !deviations.contains(where: { $0.factId == fact.factId }) {
+      rows.append(FactRequestPresentation(factId: fact.factId, request: nil, evidence: fact))
+    }
+  }
+  return rows
+}
+
+func factWaiverAvailable(
+  evidence: FactCheckDetail?, request: FactDeviationItem?, isCurrent: Bool, podStatus: PodStatus
+) -> Bool {
+  guard isCurrent, [.running, .validating, .failed, .reviewRequired].contains(podStatus),
+    evidence?.status == "pending_human" else { return false }
+  guard let request else { return true }
+  return request.action == "waive" && request.decision == nil
+}
+
+func factWaiverUnavailableReason(evidence: FactCheckDetail?, isCurrent: Bool) -> String? {
+  if !isCurrent { return "Saved evidence is read-only. Return to Current to review waiver eligibility." }
+  guard let evidence else { return "Awaiting current validator evidence before waiver approval is available." }
+  if evidence.status == "fail" || (evidence.status == nil && !evidence.passed) {
+    return "No per-fact waiver is available for an ordinary failed check. Inspect Fact Command Output below to diagnose the failure."
+  }
+  return nil
+}
+
 func validationPageScreenshot(
   _ page: PageDetail,
   proofOfWorkScreenshots: [ScreenshotRef]?
@@ -226,6 +266,65 @@ public struct ValidationTab: View {
   }
 
   // MARK: - Derived state
+
+  @ViewBuilder
+  private var currentFactRequestsPanel: some View {
+    let rows = currentFactRequests(
+      deviations: pod.taskSummary?.factDeviations ?? [],
+      evidence: progress?.factChecks ?? checks?.factChecks ?? []
+    )
+    if selectedHistoryKey != "current" {
+      HStack {
+        Text("Saved attempt · read-only").font(.caption).foregroundStyle(.secondary)
+        Spacer()
+        Button("Return to Current") { selectedHistoryKey = "current" }
+          .buttonStyle(.bordered).controlSize(.small)
+      }
+    } else if !rows.isEmpty {
+      VStack(alignment: .leading, spacing: 12) {
+        Label("Required Fact Requests", systemImage: "checkmark.seal")
+          .font(.subheadline.weight(.semibold))
+        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Text(row.factId).font(.system(.callout, design: .monospaced).weight(.semibold))
+                .textSelection(.enabled)
+              Spacer()
+              if factCanApproveWaiver(row.evidence) {
+                factWaiverButton(factId: row.factId, evidence: row.evidence)
+              }
+            }
+            Text("Requested action: \(row.request?.action ?? "waive (validator pending human)")")
+              .font(.caption.weight(.semibold))
+            if let request = row.request {
+              Text(request.reason).font(.caption).textSelection(.enabled)
+              Text(request.whyImpossible).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+              if request.action == "replace" {
+                Text("Replacement requested. A waiver approval does not approve this replacement.")
+                  .font(.caption).foregroundStyle(.orange)
+                if let replacement = request.replacement {
+                  Text("\(replacement.artifactPath)\n\(replacement.command)")
+                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                }
+              }
+            }
+            if let evidence = row.evidence {
+              Text(evidence.reasoning).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let explanation = factWaiverUnavailableReason(evidence: row.evidence, isCurrent: true) {
+              Text(explanation).font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Inspect fact evidence") { selectedPhase = .facts }
+              .buttonStyle(.plain).font(.caption).foregroundStyle(Color.accentColor)
+          }
+          .padding(12)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color.orange.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.15)))
+        }
+      }
+    }
+  }
 
   private var liveProgress: ValidationProgress? {
     selectedHistory == nil ? pod.validationProgress : nil
@@ -638,6 +737,7 @@ public struct ValidationTab: View {
             Divider()
             ScrollView {
               VStack(alignment: .leading, spacing: 20) {
+                currentFactRequestsPanel
                 recoveryControls
                 validationSummaryPanel
                 desktopPhaseNavigation
@@ -661,6 +761,7 @@ public struct ValidationTab: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
+          currentFactRequestsPanel
           recoveryControls
           validationSummaryPanel
           phaseDetailPanel
@@ -677,6 +778,7 @@ public struct ValidationTab: View {
       selectedPhase = nil
     }
     .onChange(of: selectedHistoryKey) { _, _ in
+      factWaiverPopoverFactId = nil
       selectedPhase = nil
     }
     .onChange(
@@ -1802,14 +1904,15 @@ public struct ValidationTab: View {
   }
 
   private func factCanApproveWaiver(_ evidence: FactCheckDetail?) -> Bool {
-    guard evidence?.status == "pending_human" else { return false }
-    return true
+    factWaiverAvailable(evidence: evidence,
+      request: pod.taskSummary?.factDeviations.first { $0.factId == evidence?.factId },
+      isCurrent: selectedHistoryKey == "current", podStatus: pod.status)
   }
 
   private func factWaiverButton(factId: String, evidence: FactCheckDetail?) -> some View {
     let isApproving = approvingFactWaiverIds.contains(factId)
     return Button {
-      factWaiverReason = ""
+      factWaiverReason = pod.taskSummary?.factDeviations.first { $0.factId == factId }?.reason ?? ""
       factWaiverPopoverFactId = factId
     } label: {
       if isApproving {
@@ -1853,6 +1956,7 @@ public struct ValidationTab: View {
           .buttonStyle(.plain).foregroundStyle(.secondary)
         Spacer()
         Button("Approve Waiver") {
+          guard factCanApproveWaiver(evidence) else { return }
           let fid = factId
           let reason = factWaiverReason.isEmpty ? nil : factWaiverReason
           factWaiverPopoverFactId = nil
@@ -1912,6 +2016,11 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private func factEvidenceBody(_ check: FactCheckDetail) -> some View {
+    if let explanation = factWaiverUnavailableReason(
+      evidence: check, isCurrent: selectedHistoryKey == "current"
+    ) {
+      Text(explanation).font(.caption).foregroundStyle(.secondary)
+    }
     HStack(spacing: 8) {
       if let exitCode = check.exitCode {
         Text("exit \(exitCode)")
