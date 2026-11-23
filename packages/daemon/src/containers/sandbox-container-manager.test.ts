@@ -484,6 +484,7 @@ describe('SandboxContainerManager', () => {
     it.each([
       [8, 'XL'],
       [16, '2XL'],
+      [32, '3XL'],
     ] as const)('selects the whole opt-in bundle for exactly %s GiB', async (gib, tier) => {
       const client = new FakeSandboxApiClient();
       await new SandboxContainerManager(client, logger).spawn({
@@ -494,15 +495,15 @@ describe('SandboxContainerManager', () => {
     });
 
     it.each([
-      10, 12, 32,
-    ])('refuses a non-tier %s GiB request above L before allocating, naming XL and 2XL', async (gib) => {
+      10, 12, 24, 64,
+    ])('refuses a non-tier %s GiB request above L before allocating, naming XL, 2XL and 3XL', async (gib) => {
       const client = new FakeSandboxApiClient();
       const error = await new SandboxContainerManager(client, logger)
         .spawn({ ...baseConfig, memoryBytes: gib * 1024 ** 3 })
         .catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AutopodError);
       expect(error).toMatchObject({ code: 'PREFLIGHT_INSUFFICIENT_MEMORY', statusCode: 409 });
-      expect((error as Error).message).toContain('XL (8 GiB) or 2XL (16 GiB)');
+      expect((error as Error).message).toContain('XL (8 GiB), 2XL (16 GiB) or 3XL (32 GiB)');
       expect(client.created).toHaveLength(0);
       expect(client.execCalls).toHaveLength(0);
     });

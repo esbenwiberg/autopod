@@ -297,8 +297,8 @@ Implements the same `ContainerManager` interface and is selected when
 The manager logic is **implemented and unit-tested** against a `SandboxApiClient` seam
 (`sandbox-api-client.ts`) and a concrete Azure adapter (`azure-sandbox-api-client.ts`). It owns
 the mapping between the `ContainerManager` contract and the Sandboxes data plane: bundle selection
-from `memoryBytes` (`resolveSandboxTier` over the single XS–2XL catalog in `sandbox-tiers.ts`;
-L default, XL/2XL exact opt-in, no clamp or fallback), egress-policy translation from `networkPolicyMode` +
+from `memoryBytes` (`resolveSandboxTier` over the single XS–3XL catalog in `sandbox-tiers.ts`;
+L default, XL/2XL/3XL exact opt-in, no clamp or fallback), egress-policy translation from `networkPolicyMode` +
 `allowedHosts` (`egressPolicyForMode`), buffered exec/file I/O, host-volume upload at spawn,
 directory sync-back through file list/read, `stop`/`start` → `begin_stop`/`begin_resume`, and an
 `execStreaming` native-or-buffered fallback.

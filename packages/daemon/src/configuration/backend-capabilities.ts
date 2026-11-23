@@ -17,7 +17,7 @@ const sidecarDefaults: ExecutionCapabilities['sidecarDefaults'] = {
 
 /**
  * Derived from the same sandbox tier catalog as provisioning. The configured
- * default (≤ L) is reported separately from the 2XL maximum.
+ * default (≤ L) is reported separately from the 3XL maximum.
  */
 export function sandboxCapabilities(options: {
   enabled: boolean;

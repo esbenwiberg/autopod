@@ -94,13 +94,14 @@ import Testing
     let local = ExecutionMemoryLabel.backend(fixture.actions.capabilities, target: "local")
     #expect(ExecutionMemoryLabel.text(memoryGb: 8, backend: sandbox) == "XL · 4 vCPU · 8 GiB RAM · 80 GiB disk")
     #expect(ExecutionMemoryLabel.text(memoryGb: 16, backend: sandbox) == "2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk")
+    #expect(ExecutionMemoryLabel.text(memoryGb: 32, backend: sandbox) == "3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk")
     // Docker has no bundles; a value the backend does not advertise keeps plain RAM text.
     #expect(ExecutionMemoryLabel.text(memoryGb: 8, backend: local) == "8 GB")
-    #expect(ExecutionMemoryLabel.text(memoryGb: 32, backend: sandbox) == "32 GB")
+    #expect(ExecutionMemoryLabel.text(memoryGb: 64, backend: sandbox) == "64 GB")
     #expect(ExecutionMemoryLabel.text(memoryGb: 4, backend: nil) == "4 GB")
   }
 
-  @Test(arguments: [(8.0, "XL · 4 vCPU · 8 GiB RAM · 80 GiB disk"), (16.0, "2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk")])
+  @Test(arguments: [(8.0, "XL · 4 vCPU · 8 GiB RAM · 80 GiB disk"), (16.0, "2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk"), (32.0, "3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk")])
   func sandboxDraftAndPreviewSummariesAgreeOnTheBundle(memoryGb: Double, label: String) throws {
     let fixture = LaunchComposerFixture()
     var request = fixture.request
@@ -403,11 +404,12 @@ import Testing
     return LaunchConfigurationActions(documents: documents,
       capabilities: .object(["launchAvailable": .bool(true), "execution": .array([
         .object(["target": .string("local"), "available": .bool(true), "sidecars": .bool(true), "maxCpus": .number(4), "maxTotalMemoryGb": .number(16), "memoryTiersGb": .array([.number(4), .number(8), .number(16)]), "memoryBundles": .null]),
-        .object(["target": .string("sandbox"), "available": .bool(true), "sidecars": .bool(false), "maxCpus": .null, "maxTotalMemoryGb": .number(16), "memoryTiersGb": .array([.number(4), .number(8), .number(16)]),
+        .object(["target": .string("sandbox"), "available": .bool(true), "sidecars": .bool(false), "maxCpus": .null, "maxTotalMemoryGb": .number(32), "memoryTiersGb": .array([.number(4), .number(8), .number(16), .number(32)]),
                  "memoryBundles": .array([
                    .object(["tier": .string("L"), "memoryGb": .number(4), "cpus": .number(2), "diskGb": .number(40), "label": .string("L · 2 vCPU · 4 GiB RAM · 40 GiB disk")]),
                    .object(["tier": .string("XL"), "memoryGb": .number(8), "cpus": .number(4), "diskGb": .number(80), "label": .string("XL · 4 vCPU · 8 GiB RAM · 80 GiB disk")]),
                    .object(["tier": .string("2XL"), "memoryGb": .number(16), "cpus": .number(8), "diskGb": .number(160), "label": .string("2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk")]),
+                   .object(["tier": .string("3XL"), "memoryGb": .number(32), "cpus": .number(16), "diskGb": .number(320), "label": .string("3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk")]),
                  ])]),
       ])]), reload: {},
       resolve: { request in self.resolutions.append(request); if self.holdResolve { await withCheckedContinuation { self.heldResolution = $0 } }; if self.resolveFailure { throw DaemonError.badRequest("Configuration changed; draft retained") }; return try self.preview(request) },

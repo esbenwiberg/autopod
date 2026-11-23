@@ -123,7 +123,7 @@ export interface SandboxContainerManagerConfig {
   registryCredentials?: SandboxRegistryCredentials;
   /** Resolve mutable image tags to their current manifest digest for persistent disk-image keys. */
   resolveImageDigest?: (image: string) => Promise<string | undefined>;
-  /** Fleet default tier when a spawn carries no memory hint (default: 'L'; never XL/2XL). */
+  /** Fleet default tier when a spawn carries no memory hint (default: 'L'; never an opt-in XL–3XL bundle). */
   tier?: SandboxDefaultTier;
 }
 

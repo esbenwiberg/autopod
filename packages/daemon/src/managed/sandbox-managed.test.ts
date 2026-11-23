@@ -135,17 +135,19 @@ function managedTierHarness() {
   };
 }
 
-it('managed allocation applies the shared tier resolver: default L, exact XL/2XL', async () => {
+it('managed allocation applies the shared tier resolver: default L, exact XL/2XL/3XL', async () => {
   const h = managedTierHarness();
   try {
     await h.manager().ensureManagedContainer(h.config('managed-default'));
     await h.manager().ensureManagedContainer(h.config('managed-xl', 8));
     await h.manager().ensureManagedContainer(h.config('managed-2xl', 16));
+    await h.manager().ensureManagedContainer(h.config('managed-3xl', 32));
     await h.manager().ensureManagedContainer(h.config('managed-small', 1.5));
     expect(h.created.map((c) => [c.podId, c.tier])).toEqual([
       ['managed-default', 'L'],
       ['managed-xl', 'XL'],
       ['managed-2xl', '2XL'],
+      ['managed-3xl', '3XL'],
       ['managed-small', 'M'],
     ]);
   } finally {
@@ -154,7 +156,7 @@ it('managed allocation applies the shared tier resolver: default L, exact XL/2XL
 });
 
 it.each([
-  10, 32,
+  10, 64,
 ])('managed allocation refuses %s GiB before any claim, discovery or create', async (gib) => {
   const h = managedTierHarness();
   try {

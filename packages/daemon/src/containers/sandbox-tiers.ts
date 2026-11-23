@@ -7,7 +7,8 @@
  * payload — derives from this list so the bundles cannot drift apart.
  *
  * Source: https://learn.microsoft.com/en-us/azure/container-apps/sandboxes-overview#resource-tiers
- * Azure also documents 3XL; it is intentionally not offered.
+ * and https://sandboxes.azure.com/docs/sandboxes/sandbox#resource-tiers. Every documented
+ * tier is offered; bundles above L are per-repository opt-in.
  */
 
 import { AutopodError } from '@autopod/shared';
@@ -33,6 +34,7 @@ export const SANDBOX_TIERS = [
   { tier: 'L', vcpu: 2, memoryGiB: 4, diskGiB: 40, optIn: false },
   { tier: 'XL', vcpu: 4, memoryGiB: 8, diskGiB: 80, optIn: true },
   { tier: '2XL', vcpu: 8, memoryGiB: 16, diskGiB: 160, optIn: true },
+  { tier: '3XL', vcpu: 16, memoryGiB: 32, diskGiB: 320, optIn: true },
 ] as const satisfies readonly SandboxTierSpec[];
 
 export type SandboxResourceTier = (typeof SANDBOX_TIERS)[number]['tier'];
@@ -82,6 +84,12 @@ export function sandboxTierLabel(tier: SandboxResourceTier): string {
 const optInTiers = SANDBOX_TIERS.filter((entry) => entry.optIn);
 const roundUpTiers = SANDBOX_TIERS.filter((entry) => !entry.optIn);
 
+function joinAlternatives(items: string[]): string {
+  return items.length < 2
+    ? (items[0] ?? '')
+    : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
+}
+
 function formatGiB(bytes: number): string {
   return `${Number((bytes / GIB).toFixed(3))} GiB`;
 }
@@ -91,7 +99,8 @@ function formatGiB(bytes: number): string {
  *
  * - No hint (`undefined` / ≤ 0) → the configured default tier.
  * - Up to L: the smallest bundle that satisfies the request (XS–L round-up).
- * - Above L: must equal an opt-in bundle exactly (8 GiB = XL, 16 GiB = 2XL).
+ * - Above L: must equal an opt-in bundle exactly (8 GiB = XL, 16 GiB = 2XL,
+ *   32 GiB = 3XL).
  *   Anything else is refused before allocation — never rounded up to a larger,
  *   more expensive bundle and never clamped down.
  */
@@ -105,7 +114,9 @@ export function resolveSandboxTier(
   }
   const exact = optInTiers.find((entry) => entry.memoryGiB * GIB === memoryBytes);
   if (exact) return exact.tier;
-  const options = optInTiers.map((entry) => `${entry.tier} (${entry.memoryGiB} GiB)`).join(' or ');
+  const options = joinAlternatives(
+    optInTiers.map((entry) => `${entry.tier} (${entry.memoryGiB} GiB)`),
+  );
   throw new AutopodError(
     `Sandbox resource preflight failed: requested ${formatGiB(memoryBytes)} is not an offered sandbox bundle. Above ${roundUpTiers[roundUpTiers.length - 1]!.tier} (${roundUpTiers[roundUpTiers.length - 1]!.memoryGiB} GiB), select exactly ${options} in the repository's execution settings, or choose a compatible execution target. Larger sizes are not offered.`,
     'PREFLIGHT_INSUFFICIENT_MEMORY',

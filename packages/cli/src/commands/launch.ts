@@ -389,7 +389,7 @@ export function addLaunchPresetOptions(command: Command): Command {
     .option('--execution <local|sandbox>', 'Choose Docker (local) or hosted sandbox')
     .option(
       '--memory-gb <amount>',
-      'Main container memory in GB (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL)',
+      'Main container memory in GB (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL, 32 = 3XL)',
       positive,
     )
     .option('--cpus <amount>', 'Main container CPU allocation where supported', positive);
