@@ -30,6 +30,12 @@ const quotaFixtures = [
   {
     runtime: 'claude' as const,
     evidence: {
+      message: "You've hit your 5-hour limit · resets 10:50pm (UTC)",
+    },
+  },
+  {
+    runtime: 'claude' as const,
+    evidence: {
       message:
         "You've hit your org's monthly spend limit · ask your admin to raise it at claude.ai/settings/usage",
     },
@@ -152,6 +158,8 @@ describe('classifyProviderError', () => {
     "You've hit your session limit · resets 13:30pm (UTC)",
     "You've hit your session limit · resets 12:60pm (UTC)",
     "You've hit your session limit · resets 12:30pm (UTC).",
+    "You've hit your 5-hour limit · resets 13:50pm (UTC)",
+    "You've hit your 6-hour limit · resets 10:50pm (UTC)",
   ])('fails closed for drifted Claude session-limit text: %s', (message) => {
     expect(classifyProviderError('claude', { message })).toMatchObject({
       category: 'unknown',
