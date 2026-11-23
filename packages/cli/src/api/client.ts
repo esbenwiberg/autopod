@@ -877,6 +877,10 @@ export class AutopodClient {
     );
   }
 
+  async getPartialResearch(id: string): Promise<import('@autopod/shared').PartialResearchReport> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/files/partial-research`);
+  }
+
   async listPodFiles(
     id: string,
   ): Promise<{ files: Array<{ path: string; size: number; modified: number }> }> {

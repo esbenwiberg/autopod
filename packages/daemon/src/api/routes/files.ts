@@ -7,6 +7,8 @@ import {
   readArtifactSnapshotFile,
   verifyArtifactSnapshot,
 } from '../../pods/artifact-snapshot-receipt.js';
+import type { CompletionJournal } from '../../pods/completion-journal.js';
+import { readPartialResearchReport } from '../../pods/partial-research-report.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 
 interface FileEntry {
@@ -79,7 +81,19 @@ export function filesRoutes(
   app: FastifyInstance,
   podManager: PodManager,
   containerManagerFactory?: ContainerManagerFactory,
+  completionJournal?: Pick<CompletionJournal, 'getPartialResearch'>,
 ): void {
+  // Dedicated operator-only read; never fall back to the container, mutable
+  // worktree or accepted findings. An older daemon has no such endpoint.
+  app.get('/pods/:podId/files/partial-research', (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    reply.header('Cache-Control', 'no-store');
+    return readPartialResearchReport(
+      podManager.getSession(podId),
+      (id, generation, cycle) =>
+        completionJournal?.getPartialResearch(id, generation, cycle) ?? null,
+    );
+  });
   // GET /pods/:podId/files — list files in the pod worktree filtered by extension.
   // Prefers the live container's /workspace when available so workspace pods (which
   // only sync /workspace → host worktree at completion) don't appear empty mid-run.

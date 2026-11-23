@@ -62,6 +62,33 @@ inspect the failure and explicitly Resume finalization. A recorded settled worke
 is not dispatched again. Receipt corruption must be repaired from original evidence;
 there is no force-accept or termination-proof bypass.
 
+## Reading partial research from a held worker
+
+For a failed `accept-findings` pod with artifact output, use:
+
+```sh
+ap files <full-pod-id> --partial
+ap files <full-pod-id> --partial --json
+```
+
+When the completion gate successfully preserves a workspace before parking it for
+uncollected guidance or an infrastructure blocker, it captures the root
+`research-output.md` as bounded UTF-8 text (up to 5 MiB, no links). For a sandbox,
+only the verified checkpoint's Git blob is eligible; an ignored or unmatched host
+file is not evidence. This separate
+capture is labeled **incomplete / unreviewed**. It is tied to the exact pod,
+lifecycle generation and settlement cycle; the reader checks the saved bytes
+against their recorded SHA-256 digest. The text CLI prints provenance to stderr
+and the file to stdout. JSON includes both.
+
+The authenticated `GET /pods/:id/files/partial-research` reads only that capture.
+It does not open the live workspace, wake or retry the worker, consume guidance,
+clear the infrastructure hold, or create a findings receipt. Ordinary `ap files
+--path ...` and `ap findings` keep the existing receipt rules. Older holds are
+not backfilled: a workspace preservation timestamp alone cannot prove the exact
+report bytes. Absent, invalid or unverifiable reports return a specific conflict
+instead of falling back to mutable files.
+
 ## Compatibility and rollout
 
 Migration 233 adds nullable projections and append-only findings receipts, with no
