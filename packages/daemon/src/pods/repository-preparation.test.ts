@@ -92,11 +92,20 @@ describe('repository preparation', () => {
 
   it('preserves public literals when transport loses env, with secrets excluded from argv', async () => {
     const f = await fixture('test "$PUBLIC_VALUE" = visible && test -z "$PRIVATE_VALUE"');
+    let commandsRun = 0;
     vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, argv) => {
       if (argv[2] === PREPARATION_SOURCE_PROBE)
         return { exitCode: 0, stdout: JSON.stringify(source), stderr: '' };
       expect(JSON.stringify(argv)).not.toContain('private-fixture');
-      const output = await exec(argv[0]!, argv.slice(1), { env: { PATH: process.env.PATH } });
+      // Stub container-only probes that sleep, scan host directories or use
+      // package tools. Keep the timing-file read to clean up the real command.
+      if (argv[0] === 'sh' && argv[3] === 'autopod-prep-timing') {
+        const output = await exec(argv[0], argv.slice(1));
+        return { ...output, exitCode: 0 };
+      }
+      if (argv[0] !== '/usr/bin/env') return { exitCode: 0, stdout: '', stderr: '' };
+      commandsRun++;
+      const output = await exec(argv[0], argv.slice(1), { env: { PATH: process.env.PATH } });
       return { ...output, exitCode: 0 };
     });
     expect(
@@ -107,6 +116,7 @@ describe('repository preparation', () => {
         })
       ).status,
     ).toBe('passed');
+    expect(commandsRun).toBe(1);
   });
 
   it('retains bounded useful failure detail while removing credentials and command literals', async () => {

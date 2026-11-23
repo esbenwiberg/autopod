@@ -1065,6 +1065,12 @@ describe('Extended Route Tests', () => {
             open: true,
             merged: false,
             reviewDecision: 'APPROVED',
+            headSha: 'a'.repeat(40),
+            sourceTarget: {
+              repository: 'https://github.com/org/repo',
+              branch: 'preserved-branch',
+              baseBranch: 'main',
+            },
             blockReason: null,
             ciFailures: [],
             reviewComments: [],

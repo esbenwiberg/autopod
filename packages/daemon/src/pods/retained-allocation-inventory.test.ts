@@ -422,9 +422,21 @@ describe('forward-only retained allocation inventory', () => {
 
   it('does not enroll any pre-274 execution when the actual forward migration runs', async () => {
     const location = path.join(await rootDir(), 'legacy.db');
-    const db = await openFileDb(location, createMigratedTestDb(272));
-    const f = seed(db);
-    f.repo.update(podId, { containerId: 'e'.repeat(64), worktreePath: '/old/checkout' });
+    const db = await openFileDb(location, createMigratedTestDb(273));
+    // Use historical schema rows, not today's repository (which prepares SQL
+    // referencing tables introduced after this migration).
+    insertTestProfile(db);
+    db.prepare(`INSERT INTO pods
+      (id, profile_name, task, status, model, runtime, branch, user_id, execution_target,
+       container_id, worktree_path)
+      VALUES (?, 'test-profile', 'fixture', 'running', 'fixture', 'codex', 'fixture-branch',
+       'fixture', 'local', ?, '/old/checkout')`).run(podId, 'e'.repeat(64));
+    const taskId = 'legacy-fixture-task';
+    db.prepare(
+      "INSERT INTO logical_tasks (id, root_pod_id, created_at) VALUES (?, ?, datetime('now'))",
+    ).run(taskId, podId);
+    db.prepare(`INSERT INTO task_executions (pod_id, execution_id, task_id, created_at)
+      VALUES (?, 'legacy-fixture-execution', ?, datetime('now'))`).run(podId, taskId);
     db.close();
     const reopened = await openFileDb(location);
     reopened.exec(
@@ -434,7 +446,7 @@ describe('forward-only retained allocation inventory', () => {
       ),
     );
     const inventory = createRetainedAllocationInventory(reopened);
-    expect(inventory.readTask(f.taskId)).toMatchObject({
+    expect(inventory.readTask(taskId)).toMatchObject({
       state: 'incomplete',
       allocations: [],
       reasons: expect.arrayContaining([
@@ -444,7 +456,7 @@ describe('forward-only retained allocation inventory', () => {
     const scope = inventory.scope(podId);
     if (!scope) throw new Error('new producer scope unavailable');
     await dockerFixture().net.ensureNetworkForPod(podId, scope);
-    expect(inventory.readTask(f.taskId).reasons).toContainEqual(
+    expect(inventory.readTask(taskId).reasons).toContainEqual(
       expect.objectContaining({ code: 'legacy-execution' }),
     );
   });

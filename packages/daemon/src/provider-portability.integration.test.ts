@@ -270,6 +270,8 @@ describe('provider portability integration', () => {
       [],
       ['localhost'],
       8080,
+      true,
+      expect.objectContaining({ recoveryId: null, begin: expect.any(Function) }),
     );
     expect(managerContext.containerManager.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
