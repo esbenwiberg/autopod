@@ -112,12 +112,13 @@ describe('interrupted agent turn (#648)', () => {
       // The preserved worktree (holding the synced uncommitted work) is remounted.
       expect(requeued.recoveryWorktreePath).toBe(failed.worktreePath);
       expect(requeued.worktreePath).toBe(failed.worktreePath);
-      // Already preserved: no second sync before replacing the container.
+      // Rework re-preserves the failed local worker before replacing its container
+      // (#670): one idempotent sync on top of the failure-time preservation.
       expect(
         vi
           .mocked(ctx.containerManager.execInContainer)
           .mock.calls.filter(([, command]) => isSyncBack(command)).length,
-      ).toBe(syncsBeforeRework);
+      ).toBe(syncsBeforeRework + 1);
     } finally {
       ctx.db.close();
     }

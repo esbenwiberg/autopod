@@ -5,6 +5,7 @@ import type { ValidationEngine } from '../interfaces/index.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
+import { isAgentStageInterrupted } from './agent-stage-interruption.js';
 import {
   assertBudgetCodingNotInterrupted,
   BUDGET_CONTINUATION_CHECKS_ONLY,
@@ -310,11 +311,38 @@ export function createValidationTriggerWorkflow(
       const reworkGeneration = podRepo.incrementLifecycleGeneration(podId);
       validationAbortControllers.get(podId)?.abort();
 
-      if (
+      // An interrupted local worker's uncommitted/untracked source may exist only
+      // in its container's /workspace overlay. (Validation-stage failures were
+      // already synced and committed at completion; re-syncing them could import
+      // validation-generated files.) Removing the container below would
+      // discard it, so copy it to the host worktree first (idempotent when the
+      // agent-failure path already preserved it). A container Docker reports as
+      // already gone has nothing left to copy; an unknown status fails closed.
+      let preserveLocalFailedWorker =
         !isInteractive &&
-        (pod.executionTarget === 'sandbox' || unpreservedInterruptedTurn) &&
-        pod.containerId &&
-        pod.worktreePath
+        pod.executionTarget === 'local' &&
+        (isAgentStageInterrupted(podRepo, pod) || unpreservedInterruptedTurn) &&
+        !!pod.containerId &&
+        !!pod.worktreePath;
+      if (preserveLocalFailedWorker && pod.containerId) {
+        const status = await containerManagerFactory
+          .get(pod.executionTarget)
+          .getStatus(pod.containerId)
+          .catch(() => 'unknown' as const);
+        if (status === 'deleted') {
+          preserveLocalFailedWorker = false;
+          emitActivityStatus(
+            podId,
+            'Old container no longer exists — Rework continues from the host worktree; container-only changes could not be recovered.',
+          );
+        }
+      }
+      if (
+        (!isInteractive &&
+          pod.executionTarget === 'sandbox' &&
+          pod.containerId &&
+          pod.worktreePath) ||
+        preserveLocalFailedWorker
       ) {
         try {
           await preservePodWorkspace(

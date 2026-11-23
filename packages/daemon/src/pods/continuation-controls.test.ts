@@ -57,6 +57,90 @@ it('does not route a hard budget stop into validation-only Resume, including leg
   expect(f.calls.handleCompletion).not.toHaveBeenCalled();
   expect(f.captured.enqueueSession).not.toHaveBeenCalled();
 });
+describe('unfinished agent run Resume gate (#674 + #670)', () => {
+  function workerRun(
+    f: ReturnType<typeof fixture>,
+    outcome: 'completed' | 'failed' | 'paused',
+    options: { settle?: boolean; category?: string | null } = {},
+  ) {
+    const pod = f.pod();
+    f.pods.completionJournal?.begin(pod);
+    // A settled cycle (agentSettledAt) is the #670 incident shape: the worker
+    // emitted a completion/usage event and then still failed.
+    if (options.settle ?? true) f.pods.completionJournal?.settle(f.pod(), 'Partial');
+    const cycle = f.pods.completionJournal?.get(pod.id, pod.lifecycleGeneration)?.cycle ?? 1;
+    const run = f.pods.taskExecutions?.beginRun(pod.id, pod.lifecycleGeneration, cycle, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+    });
+    if (!run) throw new Error('Missing run ledger');
+    f.pods.taskExecutions?.finishRun(
+      run,
+      outcome,
+      outcome === 'completed' ? null : (options.category ?? 'unknown'),
+    );
+  }
+  const expectNoRecovery = (f: ReturnType<typeof fixture>) => {
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+    expect(f.captured.pushAndCreatePr).not.toHaveBeenCalled();
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+  };
+
+  it('still refuses an unsettled current cycle with the #674 guidance', async () => {
+    const f = fixture();
+    f.pods.completionJournal?.begin(f.pod());
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toMatchObject({
+      code: 'AGENT_RUN_UNFINISHED',
+      message: expect.stringContaining('did not finish its last run'),
+    });
+    expectNoRecovery(f);
+  });
+
+  it.each([
+    ['provider failure after a settled cycle (#670 incident)', 'failed', 'unknown'],
+    ['complete-then-fatal interrupted turn (#648)', 'failed', 'turn_interrupted'],
+    ['account hand-off that ended failed', 'paused', null],
+  ] as const)('refuses a settled cycle whose latest run did not complete: %s', async (_label, outcome, category) => {
+    const f = fixture();
+    workerRun(f, outcome, { category });
+    expect(f.pod().finalization?.agentSettledAt).toEqual(expect.any(String));
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toMatchObject({
+      code: 'AGENT_RUN_UNFINISHED',
+      statusCode: 409,
+    });
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toThrow(
+      /ap rework control.*ap continue-provider control --primary/,
+    );
+    expectNoRecovery(f);
+  });
+
+  it('refuses push-only Resume too, even with an older passing validation', async () => {
+    const f = fixture();
+    f.pods.update('control', { lastValidationResult: validation() });
+    workerRun(f, 'failed');
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toMatchObject({
+      code: 'AGENT_RUN_UNFINISHED',
+    });
+    expectNoRecovery(f);
+  });
+
+  it('names the preservation state in the refusal', async () => {
+    const f = fixture();
+    workerRun(f, 'failed');
+    f.pods.completionJournal?.mark(f.pod(), 'ready', true);
+    await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toThrow(/Source saved: \d{4}-/);
+  });
+
+  it('still revalidates a pod whose worker completed and failed in validation', async () => {
+    const f = fixture();
+    workerRun(f, 'completed');
+    f.pods.completionJournal?.mark(f.pod(), 'finalizing');
+    await f.c.resumePod.call(f.calls, 'control');
+    expect(f.calls.revalidateSession).toHaveBeenCalledWith('control', { force: true });
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) close();

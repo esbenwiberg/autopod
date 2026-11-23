@@ -75,7 +75,7 @@ export function createAgentExecutionFixture(disk = false) {
       );
     },
     persistRuntimeCredentialsForPod: vi.fn(async () => {}),
-    preserveSandboxAfterAgentFailure: vi.fn(async () => {}),
+    preserveWorkspaceAfterAgentFailure: vi.fn(async () => {}),
     releaseZeroWorkFailure: vi.fn(async () => false),
     hasDurableAgentExecutionEvidence: consumerCaptured.hasDurableAgentExecutionEvidence,
     tryRecoverTransientSandboxFailure: vi.fn(async () => false),

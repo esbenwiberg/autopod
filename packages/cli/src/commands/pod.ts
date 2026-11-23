@@ -8,7 +8,12 @@ import type {
   SystemEvent,
   ValidationExecutionRecoveryState,
 } from '@autopod/shared';
-import { describeBudgetPause, describeTaskBudgetUsage, podStatusSchema } from '@autopod/shared';
+import {
+  describeBudgetPause,
+  describeTaskBudgetUsage,
+  podStatusSchema,
+  WORKSPACE_PRESERVATION_FAILED,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -886,16 +891,24 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         for (const diagnostic of task.diagnostics) console.log(chalk.dim(diagnostic));
         console.log(task.budgetCheck?.reason ?? 'Task budget admission evidence unavailable.');
       } else console.log(chalk.yellow('Task accounting unavailable'));
+      const preservationFailed = s.failureReason?.includes(WORKSPACE_PRESERVATION_FAILED) ?? false;
+      const sourceSaved =
+        s.finalization?.sourcePreservedAt ??
+        (preservationFailed
+          ? chalk.red('NOT saved — original container retained (see Failure for next steps)')
+          : 'not verified');
       if (s.finalization?.agentSettledAt) {
         console.log(`${chalk.bold('Agent settled:')} ${s.finalization.agentSettledAt}`);
         console.log(`${chalk.bold('Finalization:')} ${s.finalization.phase}`);
-        console.log(
-          `${chalk.bold('Source saved:')} ${s.finalization.sourcePreservedAt ?? 'not verified'}`,
-        );
+        console.log(`${chalk.bold('Source saved:')} ${sourceSaved}`);
         if (s.finalization.pendingDecisionId)
           console.log(
             'Human decision remains unanswered; respond to the pending question before continuation.',
           );
+      } else if (s.finalization?.sourcePreservedAt || preservationFailed) {
+        // An abnormal worker exit can preserve (or fail to preserve) source
+        // without a settled result; the operator still needs to see it (#670).
+        console.log(`${chalk.bold('Source saved:')} ${sourceSaved}`);
       }
       for (const diagnostic of s.recordDiagnostics ?? [])
         console.log(chalk.yellow(`Record unavailable: ${diagnostic.field} (${diagnostic.code})`));
