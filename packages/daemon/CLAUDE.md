@@ -303,8 +303,12 @@ Each bridge consumes one dockerd address-pool subnet. Ordinary pruning never
 touches retained-checkpoint bridges. On pool exhaustion,
 `containers/retained-network-release.ts` releases superseded retained bridges,
 oldest first, after recording them in `retained_network_releases`. Operators can
-also run `ap release-retained-networks`. If no subnet can be freed, new pods
-fail with `HOST_NETWORK_CAPACITY`. `/health?detail=full` reports
+also run `ap release-retained-networks`. If no subnet can be freed at an ordinary
+queued pod's first bridge allocation, the pod returns to `queued` with
+`HOST_NETWORK_CAPACITY` and its prepared checkout. It releases the slot, retains
+the deadline across restart, and retries four times (30 s, 60 s, 120 s, 5 min)
+unless killed. Custody-owned dispatches and handoffs keep their own settlement
+rules. Other network errors are not retried here. `/health?detail=full` reports
 `docker.networks` pressure. Health and pressure pruning share the same
 ownership checks. A stale completed Docker pod may release only its exact
 empty bridge, after Docker confirms that the recorded container is missing

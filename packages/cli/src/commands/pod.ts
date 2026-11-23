@@ -10,6 +10,7 @@ import type {
 } from '@autopod/shared';
 import {
   describeBudgetPause,
+  describeDockerNetworkCapacityWait,
   describeExecutionCapacityWait,
   describeTaskBudgetUsage,
   podStatusSchema,
@@ -823,6 +824,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(chalk.yellow(describeBudgetPause(s.id, s.taskExecution)));
       if (s.status === 'queued' && s.infrastructureFailure?.source === 'execution-capacity')
         console.log(chalk.yellow(describeExecutionCapacityWait(s.infrastructureFailure)));
+      if (
+        s.status === 'queued' &&
+        s.infrastructureFailure?.source === 'docker-network' &&
+        s.infrastructureFailure.lifecycleGeneration === s.lifecycleGeneration
+      )
+        console.log(chalk.yellow(describeDockerNetworkCapacityWait(s.infrastructureFailure)));
       if (s.fleetArchivedAt)
         console.log(
           `Fleet archived: ${s.fleetArchivedAt}. Resources retained; execution unchanged.`,

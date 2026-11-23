@@ -37,10 +37,18 @@ default `docker0` bridge uses one of them.
    oldest first and one at a time, retrying creation after each. It stops as
    soon as the new network is created (`Pod network created after retained
    release`). See [Release protocol](#release-protocol).
-3. If creation still fails, the pod fails with `HOST_NETWORK_CAPACITY`
-   (`Pod could not start (HOST_NETWORK_CAPACITY): ...`), which includes those
-   counts. It is not reported as a generic setup failure. No agent or container
-   was started. Free capacity first, then retry or relaunch the task.
+3. If an ordinary queued Docker pod still cannot allocate its first bridge,
+   it returns to `queued` with `HOST_NETWORK_CAPACITY`. It keeps the prepared
+   checkout and releases its concurrency slot between four retries (30 s, 60 s,
+   120 s, then 5 min). `ap status <pod>` and pod activity show the reason and
+   next deadline. The deadline survives daemon restart; use `ap kill <pod>`
+   to cancel. No sidecar, container or agent starts until allocation succeeds.
+4. If the retry budget runs out, the pod fails with
+   `Pod could not start (HOST_NETWORK_CAPACITY): ...`, including the reclaim
+   counts. Free capacity first, then use the supported recovery or relaunch
+   operation. Explicit custody-bound dispatches and workspace handoffs retain
+   their own failure/recovery rules. Other network errors (including permanent
+   configuration errors) do not enter this retry path.
 
 ## Release protocol
 

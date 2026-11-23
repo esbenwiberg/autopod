@@ -93,6 +93,9 @@ export interface ProvisioningLiveDependencies {
 
 export interface ProvisioningCaptured {
   qualifyCodingCandidate?(input: PreparedExecution): Promise<void>;
+  scheduleDockerNetworkCapacityRetry?: ReturnType<
+    typeof import('./execution-capacity-retry.js').createExecutionCapacityRetry
+  >['scheduleDockerNetworkCapacityRetry'];
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   logger: Logger;
   podRepo: PodRepository;

@@ -276,12 +276,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus: (podId, message) => emitActivityStatus(podId, message),
   });
 
-  const { scheduleExecutionCapacityRetry } = createExecutionCapacityRetry({
-    podRepo,
-    enqueueSession,
-    emitActivityStatus: (podId, message) => emitActivityStatus(podId, message),
-  });
-
   const { primeRuntimeForResume } = createRuntimeResumeContext(deps, {
     containerManagerFactory,
     executionForPod,
@@ -402,6 +396,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo,
       refreshReadiness,
     });
+  const { scheduleExecutionCapacityRetry, scheduleDockerNetworkCapacityRetry } =
+    createExecutionCapacityRetry({ podRepo, enqueueSession, emitActivityStatus, transition });
   const { hasDurableAgentExecutionEvidence, tryRecoverTransientSandboxFailure } =
     createWorkspaceInfrastructureRecovery(deps, {
       ownsLifecycle,
@@ -1074,6 +1070,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const provisioningWorkflow = createProvisioningWorkflow(deps, {
+    scheduleDockerNetworkCapacityRetry,
     // Keep live dependencies by reference; this private integration callback is
     // captured separately so late-bound cooldown/provider controls stay live.
     qualifyCodingCandidate: async (input) => {

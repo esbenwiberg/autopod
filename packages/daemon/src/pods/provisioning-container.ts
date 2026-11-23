@@ -11,6 +11,7 @@ import {
 } from '@autopod/shared';
 import type { LaunchRegistryMaterial } from '../configuration/execution-credentials.js';
 import { containerMemoryRequestBytes } from '../containers/container-memory.js';
+import { HOST_NETWORK_CAPACITY } from '../containers/docker-network-capacity.js';
 import { computeNetworkPolicyAllowlist } from '../containers/docker-network-manager.js';
 import { launchSidecarSpec } from '../containers/launch-sidecars.js';
 import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
@@ -20,6 +21,8 @@ import { ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { ensureCodexStateDir } from '../runtimes/codex-state-store.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { gitWorktreeIdentity } from '../worktrees/allocation-identity.js';
+import { AgentContinuationSupersededError } from './continuation-preflight.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import { mergeMcpServers } from './injection-merger.js';
 import { resolvePodSpawnImage, verifySandboxWarmImageAccess } from './provisioning-image-policy.js';
 import {
@@ -37,6 +40,7 @@ import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 
 type Captured = Pick<
   ProvisioningCaptured,
+  | 'scheduleDockerNetworkCapacityRetry'
   | 'allocateHostPort'
   | 'CONTAINER_APP_PORT'
   | 'execFileAsync'
@@ -63,6 +67,7 @@ export function createProvisioningContainer(
   captured: Captured,
 ) {
   const {
+    scheduleDockerNetworkCapacityRetry,
     allocateHostPort,
     CONTAINER_APP_PORT,
     execFileAsync,
@@ -138,26 +143,71 @@ export function createProvisioningContainer(
         profile.privateRegistries,
       );
     }
+    const previousWait = dockerNetworkCapacityWait(pod);
+    if (previousWait && (!networkManager || !runtimeNetworkPolicy?.enabled))
+      throw new AutopodError(
+        'The Docker network required by the waiting pod is no longer configured.',
+        'DOCKER_NETWORK_UNAVAILABLE',
+        503,
+      );
     if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
       initialMergedMcpServers ??= mergeMcpServers(
         injectionsForPod(pod).mcpServers,
         profile.mcpServers,
       );
+      const assertCurrent = () => {
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.status !== 'provisioning' ||
+          current.lifecycleGeneration !== input.lifecycleGeneration
+        )
+          throw new AgentContinuationSupersededError();
+        return current;
+      };
       daemonGatewayIp = await networkManager.getGatewayIp(resourceIdentity);
-      const netConfig = await networkManager.buildNetworkConfig(
-        runtimeNetworkPolicy,
-        initialMergedMcpServers,
-        daemonGatewayIp,
-        profile.privateRegistries,
-        resourceIdentity,
-        [],
-        [hostnameFromUrl(mcpBaseUrl)],
-        portFromUrl(mcpBaseUrl),
-        ...(allocation ? ([true, allocation] as const) : []),
-      );
-      if (netConfig) {
-        networkName = netConfig.networkName;
-        firewallScript = netConfig.firewallScript;
+      assertCurrent();
+      try {
+        const netConfig = await networkManager.buildNetworkConfig(
+          runtimeNetworkPolicy,
+          initialMergedMcpServers,
+          daemonGatewayIp,
+          profile.privateRegistries,
+          resourceIdentity,
+          [],
+          [hostnameFromUrl(mcpBaseUrl)],
+          portFromUrl(mcpBaseUrl),
+          ...(allocation ? ([true, allocation] as const) : []),
+        );
+        assertCurrent();
+        if (netConfig) {
+          networkName = netConfig.networkName;
+          firewallScript = netConfig.firewallScript;
+        }
+      } catch (error) {
+        const current = assertCurrent();
+        const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
+        // Only this first bridge allocation can yield. Handoffs and explicit
+        // recovery dispatches have their own custody and cannot be replayed here.
+        if (
+          error instanceof AutopodError &&
+          error.code === HOST_NETWORK_CAPACITY &&
+          input.allowNetworkCapacityWait &&
+          !current.containerId &&
+          !(checkpoint && !checkpoint.checked) &&
+          !podRepo.retainedCoding?.isOwner(podId) &&
+          !podRepo.recoveryForks?.child(podId) &&
+          scheduleDockerNetworkCapacityRetry?.(current, {
+            worktreePath,
+            bareRepoPath,
+            isRecovery: input.isRecovery,
+          })
+        )
+          return { kind: 'halted' as const };
+        throw error;
+      }
+      if (previousWait) {
+        podRepo.update(podId, { infrastructureFailure: null });
+        emitStatus('Docker subnet allocated — provisioning.');
       }
     }
 
