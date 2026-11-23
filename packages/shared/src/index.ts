@@ -32,6 +32,7 @@ export {
   SCREENSHOT_QUALITY,
   VALID_STATUS_TRANSITIONS,
   WORKSPACE_PI_HANDOFF_PATH,
+  WORKSPACE_PRESERVATION_FAILED,
 } from './constants.js';
 export type {
   ContractDiagnostic,

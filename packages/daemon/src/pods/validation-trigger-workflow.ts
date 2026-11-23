@@ -296,11 +296,36 @@ export function createValidationTriggerWorkflow(
       const reworkGeneration = podRepo.incrementLifecycleGeneration(podId);
       validationAbortControllers.get(podId)?.abort();
 
-      if (
+      // A failed local worker's uncommitted/untracked source may exist only in
+      // its container's /workspace overlay. Removing the container below would
+      // discard it, so copy it to the host worktree first (idempotent when the
+      // agent-failure path already preserved it). A container Docker reports as
+      // already gone has nothing left to copy; an unknown status fails closed.
+      let preserveLocalFailedWorker =
         !isInteractive &&
-        pod.executionTarget === 'sandbox' &&
-        pod.containerId &&
-        pod.worktreePath
+        pod.executionTarget === 'local' &&
+        pod.status === 'failed' &&
+        !!pod.containerId &&
+        !!pod.worktreePath;
+      if (preserveLocalFailedWorker && pod.containerId) {
+        const status = await containerManagerFactory
+          .get(pod.executionTarget)
+          .getStatus(pod.containerId)
+          .catch(() => 'unknown' as const);
+        if (status === 'deleted') {
+          preserveLocalFailedWorker = false;
+          emitActivityStatus(
+            podId,
+            'Old container no longer exists — Rework continues from the host worktree; container-only changes could not be recovered.',
+          );
+        }
+      }
+      if (
+        (!isInteractive &&
+          pod.executionTarget === 'sandbox' &&
+          pod.containerId &&
+          pod.worktreePath) ||
+        preserveLocalFailedWorker
       ) {
         try {
           await preservePodWorkspace(

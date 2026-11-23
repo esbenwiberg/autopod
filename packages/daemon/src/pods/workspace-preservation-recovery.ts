@@ -5,6 +5,10 @@ import {
   captureValidationMutationGuard,
 } from './validation-recovery-policy.js';
 import type { WorkspacePreservationRecoveryCaptured } from './workspace-contracts.js';
+import {
+  recordWorkspacePreservationFailure,
+  recordWorkspacePreserved,
+} from './workspace-preservation-outcome.js';
 
 export function createWorkspacePreservationRecovery(
   captured: WorkspacePreservationRecoveryCaptured,
@@ -18,9 +22,22 @@ export function createWorkspacePreservationRecovery(
     recoverWorktreeFromContainer,
   } = captured;
 
-  async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
+  /**
+   * Copy an abnormally-ended worker's container workspace (uncommitted and
+   * untracked source) into the host worktree before anything can remove the
+   * container. Sandboxes use their verified checkpoint; local Docker uses the
+   * ordinary bounded sync-back (archive fallback covers a stopped container).
+   * Success records `Source saved`; failure is recorded on the pod and the
+   * container is always retained as the only copy.
+   */
+  async function preserveWorkspaceAfterAgentFailure(podId: string, reason: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
-    if (pod.executionTarget !== 'sandbox' || !pod.containerId || !pod.worktreePath) return;
+    if (
+      (pod.executionTarget !== 'sandbox' && pod.executionTarget !== 'local') ||
+      !pod.containerId ||
+      !pod.worktreePath
+    )
+      return;
     // Never wake a failed/unsettled execution just to collect a checkpoint.
     if (podRepo.taskExecutions?.hasActiveRun(podId)) return;
     try {
@@ -30,25 +47,42 @@ export function createWorkspacePreservationRecovery(
         .getStatus(pod.containerId);
       const current = podRepo.getOrThrow(podId);
       if (
-        status !== 'running' ||
         current.lifecycleGeneration !== pod.lifecycleGeneration ||
         current.containerId !== pod.containerId ||
         current.status !== pod.status ||
         podRepo.taskExecutions?.hasActiveRun(podId)
       )
         return;
+      if (pod.executionTarget === 'sandbox' && status !== 'running') return;
+      if (pod.executionTarget === 'local') {
+        if (status === 'deleted') {
+          emitActivityStatus(
+            podId,
+            'Worker container no longer exists — uncommitted changes from the failed run could not be preserved. Rework continues from the host worktree.',
+          );
+          return;
+        }
+        if (status === 'unknown') throw new Error(`Container ${pod.containerId} status is unknown`);
+      }
       assertValidationMutationSettled(podRepo, podId);
       await preservePodWorkspace(current, reason);
+      recordWorkspacePreserved(podRepo, current);
       // A tracked-source checkpoint does not prove ignored report preservation.
       // Leave the original source intact until a dedicated capture/release workflow.
       logger.info(
-        { podId, containerId: pod.containerId },
-        'Source checkpoint retained; original sandbox retained for report recovery',
+        { podId, containerId: pod.containerId, executionTarget: pod.executionTarget },
+        'Workspace preserved after agent failure; original container retained',
       );
     } catch (preserveErr) {
+      const current = podRepo.getOrThrow(podId);
+      if (
+        current.lifecycleGeneration === pod.lifecycleGeneration &&
+        current.containerId === pod.containerId
+      )
+        recordWorkspacePreservationFailure(podRepo, podId, preserveErr);
       emitActivityStatus(
         podId,
-        'Workspace preservation failed after the agent exit — retaining the sandbox and blocking destructive Rework.',
+        `Workspace preservation failed after the agent exit — retaining the ${pod.executionTarget === 'sandbox' ? 'sandbox' : 'container'} and blocking destructive Rework.`,
       );
       logger.error(
         { err: preserveErr, podId, containerId: pod.containerId },
@@ -93,5 +127,5 @@ export function createWorkspacePreservationRecovery(
     logger.info({ podId: pod.id, phase }, 'Recovered worktree after workspace sync failure');
     return true;
   }
-  return { preserveSandboxAfterAgentFailure, tryRecoverAfterWorkspaceSyncFailure };
+  return { preserveWorkspaceAfterAgentFailure, tryRecoverAfterWorkspaceSyncFailure };
 }
