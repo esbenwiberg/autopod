@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { AutopodError, type Pod, WORKSPACE_PRESERVATION_FAILED } from '@autopod/shared';
+import { AutopodError, type Pod } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
+import { assertAgentStageNotInterrupted } from './agent-stage-interruption.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
@@ -15,7 +16,6 @@ import type {
   ContinuationResumeCalls,
 } from './continuation-ports.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
-import type { PodRepository } from './pod-repository.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
@@ -58,36 +58,6 @@ export function pausedResumeHint(pod: Pick<Pod, 'id' | 'status' | 'pauseReason'>
   if (pod.pauseReason === 'provider_limit')
     return `. This pod is paused on a provider limit; run: ap continue-provider ${pod.id}`;
   return `. To continue a paused pod, run: ap tell ${pod.id} "<message>"`;
-}
-
-/**
- * A worker run that ended without completing (provider/quota/runtime failure,
- * hand-off, or interruption) left unfinished coding. Validation-only Resume and
- * push-only recovery would ship or check that partial tree, so require a coding
- * continuation instead (#670). Validation-stage failures are unaffected.
- */
-export function assertAgentStageNotInterrupted(
-  repo: Pick<PodRepository, 'taskExecutions'>,
-  pod: Pod,
-): void {
-  if (pod.status !== 'failed') return;
-  const run = repo.taskExecutions?.latestRun?.(pod.id, pod.lifecycleGeneration);
-  if (!run?.endedAt || run.outcome === 'completed' || run.outcome === null) return;
-  const phase = pod.finalization?.phase;
-  if (pod.finalization?.generation === pod.lifecycleGeneration) {
-    if (pod.finalization.cycle > run.cycle) return;
-    if (phase === 'finalizing' || phase === 'finished') return;
-  }
-  const source = pod.finalization?.sourcePreservedAt
-    ? `Source saved: ${pod.finalization.sourcePreservedAt}.`
-    : pod.failureReason?.includes(WORKSPACE_PRESERVATION_FAILED)
-      ? 'Source NOT saved — the original container is retained; inspect ap status before Rework.'
-      : 'Workspace preservation was not verified — inspect ap status before Rework.';
-  throw new AutopodError(
-    `Pod ${pod.id} failed during the agent stage; validation-only Resume cannot finish unfinished work. Run: ap rework ${pod.id} (continue coding from the preserved workspace) or ap continue-provider ${pod.id} --primary (continue on the profile primary provider). ${source}`,
-    'AGENT_STAGE_FAILED',
-    409,
-  );
 }
 
 export function createContinuationControls(deps: ContinuationLiveDependencies, captured: Captured) {

@@ -189,6 +189,32 @@ describe('workspace preservation on abnormal worker exit (#670)', () => {
     expectPreservedTree(f.worktree);
   });
 
+  it('does not re-sync a worker that completed and failed later in validation', async () => {
+    const f = setup(async function* () {
+      yield completeEvent('Done');
+    });
+    f.ctx.podRepo.update(f.pod.id, {
+      status: 'running',
+      containerId: 'container-123',
+      worktreePath: f.worktree,
+    });
+    expect(
+      await f.manager.consumeAgentEvents(
+        f.pod.id,
+        (async function* () {
+          yield completeEvent('Done');
+        })(),
+      ),
+    ).toBe('completed');
+    const settled = f.ctx.podRepo.getOrThrow(f.pod.id);
+    f.ctx.podRepo.completionJournal?.mark(settled, 'finalizing');
+    f.ctx.podRepo.update(f.pod.id, { status: 'failed' });
+    await f.manager.triggerValidation(f.pod.id, { force: true });
+    expect(f.syncCalls).toEqual([]);
+    expect(f.ctx.containerManager.kill).toHaveBeenCalled();
+    expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('queued');
+  });
+
   it('records a failed preservation, retains the container and refuses destructive Rework', async () => {
     const f = setup(async function* () {
       yield statusEvent('Writing phase 2');
