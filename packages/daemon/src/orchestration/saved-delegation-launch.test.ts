@@ -30,6 +30,7 @@ import {
   PRIVATE_PARENT_VERIFIER,
   PRIVATE_SUBMISSION_FILE,
 } from '../managed/private-commit-policy.js';
+import type { ManagedProfileSetConfig } from '../managed/profile-set-config.js';
 import {
   readSavedWorkerScope,
   withScopedSandboxWorkerSource,
@@ -63,8 +64,14 @@ import { readQualifiedParentIntegration } from './parent-integration-qualified.j
 import { ParentReportResults } from './parent-report-results.js';
 import { ParentReviewHandoff } from './parent-review-handoff.js';
 import {
+  publishedBaseTransport,
+  publishedDelegationSource,
+  publishedSeedReceipt,
+} from './published-delegation-base.js';
+import {
   admitSavedDelegationLaunch,
   readSavedDelegationAdmission,
+  type SavedDelegationPlan,
   savedDelegationAttemptRun,
   savedDelegationGatePolicy,
 } from './saved-delegation-admission.js';
@@ -73,6 +80,7 @@ import {
   createSavedDelegationPolicyStore,
   type DelegationPrincipal,
 } from './saved-delegation-policy.js';
+import { bindSavedWorkerRecipes, savedWorkerRecipeDigest } from './saved-delegation-recipes.js';
 import { createSavedDelegationRegistry } from './saved-delegation-registry.js';
 import { attachSavedDelegationRuntime } from './saved-delegation-runtime.js';
 
@@ -419,7 +427,7 @@ it('cannot run as an ordinary Task even if the delegated option has a valid prev
   }
 });
 
-async function admissionFixture(db = createTestDb(), anchored = false) {
+async function admissionFixture(db = createTestDb(), anchored = false, publishedMode = false) {
   const f = fixture(db);
   const source = await setupOrchestrationRun(
     undefined,
@@ -428,9 +436,47 @@ async function admissionFixture(db = createTestDb(), anchored = false) {
     undefined,
     anchored ? 3 * 1024 * 1024 : 0,
   );
+  const published = publishedMode
+    ? await (async () => {
+        const upstream = path.join(source.root, 'upstream.git');
+        await withVerifiedCheckpointMirror(source.root, source.cp, source.bytes, (mirror) =>
+          managedGit(source.root, ['clone', '--bare', '--no-local', '--', mirror, upstream]),
+        );
+        return publishedDelegationSource({
+          mirror: path.join(source.root, 'published.git'),
+          scratch: path.join(source.root, 'published-work'),
+          github: {
+            resolveCredential: async () => ({ username: 'fixture', token: 'fixture-only' }),
+            getStatus: vi.fn(),
+          },
+          readBranchHead: async () => source.cp.commit,
+          fetchBranch: (cwd, args, credential) =>
+            managedGit(
+              cwd,
+              args.map((arg) => (arg === credential?.url ? upstream : arg)),
+            ),
+        });
+      })()
+    : undefined;
   const original = f.pins.getMockImplementation()!;
   f.pins.mockImplementation(async (policy, config) => {
     const pins = await original(policy, config);
+    if (published) {
+      const pin = await published.resolve(
+        config.repository!.config,
+        policy.sourceBranch,
+        pins.source.repositoryDigest,
+      );
+      return {
+        ...pins,
+        source: {
+          ...pin,
+          baseTransport: publishedBaseTransport,
+          resultTransport: 'anchored/v1' as const,
+          bundleDigest: sha256(publishedSeedReceipt(pin)),
+        },
+      };
+    }
     const { predecessor, commit, tree } = source.cp;
     return {
       ...pins,
@@ -444,7 +490,14 @@ async function admissionFixture(db = createTestDb(), anchored = false) {
       },
     };
   });
-  const readSeedBundle = vi.fn(async () => Buffer.from(source.bytes));
+  const readSeedBundle = vi.fn(async (plan?: Readonly<SavedDelegationPlan>) =>
+    published ? publishedSeedReceipt(plan!.pins.source) : Buffer.from(source.bytes),
+  );
+  const verifyPublishedSeed = published
+    ? vi.fn(async (plan: Readonly<SavedDelegationPlan>) => {
+        await published.withBase(plan.pins.source, async () => {});
+      })
+    : undefined;
   const insertPod = vi.fn(() => {
     const pod = insertConfigurationTestPod(db, randomUUID());
     db.prepare('UPDATE pods SET user_id=? WHERE id=?').run(owner.oid, pod);
@@ -460,6 +513,7 @@ async function admissionFixture(db = createTestDb(), anchored = false) {
       readVerifiedPins: f.pins,
       scratch: path.join(source.root, 'admissions'),
       readSeedBundle,
+      verifyPublishedSeed,
       insertPod,
     });
   const reviewed = async (requestId = id) => {
@@ -467,7 +521,16 @@ async function admissionFixture(db = createTestDb(), anchored = false) {
     const { plan } = await f.preview(request);
     return { ...request, expectedDigest: plan.digest };
   };
-  return { ...f, source, readSeedBundle, insertPod, submit, reviewed };
+  return {
+    ...f,
+    source,
+    readSeedBundle,
+    verifyPublishedSeed,
+    published,
+    insertPod,
+    submit,
+    reviewed,
+  };
 }
 
 it('requires the reviewed digest and atomically retains exactly one admission across concurrent replay and policy edits', async () => {
@@ -798,8 +861,10 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
 it.each([
   'full',
   'anchored',
-] as const)('qualifies and hands off two saved roles with %s bundles after a daemon DB reopen', async (mode) => {
-  const anchored = mode === 'anchored';
+  'published',
+] as const)('qualifies and hands off two saved roles with %s source after a daemon DB reopen', async (mode) => {
+  const anchored = mode !== 'full';
+  const publishedMode = mode === 'published';
   const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-runtime-'));
   const dbPath = path.join(root, 'state.db');
   let db = createHistoricalDiskDatabase(dbPath, [{ dir: MIGRATIONS_DIR, through: 282 }]);
@@ -808,7 +873,7 @@ it.each([
   let daemonOwner: ReturnType<typeof claimDaemonLifetime> | undefined;
   try {
     await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
-    const f = await admissionFixture(db, anchored);
+    const f = await admissionFixture(db, anchored, publishedMode);
     if (anchored) expect(f.source.bytes.length).toBeGreaterThan(MAX_ANCHORED_INTEGRATION_BYTES);
     const template = structuredClone(f.source.request);
     template.task.kind = 'implementation';
@@ -854,11 +919,61 @@ it.each([
     ];
     template.outputs.artifacts.limits = { maxFiles: 1, maxFileBytes: 16384, maxTotalBytes: 16384 };
     resign(template);
+    let selected = f.saved;
+    let leftTemplate = template;
+    let rightTemplate = template;
+    const publishedProfiles: ManagedProfileSetConfig | undefined = publishedMode
+      ? {
+          mode: 'reviewed-profile-set-v1',
+          installationId: 'fixture',
+          image: 'registry.example.invalid/worker@sha256:' + 'b'.repeat(64),
+          mirror: {
+            enrollmentId: 'repo-a',
+            remote: 'private',
+            path: path.join(root, 'published.git'),
+            baseRevision: f.source.cp.commit,
+          },
+          profiles: [
+            {
+              profileSnapshot: profile,
+              taskKind: 'implementation',
+              artifactPath: PRIVATE_SUBMISSION_FILE,
+              inputNames: [],
+              privateCommit: true,
+              sourceMode: 'commit',
+            },
+          ],
+        }
+      : undefined;
+    if (publishedProfiles) {
+      const stage = publishedProfiles.profiles[0]!;
+      selected = f.policies.revise(owner, f.saved.policyId, f.saved.revision, {
+        ...seed,
+        workers: seed.workers.map((worker) => ({
+          ...worker,
+          recipeId: profile.profileId,
+          recipeRevision: profile.profileVersion,
+          recipeDigest: savedWorkerRecipeDigest(stage),
+        })),
+      });
+      const recipes = bindSavedWorkerRecipes(
+        publishedProfiles,
+        selected.policy,
+        f.source.cp.commit,
+      );
+      leftTemplate = recipes.left.template;
+      rightTemplate = recipes.right.template;
+    }
     const pins = f.pins.getMockImplementation()!;
     f.pins.mockImplementation(async (...args) => {
       const result = await pins(...args);
-      result.workers[0].executionSpecDigest = result.workers[1].executionSpecDigest =
-        template.executionSpecDigest;
+      if (publishedProfiles) {
+        const recipes = bindSavedWorkerRecipes(publishedProfiles, args[0], result.source.commit);
+        result.workers = [recipes.left.binding, recipes.right.binding];
+      } else {
+        result.workers[0].executionSpecDigest = result.workers[1].executionSpecDigest =
+          template.executionSpecDigest;
+      }
       return result;
     });
     const app = Fastify();
@@ -925,6 +1040,7 @@ it.each([
           scratch: root,
           readVerifiedPins: f.pins,
           readSeedBundle: f.readSeedBundle,
+          verifyPublishedSeed: f.verifyPublishedSeed,
         },
       });
       configurationRoutes(app, components.routes);
@@ -944,7 +1060,12 @@ it.each([
       );
       const list = '/launch/delegation-policies?repositoryId=repo-a';
       expect((await app.inject(list)).json()).toEqual([
-        { policyId: f.saved.policyId, revision: 1, repositoryId: 'repo-a', name: seed.name },
+        {
+          policyId: selected.policyId,
+          revision: selected.revision,
+          repositoryId: 'repo-a',
+          name: seed.name,
+        },
       ]);
       expect(
         (await app.inject({ url: list, headers: { 'x-fixture-subject': 'other' } })).json(),
@@ -952,7 +1073,11 @@ it.each([
       expect(
         (await app.inject({ url: list, headers: { 'x-fixture-subject': 'app' } })).statusCode,
       ).toBe(403);
-      const launchRequest = { ...f.request, selections: { githubAccessId: null } };
+      const launchRequest = {
+        ...f.request,
+        delegation: { policyId: selected.policyId, revision: selected.revision },
+        selections: { githubAccessId: null },
+      };
       const preview = await app.inject({
         method: 'POST',
         url: '/launch/resolve',
@@ -1021,7 +1146,13 @@ it.each([
     } finally {
       await app.close();
     }
-    const { plan, checkpoint } = readSavedDelegationAdmission(db, podId, owner);
+    const { plan, checkpoint, bundle: seedBytes } = readSavedDelegationAdmission(db, podId, owner);
+    if (publishedMode) {
+      expect(plan.pins.source.baseTransport).toBe(publishedBaseTransport);
+      expect(seedBytes.equals(publishedSeedReceipt(plan.pins.source))).toBe(true);
+      expect(seedBytes.length).toBeLessThan(512);
+      expect(f.verifyPublishedSeed).toHaveBeenCalledOnce();
+    }
     const keyPath = path.join(root, 'pod-key');
     writeFileSync(keyPath, Buffer.alloc(32, 81), { mode: 0o600, flag: 'wx' });
     const issuer = createPodTokenIssuer(keyPath);
@@ -1102,16 +1233,17 @@ it.each([
     const exited = new Set<string>();
     const parentCheckout = path.join(root, 'parent');
     let wrongParentCheckout = true;
-    const attach = (recipe = template) => {
+    const attach = (recipe = leftTemplate) => {
+      const workerProfile = leftTemplate.profileSnapshot;
       const service = new ManagedPodService(
         db,
         {
           ...f.source.f.admission,
           targets: ['sandbox'],
-          profiles: new Map([[profile.snapshotDigest, profile]]),
-          enrollmentCeiling: profile.scope,
-          identityCeiling: profile.scope,
-          backendCeiling: profile.scope,
+          profiles: new Map([[workerProfile.snapshotDigest, workerProfile]]),
+          enrollmentCeiling: workerProfile.scope,
+          identityCeiling: workerProfile.scope,
+          backendCeiling: workerProfile.scope,
         },
         {
           ...f.source.f.runtime,
@@ -1175,7 +1307,7 @@ it.each([
         scratch: path.join(root, 'scratch'),
         issuer,
         runtimeDigest: plan.pins.runtimeDigest,
-        recipes: { count: recipe, reason: template },
+        recipes: { count: recipe, reason: rightTemplate },
         gates,
         service,
         collector: {
@@ -1204,6 +1336,9 @@ it.each([
           },
         },
         withWorkerSource: (mirror, _run, use) => pinnedWorkerSource.run(mirror, use),
+        ...(f.published
+          ? { withPublishedBase: (use) => f.published!.withBase(plan.pins.source, use) }
+          : {}),
         async observeParentSource() {
           if (wrongParentCheckout)
             return { commit: checkpoint.predecessor, tree: checkpoint.tree, clean: true };
@@ -1216,8 +1351,8 @@ it.each([
       });
     };
     const altered = resign({
-      ...structuredClone(template),
-      task: { ...template.task, objective: 'Different recipe content' },
+      ...structuredClone(leftTemplate),
+      task: { ...leftTemplate.task, objective: 'Different recipe content' },
     });
     expect(() => attach(altered)).toThrow('saved-delegation-recipe-binding');
     runtime = attach();

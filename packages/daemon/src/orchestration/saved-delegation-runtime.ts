@@ -20,6 +20,7 @@ import type { ParentIntegrationGates } from './parent-integration-qualified.js';
 import { parentPrivateCompletion } from './parent-private-completion.js';
 import { parentQualificationJob } from './parent-qualification-job.js';
 import { ParentReportResults } from './parent-report-results.js';
+import { publishedBaseTransport, publishedSeedReceipt } from './published-delegation-base.js';
 import {
   readSavedDelegationAdmission,
   savedDelegationAttemptRun,
@@ -52,12 +53,16 @@ export function attachSavedDelegationRuntime(input: {
   withWorkerSource<T>(mirror: string, run: string, use: () => Promise<T>): Promise<T>;
   /** Observe the checkout that the parent will actually run against. */
   observeParentSource(podId: string): Promise<{ commit: string; tree: string; clean: boolean }>;
+  withPublishedBase?<T>(use: (mirror: string) => Promise<T>): Promise<T>;
 }) {
   const { db, podId, issuer, service, scratch } = input;
   const principal = { ...input.principal };
   const currentSeed = () => readSavedDelegationAdmission(db, podId, principal);
   const { plan, checkpoint } = currentSeed();
   const { run, commit, tree, repository } = checkpoint;
+  const published = plan.pins.source.baseTransport === publishedBaseTransport;
+  if (published !== Boolean(input.withPublishedBase))
+    throw new Error('saved-delegation-base-resolver-required');
   const installation = 'native.' + run;
   const artifactPipeline = service.artifactPipeline;
   if (
@@ -112,6 +117,11 @@ export function attachSavedDelegationRuntime(input: {
     const seed = currentSeed();
     if (seed.checkpoint.evidenceDigest !== checkpoint.evidenceDigest)
       throw new Error('saved-delegation-seed-changed');
+    if (published) {
+      if (!seed.bundle.equals(publishedSeedReceipt(plan.pins.source)))
+        throw new Error('saved-delegation-seed-changed');
+      return input.withPublishedBase!(use);
+    }
     return withVerifiedCheckpointMirror(scratch, checkpoint, seed.bundle, use);
   };
   const delta: ParentDeltaSource | undefined =

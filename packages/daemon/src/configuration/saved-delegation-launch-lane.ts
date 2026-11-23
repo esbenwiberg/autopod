@@ -17,7 +17,7 @@ import { type LaunchResolutionServices, refuseUnboundSavedDelegation } from './l
  * and restart recovery. No route, policy, or caller can turn this on. */
 export type SavedDelegationLaunchHost = Pick<
   Parameters<typeof admitSavedDelegationLaunch>[0],
-  'scratch' | 'readVerifiedPins' | 'readSeedBundle'
+  'scratch' | 'readVerifiedPins' | 'readSeedBundle' | 'verifyPublishedSeed'
 > & { available(): boolean };
 
 export function createSavedDelegationLaunchLane(
@@ -111,6 +111,7 @@ export function createSavedDelegationLaunchLane(
           ready();
           return bundle;
         },
+        verifyPublishedSeed: host.verifyPublishedSeed,
         insertPod: (config) => {
           ready();
           return insertPod(config);

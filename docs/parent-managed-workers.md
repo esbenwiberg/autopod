@@ -473,20 +473,43 @@ The pilot is mutually exclusive with signed trial and Dispatcher execution
 configurations; do not enable it while unrelated managed work still needs its
 runtime. Ordinary nondelegated Tasks are not enrolled by this setting.
 
-The file and its pinned `HEAD` Git bundle must be regular owner-only files in
-the same canonical 0700 directory. The version-1 record pins the exact Entra
-subject/issuer/audience, saved policy ID and contents, repository configuration
-digest, seed predecessor/commit/tree/bundle digest, reviewed sandbox profile
-set, exact managed recipes for the two roles, a dedicated Azure group scope and
-ready disk, and separate checks and review endpoints and public pins. Use the
-existing daemon-side GitHub read authority and worker accounts. The separate
+The configuration is a regular owner-only file in a canonical 0700 directory.
+It pins the Entra subject/issuer/audience, saved policy and repository identity,
+reviewed sandbox profiles, dedicated Azure group and ready disk, and the
+independent evaluator endpoints and public pins. Use the daemon's existing
+GitHub read authority and worker accounts. The separate
 `AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET` must resolve to the pinned dedicated
 group, not the ordinary fleet. Supply each evaluator's role-scoped mTLS and
 Ed25519 dispatch credentials through `CREDENTIALS_DIRECTORY`; never place
 credentials in the pilot JSON or a worker environment.
 
-Preview verifies the configured GitHub branch still points at the staged
-commit. For automatic evaluator registration, set `"evaluatorEnrollment":
+For normal launch without per-Task source or recipe setup, configure
+`"source":{"mode":"published","mirror":"/absolute/path/repo.git"}`, omit
+`recipes`, and enable automatic evaluator enrollment. The mirror path must be
+the reviewed profile set's `mirror.path`. Install the site policy once: each
+role names a reviewed stage by `profileId` and `profileVersion`, its
+`savedWorkerRecipeDigest` (`digest(['saved-worker-recipe/v1', parsedStage])`),
+its existing account, assigned files and exact limits. The base revision in the
+reusable profile is a placeholder shared by its repository scope and mirror;
+Autopod derives the actual staged profile and grant from the reviewed commit.
+Use a site grant expiry with sufficient runway; renewing site authorization is
+not a per-Task step.
+
+Preview reads the authenticated GitHub branch, retains the exact commit under
+an immutable ref in the daemon-owned bare mirror, and binds commit, tree and
+execution digests into the reviewed plan. Admission rechecks the branch and
+scope before registering the Task with both evaluators. Drift requires fresh
+review. SQLite retains only a small exact source descriptor; backup and
+restore the bare mirror, including `refs/autopod/retained/`, along with the
+state database. No fresh branch read or credentials are needed to reopen an
+already admitted Task. Give each evaluator a one-time **read-only** mount of
+published Git objects via `publishedMirror`; never mount daemon state, worker
+output or private integration scratch there. Only the daemon writes this base
+mirror. The pinned Git commit is independently verified by each evaluator.
+
+For the legacy staged mode, the pinned `HEAD` bundle must be in the same
+private directory as the config, and Preview requires the branch to match the
+stored seed. For automatic evaluator registration, set `"evaluatorEnrollment":
 "automatic"` in the pilot record. Configure each standalone evaluator once:
 use `enrollment` instead of `lease` in its service JSON, with `repository`
 (the same repository ID), `paths` (the exact sorted union of both role scopes),
@@ -531,9 +554,8 @@ scope, remotes, or credentials. Missing assigned files may be created; only
 submitted changes within that worker's reserved paths can become a commit.
 This suits scoped text changes, not workers that need a full build checkout.
 
-The current host still needs a retained seed and reviewed worker recipes.
-Scoped worker uploads do not by themselves make the normal one-click launch
-available for a repository whose seed exceeds the retained-bundle limit.
+Published mode uses anchored results and scoped worker uploads automatically.
+The legacy staged-seed mode continues to support previously reviewed packets.
 
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and

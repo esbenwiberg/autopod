@@ -1,4 +1,4 @@
-import { chmod, symlink, writeFile } from 'node:fs/promises';
+import { chmod, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 import { digest, sha256 } from '../managed/canonical.js';
@@ -7,6 +7,7 @@ import {
   PRIVATE_PARENT_VERIFIER,
   PRIVATE_SUBMISSION_FILE,
 } from '../managed/private-commit-policy.js';
+import { parseManagedProfileSetConfig } from '../managed/profile-set-config.js';
 import { managedGit } from '../managed/source-git.js';
 import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { resign } from '../test-utils/managed-fixture.js';
@@ -19,6 +20,7 @@ import {
   readSavedDelegationPilot,
 } from './saved-delegation-pilot.js';
 import { createSavedDelegationPolicyStore } from './saved-delegation-policy.js';
+import { bindSavedWorkerRecipes, savedWorkerRecipeDigest } from './saved-delegation-recipes.js';
 
 async function fixture() {
   const seed = await setupOrchestrationRun();
@@ -151,9 +153,53 @@ async function fixture() {
   };
 }
 
+it('accepts a reusable published policy without seed or recipe files and deterministically pins worker requests', async () => {
+  const f = await fixture();
+  const { recipes: _, ...site } = f.spec;
+  const reviewed = parseManagedProfileSetConfig(JSON.stringify(site.profiles))!;
+  const stage = reviewed.profiles[0]!;
+  const pin = savedWorkerRecipeDigest(stage);
+  const policy = {
+    ...site.policy,
+    workers: site.policy.workers.map((role) => ({
+      ...role,
+      recipeId: stage.profileSnapshot.profileId,
+      recipeRevision: stage.profileSnapshot.profileVersion,
+      recipeDigest: pin,
+    })),
+  };
+  await f.write({
+    ...site,
+    policy,
+    source: { mode: 'published', mirror: reviewed.mirror.path },
+    evaluatorEnrollment: 'automatic',
+  });
+  await rm(f.bundlePath);
+  const published = await f.read();
+  if (published.kind !== 'published') throw new Error('expected published source');
+  const first = bindSavedWorkerRecipes(published.profiles, published.spec.policy, f.cp.commit);
+  const second = bindSavedWorkerRecipes(published.profiles, published.spec.policy, '8'.repeat(40));
+  expect(first.left.binding.recipeDigest).toBe(second.left.binding.recipeDigest);
+  expect(first.left.binding.executionSpecDigest).not.toBe(second.left.binding.executionSpecDigest);
+  expect(second.left.template.effectiveGrant.scope.repositories[0]?.baseRevision).toBe(
+    '8'.repeat(40),
+  );
+  expect(second.left.template.effectiveGrant.budget).toEqual(
+    first.left.template.effectiveGrant.budget,
+  );
+  expect(second.left.template.effectiveGrant.scope.identityBindings).toEqual([]);
+  expect(
+    bindSavedWorkerRecipes((await f.read()).profiles, published.spec.policy, f.cp.commit),
+  ).toEqual(first);
+  await f.write({ ...site, policy, source: { mode: 'published', mirror: reviewed.mirror.path } });
+  await expect(f.read()).rejects.toThrow('published-policy-refused');
+});
+
 it('loads exact private pilot material and installs its policy idempotently, without overwriting a revision', async () => {
   const f = await fixture();
   const pilot = await f.read();
+  expect(pilot.kind).toBe('staged');
+  if (pilot.kind !== 'staged') throw new Error('expected staged source');
   expect(pilot.source.commit).toBe(f.cp.commit);
   expect(pilot.bundle).toEqual(f.bytes);
   expect(pilot.left.binding.executionSpecDigest).toBe(f.spec.recipes.left.executionSpecDigest);

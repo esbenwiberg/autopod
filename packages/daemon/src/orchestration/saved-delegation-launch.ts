@@ -8,6 +8,7 @@ import {
 } from '../configuration/launch-resolver.js';
 import { canonical, digest } from '../managed/canonical.js';
 import { gatePinsSchema, gatePolicySchema } from './combined-attestation.js';
+import { publishedBaseTransport } from './published-delegation-base.js';
 import {
   type DelegationPrincipal,
   delegationOwnerDigest,
@@ -38,6 +39,7 @@ const verifiedPinsSchema = z
         tree: oid,
         bundleDigest: delegationPin,
         resultTransport: z.literal('anchored/v1').optional(),
+        baseTransport: z.literal(publishedBaseTransport).optional(),
       })
       .strict(),
     workers: z.tuple([recipeBinding, recipeBinding]),
@@ -162,6 +164,7 @@ export async function prepareSavedDelegationLaunch(input: {
   );
   if (
     pins.source.repositoryDigest !== configurationDigest(config.repository?.config) ||
+    (pins.source.baseTransport && pins.source.resultTransport !== 'anchored/v1') ||
     pins.source.ref !== 'refs/heads/' + saved.policy.sourceBranch ||
     canonical(pins.workers.map(({ executionSpecDigest: _, ...binding }) => binding)) !==
       canonical(workers) ||
