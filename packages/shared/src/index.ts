@@ -582,6 +582,7 @@ export type {
   AgentToolUseEvent,
   AgentUsageEvent,
   ClaudeResultUsageEvent,
+  CodexFinalProofRefusal,
   HttpMcpServerConfig,
   McpServerConfig,
   ProviderFailureCategory,

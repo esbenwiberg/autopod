@@ -69,8 +69,11 @@ original resource; it does not delete this archive or historical failure evidenc
 - Only an ordinary blocked `running` or `failed` local Docker task with one exact
   unsettled current-generation/current-cycle worker claim is eligible. A pre-validation
   orphan may use the exact daemon-owned unresolved restart/wake hold; it does not
-  need an invented failed result, report or token measurement. An arbitrary
-  diagnostic is not that hold. The
+  need an invented failed result, report or token measurement. A [native
+  Codex final-proof refusal](codex-usage-accounting.md#recover-committed-docker-source-after-a-final-proof-refusal)
+  can also seal an already settled failed run. This still requires fresh exact
+  stopped-resource proof and does not rewrite the earlier settlement.
+  An arbitrary diagnostic is not either hold. The
   identity must be a dispatch-recorded **full 64-character Docker ID**, not a
   name or a guess from a mutable pod pointer. A fresh exact-ID inspection selects
   its Docker engine namespace; it does not pretend an absent historical engine

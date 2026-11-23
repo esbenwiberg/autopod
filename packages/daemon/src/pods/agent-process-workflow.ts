@@ -744,6 +744,9 @@ export function createAgentProcessWorkflow(
         visibleFailurePhase = 'completion';
         await this.handleCompletion(podId);
       } else if (outcome === 'failed') {
+        // This hold owns a separate, exact stop-and-retain archive. Do not
+        // release a zero-usage worker or treat an ordinary mirror as the seal.
+        if (podRepo.taskExecutions?.codexFinalProofHold?.(podId, lifecycleGeneration)) return;
         await preserveWorkspaceAfterAgentFailure(podId, 'fatal agent exit');
         await releaseZeroWorkFailure(podId, lifecycleGeneration, containerId);
       }

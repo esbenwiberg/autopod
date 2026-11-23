@@ -24,6 +24,7 @@ import {
   savedPublicationBase,
   verifySavedSource,
 } from '../worktrees/saved-work-source.js';
+import { assertNoCodexFinalProofHold } from './codex-final-proof-hold.js';
 import type { PodRepository } from './pod-repository.js';
 import { finalizationSourceLocations } from './retained-finalization-repository.js';
 import { draftError, draftHash } from './saved-work-draft-repository.js';
@@ -60,6 +61,9 @@ export function createSavedWorkDraftPr(deps: {
     return actor.userId;
   };
   function policy(pod: Pod) {
+    // The host may still show only the start commit. Use the exact recovery
+    // seal instead of treating the old checkout as the final worker source.
+    assertNoCodexFinalProofHold(pods.taskExecutions, pod);
     if (
       pod.options.output !== 'pr' ||
       pod.options.agentMode !== 'auto' ||

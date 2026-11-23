@@ -30,9 +30,13 @@ const jsonl = (...rows: unknown[]) => rows.map((r) => JSON.stringify(r)).join('\
 
 describe('native final-usage metadata selection', () => {
   it('requires a native terminal marker after the last provider response', () => {
-    expect(nativeCompletionUsage(jsonl(record('a')), 'thread', complete)).toEqual({ native: true });
+    expect(nativeCompletionUsage(jsonl(record('a')), 'thread', complete)).toEqual({
+      native: true,
+      refusal: 'missing_terminal',
+    });
     expect(nativeCompletionUsage(jsonl(terminal(), record('a')), 'thread', complete)).toEqual({
       native: true,
+      refusal: 'missing_terminal',
     });
     expect(
       nativeCompletionUsage(jsonl(record('a'), terminal()), 'thread', complete).lines,
@@ -43,7 +47,7 @@ describe('native final-usage metadata selection', () => {
     const aborted = { type: 'event_msg', payload: { type: 'turn_aborted' } };
     expect(
       nativeCompletionUsage(jsonl(record('a'), terminal(), aborted), 'thread', complete),
-    ).toEqual({ native: true });
+    ).toEqual({ native: true, refusal: 'missing_terminal' });
   });
 
   it('excludes all old resumed-turn usage and completion markers', () => {
@@ -68,7 +72,10 @@ describe('native final-usage metadata selection', () => {
 
   it('never falls back to legacy completeness for a modern file whose response records are not flushed', () => {
     const header = { type: 'session_meta', payload: { cli_version: '0.160.1' } };
-    expect(nativeCompletionUsage(jsonl(header), 'thread', complete)).toEqual({ native: true });
+    expect(nativeCompletionUsage(jsonl(header), 'thread', complete)).toEqual({
+      native: true,
+      refusal: 'missing_response',
+    });
   });
 
   it('preserves legacy compatibility without claiming native evidence', () => {

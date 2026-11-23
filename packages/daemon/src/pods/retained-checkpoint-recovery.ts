@@ -36,6 +36,7 @@ import {
   fingerprintPreservedWorkspace,
   verifyArtifactSnapshot,
 } from './artifact-snapshot-receipt.js';
+import { codexFinalProofNextStep } from './codex-final-proof-hold.js';
 import { assertQualificationExecutionContextSupported } from './environment-qualification.js';
 import type { PodRepository } from './pod-repository.js';
 import { createRepairContinuation } from './repair-continuation.js';
@@ -289,6 +290,15 @@ export function createRetainedCheckpointRecovery(deps: {
         'MEMORY_RECOVERY_REQUIRED',
       );
     const sealed = repo.prevalidationSource(pod);
+    const codexHold = deps.podRepo.taskExecutions?.codexFinalProofHold?.(
+      pod.id,
+      pod.lifecycleGeneration,
+    );
+    if (codexHold && !sealed)
+      checkpointError(
+        `Native Codex final usage refused (${codexHold.reason}). ${codexHold.endedAt ? 'Exact clean source is not sealed.' : 'Worker settlement is unverified.'} ${codexFinalProofNextStep(pod)}`,
+        'CODEX_FINAL_PROOF_REFUSED',
+      );
     if (
       sealed &&
       (!continuation ||
@@ -643,7 +653,16 @@ export function createRetainedCheckpointRecovery(deps: {
       ]),
     );
     const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
+    const codexHold = deps.podRepo.taskExecutions?.codexFinalProofHold?.(
+      pod.id,
+      pod.lifecycleGeneration,
+    );
+    const sealed = codexHold && sealedPrevalidation ? repo.prevalidationSource(pod) : null;
     return {
+      ...(codexHold && {
+        codexFinalProofRefusal: codexHold.reason,
+        sealedSource: sealed ? { head: sealed.head, tree: sealed.tree } : null,
+      }),
       version: 1 as const,
       mode: 'read_only' as const,
       generation: pod.lifecycleGeneration,
@@ -688,7 +707,9 @@ export function createRetainedCheckpointRecovery(deps: {
         sourcePreservationRecorded: Boolean(
           currentFinalization && pod.finalization?.sourcePreservedAt,
         ),
-        workerSettlementRecorded: Boolean(currentFinalization && pod.finalization?.agentSettledAt),
+        workerSettlementRecorded: codexHold
+          ? Boolean(sealed || deps.podRepo.taskExecutions?.hasSettledRun?.(pod, codexHold.cycle))
+          : Boolean(currentFinalization && pod.finalization?.agentSettledAt),
         pendingDecision: Boolean(
           pod.pendingEscalation || deps.podRepo.hasUnansweredDecision?.(podId),
         ),
@@ -699,18 +720,21 @@ export function createRetainedCheckpointRecovery(deps: {
         retryAdmission: 'not_checked' as const,
       },
       checks,
-      nextSteps: [
-        'Inspect recorded needs and resolve pending decisions/guidance or custody through their owning controls; never clear a hold to retry.',
-        'Select the exact retained host HEAD and generation/result hash. Host preservation does not collect unsynced original files or reports.',
-        'Use --preview-execution PROFILE for configuration only; it does not qualify the actual environment. Sandbox wakeup is machine-only, not task continuation.',
-        sealedPrevalidation
-          ? 'This is sealed pre-validation source: use --apply with the exact sealed HEAD for checks only. No prepare-only repair or remote source substitution is supported; the private archive will be reverified.'
-          : 'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
-        sealedPrevalidation
-          ? 'Inspect ap retry-state POD --stage validation before selection. A new null-result source receipt is not retry permission, a prior pass or coding authority.'
-          : 'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
-        'Fresh configured checks and independent review must run on the selected source. A pass still requires separate human approval; historical reports and budgets remain retained.',
-      ],
+      nextSteps:
+        codexHold && !sealed
+          ? [codexFinalProofNextStep(pod)]
+          : [
+              'Inspect recorded needs and resolve pending decisions/guidance or custody through their owning controls; never clear a hold to retry.',
+              'Select the exact retained host HEAD and generation/result hash. Host preservation does not collect unsynced original files or reports.',
+              'Use --preview-execution PROFILE for configuration only; it does not qualify the actual environment. Sandbox wakeup is machine-only, not task continuation.',
+              sealedPrevalidation
+                ? `This is sealed pre-validation source: use --apply with the exact sealed HEAD${sealed ? ` (${sealed.head})` : ''} for checks only. No prepare-only repair or remote source substitution is supported; the private archive will be reverified.`
+                : 'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
+              sealedPrevalidation
+                ? 'Inspect ap retry-state POD --stage validation before selection. A new null-result source receipt is not retry permission, a prior pass or coding authority.'
+                : 'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
+              'Fresh configured checks and independent review must run on the selected source. A pass still requires separate human approval; historical reports and budgets remain retained.',
+            ],
     };
   }
   async function quiesce(id: string): Promise<boolean> {
