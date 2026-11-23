@@ -533,6 +533,15 @@ Keep the role-owned enrollment and claim records across service restarts; do
 not remove them to retry evaluation. A network failure after actual evaluation
 dispatch is still uncertain and is not replayed.
 
+On a host whose existing HTTPS ingress must be left untouched, configure the
+exact private pair `https://127.0.0.1:18443/verify` for checks and
+`https://127.0.0.1:19443/verify` for review. Bind each HTTPS ingress only to
+IPv4 loopback and route it only to its role's protected Unix socket. Use server
+certificates with IP SAN `127.0.0.1`, separate pinned role CAs and client
+identities, and require client certificates at each listener. Neither other
+ports or IPs, swapped roles, nor a mixture of DNS and loopback endpoints are
+accepted. Standard-port DNS pairs continue to work without changes.
+
 If the automatic mode is omitted, the legacy fixed-lease path is unchanged.
 The preview response's `delegationPreview` includes `runId`,
 `evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for that fixed-lease

@@ -3,6 +3,7 @@ import { digest, sha256 } from '../managed/canonical.js';
 import { fixtureSigner } from '../test-utils/gate-signer.js';
 import {
   createParentEvaluatorClient,
+  localEvaluatorEndpoints,
   parentEvaluatorEndpointsSchema,
 } from './parent-evaluator-client.js';
 import type { ParentIntegrationGateRequest } from './parent-integration-qualified.js';
@@ -27,6 +28,22 @@ it.each([
   'https://review.fixture.example/another-path',
 ])('rejects an unenrollable endpoint: %s', (checks) => {
   expect(parentEvaluatorEndpointsSchema.safeParse({ ...endpoints, checks }).success).toBe(false);
+});
+
+it('allows only the exact paired loopback endpoints without widening DNS endpoints', () => {
+  const local = localEvaluatorEndpoints;
+  expect(parentEvaluatorEndpointsSchema.parse(local)).toEqual(local);
+  for (const pair of [
+    { ...local, checks: endpoints.checks },
+    { ...local, independentReview: endpoints.independentReview },
+    { checks: local.independentReview, independentReview: local.checks },
+    { ...local, checks: local.checks.replace('18443', '18444') },
+    { ...local, checks: local.checks.replace('127.0.0.1', '0.0.0.0') },
+    { ...local, checks: local.checks.replace('127.0.0.1', 'localhost') },
+    { ...local, checks: local.checks + '/extra' },
+    { ...local, checks: local.checks + '?extra' },
+  ])
+    expect(parentEvaluatorEndpointsSchema.safeParse(pair).success).toBe(false);
 });
 
 it('bounds response bytes and does not fall back or retry', async () => {
