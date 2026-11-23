@@ -59,6 +59,7 @@ import { serializePodForWire, serializeValidationResult } from '../wire-serializ
 import { approvalRewriteAbandonmentRoutes } from './approval-rewrite-abandonment.js';
 import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { operatorActionRoutes } from './operator-actions.js';
 import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedCleanupRoutes } from './retained-cleanup.js';
@@ -1074,6 +1075,8 @@ export function podRoutes(
     reply.header('Cache-Control', 'no-store');
     return reply.code(201).send(result);
   });
+
+  operatorActionRoutes(app, podManager);
 
   // POST /pods/:podId/message — send message
   // A reply to a budget-paused pod approves one extension (compatibility for

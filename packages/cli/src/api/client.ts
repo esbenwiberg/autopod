@@ -846,6 +846,18 @@ export class AutopodClient {
   ): Promise<unknown> {
     return this.request('POST', `/pods/${id}/validation-recovery-budget`, input);
   }
+  async getOperatorTarget(id: string): Promise<import('@autopod/shared').OperatorTarget> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/operator-target-v1`);
+  }
+
+  async guardedOperatorAction(
+    id: string,
+    input: import('@autopod/shared').GuardedOperatorAction,
+  ): Promise<{ ok: boolean; action: string; expectedTarget: string }> {
+    // Never fall back to a legacy endpoint: older daemons must refuse.
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/operator-action-v1`, input);
+  }
+
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);
   }

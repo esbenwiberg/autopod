@@ -9,6 +9,7 @@ import {
 import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';
+import { assertOperatorTarget } from './operator-target.js';
 import { validateTransition } from './state-machine.js';
 import { validationSourceError } from './validation-source-evidence.js';
 
@@ -54,6 +55,7 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         ? { type: 'automation' as const, id: 'auto-approve' }
         : { type: 'automation' as const, id: 'direct-pod-manager' });
     const pod = podRepo.getOrThrow(podId);
+    assertOperatorTarget(pod, options.expectedTarget);
     if (options.publishOnly) {
       const continuation = podRepo.retainedCheckpoints?.latest(podId);
       if (
@@ -110,6 +112,7 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
       );
     }
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
+    assertOperatorTarget(podRepo.getOrThrow(podId), options.expectedTarget);
     const recovery = podRepo.recoveryForks?.child(podId);
     assertApprovalCurrent(pod, { approvalEntry: !!recovery });
     const approvalReason = assertApprovalAllowed(podId, readiness, options);
@@ -141,6 +144,7 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
       podRepo.recoveryForks!.approve(podId, actor, source);
       persistReadinessApproval(podId, readiness, actor, approvalReason);
     }
+    assertOperatorTarget(podRepo.getOrThrow(podId), options.expectedTarget);
     const prepared = await prepareApprovalDelivery({
       podId,
       options,
@@ -151,6 +155,7 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     });
     if (prepared.kind === 'halted') return;
 
+    assertOperatorTarget(podRepo.getOrThrow(podId), options.expectedTarget);
     assertApprovalCurrent(pod);
     if (options.publishOnly) {
       if (prepared.recoveredMerge)

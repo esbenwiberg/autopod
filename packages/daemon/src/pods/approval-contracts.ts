@@ -30,6 +30,8 @@ import type { createReadinessService } from './readiness-review.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface ApproveSessionOptions {
+  /** Recorded validation/question identity inspected by an external operator. */
+  expectedTarget?: string;
   /** Explicit human publication of checked retained source; no merge or completion. */
   publishOnly?: boolean;
   squash?: boolean;

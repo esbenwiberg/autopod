@@ -24,6 +24,7 @@ import type {
   OperatorMessagesCaptured,
 } from './operator-contracts.js';
 import { buildDetachedMcpFallbackMessage } from './operator-policy.js';
+import { assertDelegableReply, assertOperatorTarget } from './operator-target.js';
 import { reportPrDescriptionFallback } from './pr-description-fallback.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { canReceiveMessage, isTerminalState } from './state-machine.js';
@@ -213,6 +214,8 @@ export function createOperatorMessages(
       );
     }
     const pod = podRepo.getOrThrow(podId);
+    assertOperatorTarget(pod, options.expectedTarget);
+    if (options.expectedTarget) assertDelegableReply(pod);
     if (pod.status === 'paused' || pod.status === 'failed')
       assertNoInfrastructureBlocker(podRepo, podId);
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {

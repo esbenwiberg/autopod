@@ -33,6 +33,53 @@ ap release-retained-networks [--apply] [--limit N]  # Release superseded retaine
 ap stop                     # Gracefully stop the daemon
 ```
 
+### Guarded delegated operator actions
+
+An operator-side orchestrator can inspect an exact recorded decision/validation
+target and then answer, nudge or approve that same target:
+
+```sh
+ap operator-target exact-pod-id --json
+ap tell exact-pod-id "Use the existing contract" --expected-target <sha256> --actor <parent-session-id> --json
+ap nudge exact-pod-id "Read the queued clarification" --expected-target <sha256> --actor <parent-session-id> --json
+ap approve exact-pod-id --expected-target <sha256> --actor <parent-session-id> --json
+```
+
+Use the returned `expectedTarget`, not a caller-invented hash. These commands
+require the matching new CLI and backend. Source checkout/build is not a running
+daemon rollout; older deployments refuse the versioned interface, with **no
+fallback to legacy approval/message endpoints**. Use full exact pod IDs, not
+ambiguous abbreviations.
+
+The read-only `GET /pods/:id/operator-target-v1` returns version, pod/lifecycle,
+status, the actual pending question, review/readiness evidence and a SHA-256
+binding of the recorded question, resources, configuration and validation evidence.
+Read that current evidence, not merely a new token for an old notification. It is not authority
+or an OS lock on a mutable checkout. The existing source/candidate verification,
+review, readiness, retry and custody gates remain authoritative.
+
+`POST /pods/:id/operator-action-v1` takes `action` (`reply`, `nudge` or
+`approve`), `expectedTarget`, an automation session label `actor`, and
+`message` for reply/nudge. The owning operation rejects changed targets before
+recording answers or approvals; approval rechecks after asynchronous readiness
+and preparation. Delegated answers/approval are attributed to automation bound
+to the authenticated operator, not an impersonated human. Explicit human-only
+decisions, credentials, action-approval and validation-override gates cannot be
+answered through the delegated reply path. Guarded approval uses existing
+automation readiness rules: no bulk approval, waiver reason, publication-only or
+squash flag is admitted through this CLI path.
+
+**Approve can merge.** Tell can resume a worker or approve a token-budget pause.
+Nudge queues guidance for a running worker; saved does not mean acknowledged or
+applied. A successful command acknowledges its operation, not independent proof
+of final delivery. Inspect pod state/recorded receipts afterwards.
+
+These endpoints do not supply an exactly-once external-operation journal. The
+orchestrator must persist its request identity before dispatch, retain unknown
+outcomes when a reply is lost, and reconcile backend state rather than blindly
+repeat. Authorization remains the owner's normal remit and the existing backend
+rules; no new permissions DSL or Podsitter dependency is introduced.
+
 ### Profiles
 
 ```bash
