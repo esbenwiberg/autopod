@@ -11,7 +11,7 @@ import {
   PRIVATE_SUBMISSION_FILE,
 } from './private-commit-policy.js';
 import { collectPrivateHead } from './private-head-export.js';
-import { allocateSandboxCheckpoint } from './sandbox-checkpoint.js';
+import { allocateSandboxCheckpoint, type SandboxCheckpoint } from './sandbox-checkpoint.js';
 
 export interface ReviewedContainerBoundary {
   route: Route;
@@ -34,7 +34,7 @@ export interface ReviewedContainerBoundary {
     request: ManagedPodRequest,
   ): Promise<
     ContainerSpawnConfig & {
-      sandboxCheckpoint?: { repository: string; commit: string; coding?: true };
+      sandboxCheckpoint?: SandboxCheckpoint;
     }
   >;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
@@ -250,6 +250,8 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     const allocate = boundary.manager.ensureManagedContainer;
     if (!allocate) throw new Error('managed-allocation-unavailable');
     const { sandboxCheckpoint, ...spawn } = config;
+    if (sandboxCheckpoint?.scopedSource && !isPrivateSubmission(request))
+      throw new Error('saved-worker-source-lane-mismatch');
     if (request.route.executionTarget === 'sandbox' && isPrivateParentCommit(request)) {
       if (!boundary.sandboxCodingCheckpoints || !sandboxCheckpoint?.coding)
         throw new Error('managed-sandbox-coding-checkpoint-required');

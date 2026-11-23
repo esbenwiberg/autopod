@@ -523,10 +523,17 @@ already has that commit can import the approved bundle with
 `git fetch /path/to/result.bundle HEAD` without publishing anything. Existing
 fixed and self-contained runs are unchanged.
 
-This changes result transport only. The current host still needs a retained
-seed, and its sandbox bootstrap still has the existing narrow source projection
-limits. Do not use the change-only result setting to claim large-repo worker
-readiness or to raise those limits.
+Anchored workers receive a verified upload of their reserved paths from the
+pinned Git tree, plus tracked root `AGENTS.md`, `CLAUDE.md`, and `README.md`
+when present. These paths must be regular UTF-8 text under the 1 MiB total
+upload bound. The upload contains no `.git`, untracked files, sibling worker
+scope, remotes, or credentials. Missing assigned files may be created; only
+submitted changes within that worker's reserved paths can become a commit.
+This suits scoped text changes, not workers that need a full build checkout.
+
+The current host still needs a retained seed and reviewed worker recipes.
+Scoped worker uploads do not by themselves make the normal one-click launch
+available for a repository whose seed exceeds the retained-bundle limit.
 
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and

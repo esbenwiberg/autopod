@@ -128,6 +128,84 @@ it('rejects oversized reachable history before staging or allocating a writable 
   expect(await readdir(s.root)).toEqual(['repo']);
 });
 
+it('uploads pinned assigned text and reviewed context without Git history, unrelated files, or worktree edits', async () => {
+  const s = await seed();
+  await writeFile(path.join(s.repo, 'README.md'), 'repository context\n');
+  await writeFile(path.join(s.repo, 'historical.bin'), randomBytes(2 * 1024 * 1024));
+  await writeFile(path.join(s.repo, 'MAPLE', 'other-role.txt'), 'not for this worker');
+  s.git('add', 'README.md', 'historical.bin', 'MAPLE/other-role.txt');
+  s.git('commit', '-qm', 'base too large for full projection');
+  const commit = s.git('rev-parse', 'HEAD');
+  const tree = s.git('rev-parse', 'HEAD^{tree}');
+  await writeFile(path.join(s.repo, 'MAPLE', 'input.txt'), 'dirty\n');
+  const scope = { tree, files: ['MAPLE/input.txt', 'docs/new.txt'] };
+  let uploaded = '';
+  const ensureManagedContainer = vi.fn(async (config: ContainerSpawnConfig) => {
+    const input = config.volumes!.find((volume) => volume.container === '/repositories/fixture')!;
+    expect(input.readOnly).toBe(true);
+    uploaded = input.host;
+    expect((await readdir(uploaded)).sort()).toEqual([
+      '.agents',
+      '.codex',
+      'MAPLE',
+      'README.md',
+      'docs',
+    ]);
+    expect(await readdir(path.join(uploaded, 'docs'))).toEqual([]);
+    expect(await readdir(path.join(uploaded, 'MAPLE'))).toEqual(['input.txt']);
+    expect(await readFile(path.join(uploaded, 'MAPLE/input.txt'), 'utf8')).toBe('12\n');
+    return 'runtime-scoped';
+  });
+  const execInContainer = vi.fn(async (_ref: string, args: string[]) => {
+    const manifest = args[5]!;
+    expect(args.slice(0, 5)).toEqual([
+      'python3',
+      '-I',
+      '-c',
+      VERIFY_SANDBOX_PROJECTION,
+      '/repositories/fixture',
+    ]);
+    expect(args[6]).toBe('coding');
+    expect(JSON.parse(manifest).files).toEqual({
+      'MAPLE/input.txt': createHash('sha256').update('12\n').digest('hex'),
+      'README.md': createHash('sha256').update('repository context\n').digest('hex'),
+    });
+    return { exitCode: 0, stdout: createHash('sha256').update(manifest).digest('hex'), stderr: '' };
+  });
+  const manager = { ensureManagedContainer, execInContainer } as unknown as ContainerManager;
+  const config = {
+    podId: 'managed-scoped',
+    image: 'fixture',
+    env: {},
+    networkPolicyMode: 'deny-all',
+    volumes: [
+      { host: s.repo, container: '/repositories/fixture', readOnly: false },
+      { host: s.root, container: '/output', readOnly: false },
+    ],
+  } as ContainerSpawnConfig;
+  const checkpoint = { repository: 'fixture', commit, coding: true as const, scopedSource: scope };
+  const reserve = vi.fn();
+  await expect(allocateSandboxCheckpoint(manager, config, checkpoint, reserve)).resolves.toBe(
+    'runtime-scoped',
+  );
+  expect(reserve).toHaveBeenCalledOnce();
+  expect(ensureManagedContainer).toHaveBeenCalledOnce();
+  expect(execInContainer).toHaveBeenCalledOnce();
+  await expect(readdir(uploaded)).rejects.toMatchObject({ code: 'ENOENT' });
+  for (const scopedSource of [
+    { ...scope, tree: '0'.repeat(40) },
+    { ...scope, files: ['historical.bin'] },
+    { ...scope, files: ['MAPLE'] },
+    { ...scope, files: ['../untracked'] },
+    { ...scope, files: ['readme.md'] },
+  ])
+    await expect(
+      allocateSandboxCheckpoint(manager, config, { ...checkpoint, scopedSource }, reserve),
+    ).rejects.toThrow();
+  expect(reserve).toHaveBeenCalledOnce();
+  expect(ensureManagedContainer).toHaveBeenCalledOnce();
+});
+
 it('rejects a valid Git bundle with a tracked executable before materializing a sandbox workspace', async () => {
   const s = await seed();
   s.git('update-index', '--chmod=+x', 'MAPLE/input.txt');

@@ -30,6 +30,10 @@ import {
   PRIVATE_PARENT_VERIFIER,
   PRIVATE_SUBMISSION_FILE,
 } from '../managed/private-commit-policy.js';
+import {
+  readSavedWorkerScope,
+  withScopedSandboxWorkerSource,
+} from '../managed/scoped-worker-source.js';
 import { managedGit, managedGitBytes } from '../managed/source-git.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
@@ -1094,6 +1098,7 @@ it.each([
     };
     const pinnedWorkerSource = new AsyncLocalStorage<string>();
     const launches: string[] = [];
+    const scopedUploads: string[][] = [];
     const exited = new Set<string>();
     const parentCheckout = path.join(root, 'parent');
     let wrongParentCheckout = true;
@@ -1113,10 +1118,36 @@ it.each([
           async ensure(...args) {
             const mirror = pinnedWorkerSource.getStore();
             if (!mirror) throw new Error('fixture worker requires a private mirror');
-            const checkout = path.join(root, args[0]);
-            await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, checkout]);
-            await managedGit(checkout, ['checkout', '--detach', checkpoint.commit]);
-            expect(await managedGit(checkout, ['rev-parse', 'HEAD^{tree}'])).toBe(checkpoint.tree);
+            if (anchored) {
+              const binding = {
+                podId: args[0],
+                run: plan.runId,
+                repository: checkpoint.repository,
+                commit: checkpoint.commit,
+                tree: checkpoint.tree,
+              };
+              const scope = readSavedWorkerScope(db, binding, args[1]);
+              expect(() =>
+                readSavedWorkerScope(db, binding, { ...args[1], startKey: 'not-reserved' }),
+              ).toThrow('scope-unavailable');
+              await withScopedSandboxWorkerSource(
+                mirror,
+                checkpoint.commit,
+                scope,
+                async (_dir, manifest) => {
+                  const names = Object.keys(JSON.parse(manifest).files).sort();
+                  expect(names).toEqual(['README.md', ...scope.files].sort());
+                  scopedUploads.push(names);
+                },
+              );
+            } else {
+              const checkout = path.join(root, args[0]);
+              await managedGit(root, ['clone', '--no-local', '--no-checkout', mirror, checkout]);
+              await managedGit(checkout, ['checkout', '--detach', checkpoint.commit]);
+              expect(await managedGit(checkout, ['rev-parse', 'HEAD^{tree}'])).toBe(
+                checkpoint.tree,
+              );
+            }
             launches.push(args[0]);
             return f.source.f.runtime.ensure(...args);
           },
@@ -1283,6 +1314,11 @@ it.each([
       { role: 'review', commit: result.checkpoint.commit, tree: result.checkpoint.tree },
     ]);
     expect(result.gateRequest.paths).toEqual(['sample/count.txt', 'sample/reason.txt']);
+    if (anchored)
+      expect(scopedUploads.sort()).toEqual([
+        ['README.md', 'sample/count.txt'],
+        ['README.md', 'sample/reason.txt'],
+      ]);
     expect((await runtime.results(current, {})).results.map((item) => item.report.status)).toEqual([
       'private-candidate-retained',
       'private-candidate-retained',

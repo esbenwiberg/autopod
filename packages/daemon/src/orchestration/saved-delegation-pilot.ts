@@ -415,7 +415,16 @@ export async function composeSavedDelegationPilot(input: {
           service: managed.components.service,
           collector: managed.privateRuntime,
           withWorkerSource: (mirror, _run, use) =>
-            managed.withCheckpoint(checkpoint, mirror, () => use()),
+            managed.withCheckpoint(
+              {
+                ...checkpoint,
+                ...(plan.pins.source.resultTransport === 'anchored/v1'
+                  ? { scopedTree: checkpoint.tree }
+                  : {}),
+              },
+              mirror,
+              () => use(),
+            ),
           observeParentSource: input.observeParentSource,
         });
         await managed.resume();
