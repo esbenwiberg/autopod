@@ -5,11 +5,17 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { canonical, sha256 } from '../managed/canonical.js';
 import { MAX_PRIVATE_HEAD_BYTES } from '../managed/private-head-export.js';
+import { managedGitBytes } from '../managed/source-git.js';
 import { type CombinedPolicy, combinedPolicyDigest, type Role } from './combined-attestation.js';
 import {
   createEvaluatorDispatchVerifier,
   evaluatorDispatchSchema,
 } from './parent-evaluator-dispatch.js';
+import {
+  createEvaluatorEnrollmentStore,
+  type evaluatorEnrollmentConfigSchema,
+  evaluatorEnrollmentRequestSchema,
+} from './parent-evaluator-enrollment.js';
 import { evaluatorReadinessSchema, readinessDigest } from './parent-evaluator-readiness.js';
 import {
   type ParentEvaluatorPorts,
@@ -51,7 +57,6 @@ export type ParentEvaluatorLease = z.input<typeof parentEvaluatorLeaseSchema>;
 interface EndpointConfig {
   policy: CombinedPolicy;
   role: Role;
-  lease: ParentEvaluatorLease;
   /** Private persistent directory, writable by this role's service identity only. */
   stateDir: string;
   /** Private scratch, no worker checkout or daemon state. */
@@ -60,6 +65,9 @@ interface EndpointConfig {
   authorize: (request: FastifyRequest) => boolean;
   ports: ParentEvaluatorPorts;
 }
+type LeaseMode =
+  | { lease: ParentEvaluatorLease; enrollment?: never }
+  | { enrollment: z.input<typeof evaluatorEnrollmentConfigSchema>; lease?: never };
 
 async function claim(stateDir: string, role: Role, run: string, input: string) {
   const file = path.join(stateDir, role + '-' + run + '.claim');
@@ -79,20 +87,26 @@ async function claim(stateDir: string, role: Role, run: string, input: string) {
 }
 
 /** Install in a separate, role-owned private evaluator app, never in the daemon HTTP listener. */
-export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: EndpointConfig) {
+export function registerParentEvaluatorEndpoint(
+  app: FastifyInstance,
+  config: EndpointConfig & LeaseMode,
+) {
   const { role, stateDir, scratch, authorize } = config;
   if (role !== 'checks' && role !== 'independentReview')
     throw new Error('parent-evaluator-role-invalid');
   if (!path.isAbsolute(stateDir) || !path.isAbsolute(scratch) || stateDir === scratch)
     throw new Error('parent-evaluator-private-directories-required');
-  const lease = parentEvaluatorLeaseSchema.parse(config.lease);
-  const expectedPaths = canonical(lease.paths);
-  const verifyDispatch = lease.dispatchPublicKey
-    ? createEvaluatorDispatchVerifier(lease.dispatchPublicKey, role, config.policy)
-    : undefined;
-  const policyDigest = combinedPolicyDigest(config.policy);
-  const evaluate = parentExactTreeEvaluator(scratch, config.policy, role, config.ports);
-  const expired = () => Date.now() >= lease.expiresAt * 1000;
+  const fixedLease = config.lease && parentEvaluatorLeaseSchema.parse(config.lease);
+  const expired = (lease: ParentEvaluatorLease) => Date.now() >= lease.expiresAt * 1000;
+  const store =
+    config.enrollment &&
+    createEvaluatorEnrollmentStore({ ...config, enrollment: config.enrollment });
+  if (Boolean(fixedLease) === Boolean(store)) throw new Error('parent-evaluator-mode-invalid');
+  const fixedPolicy = structuredClone(config.policy);
+  // Preserve validation at startup for fixed leases, including key separateness.
+  if (fixedLease?.dispatchPublicKey)
+    createEvaluatorDispatchVerifier(fixedLease.dispatchPublicKey, role, fixedPolicy);
+  combinedPolicyDigest(fixedPolicy);
   app.post(
     '/verify',
     {
@@ -100,7 +114,8 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
       onRequest: async (request, reply) => {
         reply.header('cache-control', 'no-store');
         if (authorize(request) !== true) return reply.code(404).send({ code: 'not-found' });
-        if (expired()) return reply.code(410).send({ code: 'evaluator-lease-expired' });
+        if (fixedLease && expired(fixedLease))
+          return reply.code(410).send({ code: 'evaluator-lease-expired' });
         if (
           request.headers['content-encoding'] ||
           !/^application\/json(?:\s*;.*)?$/i.test(request.headers['content-type'] ?? '')
@@ -109,7 +124,46 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
       },
     },
     async (request, reply) => {
+      if (store) {
+        const registration = evaluatorEnrollmentRequestSchema.safeParse(request.body);
+        if (registration.success) {
+          try {
+            const result = await store.enroll(registration.data);
+            if (result.status === 'denied')
+              return reply.code(403).send({ code: 'evaluator-enrollment-denied' });
+            if (result.status === 'conflict')
+              return reply.code(409).send({ code: 'evaluator-enrollment-conflict' });
+            if (result.status === 'expired')
+              return reply.code(410).send({ code: 'evaluator-lease-expired' });
+            return { enrolled: true, enrollmentDigest: result.enrollmentDigest };
+          } catch {
+            return reply.code(503).send({ code: 'evaluator-enrollment-unavailable' });
+          }
+        }
+      }
       const probe = evaluatorReadinessSchema.safeParse(request.body);
+      const parsed = bodySchema.safeParse(request.body);
+      const run = probe.success ? probe.data.readiness.run : parsed.data?.request.subject.run;
+      if (!run) return reply.code(400).send({ code: 'evaluator-input-invalid' });
+      const binding = await (async () => {
+        try {
+          return fixedLease
+            ? { lease: fixedLease, policy: fixedPolicy }
+            : await store?.resolve(run);
+        } catch {
+          return null;
+        }
+      })();
+      if (binding === null)
+        return reply.code(503).send({ code: 'evaluator-enrollment-unavailable' });
+      if (!binding) return reply.code(403).send({ code: 'evaluator-input-not-enrolled' });
+      const { lease, policy }: { lease: ParentEvaluatorLease; policy: CombinedPolicy } = binding;
+      if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
+      const expectedPaths = canonical(lease.paths);
+      const policyDigest = combinedPolicyDigest(policy);
+      const verifyDispatch = lease.dispatchPublicKey
+        ? createEvaluatorDispatchVerifier(lease.dispatchPublicKey, role, policy)
+        : undefined;
       if (probe.success) {
         const { readiness, dispatch } = probe.data;
         const bindingDigest = readinessDigest(readiness);
@@ -121,7 +175,7 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
           readiness.predecessor !== lease.predecessor ||
           readiness.policyDigest !== policyDigest ||
           canonical(readiness.paths) !== expectedPaths ||
-          expired()
+          expired(lease)
         ) {
           return reply.code(403).send({ code: 'evaluator-readiness-not-enrolled' });
         }
@@ -134,7 +188,6 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
         }
         return { ready: true, bindingDigest };
       }
-      const parsed = bodySchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ code: 'evaluator-input-invalid' });
       const { request: input, bundle: encoded, dispatch } = parsed.data;
       const inputDigest = parentIntegrationGateDigest(input);
@@ -158,7 +211,7 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
         sha256(bytes) !== input.bundleDigest
       )
         return reply.code(400).send({ code: 'evaluator-bundle-invalid' });
-      if (expired()) return reply.code(410).send({ code: 'evaluator-lease-expired' });
+      if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
       try {
         // Even a lost response or veto is not permission to send again.
         await claim(stateDir, role, lease.run, inputDigest);
@@ -168,9 +221,40 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
         return reply.code(503).send({ code: 'evaluator-claim-unavailable' });
       }
       try {
-        if (expired()) return reply.code(410).send({ code: 'evaluator-lease-expired' });
-        const receipt = await evaluate(input, bytes);
-        if (expired()) return reply.code(410).send({ code: 'evaluator-lease-expired' });
+        if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
+        const ports = store
+          ? {
+              ...config.ports,
+              async evaluate(selection: Parameters<ParentEvaluatorPorts['evaluate']>[0]) {
+                // Trust the enrolled scope, not a signed claim about the bundle contents.
+                const diff = await managedGitBytes(
+                  selection.mirror,
+                  [
+                    'diff-tree',
+                    '--no-commit-id',
+                    '--name-only',
+                    '--no-renames',
+                    '-r',
+                    '-z',
+                    selection.predecessor,
+                    selection.commit,
+                    '--',
+                  ],
+                  undefined,
+                  [],
+                  { input: '', timeout: 5000, maxBuffer: maxMetadata },
+                );
+                const paths = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+                  .decode(diff)
+                  .split('\0');
+                if (paths.pop() !== '' || canonical(paths.sort()) !== expectedPaths)
+                  throw new ParentEvaluatorVeto(role);
+                return config.ports.evaluate(selection);
+              },
+            }
+          : config.ports;
+        const receipt = await parentExactTreeEvaluator(scratch, policy, role, ports)(input, bytes);
+        if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
         return receipt;
       } catch (error) {
         if (error instanceof ParentEvaluatorVeto)

@@ -486,16 +486,30 @@ Ed25519 dispatch credentials through `CREDENTIALS_DIRECTORY`; never place
 credentials in the pilot JSON or a worker environment.
 
 Preview verifies the configured GitHub branch still points at the staged
-commit. The preview response's `delegationPreview` includes `runId`,
-`evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for the operator to
-provision **both** role-owned, one-shot evaluator leases for that exact run,
-seed commit, repository and ordered paths. Use the reviewed preview from the
-same open Task draft; staging leases is not owner approval or a launch. A
-fresh admission probes both exact leases over authenticated TLS. A missing,
-mismatched, expired, or already-claimed lease refuses the launch before any
-Task or worker reservation is written. Probes carry no bundle and do not
-consume the one-shot claim. A network failure after actual dispatch is still
-uncertain and is not replayed.
+commit. For automatic evaluator registration, set `"evaluatorEnrollment":
+"automatic"` in the pilot record. Configure each standalone evaluator once:
+use `enrollment` instead of `lease` in its service JSON, with `repository`
+(the same repository ID), `paths` (the exact sorted union of both role scopes),
+`dispatchPublicKey` (that role's daemon dispatch public key), and
+`leaseSeconds` (60–86,400, covering the expected runtime). Keep each service's
+fixed recipe, socket, persistent private state directory, and `policy` with
+both pinned receipt authorities. The service combines those fixed pins with
+each run's signed base policy digest; a registration cannot replace a recipe,
+receipt authority, repository, or file scope.
+
+A fresh admission registers the exact reviewed Task with both roles at their
+existing authenticated `/verify` URLs before creating the Task or reserving a
+worker. Registration carries no source and consumes no evaluation claim.
+Retrying a matching registration completes a partial handoff without extending
+the lease. A conflicting, expired, or already-claimed run is not reopened.
+Keep the role-owned enrollment and claim records across service restarts; do
+not remove them to retry evaluation. A network failure after actual evaluation
+dispatch is still uncertain and is not replayed.
+
+If the automatic mode is omitted, the legacy fixed-lease path is unchanged.
+The preview response's `delegationPreview` includes `runId`,
+`evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for that fixed-lease
+setup. Neither mode approves or publishes a result.
 
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and

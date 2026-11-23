@@ -10,20 +10,24 @@ import {
   parentEvaluatorLeaseSchema,
   registerParentEvaluatorEndpoint,
 } from './parent-evaluator-endpoint.js';
+import { evaluatorEnrollmentConfigSchema } from './parent-evaluator-enrollment.js';
 import type { ParentEvaluatorPorts } from './parent-exact-tree-evaluator.js';
 
 const absolute = z.string().min(1).max(2048).refine(path.isAbsolute);
-const serviceSchema = z
+const serviceBase = z
   .object({
     role: z.enum(['checks', 'independentReview']),
     policy: gatePolicySchema,
-    lease: parentEvaluatorLeaseSchema,
     stateDir: absolute,
     scratch: absolute,
     socket: absolute,
     recipe: absolute,
   })
   .strict();
+const serviceSchema = z.union([
+  serviceBase.extend({ lease: parentEvaluatorLeaseSchema }),
+  serviceBase.extend({ enrollment: evaluatorEnrollmentConfigSchema }),
+]);
 
 async function readProtected(filename: string, cap: number, secret = false) {
   const fd = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -72,7 +76,9 @@ export async function startParentEvaluatorService(configFile: string, credential
   const cfg = serviceSchema.parse(
     JSON.parse((await readProtected(configFile, 16384)).toString('utf8')),
   );
-  if (Date.now() >= cfg.lease.expiresAt * 1000) throw new Error('evaluator-service-lease-expired');
+  const mode = 'lease' in cfg ? { lease: cfg.lease } : { enrollment: cfg.enrollment };
+  if (mode.lease && Date.now() >= mode.lease.expiresAt * 1000)
+    throw new Error('evaluator-service-lease-expired');
   const state = await ownedDirectory(cfg.stateDir, true);
   const scratch = await ownedDirectory(cfg.scratch, true);
   const socketDir = await ownedDirectory(path.dirname(cfg.socket), false);
@@ -127,7 +133,7 @@ export async function startParentEvaluatorService(configFile: string, credential
     registerParentEvaluatorEndpoint(app, {
       role: cfg.role,
       policy: cfg.policy,
-      lease: cfg.lease,
+      ...mode,
       stateDir: state,
       scratch,
       // No TCP listener and no HTTP header grants authority. The parent

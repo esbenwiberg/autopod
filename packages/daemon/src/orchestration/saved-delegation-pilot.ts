@@ -34,6 +34,7 @@ import {
   createEvaluatorDispatchSigner,
   readEvaluatorDispatchKeys,
 } from './parent-evaluator-dispatch.js';
+import { enrollParentEvaluators } from './parent-evaluator-enrollment.js';
 import { requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { loadParentEvaluatorTlsFetch } from './parent-evaluator-tls.js';
 import {
@@ -79,6 +80,7 @@ const pilotSchema = z
     profiles: z.unknown(),
     recipes: z.record(z.string(), z.unknown()),
     endpoints: parentEvaluatorEndpointsSchema,
+    evaluatorEnrollment: z.literal('automatic').optional(),
     authorities: gatePinsSchema,
   })
   .strict();
@@ -327,17 +329,32 @@ export async function composeSavedDelegationPilot(input: {
         throw new Error('saved-delegation-pilot-plan-refused');
       const policy = savedDelegationGatePolicy(plan);
       const signer = createEvaluatorDispatchSigner(dispatchKeys, policy);
+      const binding = {
+        run: plan.runId,
+        repository: spec.policy.repositoryId,
+        predecessor: source.commit,
+        paths: spec.policy.workers.flatMap((role) => role.files).sort(),
+      };
       try {
-        await requireEvaluatorReadiness(spec.endpoints, transport, signer, {
-          run: plan.runId,
-          repository: spec.policy.repositoryId,
-          predecessor: source.commit,
-          policyDigest: combinedPolicyDigest(policy),
-          paths: spec.policy.workers.flatMap((role) => role.files).sort(),
-        });
+        if (spec.evaluatorEnrollment === 'automatic')
+          await enrollParentEvaluators(
+            spec.endpoints,
+            transport,
+            signer,
+            {
+              ...binding,
+              basePolicyDigest: policy.basePolicyDigest,
+            },
+            policy,
+          );
+        else
+          await requireEvaluatorReadiness(spec.endpoints, transport, signer, {
+            ...binding,
+            policyDigest: combinedPolicyDigest(policy),
+          });
       } catch {
         configurationError(
-          'The independent evaluators are not provisioned for this exact reviewed pilot Task. Nothing was launched.',
+          'The independent evaluators did not accept this exact reviewed Task. Nothing was launched.',
           'DELEGATION_PILOT_EVALUATORS_NOT_READY',
           409,
         );
