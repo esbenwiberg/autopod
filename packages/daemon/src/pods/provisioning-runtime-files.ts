@@ -12,6 +12,10 @@ export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 
 export const AGENT_ENV_PATH = '/run/autopod/agent-env.sh';
 
+// Non-agent execs use the shim for credentials, not restart recovery. Use the
+// existing PID path override so shims in already-provisioned pods work too.
+export const CREDENTIAL_ONLY_SHIM_ENV = 'AUTOPOD_AGENT_PID_PATH=/dev/null';
+
 /**
  * Shim script written to every pod container before the agent exec.
  * Reads *_FILE env vars and exports the real credential values so that SDKs

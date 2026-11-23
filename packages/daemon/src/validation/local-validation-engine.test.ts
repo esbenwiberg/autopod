@@ -7,12 +7,17 @@ import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
 import { formatFeedback } from '../pods/feedback-formatter.js';
+import {
+  AGENT_ENV_PATH,
+  AGENT_SHIM_PATH,
+  AGENT_SHIM_SCRIPT,
+} from '../pods/provisioning-runtime-files.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
@@ -171,6 +176,90 @@ index 0000000..3333333
 });
 
 describe('required fact execution', () => {
+  it.each([
+    0, 7,
+  ])('executes a credential-backed fact without changing the agent PID (exit=%s)', async (exitCode) => {
+    const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-shim-'));
+    try {
+      const pidPath = path.join(fixture, 'agent.pid');
+      const shimPath = path.join(fixture, 'agent-shim.sh');
+      const secretPath = path.join(fixture, 'nuget-endpoints');
+      const sentinel = '424242\n';
+      await fs.writeFile(pidPath, sentinel);
+      await fs.writeFile(secretPath, 'fixture credential');
+      await fs.writeFile(
+        shimPath,
+        AGENT_SHIM_SCRIPT.replaceAll(AGENT_ENV_PATH, './agent-env.sh').replace(
+          '/run/autopod/agent.pid',
+          './agent.pid',
+        ),
+      );
+      const proofCommand = [
+        'test "$VSS_NUGET_EXTERNAL_FEED_ENDPOINTS" = "fixture credential" || exit 99',
+        `test -z "\${VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE+x}" || exit 98`,
+        `exit ${exitCode}`,
+      ].join('; ');
+      const execInContainer = vi.fn(
+        async (_id: string, command: string[], options?: ExecOptions) => {
+          if (command.at(-1) !== proofCommand) return { stdout: '', stderr: '', exitCode: 0 };
+          // Exercise the actual wrapped argv and shim, not a simulated exit status.
+          const [executable, ...args] = command.map((arg) =>
+            arg === AGENT_SHIM_PATH ? shimPath : arg,
+          );
+          const run = spawnSync(executable ?? '/bin/false', args, {
+            cwd: fixture,
+            env: { PATH: '/usr/bin:/bin', ...options?.env },
+            encoding: 'utf8',
+            timeout: 5_000,
+          });
+          if (run.error) throw run.error;
+          if (run.status === null) throw new Error(`Fact fixture terminated by ${run.signal}`);
+          return { stdout: run.stdout, stderr: run.stderr, exitCode: run.status };
+        },
+      );
+      const cm = { execInContainer } as unknown as ContainerManager;
+      const result = await createLocalValidationEngine(cm).validate({
+        podId: 'fact-shim',
+        containerId: 'fixture',
+        previewUrl: '',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Check the credential-backed fact',
+        hasWebUi: false,
+        diff: '',
+        extraExecEnv: { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: secretPath },
+        skipPhases: ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'review'],
+        contract: {
+          contractVersion: 1,
+          title: 'Credential-backed fact',
+          dependsOn: [],
+          scenarios: [],
+          humanReview: [],
+          requiredFacts: [
+            {
+              id: 'shim-proof',
+              proves: [],
+              kind: 'custom-command',
+              artifact: { path: 'fact.ts', change: 'touch' },
+              command: proofCommand,
+            },
+          ],
+        },
+      });
+      expect(await fs.readFile(pidPath, 'utf8')).toBe(sentinel);
+      expect(result.factValidation?.results[0]).toMatchObject({ exitCode, passed: exitCode === 0 });
+      expect(
+        execInContainer.mock.calls.find(([, argv]) => argv.at(-1) === proofCommand)?.[2],
+      ).toMatchObject({ requireObservedExit: true });
+    } finally {
+      await fs.rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('uses a separate outer test bound without extending required-fact commands', async () => {
     const cm = {
       execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
