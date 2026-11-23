@@ -19,6 +19,8 @@ export interface CandidatePathScopeRequest {
   expectedTree: string;
   /** Host authorization. Candidate-controlled text must never populate this list. */
   allowlist: readonly CandidatePathAllowance[];
+  /** Published, trusted base only. Existing links may stay byte-for-byte unchanged. */
+  allowInheritedLinks?: boolean;
 }
 
 export interface CandidatePathScopeResult {
@@ -157,11 +159,20 @@ function parseRawChanges(raw: Buffer): RawChange[] {
 
 // A new name can collide with an unchanged tracked path, not just another diff
 // entry. Include directories so aliases cannot hide under different leaf names.
-export async function assertPortableCandidateTree(repository: string, commit: string) {
+export async function assertPortableCandidateTree(
+  repository: string,
+  commit: string,
+  publishedBase?: string,
+) {
   validateObjectId(commit, 'tree-invalid');
-  const text = decode(
-    await managedGitBytes(repository, ['ls-tree', '-r', '-t', '-z', '--full-tree', commit]),
-  );
+  const list = async (ref: string) =>
+    decode(await managedGitBytes(repository, ['ls-tree', '-r', '-t', '-z', '--full-tree', ref]));
+  const link = /^120000 blob [0-9a-f]{40}\t/;
+  if (publishedBase) validateObjectId(publishedBase, 'base-invalid');
+  const inherited = publishedBase
+    ? new Set((await list(publishedBase)).split('\0').filter((entry) => link.test(entry)))
+    : undefined;
+  const text = await list(commit);
   if (!text) return; // All files may have been deleted within the grant.
   if (!text.endsWith('\0')) fail('tree-invalid');
   const names = new Set<string>();
@@ -169,7 +180,11 @@ export async function assertPortableCandidateTree(repository: string, commit: st
   if (entries.length > 20_000) fail('tree-too-large');
   for (const entry of entries) {
     const tab = entry.indexOf('\t');
-    if (tab < 0 || !/^(?:040000 tree|100(?:644|755) blob) [0-9a-f]{40}$/.test(entry.slice(0, tab)))
+    if (
+      tab < 0 ||
+      (!/^(?:040000 tree|100(?:644|755) blob) [0-9a-f]{40}$/.test(entry.slice(0, tab)) &&
+        !inherited?.has(entry))
+    )
       fail('tree-invalid');
     const key = portablePathKey(validatePath(entry.slice(tab + 1)));
     if (names.has(key)) fail('path-collision');
@@ -269,6 +284,10 @@ export async function validateCandidatePathScope(
   const changedPaths = [...new Set(changes.map((change) => change.path))].sort((a, b) =>
     Buffer.from(a).compare(Buffer.from(b)),
   );
-  await assertPortableCandidateTree(request.repository, request.candidate);
+  await assertPortableCandidateTree(
+    request.repository,
+    request.candidate,
+    request.allowInheritedLinks ? request.base : undefined,
+  );
   return { base: request.base, candidate: request.candidate, tree: commit.tree, changedPaths };
 }

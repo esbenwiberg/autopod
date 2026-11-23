@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
 import {
   type CombinedPolicy,
   combinedPolicyDigest,
@@ -48,6 +49,7 @@ export const parentIntegrationGateRequestSchema = z
     paths: z.array(z.string().min(1).max(4096)).min(1).max(2048),
     bindingDigest: sha,
     bundleDigest: sha,
+    resultTransport: z.literal('anchored/v1').optional(),
   })
   .strict();
 export type ParentIntegrationGateRequest = z.infer<typeof parentIntegrationGateRequestSchema>;
@@ -170,6 +172,7 @@ export async function qualifyParentIntegration(
   inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
   gates: ParentIntegrationGates,
   onRetained?: (evidenceDigest: string) => void,
+  delta?: ParentDeltaSource,
 ): Promise<ContinuationCheckpoint> {
   if (!host.usesDatabase(db)) throw new Error('parent-integration-database-mismatch');
   const policy = gatePolicySchema.parse(gates.policy);
@@ -184,7 +187,7 @@ export async function qualifyParentIntegration(
   const runBinding = readBinding();
   if (!runBinding) throw new Error('parent-integration-policy-mismatch');
 
-  const integration = await buildParentIntegration(db, scratch, run, inputs);
+  const integration = await buildParentIntegration(db, scratch, run, inputs, delta);
   const assertCurrent = () => {
     if (readBinding()?.repository !== runBinding.repository)
       throw new Error('parent-integration-policy-mismatch');
@@ -203,6 +206,7 @@ export async function qualifyParentIntegration(
     paths: integration.paths,
     bindingDigest: integration.bindingDigest,
     bundleDigest: integration.bundleDigest,
+    ...(delta ? { resultTransport: 'anchored/v1' } : {}),
   });
   requireBoundedRequest(request);
   const inputDigest = parentIntegrationGateDigest(request);
@@ -236,5 +240,6 @@ export async function qualifyParentIntegration(
     // are disposable and cannot change the retained in-memory bundle.
     assertCurrent,
     onRetained,
+    delta,
   );
 }

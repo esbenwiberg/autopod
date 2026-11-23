@@ -41,6 +41,9 @@ export class ParentReviewHandoff {
       commit: checkpoint.commit,
       tree: checkpoint.tree,
       bundleDigest: gateRequest.bundleDigest,
+      ...(gateRequest.resultTransport === 'anchored/v1'
+        ? { bundleBaseCommit: checkpoint.predecessor }
+        : {}),
       paths: gateRequest.paths,
       checks: checks.receiptDigest,
       independentReview: independentReview.receiptDigest,

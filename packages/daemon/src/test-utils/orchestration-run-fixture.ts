@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, onTestFinished } from 'vitest';
@@ -12,6 +13,7 @@ export async function setupOrchestrationRun(
   maxActive = 1,
   run = 'example',
   policyDigest = digest('fixture-policy'),
+  extraBaseBytes = 0,
 ) {
   const f = requestTimeFixture(2);
   const root = await mkdtemp(path.join(await realpath(tmpdir()), 'native-run-'));
@@ -68,6 +70,15 @@ export async function setupOrchestrationRun(
       message,
     ]);
   await managedGit(root, ['init', '-b', 'main', source]);
+  if (extraBaseBytes) {
+    await writeFile(path.join(source, 'existing.bin'), randomBytes(extraBaseBytes));
+    await symlink('existing.bin', path.join(source, 'existing-link'));
+    await mkdir(path.join(source, 'sample'));
+    await writeFile(path.join(source, 'sample', 'count.txt'), '12\n');
+    await writeFile(path.join(source, 'sample', 'reason.txt'), 'old reason\n');
+    await writeFile(path.join(source, 'README.md'), 'Fixture repository context\n');
+    await managedGit(source, ['add', 'existing.bin', 'existing-link', 'sample', 'README.md']);
+  }
   await commit('base');
   const predecessor = await managedGit(source, ['rev-parse', 'HEAD']);
   await writeFile(path.join(source, 'proof.txt'), 'unpublished checkpoint\n');

@@ -15,6 +15,7 @@ import path from 'node:path';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { assertBoundedHeadPack } from './bounded-head-pack.js';
 import { MAX_PRIVATE_HEAD_BYTES } from './private-head-export.js';
+import { type ScopedWorkerSeed, withScopedSandboxWorkerSource } from './scoped-worker-source.js';
 import { managedGit, managedGitBytes } from './source-git.js';
 
 // Validate the committed tree without checking out files. Shared by offline
@@ -246,10 +247,17 @@ parent=os.stat(os.path.dirname(root));check(parent.st_uid==0 and not parent.st_m
 visit(root,"");check(not dirs and seen==set(want))
 print(hashlib.sha256(raw.encode()).hexdigest())`;
 
+export interface SandboxCheckpoint {
+  repository: string;
+  commit: string;
+  coding?: true;
+  scopedSource?: ScopedWorkerSeed;
+}
+
 export async function allocateSandboxCheckpoint(
   manager: ContainerManager,
   config: ContainerSpawnConfig,
-  cp: { repository: string; commit: string; coding?: true },
+  cp: SandboxCheckpoint,
   beforeAllocate?: () => void,
 ) {
   const volumes = config.volumes ?? [],
@@ -259,11 +267,11 @@ export async function allocateSandboxCheckpoint(
     inputs.length !== 1 ||
     volumes.length !== 2 ||
     !volumes.some((v) => v.container === '/output' && !v.readOnly) ||
-    config.networkPolicyMode !== 'deny-all'
+    config.networkPolicyMode !== 'deny-all' ||
+    (cp.scopedSource && !cp.coding)
   )
     throw new Error('sandbox-checkpoint-scope');
-  const project = cp.coding ? withSandboxCodingProjection : withSandboxProjection;
-  return project(inputs[0]!.host, cp.commit, async (dir, manifest) => {
+  const upload = async (dir: string, manifest: string) => {
     beforeAllocate?.();
     const id = await manager.ensureManagedContainer!({
       ...config,
@@ -293,5 +301,10 @@ export async function allocateSandboxCheckpoint(
     )
       throw new Error('sandbox-checkpoint-upload-unverified');
     return id;
-  });
+  };
+  const source = inputs[0]!.host;
+  if (cp.scopedSource)
+    return withScopedSandboxWorkerSource(source, cp.commit, cp.scopedSource, upload);
+  const project = cp.coding ? withSandboxCodingProjection : withSandboxProjection;
+  return project(source, cp.commit, upload);
 }

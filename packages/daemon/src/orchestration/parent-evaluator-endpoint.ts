@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { canonical, sha256 } from '../managed/canonical.js';
 import { MAX_PRIVATE_HEAD_BYTES } from '../managed/private-head-export.js';
 import { managedGitBytes } from '../managed/source-git.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
+import { assertPortableCandidateTree } from './candidate-path-scope.js';
 import { type CombinedPolicy, combinedPolicyDigest, type Role } from './combined-attestation.js';
 import {
   createEvaluatorDispatchVerifier,
@@ -66,8 +68,12 @@ interface EndpointConfig {
   ports: ParentEvaluatorPorts;
 }
 type LeaseMode =
-  | { lease: ParentEvaluatorLease; enrollment?: never }
-  | { enrollment: z.input<typeof evaluatorEnrollmentConfigSchema>; lease?: never };
+  | { lease: ParentEvaluatorLease; enrollment?: never; resolveBase?: never }
+  | {
+      enrollment: z.input<typeof evaluatorEnrollmentConfigSchema>;
+      lease?: never;
+      resolveBase?: (predecessor: string) => Promise<ParentDeltaSource>;
+    };
 
 async function claim(stateDir: string, role: Role, run: string, input: string) {
   const file = path.join(stateDir, role + '-' + run + '.claim');
@@ -100,7 +106,11 @@ export function registerParentEvaluatorEndpoint(
   const expired = (lease: ParentEvaluatorLease) => Date.now() >= lease.expiresAt * 1000;
   const store =
     config.enrollment &&
-    createEvaluatorEnrollmentStore({ ...config, enrollment: config.enrollment });
+    createEvaluatorEnrollmentStore({
+      ...config,
+      enrollment: config.enrollment,
+      assertBase: config.resolveBase,
+    });
   if (Boolean(fixedLease) === Boolean(store)) throw new Error('parent-evaluator-mode-invalid');
   const fixedPolicy = structuredClone(config.policy);
   // Preserve validation at startup for fixed leases, including key separateness.
@@ -148,7 +158,7 @@ export function registerParentEvaluatorEndpoint(
       const binding = await (async () => {
         try {
           return fixedLease
-            ? { lease: fixedLease, policy: fixedPolicy }
+            ? { lease: fixedLease, policy: fixedPolicy, resultTransport: undefined }
             : await store?.resolve(run);
         } catch {
           return null;
@@ -197,6 +207,7 @@ export function registerParentEvaluatorEndpoint(
         input.subject.predecessor !== lease.predecessor ||
         input.subject.policyDigest !== policyDigest ||
         canonical(input.paths) !== expectedPaths ||
+        input.resultTransport !== binding.resultTransport ||
         Buffer.byteLength(canonical(input)) > maxMetadata ||
         (verifyDispatch
           ? !verifyDispatch(inputDigest, dispatch)
@@ -249,11 +260,23 @@ export function registerParentEvaluatorEndpoint(
                   .split('\0');
                 if (paths.pop() !== '' || canonical(paths.sort()) !== expectedPaths)
                   throw new ParentEvaluatorVeto(role);
+                if (config.resolveBase)
+                  await assertPortableCandidateTree(
+                    selection.mirror,
+                    selection.commit,
+                    selection.predecessor,
+                  );
                 return config.ports.evaluate(selection);
               },
             }
           : config.ports;
-        const receipt = await parentExactTreeEvaluator(scratch, policy, role, ports)(input, bytes);
+        const receipt = await parentExactTreeEvaluator(
+          scratch,
+          policy,
+          role,
+          ports,
+          config.resolveBase,
+        )(input, bytes);
         if (expired(lease)) return reply.code(410).send({ code: 'evaluator-lease-expired' });
         return receipt;
       } catch (error) {

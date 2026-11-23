@@ -5,6 +5,7 @@ import { canonical, digest, sha256 } from '../managed/canonical.js';
 import type { ManagedPodService } from '../managed/managed-service.js';
 import { sandboxTreeEntries } from '../managed/sandbox-checkpoint.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
+import { type ParentDeltaSource, restoreParentSource } from './anchored-delegation-source.js';
 import { type CandidateRef, type CombinedGates, combinedVerifier } from './combined-checkpoint.js';
 import { type ContinuationCheckpoint, OrchestrationContinuations } from './continuations.js';
 import type { ControllerProvider } from './controller-turns.js';
@@ -153,6 +154,7 @@ export class LocalCheckpointHost {
     operatorSeed?: { requests: number; active: number },
     assertCurrentAuthority?: () => void,
     onRetained?: (evidenceDigest: string) => void,
+    delta?: ParentDeltaSource,
   ): Promise<ContinuationCheckpoint> {
     const subject = Object.freeze({ ...input });
     if (!bytes.length || bytes.length > MAX_CANDIDATE_BYTES)
@@ -167,7 +169,11 @@ export class LocalCheckpointHost {
     if (!operatorSeed && !current()) throw new Error('checkpoint-run-mismatch');
     if (!verify && (!operatorSeed || !this.ownerInspectionDigest))
       throw new Error('inspection-checkpoint-not-enrolled');
-    const verification = await withVerifiedCheckpointMirror(
+    if (delta && (operatorSeed || !verify))
+      throw new Error('checkpoint-anchored-qualification-only');
+    const verification = await restoreParentSource(
+      withVerifiedCheckpointMirror,
+      delta,
       this.scratch,
       subject,
       bundle,

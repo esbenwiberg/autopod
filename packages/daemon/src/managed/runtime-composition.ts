@@ -10,10 +10,11 @@ import { canonical } from './canonical.js';
 import { ManagedContainerRuntime } from './container-runtime.js';
 import { type ManagedGitHubReadConfig, ManagedGitHubReadGateway } from './github-read-gateway.js';
 import type { ManagedPodRow } from './managed-service.js';
-import { isPrivateParentCommit } from './private-commit-policy.js';
+import { isPrivateParentCommit, isPrivateSubmission } from './private-commit-policy.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedPublicReadGateway } from './public-read-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
+import { readSavedWorkerScope } from './scoped-worker-source.js';
 import type { ManagedValidationConfig } from './validation.js';
 import { ManagedSupervisedValidation } from './validation-runtime.js';
 import { type ManagedRepositoryMirror, ManagedWorkspaces } from './workspaces.js';
@@ -113,12 +114,8 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
   );
   // This scope exists only while the owner is restoring an admitted continuation.
   // It is not a request field. Ordinary managed starts keep the enrolled mirror.
-  const checkpointScope = new AsyncLocalStorage<{
-    run: string;
-    repository: string;
-    commit: string;
-    mirror: string;
-  }>();
+  type CheckpointSource = { run: string; repository: string; commit: string; scopedTree?: string };
+  const checkpointScope = new AsyncLocalStorage<CheckpointSource & { mirror: string }>();
   const prepareWorkspaces = async (podId: string, request: ManagedPodRequest) => {
     const owner = config.db
       .prepare('SELECT dispatcher_installation_id FROM managed_pods WHERE pod_id=?')
@@ -271,6 +268,24 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       },
       prepare: async (podId, request) => {
         const cp = checkpointScope.getStore();
+        const scopedSource = cp?.scopedTree
+          ? readSavedWorkerScope(
+              config.db,
+              {
+                podId,
+                run: cp.run,
+                repository: cp.repository,
+                commit: cp.commit,
+                tree: cp.scopedTree,
+              },
+              request,
+            )
+          : undefined;
+        if (
+          scopedSource &&
+          (request.route.executionTarget !== 'sandbox' || !isPrivateSubmission(request))
+        )
+          throw new Error('saved-worker-source-lane-mismatch');
         const volumes = await prepareWorkspaces(podId, request);
         for (const input of components.service.inputs!.mounts(podId))
           volumes.push({ host: input.hostPath, container: input.containerPath, readOnly: true });
@@ -281,6 +296,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
                   repository: cp.repository,
                   commit: cp.commit,
                   ...(isPrivateParentCommit(request) ? { coding: true as const } : {}),
+                  ...(scopedSource ? { scopedSource } : {}),
                 },
               }
             : {}),
@@ -395,7 +411,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     runtime,
     workspaces,
     withCheckpoint<T>(
-      cp: { run: string; repository: string; commit: string },
+      cp: CheckpointSource,
       mirror: string,
       use: (service: typeof components.service) => Promise<T>,
     ) {

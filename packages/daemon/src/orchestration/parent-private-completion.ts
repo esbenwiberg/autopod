@@ -7,6 +7,7 @@ import {
   assertPrivateParentCommit,
   isPrivateSubmission,
 } from '../managed/private-commit-policy.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
 import type { ContinuationCheckpoint } from './continuations.js';
 import {
   assertClosedParentCandidate,
@@ -23,6 +24,7 @@ export function parentPrivateCompletion(
   paths: readonly string[],
   onComplete?: () => void,
   secondPaths?: readonly string[],
+  delta?: ParentDeltaSource,
 ): NonNullable<ManagedPodService['privateCommit']> {
   const { run, repository, commit, evidenceDigest, policyDigest } = checkpoint;
   const owner = `native.${run}`;
@@ -160,6 +162,7 @@ export function parentPrivateCompletion(
                 bytes,
                 binding.maxBytes,
                 assertCurrent,
+                delta,
               );
             },
           }
@@ -173,6 +176,7 @@ export function parentPrivateCompletion(
         allowlist,
         undefined,
         current,
+        delta,
       );
       db.transaction(() => {
         current();

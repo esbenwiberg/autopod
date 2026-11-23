@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { canonical } from '../managed/canonical.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
 import type { LocalCheckpointHost } from './local-checkpoints.js';
 import type { ParentIntegrationInput } from './parent-candidate-integration.js';
 import { ParentEvaluatorVeto } from './parent-exact-tree-evaluator.js';
@@ -18,6 +19,7 @@ export function parentQualificationJob(
   gates: ParentIntegrationGates,
   secondPaths?: readonly string[],
   matchByScope = false,
+  delta?: ParentDeltaSource,
 ) {
   const scopes = [paths, secondPaths ?? paths].map((names) =>
     names.map((path) => ({ kind: 'file' as const, path })),
@@ -114,6 +116,7 @@ export function parentQualificationJob(
           independentReview: send('independentReview'),
         },
         (evidence) => transition('independentReview', 'ready', evidence),
+        delta,
       )
         .then(
           () => {},

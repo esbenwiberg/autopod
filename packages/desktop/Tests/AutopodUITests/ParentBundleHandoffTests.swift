@@ -5,8 +5,10 @@ import Testing
 
 @MainActor
 struct ParentBundleHandoffTests {
-  @Test func previewDoesNotApproveOrDownloadAndSaveRequiresExplicitApproval() async throws {
-    let f = try Fixture()
+  @Test(arguments: [false, true])
+  func previewDoesNotApproveOrDownloadAndSaveRequiresExplicitApproval(anchored: Bool) async throws {
+    let base = anchored ? String(repeating: "3", count: 40) : nil
+    let f = try Fixture(bundleBaseCommit: base)
     let model = ParentBundleHandoff()
     let permitted: @MainActor @Sendable () -> Bool = { true }
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bundle")
@@ -19,6 +21,7 @@ struct ParentBundleHandoffTests {
     }
     #expect(f.events == ["preview"])
     #expect(model.review == f.review)
+    #expect(model.review?.bundleBaseCommit == base)
     #expect(model.approval == nil)
     await model.approve(f.selection, actions: f.actions, isCurrent: permitted)
     await model.approve(f.selection, actions: f.actions, isCurrent: permitted)
@@ -98,15 +101,16 @@ struct ParentBundleHandoffTests {
     let approval: ParentBundleApproval
     let bytes = Data("verified test bundle".utf8)
 
-    init() throws {
+    init(bundleBaseCommit: String? = nil) throws {
       func sha(_ char: String) -> String { "sha256:" + String(repeating: char, count: 64) }
       let commit = String(repeating: "f", count: 40)
       let tree = String(repeating: "a", count: 40)
       selection = try #require(ParentBundleSelection(parentId: "parent", run: "run", evidenceDigest: sha("b"), commit: commit))
+      let baseField = bundleBaseCommit.map { ",\"bundleBaseCommit\":\"\($0)\"" } ?? ""
       let json = """
         {"parentId":"parent","run":"run","evidenceDigest":"\(sha("b"))","commit":"\(commit)","tree":"\(tree)",
         "bundleDigest":"\(sha("c"))","paths":["sample/count.txt"],"checks":"\(sha("1"))",
-        "independentReview":"\(sha("2"))","reviewDigest":"\(sha("d"))"}
+        "independentReview":"\(sha("2"))","reviewDigest":"\(sha("d"))"\(baseField)}
         """
       review = try JSONDecoder().decode(ParentBundleReview.self, from: Data(json.utf8))
       approval = try JSONDecoder().decode(ParentBundleApproval.self, from: Data("""

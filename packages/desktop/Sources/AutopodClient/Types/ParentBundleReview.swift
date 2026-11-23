@@ -34,6 +34,7 @@ public struct ParentBundleReview: Decodable, Equatable, Sendable {
   public let commit: String
   public let tree: String
   public let bundleDigest: String
+  public let bundleBaseCommit: String?
   public let paths: [String]
   public let checks: String
   public let independentReview: String
@@ -43,6 +44,7 @@ public struct ParentBundleReview: Decodable, Equatable, Sendable {
     parentId == selection.parentId && run == selection.run
       && evidenceDigest == selection.evidenceDigest && commit == selection.commit
       && ParentBundleSelection.isHex(tree, prefix: "", count: 40)
+      && (bundleBaseCommit.map { $0 != commit && ParentBundleSelection.isHex($0, prefix: "", count: 40) } ?? true)
       && [bundleDigest, checks, independentReview, reviewDigest].allSatisfy { ParentBundleSelection.isHex($0) }
       && !paths.isEmpty && paths.count <= 2048
       && paths.allSatisfy { !$0.isEmpty && $0.utf16.count <= 4096 }

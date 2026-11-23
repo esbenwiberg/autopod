@@ -1,6 +1,7 @@
 import { assertBoundedHeadPack } from '../managed/bounded-head-pack.js';
 import { sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
+import { type ParentDeltaSource, restoreParentSource } from './anchored-delegation-source.js';
 import { type CandidatePathAllowance, validateCandidatePathScope } from './candidate-path-scope.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 
@@ -35,6 +36,7 @@ export async function verifyParentPrivateSource(
   scratch: string,
   exportedHeadBundle: Buffer,
   input: Readonly<ParentPrivateSourceSelector>,
+  delta?: ParentDeltaSource,
 ): Promise<VerifiedParentPrivateSource> {
   if (
     !Buffer.isBuffer(exportedHeadBundle) ||
@@ -57,14 +59,24 @@ export async function verifyParentPrivateSource(
     ? input.allowlist.map((entry) => ({ kind: entry.kind, path: entry.path }))
     : input.allowlist;
 
-  await assertBoundedHeadPack(bundle, commit);
-  const scoped = await withVerifiedCheckpointMirror(
+  if (!delta) await assertBoundedHeadPack(bundle, commit);
+  const scoped = await restoreParentSource(
+    withVerifiedCheckpointMirror,
+    delta,
     scratch,
     { predecessor: base, commit, tree },
     bundle,
     async (mirror) => {
       // A single advertised ref is insufficient: a pack may carry hidden objects.
-      if (await managedGit(mirror, ['fsck', '--full', '--unreachable', '--no-reflogs', commit]))
+      if (
+        await managedGit(mirror, [
+          'fsck',
+          delta ? '--no-full' : '--full',
+          '--unreachable',
+          '--no-reflogs',
+          commit,
+        ])
+      )
         throw new Error('parent-private-source-unreachable-objects');
       return validateCandidatePathScope({
         repository: mirror,
@@ -72,6 +84,7 @@ export async function verifyParentPrivateSource(
         candidate: commit,
         expectedTree: tree,
         allowlist,
+        allowInheritedLinks: Boolean(delta),
       });
     },
   );

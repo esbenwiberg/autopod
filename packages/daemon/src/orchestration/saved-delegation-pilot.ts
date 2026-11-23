@@ -22,6 +22,7 @@ import {
   parseManagedProfileSetConfig,
   profileSetRequestPolicy,
 } from '../managed/profile-set-config.js';
+import { withScopedSandboxWorkerSource } from '../managed/scoped-worker-source.js';
 import { MAX_CANDIDATE_BYTES, managedGit } from '../managed/source-git.js';
 import { combinedPolicyDigest, gatePinsSchema, gatePolicySchema } from './combined-attestation.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
@@ -38,6 +39,11 @@ import { enrollParentEvaluators } from './parent-evaluator-enrollment.js';
 import { requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { loadParentEvaluatorTlsFetch } from './parent-evaluator-tls.js';
 import {
+  publishedBaseTransport,
+  publishedDelegationSource,
+  publishedSeedReceipt,
+} from './published-delegation-base.js';
+import {
   readSavedDelegationAdmission,
   savedDelegationGatePolicy,
 } from './saved-delegation-admission.js';
@@ -46,6 +52,7 @@ import {
   delegationPin,
   savedDelegationPolicySchema,
 } from './saved-delegation-policy.js';
+import { bindSavedWorkerRecipes } from './saved-delegation-recipes.js';
 import { attachSavedDelegationRuntime } from './saved-delegation-runtime.js';
 
 const gitId = z.string().regex(/^[a-f0-9]{40}$/);
@@ -62,15 +69,24 @@ const pilotSchema = z
     policyId: z.uuid(),
     policy: savedDelegationPolicySchema,
     repositoryDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    source: z
-      .object({
-        predecessor: gitId,
-        commit: gitId,
-        tree: gitId,
-        bundleDigest: delegationPin,
-        bundlePath: z.string().max(4096).refine(path.isAbsolute),
-      })
-      .strict(),
+    source: z.union([
+      z
+        .object({
+          predecessor: gitId,
+          commit: gitId,
+          tree: gitId,
+          bundleDigest: delegationPin,
+          bundlePath: z.string().max(4096).refine(path.isAbsolute),
+          resultTransport: z.literal('anchored/v1').optional(),
+        })
+        .strict(),
+      z
+        .object({
+          mode: z.literal('published'),
+          mirror: z.string().max(4096).refine(path.isAbsolute),
+        })
+        .strict(),
+    ]),
     sandbox: z
       .object({
         resourceScopeDigest: delegationPin,
@@ -78,7 +94,7 @@ const pilotSchema = z
       })
       .strict(),
     profiles: z.unknown(),
-    recipes: z.record(z.string(), z.unknown()),
+    recipes: z.record(z.string(), z.unknown()).optional(),
     endpoints: parentEvaluatorEndpointsSchema,
     evaluatorEnrollment: z.literal('automatic').optional(),
     authorities: gatePinsSchema,
@@ -134,7 +150,6 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     ),
   );
   if (
-    path.dirname(spec.source.bundlePath) !== path.dirname(file) ||
     spec.authorities.checks.configurationDigest !== spec.policy.checksDigest ||
     spec.authorities.independentReview.configurationDigest !== spec.policy.reviewer.policyDigest ||
     !gatePolicySchema.safeParse({ ...spec.authorities, basePolicyDigest: digest(spec.policy) })
@@ -149,7 +164,6 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     profiles.catalogArtifacts ||
     profiles.mirror.dependencyCachePath ||
     profiles.mirror.enrollmentId !== spec.policy.repositoryId ||
-    profiles.mirror.baseRevision !== spec.source.commit ||
     profiles.mirror.remote !== 'private' ||
     profiles.profiles.some(
       (stage) =>
@@ -159,13 +173,40 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     )
   )
     throw new Error('saved-delegation-pilot-profile-refused');
-  if (Object.keys(spec.recipes).length !== 2)
+  const principal = { ...spec.owner, operatorPrincipal: 'delegated-user' as const };
+  const configured = spec.source;
+  if ('mirror' in configured) {
+    if (
+      spec.recipes ||
+      spec.evaluatorEnrollment !== 'automatic' ||
+      configured.mirror !== profiles.mirror.path
+    )
+      throw new Error('saved-delegation-published-policy-refused');
+    // Site reviews reusable profile stages once. Validate their authority at startup.
+    bindSavedWorkerRecipes(profiles, spec.policy, profiles.mirror.baseRevision);
+    return {
+      kind: 'published' as const,
+      principal,
+      spec,
+      profiles,
+      mirror: configured.mirror,
+      runtimeDigest: digest(['saved-delegation-published-runtime/v1', spec, profiles]),
+    };
+  }
+  const recipes = spec.recipes;
+  if (
+    path.dirname(configured.bundlePath) !== path.dirname(file) ||
+    (configured.resultTransport && spec.evaluatorEnrollment !== 'automatic') ||
+    configured.commit !== profiles.mirror.baseRevision
+  )
+    throw new Error('saved-delegation-pilot-source-refused');
+  if (!recipes || Object.keys(recipes).length !== 2)
     throw new Error('saved-delegation-pilot-recipes-refused');
   const workerPins = ([left, right]: typeof spec.policy.workers) =>
     [left, right].map((role) => {
-      const request = validateManagedRequest(spec.recipes[role.role]);
+      const request = validateManagedRequest(recipes[role.role]);
       const budget = request.effectiveGrant.budget;
-      assertPrivateParentCommit(request, spec.policy.repositoryId, spec.source.commit, 'sandbox');
+      assertPrivateParentCommit(request, spec.policy.repositoryId, configured.commit, 'sandbox');
       profileSetRequestPolicy(profiles)(request);
       if (
         !isPrivateSubmission(request) ||
@@ -191,7 +232,7 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     });
   const [left, right] = workerPins(spec.policy.workers);
   if (!left || !right) throw new Error('saved-delegation-pilot-recipes-refused');
-  const { bundlePath, ...source } = spec.source;
+  const { bundlePath, ...source } = configured;
   const bundle = await readPrivatePilotFile(bundlePath, MAX_CANDIDATE_BYTES);
   if (sha256(bundle) !== source.bundleDigest)
     throw new Error('saved-delegation-pilot-seed-mismatch');
@@ -211,7 +252,8 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
     spec.authorities,
   ]);
   return {
-    principal: { ...spec.owner, operatorPrincipal: 'delegated-user' as const },
+    kind: 'staged' as const,
+    principal,
     spec,
     profiles,
     left,
@@ -249,7 +291,20 @@ export async function composeSavedDelegationPilot(input: {
     'saved-pilot',
   );
   const pilot = await readSavedDelegationPilot(input.file, scratch);
-  const { principal, spec, profiles, runtimeDigest, source, bundle, left, right } = pilot;
+  const { principal, spec, profiles, runtimeDigest } = pilot;
+  const published =
+    pilot.kind === 'published'
+      ? publishedDelegationSource({
+          mirror: pilot.mirror,
+          scratch,
+          github: input.githubAuth,
+          readBranchHead: input.readBranchHead,
+        })
+      : undefined;
+  const recipesFor = (commit: string) =>
+    pilot.kind === 'staged'
+      ? { profiles, left: pilot.left, right: pilot.right }
+      : bindSavedWorkerRecipes(profiles, spec.policy, commit);
   const cli = input.cli.bindings.filter(
     (entry) =>
       entry.installationId === profiles.installationId &&
@@ -273,6 +328,7 @@ export async function composeSavedDelegationPilot(input: {
     ...spec.authorities,
     basePolicyDigest: digest(spec.policy),
   });
+  await published?.initialize();
   const policies = createSavedDelegationPolicyStore(db);
   let advertised = false;
   const launchHost: SavedDelegationLaunchHost = {
@@ -291,28 +347,77 @@ export async function composeSavedDelegationPilot(input: {
           'DELEGATION_PILOT_SCOPE_REFUSED',
           409,
         );
-      // Authenticate the configured repository and check the explicit branch before freezing the staged seed.
-      if ((await input.readBranchHead(repository.config, policy.sourceBranch)) !== source.commit)
-        configurationError(
-          'The pilot branch moved. Refresh and review its pinned source before launch.',
-          'DELEGATION_PILOT_SOURCE_CHANGED',
-          409,
-        );
+      const ref = 'refs/heads/' + policy.sourceBranch;
+      const source = await (async () => {
+        if (pilot.kind === 'staged') {
+          if (
+            (await input.readBranchHead(repository.config, policy.sourceBranch)) !==
+            pilot.source.commit
+          )
+            configurationError(
+              'The branch moved. Review a new pinned source.',
+              'DELEGATION_PILOT_SOURCE_CHANGED',
+              409,
+            );
+          return { ...pilot.source, ref, repositoryDigest: spec.repositoryDigest };
+        }
+        try {
+          const pin = await published!.resolve(
+            repository.config,
+            policy.sourceBranch,
+            spec.repositoryDigest,
+          );
+          return {
+            ...pin,
+            baseTransport: publishedBaseTransport,
+            resultTransport: 'anchored/v1' as const,
+            bundleDigest: sha256(publishedSeedReceipt(pin)),
+          };
+        } catch (error) {
+          if (error instanceof Error && error.message === 'published-delegation-branch-moved')
+            configurationError(
+              'The branch moved. Review a new pinned source.',
+              'DELEGATION_PILOT_SOURCE_CHANGED',
+              409,
+            );
+          configurationError(
+            'Could not retain the authenticated published source. Nothing was launched.',
+            'DELEGATION_PUBLISHED_SOURCE_UNAVAILABLE',
+            503,
+          );
+        }
+      })();
+      const { left, right } = recipesFor(source.commit);
+      if (published) {
+        try {
+          await published.withBase(source, async (mirror) => {
+            for (const role of policy.workers)
+              await withScopedSandboxWorkerSource(
+                mirror,
+                source.commit,
+                { tree: source.tree, files: role.files },
+                async () => {},
+              );
+          });
+        } catch {
+          configurationError(
+            'Could not verify the scoped text files at the reviewed Git commit.',
+            'DELEGATION_WORKER_SOURCE_UNAVAILABLE',
+            409,
+          );
+        }
+      }
       const budgetExpiry = Math.min(
         ...[left, right].map((entry) => entry.template.effectiveGrant.budget.expiresAt),
       );
       if (budgetExpiry <= Math.floor(Date.now() / 1000) + 300)
         configurationError(
-          'The staged worker recipes expire too soon for a new pilot Task',
+          'The reviewed worker grants expire too soon for a new Task',
           'DELEGATION_PILOT_RECIPE_EXPIRED',
           409,
         );
       return {
-        source: {
-          ...source,
-          repositoryDigest: spec.repositoryDigest,
-          ref: 'refs/heads/' + policy.sourceBranch,
-        },
+        source,
         workers: [left.binding, right.binding],
         authorities: spec.authorities,
         checksDigest: policy.checksDigest,
@@ -320,13 +425,40 @@ export async function composeSavedDelegationPilot(input: {
         runtimeDigest,
       };
     },
-    async readSeedBundle(plan) {
+    async readSeedBundle(plan, config) {
+      const source = plan.pins.source;
       if (
         plan.policyId !== spec.policyId ||
         plan.pins.runtimeDigest !== runtimeDigest ||
-        plan.pins.source.bundleDigest !== source.bundleDigest
+        (pilot.kind === 'staged'
+          ? source.bundleDigest !== pilot.source.bundleDigest
+          : source.baseTransport !== publishedBaseTransport)
       )
         throw new Error('saved-delegation-pilot-plan-refused');
+      if (published) {
+        const repository = config.repository;
+        if (!repository || configurationDigest(repository.config) !== source.repositoryDigest)
+          configurationError(
+            'The reviewed repository configuration changed.',
+            'DELEGATION_PILOT_SOURCE_CHANGED',
+            409,
+          );
+        try {
+          await published.assertCurrent(repository.config, spec.policy.sourceBranch, source.commit);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'published-delegation-branch-moved')
+            configurationError(
+              'The branch moved. Review a new pinned source.',
+              'DELEGATION_PILOT_SOURCE_CHANGED',
+              409,
+            );
+          configurationError(
+            'Could not recheck the authenticated published branch. Nothing was launched.',
+            'DELEGATION_PUBLISHED_SOURCE_UNAVAILABLE',
+            503,
+          );
+        }
+      }
       const policy = savedDelegationGatePolicy(plan);
       const signer = createEvaluatorDispatchSigner(dispatchKeys, policy);
       const binding = {
@@ -344,6 +476,7 @@ export async function composeSavedDelegationPilot(input: {
             {
               ...binding,
               basePolicyDigest: policy.basePolicyDigest,
+              ...(source.resultTransport ? { resultTransport: source.resultTransport } : {}),
             },
             policy,
           );
@@ -359,8 +492,23 @@ export async function composeSavedDelegationPilot(input: {
           409,
         );
       }
-      return Buffer.from(bundle);
+      return pilot.kind === 'staged' ? Buffer.from(pilot.bundle) : publishedSeedReceipt(source);
     },
+    ...(published
+      ? {
+          verifyPublishedSeed: async (plan) => {
+            try {
+              await published.withBase(plan.pins.source, async () => {});
+            } catch {
+              configurationError(
+                'The reviewed Git commit is not available in retained custody. Nothing was launched.',
+                'DELEGATION_PUBLISHED_SOURCE_UNAVAILABLE',
+                503,
+              );
+            }
+          },
+        }
+      : {}),
   };
   return {
     launchHost,
@@ -375,10 +523,16 @@ export async function composeSavedDelegationPilot(input: {
     },
     async attach(podId: string) {
       const { plan, checkpoint } = readSavedDelegationAdmission(db, podId, principal);
-      if (plan.policyId !== spec.policyId || plan.pins.runtimeDigest !== runtimeDigest)
+      if (
+        plan.policyId !== spec.policyId ||
+        plan.pins.runtimeDigest !== runtimeDigest ||
+        Boolean(published) !== (plan.pins.source.baseTransport === publishedBaseTransport)
+      )
         throw new Error('saved-delegation-pilot-run-mismatch');
+      const bound = recipesFor(checkpoint.commit);
+      const { left, right } = bound;
       const managed = composeManagedProfileSet(
-        profiles,
+        bound.profiles,
         { ...input.cli, bindings: cli },
         {
           db,
@@ -412,8 +566,20 @@ export async function composeSavedDelegationPilot(input: {
           service: managed.components.service,
           collector: managed.privateRuntime,
           withWorkerSource: (mirror, _run, use) =>
-            managed.withCheckpoint(checkpoint, mirror, () => use()),
+            managed.withCheckpoint(
+              {
+                ...checkpoint,
+                ...(plan.pins.source.resultTransport === 'anchored/v1'
+                  ? { scopedTree: checkpoint.tree }
+                  : {}),
+              },
+              mirror,
+              () => use(),
+            ),
           observeParentSource: input.observeParentSource,
+          ...(published
+            ? { withPublishedBase: (use) => published.withBase(plan.pins.source, use) }
+            : {}),
         });
         await managed.resume();
       } catch (error) {

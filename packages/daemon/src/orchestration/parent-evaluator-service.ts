@@ -5,6 +5,8 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { sha256 } from '../managed/canonical.js';
+import { managedGit } from '../managed/source-git.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
 import { gatePolicySchema, gateStatementBytes } from './combined-attestation.js';
 import {
   parentEvaluatorLeaseSchema,
@@ -26,7 +28,10 @@ const serviceBase = z
   .strict();
 const serviceSchema = z.union([
   serviceBase.extend({ lease: parentEvaluatorLeaseSchema }),
-  serviceBase.extend({ enrollment: evaluatorEnrollmentConfigSchema }),
+  serviceBase.extend({
+    enrollment: evaluatorEnrollmentConfigSchema,
+    publishedMirror: absolute.optional(),
+  }),
 ]);
 
 async function readProtected(filename: string, cap: number, secret = false) {
@@ -76,14 +81,42 @@ export async function startParentEvaluatorService(configFile: string, credential
   const cfg = serviceSchema.parse(
     JSON.parse((await readProtected(configFile, 16384)).toString('utf8')),
   );
-  const mode = 'lease' in cfg ? { lease: cfg.lease } : { enrollment: cfg.enrollment };
-  if (mode.lease && Date.now() >= mode.lease.expiresAt * 1000)
+  if ('lease' in cfg && Date.now() >= cfg.lease.expiresAt * 1000)
     throw new Error('evaluator-service-lease-expired');
   const state = await ownedDirectory(cfg.stateDir, true);
   const scratch = await ownedDirectory(cfg.scratch, true);
   const socketDir = await ownedDirectory(path.dirname(cfg.socket), false);
   if (overlap(state, scratch) || overlap(state, socketDir) || overlap(scratch, socketDir))
     throw new Error('evaluator-service-directory-overlap');
+  const published = 'publishedMirror' in cfg ? cfg.publishedMirror : undefined;
+  if (published) {
+    const directory = await lstat(published);
+    if (
+      !directory.isDirectory() ||
+      directory.mode & 0o022 ||
+      (await realpath(published)) !== published ||
+      [state, scratch, socketDir].some((other) => overlap(published, other)) ||
+      (await managedGit(published, ['rev-parse', '--is-bare-repository'])) !== 'true'
+    )
+      throw new Error('evaluator-service-published-mirror-invalid');
+  }
+  const resolveBase = published
+    ? async (predecessor: string): Promise<ParentDeltaSource> => {
+        if (
+          !/^[a-f0-9]{40}$/.test(predecessor) ||
+          (await managedGit(published, ['rev-parse', '--verify', `${predecessor}^{commit}`])) !==
+            predecessor
+        )
+          throw new Error('evaluator-service-published-base-unavailable');
+        const tree = await managedGit(published, [
+          'rev-parse',
+          '--verify',
+          `${predecessor}^{tree}`,
+        ]);
+        return { base: predecessor, tree, withBase: (use) => use(published) };
+      }
+    : undefined;
+  const mode = 'lease' in cfg ? { lease: cfg.lease } : { enrollment: cfg.enrollment, resolveBase };
   if (!/^[A-Za-z0-9_-]{1,48}\.sock$/.test(path.basename(cfg.socket)))
     throw new Error('evaluator-service-socket-invalid');
   const existing = await lstat(cfg.socket).catch((error: NodeJS.ErrnoException) => {

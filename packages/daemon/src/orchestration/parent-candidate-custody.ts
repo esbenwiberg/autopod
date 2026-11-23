@@ -4,6 +4,7 @@ import { digest, sha256 } from '../managed/canonical.js';
 import type { ManagedContainerRuntime } from '../managed/container-runtime.js';
 import { MAX_PRIVATE_HEAD_BYTES } from '../managed/private-head-export.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
+import { type ParentDeltaSource, restoreParentSource } from './anchored-delegation-source.js';
 import { type CandidatePathAllowance, validateCandidatePathScope } from './candidate-path-scope.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { verifyParentPrivateSource } from './parent-private-source.js';
@@ -147,6 +148,7 @@ export async function retainParentWorkerCandidate(
   hostScope: readonly CandidatePathAllowance[],
   maxBytes = MAX_PRIVATE_HEAD_BYTES,
   assertCollectionAuthority: () => void = () => {},
+  delta?: ParentDeltaSource,
 ) {
   const allowlist = structuredClone(hostScope);
   const scopeDigest = digest(allowlist);
@@ -190,13 +192,18 @@ export async function retainParentWorkerCandidate(
     },
     assertCurrent,
   );
-  const verified = await verifyParentPrivateSource(scratch, exported.bundle, {
-    base: row.base_commit,
-    commit: exported.commit,
-    tree: exported.tree,
-    allowlist,
-    maxBundleBytes: maxBytes,
-  });
+  const verified = await verifyParentPrivateSource(
+    scratch,
+    exported.bundle,
+    {
+      base: row.base_commit,
+      commit: exported.commit,
+      tree: exported.tree,
+      allowlist,
+      maxBundleBytes: maxBytes,
+    },
+    delta,
+  );
   const body = {
     schemaVersion: 1,
     candidateId: `parent-private-${row.pod_id}`,
@@ -247,6 +254,7 @@ export async function inspectParentCandidate(
       allowlist: readonly CandidatePathAllowance[];
     }
   >,
+  delta?: ParentDeltaSource,
 ) {
   const selection = structuredClone(input);
   const { receipt, bundle, base, authorityDigest, scopeDigest, tree } = readParentCandidate(
@@ -256,7 +264,9 @@ export async function inspectParentCandidate(
   );
   if (scopeDigest !== digest(selection.allowlist) || tree !== selection.expectedTree)
     throw new Error('parent-candidate-scope-mismatch');
-  const scoped = await withVerifiedCheckpointMirror(
+  const scoped = await restoreParentSource(
+    withVerifiedCheckpointMirror,
+    delta,
     scratch,
     { predecessor: base, commit: receipt.newCommit, tree: selection.expectedTree },
     bundle,
@@ -267,6 +277,7 @@ export async function inspectParentCandidate(
         candidate: receipt.newCommit,
         expectedTree: selection.expectedTree,
         allowlist: selection.allowlist,
+        allowInheritedLinks: Boolean(delta),
       }),
   );
 

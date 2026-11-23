@@ -8,6 +8,7 @@ import { canonical, digest, sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
 import { combinedPolicyDigest } from './combined-attestation.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
+import { publishedBaseTransport, publishedSeedReceipt } from './published-delegation-base.js';
 import { prepareSavedDelegationLaunch, savedDelegationRunId } from './saved-delegation-launch.js';
 import { type DelegationPrincipal, delegationOwnerDigest } from './saved-delegation-policy.js';
 
@@ -35,7 +36,10 @@ function describeSeed(plan: Plan) {
   // Verifies origin and exact Git bytes, not checks/review of a combined result.
   const manifest = canonical({
     version: 1,
-    origin: 'saved-delegation-seed/v1',
+    origin:
+      plan.pins.source.baseTransport === publishedBaseTransport
+        ? publishedBaseTransport
+        : 'saved-delegation-seed/v1',
     subject,
     bundleDigest,
   });
@@ -108,7 +112,9 @@ export function readSavedDelegationAdmission(
     row.operator_owned !== 1 ||
     row.seed_evidence_digest !== checkpoint.evidenceDigest ||
     row.manifest !== manifest ||
-    sha256(row.bundle) !== plan.pins.source.bundleDigest
+    sha256(row.bundle) !== plan.pins.source.bundleDigest ||
+    (plan.pins.source.baseTransport === publishedBaseTransport &&
+      !row.bundle.equals(publishedSeedReceipt(plan.pins.source)))
   )
     corrupt();
   return { plan, checkpoint, bundle: row.bundle };
@@ -147,7 +153,8 @@ export async function admitSavedDelegationLaunch(
   input: Planning & {
     db: Database.Database;
     scratch: string;
-    readSeedBundle(plan: Readonly<Plan>): Promise<Buffer>;
+    readSeedBundle(plan: Readonly<Plan>, config: Readonly<EffectiveLaunchConfig>): Promise<Buffer>;
+    verifyPublishedSeed?(plan: Readonly<Plan>): Promise<void>;
     insertPod(config: EffectiveLaunchConfig): string;
   },
 ) {
@@ -182,7 +189,7 @@ export async function admitSavedDelegationLaunch(
     request,
     principal,
   });
-  const raw = await input.readSeedBundle(structuredClone(plan));
+  const raw = await input.readSeedBundle(structuredClone(plan), structuredClone(config));
   if (!Buffer.isBuffer(raw) || raw.length < 1 || raw.length > MAX_CANDIDATE_BYTES)
     configurationError(
       'Saved delegation seed bundle is outside custody limits',
@@ -193,7 +200,13 @@ export async function admitSavedDelegationLaunch(
   if (sha256(bundle) !== plan.pins.source.bundleDigest)
     configurationError('Seed bundle changed after review', 'DELEGATION_SEED_INVALID', 409);
   const { manifest, checkpoint } = describeSeed(plan);
-  await withVerifiedCheckpointMirror(input.scratch, checkpoint, bundle, async () => {});
+  if (plan.pins.source.baseTransport === publishedBaseTransport) {
+    if (!input.verifyPublishedSeed || !bundle.equals(publishedSeedReceipt(plan.pins.source)))
+      configurationError('Published source custody is unavailable', 'DELEGATION_SEED_INVALID', 409);
+    await input.verifyPublishedSeed(structuredClone(plan));
+  } else {
+    await withVerifiedCheckpointMirror(input.scratch, checkpoint, bundle, async () => {});
+  }
 
   const db = input.db;
   const result = snapshots.admit({
