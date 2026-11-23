@@ -12,6 +12,7 @@ import { combinedPolicyDigest, verifyGateReceipt } from './combined-attestation.
 import { createParentEvaluatorClient } from './parent-evaluator-client.js';
 import { createEvaluatorDispatchSigner } from './parent-evaluator-dispatch.js';
 import { registerParentEvaluatorEndpoint } from './parent-evaluator-endpoint.js';
+import { type EvaluatorEnrollment, enrollParentEvaluators } from './parent-evaluator-enrollment.js';
 import { readinessDigest, requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { startParentEvaluatorService } from './parent-evaluator-service.js';
 import { parentIntegrationGateDigest } from './parent-integration-qualified.js';
@@ -91,6 +92,7 @@ async function fixture() {
       reject?: boolean;
       signerUnavailable?: boolean;
       dispatchPublicKey?: string;
+      enrollment?: { dispatchPublicKey: string; leaseSeconds?: number };
     } = {},
   ) => {
     const stateDir = path.join(root, 'state-' + role);
@@ -125,13 +127,24 @@ async function fixture() {
     registerParentEvaluatorEndpoint(app, {
       policy,
       role,
-      lease: {
-        ...lease,
-        ...(config.dispatchPublicKey
-          ? { dispatchPublicKey: config.dispatchPublicKey }
-          : { inputDigest: parentIntegrationGateDigest(request) }),
-        ...(config.expired ? { expiresAt: 1 } : {}),
-      },
+      ...(config.enrollment
+        ? {
+            enrollment: {
+              repository: lease.repository,
+              paths: lease.paths,
+              dispatchPublicKey: config.enrollment.dispatchPublicKey,
+              leaseSeconds: config.enrollment.leaseSeconds ?? 600,
+            },
+          }
+        : {
+            lease: {
+              ...lease,
+              ...(config.dispatchPublicKey
+                ? { dispatchPublicKey: config.dispatchPublicKey }
+                : { inputDigest: parentIntegrationGateDigest(request) }),
+              ...(config.expired ? { expiresAt: 1 } : {}),
+            },
+          }),
       stateDir,
       scratch: path.join(root, 'scratch-' + role),
       authorize: () => config.allowed !== false,
@@ -143,9 +156,9 @@ async function fixture() {
   return { request, bundle, policy, endpoint, lease, root };
 }
 
-it.skipIf(process.getuid?.() === 0)(
-  'runs the standalone evaluator on a protected Unix socket only',
-  async () => {
+it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
+  'runs the %s standalone evaluator on a protected Unix socket only',
+  async (mode) => {
     const f = await fixture();
     const root = await realpath(f.root);
     const dirs = ['state', 'scratch', 'sock', 'creds'].map((name) => path.join(root, name));
@@ -175,10 +188,17 @@ it.skipIf(process.getuid?.() === 0)(
       ...f.request,
       subject: { ...f.request.subject, policyDigest: combinedPolicyDigest(policy) },
     };
+    const enrollment = {
+      repository: lease.repository,
+      paths: lease.paths,
+      dispatchPublicKey: lease.dispatchPublicKey,
+      leaseSeconds: 600,
+    };
+    const leaseConfig = mode === 'fixed' ? { lease } : { enrollment };
     await writeFile(recipe, 'export const evaluate = 1', { mode: 0o600 });
     await writeFile(
       cfg,
-      JSON.stringify({ role: 'checks', policy, lease, stateDir, scratch, socket, recipe }),
+      JSON.stringify({ role: 'checks', policy, ...leaseConfig, stateDir, scratch, socket, recipe }),
       { mode: 0o600 },
     );
     await writeFile(
@@ -214,13 +234,8 @@ it.skipIf(process.getuid?.() === 0)(
       },
       policy,
     );
-    const body = JSON.stringify({
-      request,
-      bundle: f.bundle.toString('base64'),
-      dispatch: authorize('checks', input),
-    });
-    const result = await new Promise<{ status: number | undefined; body: string }>(
-      (resolve, reject) => {
+    const post = (body: string) =>
+      new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
         const req = httpRequest(
           {
             socketPath: socket,
@@ -244,7 +259,41 @@ it.skipIf(process.getuid?.() === 0)(
         req.on('error', reject);
         req.setTimeout(3000, () => req.destroy(new Error('fixture timeout')));
         req.end(body);
-      },
+      });
+    if (mode === 'automatic') {
+      const urls = {
+        checks: 'https://checks.fixture.example/verify',
+        independentReview: 'https://review.fixture.example/verify',
+      };
+      const dispatched: typeof fetch = async (url, init) => {
+        // This standalone test owns checks only; the two-role test below verifies both roles.
+        if (url !== urls.checks) throw new Error('second role not configured in this fixture');
+        const result = await post(String(init?.body));
+        expect(result.status).toBe(200);
+        return new Response(result.body, { status: result.status });
+      };
+      await expect(
+        enrollParentEvaluators(
+          urls,
+          dispatched,
+          authorize,
+          {
+            run: lease.run,
+            repository: lease.repository,
+            predecessor: lease.predecessor,
+            paths: lease.paths,
+            basePolicyDigest: policy.basePolicyDigest,
+          },
+          policy,
+        ),
+      ).rejects.toThrow('second role not configured');
+    }
+    const result = await post(
+      JSON.stringify({
+        request,
+        bundle: f.bundle.toString('base64'),
+        dispatch: authorize('checks', input),
+      }),
     );
     expect(result.status).toBe(200);
     expect(verifyGateReceipt(policy, 'checks', input, JSON.parse(result.body)).status).toBe(
@@ -367,6 +416,115 @@ it('authorizes an unknown-at-enrollment integration on loopback with a separate 
     ).statusCode,
   ).toBe(409);
   expect(restarted.evaluate).not.toHaveBeenCalled();
+});
+
+it('automatically enrolls two fresh Tasks with separate role keys and retains both leases and claims after restart', async () => {
+  const f = await fixture();
+  const c = generateKeyPairSync('ed25519');
+  const r = generateKeyPairSync('ed25519');
+  const pins = {
+    checks: c.publicKey.export({ format: 'jwk' }).x!,
+    independentReview: r.publicKey.export({ format: 'jwk' }).x!,
+  };
+  const roles = ['checks', 'independentReview'] as const;
+  const urls = {
+    checks: 'https://checks.fixture.example/verify',
+    independentReview: 'https://review.fixture.example/verify',
+  };
+  const start = () =>
+    Promise.all(
+      roles.map((role) => f.endpoint(role, { enrollment: { dispatchPublicKey: pins[role] } })),
+    );
+  let evaluators = await start();
+  const transport: typeof fetch = async (url, init) => {
+    const target = evaluators[url === urls.checks ? 0 : 1]!;
+    const result = await target.app.inject({
+      method: 'POST',
+      url: '/verify',
+      headers: { 'content-type': 'application/json' },
+      payload: String(init?.body),
+    });
+    return new Response(result.body, {
+      status: result.statusCode,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const select = (run: string, basePolicyDigest: string) => {
+    const { repository, predecessor, paths } = f.lease;
+    const enrollment = { run, repository, predecessor, paths, basePolicyDigest };
+    const policy = { ...f.policy, basePolicyDigest };
+    const subject = { ...f.request.subject, run, policyDigest: combinedPolicyDigest(policy) };
+    const readiness = { run, repository, predecessor, paths, policyDigest: subject.policyDigest };
+    const request = { ...f.request, subject };
+    const authorize = createEvaluatorDispatchSigner(
+      { checks: c.privateKey, independentReview: r.privateKey },
+      policy,
+    );
+    return {
+      enroll: (change: Partial<EvaluatorEnrollment> = {}, send = transport) =>
+        enrollParentEvaluators(urls, send, authorize, { ...enrollment, ...change }, policy),
+      ready: () => requireEvaluatorReadiness(urls, transport, authorize, readiness),
+      request,
+      client: createParentEvaluatorClient(urls, policy, transport, authorize),
+      policy,
+    };
+  };
+  const a = select(f.lease.run, digest('task-one'));
+  const b = select('b'.repeat(64), digest('task-two'));
+  const wrongRole: typeof fetch = async (url, init) =>
+    transport(url === urls.checks ? urls.independentReview : urls.checks, init);
+  await expect(a.enroll({}, wrongRole)).rejects.toThrow('unavailable');
+  await expect(a.ready()).rejects.toThrow('not-ready');
+  await expect(a.client.checks(a.request, f.bundle)).rejects.toThrow('unavailable');
+  await expect(a.enroll({ repository: 'other' })).rejects.toThrow('unavailable');
+  await expect(a.enroll({ paths: ['sample/count.txt'] })).rejects.toThrow('unavailable');
+  await Promise.all([a.enroll(), a.enroll()]);
+  await expect(
+    b.enroll({}, (url, init) =>
+      url === urls.independentReview
+        ? Promise.resolve(new Response(null, { status: 503 }))
+        : transport(url, init),
+    ),
+  ).rejects.toThrow('unavailable');
+  await expect(b.ready()).rejects.toThrow('not-ready');
+  await expect(a.enroll({ predecessor: 'd'.repeat(40) })).rejects.toThrow('unavailable');
+  await expect(select(f.lease.run, digest('substituted-policy')).enroll()).rejects.toThrow(
+    'unavailable',
+  );
+  for (const evaluator of evaluators) expect(evaluator.evaluate).not.toHaveBeenCalled();
+  const first = await a.client.checks(a.request, f.bundle);
+  expect(
+    verifyGateReceipt(a.policy, 'checks', parentIntegrationGateDigest(a.request), first).receipt,
+  ).toEqual(first);
+  for (const evaluator of evaluators) await evaluator.app.close();
+  evaluators = await start();
+  await b.enroll();
+  await b.ready();
+  await expect(a.enroll()).rejects.toThrow('unavailable');
+  await expect(a.client.checks(a.request, f.bundle)).rejects.toThrow('unavailable');
+  for (const [task, role] of [
+    [a, 'independentReview'],
+    [b, 'checks'],
+    [b, 'independentReview'],
+  ] as const) {
+    const receipt = await task.client[role](task.request, f.bundle);
+    expect(
+      verifyGateReceipt(task.policy, role, parentIntegrationGateDigest(task.request), receipt)
+        .receipt,
+    ).toEqual(receipt);
+  }
+  expect(evaluators[0]!.evaluate).toHaveBeenCalledTimes(1);
+  expect(evaluators[1]!.evaluate).toHaveBeenCalledTimes(2);
+  const unused = select('c'.repeat(64), digest('expires-unused'));
+  await unused.enroll();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 601_000);
+  try {
+    await expect(unused.enroll()).rejects.toThrow('unavailable');
+    await expect(unused.client.checks(unused.request, f.bundle)).rejects.toThrow('unavailable');
+    expect(evaluators[0]!.evaluate).toHaveBeenCalledTimes(1);
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it('fails closed for unauthenticated, expired, changed or oversized input without evaluating', async () => {

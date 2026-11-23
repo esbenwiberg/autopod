@@ -69,7 +69,6 @@ export function createParentEvaluatorClient(
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         redirect: 'error',
         credentials: 'omit',
-        cache: 'no-store',
         signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           request,

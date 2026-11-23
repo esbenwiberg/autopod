@@ -41,7 +41,6 @@ export async function requireEvaluatorReadiness(
       body: JSON.stringify({ readiness: binding, dispatch: sign(role, expected) }),
       redirect: 'error',
       credentials: 'omit',
-      cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok || response.redirected)
