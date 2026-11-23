@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_STUCK_RUNNING_THRESHOLD_MS,
+  resolveStuckRunningThresholdMs,
+} from '../util/stuck-running-threshold.js';
 import type { ClaudeStreamEvent } from './claude-stream-parser.js';
-import { ClaudeBackgroundTasks } from './claude-turn-finality.js';
+import {
+  BACKGROUND_WAIT_WATCHDOG_MARGIN_MS,
+  ClaudeBackgroundTasks,
+  DEFAULT_CLAUDE_BACKGROUND_WAIT_MS,
+  describeInterruptedClaudeTurn,
+  resolveClaudeBackgroundWaitMs,
+} from './claude-turn-finality.js';
 
 const system = (subtype: string, fields: Record<string, unknown> = {}): ClaudeStreamEvent => ({
   type: 'system',
@@ -75,5 +85,66 @@ describe('ClaudeBackgroundTasks', () => {
     expect(tasks.observe(system('background_tasks_changed', { tasks: 'x' }))).toBe(false);
     expect(tasks.observe(null as unknown as ClaudeStreamEvent)).toBe(false);
     expect(tasks.size).toBe(0);
+  });
+});
+
+describe('Claude background wait bounds', () => {
+  const MIN = 60_000;
+
+  it('defaults to 25 min, strictly inside the stuck-pod watchdog with settlement headroom', () => {
+    expect(DEFAULT_CLAUDE_BACKGROUND_WAIT_MS).toBe(25 * MIN);
+    expect(resolveStuckRunningThresholdMs({})).toBe(DEFAULT_STUCK_RUNNING_THRESHOLD_MS);
+    expect(resolveClaudeBackgroundWaitMs({})).toBe(25 * MIN);
+    // Wait + exit wait + verified kill (≤ ~65 s) must settle before the watchdog fires.
+    expect(
+      resolveClaudeBackgroundWaitMs({}) + BACKGROUND_WAIT_WATCHDOG_MARGIN_MS,
+    ).toBeLessThanOrEqual(resolveStuckRunningThresholdMs({}));
+    expect(BACKGROUND_WAIT_WATCHDOG_MARGIN_MS).toBeGreaterThan(65_000);
+  });
+
+  it('clamps an override below the configured watchdog threshold', () => {
+    expect(
+      resolveClaudeBackgroundWaitMs({ AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS: String(60 * MIN) }),
+    ).toBe(27 * MIN);
+    const env = {
+      AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS: String(25 * MIN),
+      AUTOPOD_STUCK_RUNNING_THRESHOLD_MS: String(20 * MIN),
+    };
+    expect(resolveClaudeBackgroundWaitMs(env)).toBe(17 * MIN);
+    expect(
+      resolveClaudeBackgroundWaitMs(env) + BACKGROUND_WAIT_WATCHDOG_MARGIN_MS,
+    ).toBeLessThanOrEqual(resolveStuckRunningThresholdMs(env));
+    // A watchdog tighter than the margin disables the wait rather than racing it.
+    expect(
+      resolveClaudeBackgroundWaitMs({ AUTOPOD_STUCK_RUNNING_THRESHOLD_MS: String(2 * MIN) }),
+    ).toBe(0);
+  });
+
+  it('honours a shorter override and ignores malformed values', () => {
+    expect(
+      resolveClaudeBackgroundWaitMs({ AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS: String(5 * MIN) }),
+    ).toBe(5 * MIN);
+    expect(resolveClaudeBackgroundWaitMs({ AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS: 'soon' })).toBe(
+      25 * MIN,
+    );
+    expect(resolveStuckRunningThresholdMs({ AUTOPOD_STUCK_RUNNING_THRESHOLD_MS: '-1' })).toBe(
+      DEFAULT_STUCK_RUNNING_THRESHOLD_MS,
+    );
+  });
+});
+
+describe('describeInterruptedClaudeTurn', () => {
+  it('describes only unfinished turns, with counts and the rework path', () => {
+    expect(describeInterruptedClaudeTurn({ kind: 'final' }, 143, 'p1')).toBeNull();
+    expect(describeInterruptedClaudeTurn({ kind: 'none' }, 1, 'p1')).toBeNull();
+    const message = describeInterruptedClaudeTurn(
+      { kind: 'background_pending', pendingTasks: 2, reason: 'cap', waitMs: 25 * 60_000 },
+      143,
+      'p1',
+    );
+    expect(message).toContain('2 background tasks were still running');
+    expect(message).toContain('within 25 min');
+    expect(message).toContain('`ap rework p1`');
+    expect(message?.length).toBeLessThan(1_000);
   });
 });
