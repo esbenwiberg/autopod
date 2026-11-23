@@ -10,6 +10,7 @@ import type {
 } from '@autopod/shared';
 import {
   describeBudgetPause,
+  describeExecutionCapacityWait,
   describeTaskBudgetUsage,
   podStatusSchema,
   WORKSPACE_PRESERVATION_FAILED,
@@ -820,6 +821,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
       if (s.status === 'paused' && s.pauseReason === 'budget')
         console.log(chalk.yellow(describeBudgetPause(s.id, s.taskExecution)));
+      if (s.status === 'queued' && s.infrastructureFailure?.source === 'execution-capacity')
+        console.log(chalk.yellow(describeExecutionCapacityWait(s.infrastructureFailure)));
       if (s.fleetArchivedAt)
         console.log(
           `Fleet archived: ${s.fleetArchivedAt}. Resources retained; execution unchanged.`,

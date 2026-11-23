@@ -12,6 +12,7 @@ import type {
   DispatchPreflightEvidence,
   DispatchPreview,
   EffectiveLaunchConfig,
+  ExecutionCapabilities,
   ExecutionProvenance,
   IssueWatcherBinding,
   IssueWatcherBindingPayload,
@@ -313,6 +314,10 @@ export class AutopodClient {
   }
   async sealInputBundle(id: string): Promise<import('@autopod/shared').InputBundleResponse> {
     return this.request('POST', `/input-bundles/${encodeURIComponent(id)}/seal`);
+  }
+
+  async getConfigurationCapabilities(): Promise<{ execution: ExecutionCapabilities[] }> {
+    return this.request('GET', '/configuration/capabilities');
   }
 
   async resolveLaunch(request: LaunchRequest): Promise<EffectiveLaunchConfig> {
