@@ -17,7 +17,7 @@ func currentFactRequests(
       evidence: evidence.first { $0.factId == request.factId })
   }
   for fact in evidence where fact.status == "pending_human" {
-    if !deviations.contains(where: { $0.factId == fact.factId }) {
+    if !pending.contains(where: { $0.factId == fact.factId }) {
       rows.append(FactRequestPresentation(factId: fact.factId, request: nil, evidence: fact))
     }
   }
@@ -29,8 +29,8 @@ func factWaiverAvailable(
 ) -> Bool {
   guard isCurrent, [.running, .validating, .failed, .reviewRequired].contains(podStatus),
     evidence?.status == "pending_human" else { return false }
-  guard let request else { return true }
-  return request.action == "waive" && request.decision == nil
+  guard let request, request.decision == nil else { return true }
+  return request.action == "waive"
 }
 
 func factWaiverUnavailableReason(evidence: FactCheckDetail?, isCurrent: Bool) -> String? {
@@ -1905,14 +1905,16 @@ public struct ValidationTab: View {
 
   private func factCanApproveWaiver(_ evidence: FactCheckDetail?) -> Bool {
     factWaiverAvailable(evidence: evidence,
-      request: pod.taskSummary?.factDeviations.first { $0.factId == evidence?.factId },
+      request: pod.taskSummary?.factDeviations.first { $0.factId == evidence?.factId && $0.decision == nil },
       isCurrent: selectedHistoryKey == "current", podStatus: pod.status)
   }
 
   private func factWaiverButton(factId: String, evidence: FactCheckDetail?) -> some View {
     let isApproving = approvingFactWaiverIds.contains(factId)
     return Button {
-      factWaiverReason = pod.taskSummary?.factDeviations.first { $0.factId == factId }?.reason ?? ""
+      factWaiverReason = pod.taskSummary?.factDeviations.first {
+        $0.factId == factId && $0.decision == nil
+      }?.reason ?? ""
       factWaiverPopoverFactId = factId
     } label: {
       if isApproving {

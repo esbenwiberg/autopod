@@ -53,7 +53,17 @@ struct FactRequestPresentationTests {
     #expect(rows.count == 1)
     #expect(rows.first?.request?.action == "replace")
     #expect(!factWaiverAvailable(evidence: fact, request: replacement, isCurrent: true, podStatus: .failed))
-    #expect(!factWaiverAvailable(evidence: fact, request: request(decision: "rejected"), isCurrent: true, podStatus: .failed))
-    #expect(currentFactRequests(deviations: [request(decision: "approved_waive")], evidence: [fact]).isEmpty)
+  }
+
+  @Test func priorDecisionsDoNotHideNewValidatorPendingEvidence() {
+    let fact = evidence("pending_human")
+    for decision in ["rejected", "approved_waive", "approved_replace"] {
+      let prior = request(decision: decision)
+      let rows = currentFactRequests(deviations: [prior], evidence: [fact])
+      #expect(rows.count == 1)
+      #expect(rows.first?.request == nil)
+      #expect(factWaiverAvailable(evidence: fact, request: prior, isCurrent: true, podStatus: .failed))
+      #expect(currentFactRequests(deviations: [prior], evidence: []).isEmpty)
+    }
   }
 }
