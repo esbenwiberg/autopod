@@ -60,13 +60,17 @@ import {
 import { bindHostedControllerProfile } from './orchestration/hosted-controller-profile.js';
 import { bindInspectionCodex } from './orchestration/inspection-codex.js';
 import { claimDaemonLifetime } from './orchestration/local-recovery-claim.js';
+import { createManagedLaneOwnership } from './orchestration/managed-lane-ownership.js';
 import {
   assertOperatorRecovery,
   composeOperatorEnrollment,
+  enrolledOperator,
   parseOperatorEnrollment,
 } from './orchestration/operator-enrollment.js';
 import { operatorPartition } from './orchestration/operator-partition.js';
+import { operatorRunId } from './orchestration/operator-runs.js';
 import { composeOperatorSandboxTarget } from './orchestration/operator-sandbox-target.js';
+import { combineParentLanes } from './orchestration/parent-family-lanes.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -880,8 +884,6 @@ const savedPilot =
     ? await (async () => {
         if (
           candidate ||
-          enrollment ||
-          managedProfileSetConfig ||
           managedAcceptanceConfig ||
           !managedCliConfig ||
           !ENTRA_TENANT_ID ||
@@ -893,15 +895,6 @@ const savedPilot =
           process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1'
         )
           throw new Error('saved-delegation-pilot-host-boundary-refused');
-        if (
-          db
-            .prepare(`SELECT 1 FROM managed_pods m
-    WHERE (m.observed_exit=0 OR (m.runtime_ref IS NOT NULL AND m.cleanup<>'observed'))
-      AND NOT EXISTS (SELECT 1 FROM saved_delegation_admissions a WHERE m.dispatcher_installation_id='native.'||a.run_id)
-    LIMIT 1`)
-            .get()
-        )
-          throw new Error('saved-delegation-pilot-unrelated-managed-work-retained');
         const { composeSavedDelegationPilot, observeSavedPilotWorktree } = await import(
           './orchestration/saved-delegation-pilot.js'
         );
@@ -929,6 +922,7 @@ const savedPilot =
           file: savedPilotFile,
           rawAzureTarget: process.env.AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET,
           ordinarySandboxScope: sandboxContainerManager?.executionResourceScope,
+          operatorSandboxScopeDigest: enrollment?.parent?.coding?.sandbox?.resourceScopeDigest,
           credentialsDirectory: process.env.CREDENTIALS_DIRECTORY,
           wakeupJournal: podRepo.sandboxWakeups,
           worktreeDirectory:
@@ -1335,10 +1329,29 @@ if (
     process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1')
 )
   throw new Error('operator-production-boundaries-required');
-if (partition) assertOperatorRecovery(db, partition.run);
+const signedRun =
+  partition?.run ??
+  (savedPilot && enrollment && managedCliConfig && operatorProfiles
+    ? operatorRunId(
+        enrolledOperator(enrollment, managedCliConfig, operatorProfiles),
+        enrollment.slot,
+      )
+    : undefined);
+const coexistence =
+  savedPilot &&
+  createManagedLaneOwnership(db, {
+    ordinaryInstallations: managedProfileSetConfig
+      ? (managedCliConfig?.bindings.map((binding) => binding.installationId) ?? [])
+      : [],
+    signedRun,
+    separateSignedRuntime: Boolean(partition),
+  });
+coexistence?.assertRecovery();
+if (partition || coexistence) assertOperatorRecovery(db, signedRun ?? null, !!savedPilot);
+const ordinaryInstallation = coexistence?.ordinaryRuntime ?? partition?.ordinary;
 const profileRuntime = managedProfileSetConfig
   ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
-      ownsInstallation: partition?.ordinary,
+      ownsInstallation: ordinaryInstallation,
       db,
       databasePath: DB_PATH,
       manager:
@@ -1362,7 +1375,7 @@ const legacyManagedRuntime = managedAcceptanceConfig
 const managedRuntime =
   managedProfileSetConfig?.catalogArtifacts && profileRuntime
     ? composeManagedCatalog(managedProfileSetConfig, profileRuntime, {
-        ownsInstallation: partition?.ordinary,
+        ownsInstallation: ordinaryInstallation,
         db,
         databasePath: DB_PATH,
         manager:
@@ -1415,6 +1428,7 @@ const operatorRuns = enrollment
       db,
       databasePath: DB_PATH,
       isolatedArtifacts: !!partition,
+      savedDelegationRecovery: Boolean(coexistence),
       parentHostGates: candidateBinding?.ports,
       trustedEvaluatorPins:
         candidate?.pins ??
@@ -1465,7 +1479,10 @@ if (operatorRuns?.slots.some((s) => s.parent)) {
 
 // Server
 const app = await createServer({
-  parentManaged: parentManaged ?? savedPilot?.registry,
+  parentManaged:
+    parentManaged && savedPilot
+      ? combineParentLanes(db, parentManaged, savedPilot.registry)
+      : (parentManaged ?? savedPilot?.registry),
   configuration: {
     ...configuration.routes,
     ...(candidate &&
@@ -1487,10 +1504,10 @@ const app = await createServer({
       finishOutputs: () => separateRuntime.components.pipeline.tick(),
     },
   },
-  managed:
-    candidate || savedPilot
-      ? undefined
-      : (managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH)),
+  managed: candidate
+    ? undefined
+    : (managedRuntime ??
+      (savedPilot ? undefined : composeDarkManagedCli(managedCliConfig, db, DB_PATH))),
   podManager,
   profileStore,
   providerAccountStore,

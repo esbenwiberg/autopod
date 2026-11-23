@@ -271,6 +271,7 @@ export async function composeSavedDelegationPilot(input: {
   file: string;
   rawAzureTarget: string;
   ordinarySandboxScope?: string;
+  operatorSandboxScopeDigest?: string;
   credentialsDirectory: string | undefined;
   db: Database.Database;
   databasePath: string;
@@ -319,7 +320,11 @@ export async function composeSavedDelegationPilot(input: {
     managedDatabase: db,
     wakeupJournal: input.wakeupJournal,
   });
-  if (!sandbox || sandbox.executionResourceScope === input.ordinarySandboxScope)
+  if (
+    !sandbox ||
+    sandbox.executionResourceScope === input.ordinarySandboxScope ||
+    spec.sandbox.resourceScopeDigest === input.operatorSandboxScopeDigest
+  )
     throw new Error('saved-delegation-pilot-target-refused');
   const transport = await loadParentEvaluatorTlsFetch(spec.endpoints, input.credentialsDirectory);
   const dispatchKeys = await readEvaluatorDispatchKeys(input.credentialsDirectory);

@@ -469,9 +469,12 @@ fixture checkout, runtime and signer ports; it makes no cloud calls.
 The daemon installs the concrete ports only when `AUTOPOD_SAVED_DELEGATION_PILOT`
 points to a host-owned pilot JSON file. With no pilot configured, the picker
 stays hidden and a retained saved-policy Task cannot use ordinary provisioning.
-The pilot is mutually exclusive with signed trial and Dispatcher execution
-configurations; do not enable it while unrelated managed work still needs its
-runtime. Ordinary nondelegated Tasks are not enrolled by this setting.
+Saved delegation can run alongside reviewed Dispatcher profiles and an
+existing operator enrollment. The daemon partitions recovery by the durable
+installation or run owner, not by model, profile, or an HTTP selector.
+Unresolved managed work without an enrolled owner still blocks startup.
+The standalone signed candidate host and legacy acceptance runtime remain
+exclusive. Ordinary nondelegated Tasks are not enrolled by this setting.
 
 The configuration is a regular owner-only file in a canonical 0700 directory.
 It pins the Entra subject/issuer/audience, saved policy and repository identity,
@@ -479,7 +482,8 @@ reviewed sandbox profiles, dedicated Azure group and ready disk, and the
 independent evaluator endpoints and public pins. Use the daemon's existing
 GitHub read authority and worker accounts. The separate
 `AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET` must resolve to the pinned dedicated
-group, not the ordinary fleet. Supply each evaluator's role-scoped mTLS and
+group, distinct from the ordinary fleet and any independently configured
+operator coding group. Supply each evaluator's role-scoped mTLS and
 Ed25519 dispatch credentials through `CREDENTIALS_DIRECTORY`; never place
 credentials in the pilot JSON or a worker environment.
 

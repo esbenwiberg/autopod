@@ -323,6 +323,7 @@ export function composeOperatorEnrollment(
     db: Database.Database;
     databasePath: string;
     isolatedArtifacts?: boolean;
+    savedDelegationRecovery?: boolean;
     profiles: ManagedProfileSetConfig | undefined;
     cli: ManagedCliConfig | undefined;
     runtime: Runtime | undefined;
@@ -440,7 +441,7 @@ export function composeOperatorEnrollment(
       : deps.bind(e.main);
   if (!provider && !e.parent) throw new Error('inspection-codex-binding-required');
   const prepare = async () => {
-    assertOperatorRecovery(db, run);
+    assertOperatorRecovery(db, run, deps.savedDelegationRecovery);
     const prior = db
       .prepare(
         'SELECT policy_digest,repository,worker_request_limit,max_active FROM orchestration_runs WHERE id=?',

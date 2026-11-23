@@ -4,8 +4,9 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { tryOperatorDaemonOwner } from './local-recovery-claim.js';
+import { type ParentFamilyAccess, registerParentFamilySurface } from './parent-family-lanes.js';
 import { readParentFamily } from './parent-family-read.js';
-import { ParentReviewHandoff, registerParentReviewRoutes } from './parent-review-handoff.js';
+import { ParentReviewHandoff } from './parent-review-handoff.js';
 import type { composeSavedDelegationPilot } from './saved-delegation-pilot.js';
 import { delegationOwnerDigest } from './saved-delegation-policy.js';
 
@@ -74,8 +75,24 @@ export function createSavedDelegationRegistry(
       return null;
     return { run: row.run_id, podId, actorDigest: ownerDigest };
   }
+  const familyAccess = (): ParentFamilyAccess => ({
+    async family(request, podId) {
+      const owner = authorizedOwner(podId, request.user);
+      if (!owner) return { status: 404, code: 'parent-family-not-found' };
+      return {
+        body: {
+          ...readParentFamily(db, podId, owner.run, true),
+          review: review.familyReview(owner, true),
+        },
+      };
+    },
+    async authorizeReview(request, podId) {
+      return authorizedOwner(podId, request.user);
+    },
+  });
   return {
     owns: (podId: string) => !!binding(podId),
+    familyAccess,
     async start() {
       if (release || stopping) throw new Error('saved-delegation-registry-already-started');
       if (lifetimeOwner) {
@@ -159,19 +176,7 @@ export function createSavedDelegationRegistry(
       };
     },
     registerFamily(app: FastifyInstance) {
-      app.get('/orchestration/parents/:podId/family', async (request, reply) => {
-        reply.header('cache-control', 'no-store');
-        const { podId } = request.params as { podId: string };
-        const owner = authorizedOwner(podId, request.user);
-        if (!owner) return reply.code(404).send({ code: 'parent-family-not-found' });
-        return {
-          ...readParentFamily(db, podId, owner.run, true),
-          review: review.familyReview(owner, true),
-        };
-      });
-      registerParentReviewRoutes(app, review, async (request, podId) =>
-        authorizedOwner(podId, request.user),
-      );
+      registerParentFamilySurface(app, db, familyAccess);
     },
   };
 }
