@@ -539,7 +539,6 @@ describe('shared launch request CLI', () => {
         digest: 'a'.repeat(64),
         ...request,
       })),
-      previewDispatch: vi.fn(async () => null),
       launchPod: vi.fn(),
     };
     const program = new Command().exitOverride();
