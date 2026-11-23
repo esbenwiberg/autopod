@@ -544,8 +544,10 @@ trusted, read-only `publishedMirror` containing the pinned commit. Both reject
 registration if the configured transport differs or the base is unavailable.
 The private worker submissions and final approved bundle then carry only
 objects after that base. The standalone evaluators reconstruct and verify the
-combined tree in scratch. Desktop shows the required base commit with the
-bundle; it is not a self-contained copy of the repository. A checkout that
+combined tree in scratch. Existing published symlinks and filenames containing
+`+` are allowed only when their path, Git mode and object ID are unchanged;
+workers cannot add or modify such entries. Desktop shows the required base
+commit with the bundle; it is not a self-contained copy of the repository. A checkout that
 already has that commit can import the approved bundle with
 `git fetch /path/to/result.bundle HEAD` without publishing anything. Existing
 fixed and self-contained runs are unchanged.

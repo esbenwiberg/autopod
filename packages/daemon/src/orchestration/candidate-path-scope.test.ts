@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { managedGit } from '../managed/source-git.js';
-import { type CandidatePathAllowance, validateCandidatePathScope } from './candidate-path-scope.js';
+import {
+  assertPortableCandidateTree,
+  type CandidatePathAllowance,
+  validateCandidatePathScope,
+} from './candidate-path-scope.js';
 
 const roots: string[] = [];
 const identity = [
@@ -166,6 +170,35 @@ describe('validateCandidatePathScope', () => {
         expectedTree: await managedGit(f.repo, ['rev-parse', `${f.base}^{tree}`]),
       }),
     ).rejects.toThrow('candidate-path-scope-tree-mismatch');
+  });
+
+  it('preserves an unchanged published Swift extension filename without widening write scopes', async () => {
+    const f = await fixture();
+    const inheritedName = 'src/Theme+Autopod.swift';
+    await writeFile(path.join(f.repo, inheritedName), '// existing extension\n');
+    const published = await f.commit('published tree');
+    await writeFile(path.join(f.repo, 'README.md'), 'doc change\n');
+    const docs = await f.commit('scoped regular path');
+    const request = {
+      ...(await f.request(docs, [{ kind: 'file', path: 'README.md' }])),
+      base: published,
+    };
+    await expect(validateCandidatePathScope(request)).rejects.toThrow('path-invalid');
+    await expect(
+      validateCandidatePathScope({ ...request, allowInheritedPublishedEntries: true }),
+    ).resolves.toMatchObject({ changedPaths: ['README.md'] });
+    await expect(assertPortableCandidateTree(f.repo, docs, published)).resolves.toBeUndefined();
+    await writeFile(path.join(f.repo, inheritedName), '// changed extension\n');
+    const modified = await f.commit('changed existing name');
+    await expect(assertPortableCandidateTree(f.repo, modified, published)).rejects.toThrow(
+      'path-invalid',
+    );
+    await managedGit(f.repo, ['checkout', '--detach', docs]);
+    await writeFile(path.join(f.repo, 'src/New+Autopod.swift'), '// unapproved new path\n');
+    const added = await f.commit('new nonportable name');
+    await expect(assertPortableCandidateTree(f.repo, added, published)).rejects.toThrow(
+      'path-invalid',
+    );
   });
 
   it('rejects symlinks, submodules, and tracked mode changes', async () => {

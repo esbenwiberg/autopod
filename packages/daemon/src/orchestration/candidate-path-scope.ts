@@ -19,8 +19,8 @@ export interface CandidatePathScopeRequest {
   expectedTree: string;
   /** Host authorization. Candidate-controlled text must never populate this list. */
   allowlist: readonly CandidatePathAllowance[];
-  /** Published, trusted base only. Existing links may stay byte-for-byte unchanged. */
-  allowInheritedLinks?: boolean;
+  /** Published, trusted base only. Inherited exceptions require an unchanged path, mode and object. */
+  allowInheritedPublishedEntries?: boolean;
 }
 
 export interface CandidatePathScopeResult {
@@ -48,14 +48,15 @@ function validateObjectId(value: string, label: string): void {
 
 // The first coding lane deliberately accepts only portable ASCII names.
 const reservedName = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i;
-function validatePath(value: string): string {
+function validatePath(value: string, unchangedPublished = false): string {
+  const syntax = unchangedPublished ? /^[A-Za-z0-9_.+-]{1,255}$/ : /^[A-Za-z0-9_.-]{1,255}$/;
   if (value.length > 4096) fail('path-invalid');
   if (
     value
       .split('/')
       .some(
         (component) =>
-          !/^[A-Za-z0-9_.-]{1,255}$/.test(component) ||
+          !syntax.test(component) ||
           component.endsWith('.') ||
           component.toLowerCase() === '.git' ||
           reservedName.test(component),
@@ -169,9 +170,7 @@ export async function assertPortableCandidateTree(
     decode(await managedGitBytes(repository, ['ls-tree', '-r', '-t', '-z', '--full-tree', ref]));
   const link = /^120000 blob [0-9a-f]{40}\t/;
   if (publishedBase) validateObjectId(publishedBase, 'base-invalid');
-  const inherited = publishedBase
-    ? new Set((await list(publishedBase)).split('\0').filter((entry) => link.test(entry)))
-    : undefined;
+  const inherited = publishedBase ? new Set((await list(publishedBase)).split('\0')) : undefined;
   const text = await list(commit);
   if (!text) return; // All files may have been deleted within the grant.
   if (!text.endsWith('\0')) fail('tree-invalid');
@@ -180,13 +179,14 @@ export async function assertPortableCandidateTree(
   if (entries.length > 20_000) fail('tree-too-large');
   for (const entry of entries) {
     const tab = entry.indexOf('\t');
+    const unchangedPublished = inherited?.has(entry) === true;
     if (
       tab < 0 ||
       (!/^(?:040000 tree|100(?:644|755) blob) [0-9a-f]{40}$/.test(entry.slice(0, tab)) &&
-        !inherited?.has(entry))
+        !(unchangedPublished && link.test(entry)))
     )
       fail('tree-invalid');
-    const key = portablePathKey(validatePath(entry.slice(tab + 1)));
+    const key = portablePathKey(validatePath(entry.slice(tab + 1), unchangedPublished));
     if (names.has(key)) fail('path-collision');
     names.add(key);
   }
@@ -287,7 +287,7 @@ export async function validateCandidatePathScope(
   await assertPortableCandidateTree(
     request.repository,
     request.candidate,
-    request.allowInheritedLinks ? request.base : undefined,
+    request.allowInheritedPublishedEntries ? request.base : undefined,
   );
   return { base: request.base, candidate: request.candidate, tree: commit.tree, changedPaths };
 }
