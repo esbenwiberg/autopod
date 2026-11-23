@@ -80,8 +80,27 @@ export function createProvisioningWorkspace(
     let { launchConfig, pod, podId, lifecycleGeneration } = input;
     const { emitStatus, assertStartupCurrent } = input.run;
     const run = input.run;
-    if (launchConfig && deps.launchConfiguration)
-      await deps.launchConfiguration.assertCurrentCapabilities(launchConfig);
+    if (launchConfig && deps.launchConfiguration) {
+      // The gate also requires a verified Docker host size before any workspace or
+      // container effect; while unverified the caller keeps the pod queued (#665).
+      const configuration = deps.launchConfiguration;
+      if (
+        pod.status === 'queued' &&
+        !podRepo.retainedCoding?.isOwner(podId) &&
+        configuration.assertExecutionCapacity
+      ) {
+        await configuration.assertExecutionCapacity(launchConfig);
+        assertStartupCurrent();
+        pod = podRepo.getOrThrow(podId);
+        if (pod.infrastructureFailure?.source === 'execution-capacity') {
+          podRepo.update(podId, { infrastructureFailure: null });
+          pod = podRepo.getOrThrow(podId);
+          emitStatus('Docker host capacity verified — provisioning.');
+        }
+      } else {
+        await configuration.assertCurrentCapabilities(launchConfig);
+      }
+    }
     const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
     if (
       !podRepo.sandboxStartupRetries &&

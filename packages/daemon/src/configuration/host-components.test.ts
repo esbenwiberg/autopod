@@ -255,6 +255,116 @@ describe('configuration host composition', () => {
   });
 });
 
+describe('transient Docker host capacity (#665)', () => {
+  const healthy = async () => ({ MemTotal: 8 * 1024 ** 3, NCPU: 4 });
+  function setup(ctx: ReturnType<typeof createTestContext>) {
+    const fixture = createTestConfiguration(ctx.db);
+    const accounts = createProviderAccountStore(ctx.db);
+    accounts.create({
+      id: 'account',
+      name: 'Account',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'fixture-key' },
+    });
+    return (info: () => Promise<unknown>) =>
+      createHostConfigurationComponents({
+        db: ctx.db,
+        logger: ctx.deps.logger,
+        pods: ctx.podRepo,
+        accounts,
+        audit: createActionAuditRepository(ctx.db),
+        cipher: { encrypt: (value) => `fixture:${value}`, decrypt: (value) => value.slice(8) },
+        githubAuth: {
+          resolveCredential: vi.fn(async () => ({ token: 'protected-fixture', username: 'op' })),
+          getStatus: vi.fn(),
+        },
+        azureDevOpsAuth: { getToken: vi.fn() },
+        images: {
+          resolveEnvironment: fixture.services.resolveEnvironment,
+          buildEnvironmentImage: vi.fn(),
+        },
+        reviewerManager: () => ctx.containerManager,
+        docker: { info } as unknown as Dockerode,
+        sandboxEnabled: false,
+        sandboxDefaultTier: 'M',
+        settings: hostConfigurationSettingsSchema.parse({
+          reviewerImages: { local: `trusted/reviewer@sha256:${'a'.repeat(64)}` },
+        }),
+        podManager: vi.fn(),
+        admissionReady: () => ({ ready: true }),
+      });
+  }
+  function compose(ctx: ReturnType<typeof createTestContext>, info: () => Promise<unknown>) {
+    return setup(ctx)(info);
+  }
+  const request = {
+    repositoryId: 'repo-a',
+    task: 'Review configuration',
+    selections: { githubAccessId: null },
+  };
+
+  it('admits launches and passes in-flight re-checks, but holds new containers while Docker cannot report host size', async () => {
+    const ctx = createTestContext();
+    try {
+      const build = setup(ctx);
+      const expected = await resolveLaunch(request, build(healthy).resolution);
+      const components = build(async () => {
+        throw new Error('Docker engine is busy');
+      });
+      const capabilities = (await components.routes.capabilities()) as {
+        execution: Array<{ target: string; available: boolean; hostCapacity?: unknown }>;
+      };
+      expect(capabilities.execution.find((item) => item.target === 'local')).toMatchObject({
+        available: true,
+        hostCapacity: {
+          state: 'unverified',
+          probeFailure: { kind: 'error', message: 'Docker engine is busy' },
+        },
+      });
+
+      // Admission and preview: admitted with the same frozen allocation and digest.
+      const admitted = await resolveLaunch(request, components.resolution);
+      expect(admitted.resolvedExecution).toEqual(expected.resolvedExecution);
+      expect(admitted.digest).toBe(expected.digest);
+
+      // In-flight re-checks (validation retry resume, runtime priming, MCP proxy).
+      await expect(
+        components.launchConfiguration.assertCurrentCapabilities(admitted),
+      ).resolves.toBeUndefined();
+
+      // Provisioning gate: transient, typed and carrying the underlying failure.
+      await expect(
+        components.launchConfiguration.assertExecutionCapacity?.(admitted),
+      ).rejects.toMatchObject({
+        code: 'EXECUTION_CAPACITY_UNVERIFIED',
+        statusCode: 503,
+        hostCapacity: { state: 'unverified', probeFailure: { kind: 'error' } },
+      });
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it('keeps a request that cannot fit the reported host a permanent refusal', async () => {
+    const ctx = createTestContext();
+    try {
+      const components = compose(ctx, healthy);
+      await expect(
+        resolveLaunch(
+          { ...request, overrides: { execution: { main: { memoryGb: 16 } } } },
+          components.resolution,
+        ),
+      ).rejects.toMatchObject({ code: 'ALLOCATION_UNSUPPORTED' });
+      const admitted = await resolveLaunch(request, components.resolution);
+      await expect(
+        components.launchConfiguration.assertExecutionCapacity?.(admitted),
+      ).resolves.toBeUndefined();
+    } finally {
+      ctx.db.close();
+    }
+  });
+});
+
 describe('reviewer image selection', () => {
   const pinned = (c: string) => `registry.test/autopod-node22@sha256:${c.repeat(64)}`;
   const logger = { warn: vi.fn() };

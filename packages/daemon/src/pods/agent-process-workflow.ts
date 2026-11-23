@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises';
 import type { RuntimeEvent as AgentEvent, EscalationRequest } from '@autopod/shared';
 import { AutopodError, generateId, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
+import { isExecutionCapacityUnverified } from '../configuration/backend-capabilities.js';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import type { CodexRuntime } from '../runtimes/codex-runtime.js';
@@ -60,6 +61,7 @@ export function createAgentProcessWorkflow(
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,
     scheduleHostFetchRetry,
+    scheduleExecutionCapacityRetry,
     emitActivityError,
     transition,
     escalationRepo,
@@ -786,6 +788,15 @@ export function createAgentProcessWorkflow(
         const current = podRepo.getOrThrow(podId);
         if (current.status === 'queued') scheduleHostFetchRetry(current, err);
         return;
+      }
+      // Provisioning gate (#665): Docker could not report host capacity before any
+      // workspace/container effect. Transient — wait in the queue, never fail.
+      if (isExecutionCapacityUnverified(err) && !podRepo.retainedCoding?.isOwner(podId)) {
+        const current = podRepo.getOrThrow(podId);
+        if (current.status === 'queued') {
+          scheduleExecutionCapacityRetry(current, err);
+          return;
+        }
       }
       if (err instanceof GitMissingRemoteBranchError) {
         const current = podRepo.getOrThrow(podId);

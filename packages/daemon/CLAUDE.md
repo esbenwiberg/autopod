@@ -277,6 +277,17 @@ Wraps Dockerode. Key responsibilities:
 - **Log streaming** — `streamLogs()` returns an async iterable of log lines
 - **Kill / remove** — `stopContainer()` + `removeContainer()` (always cleans up even on error)
 
+Docker launch capabilities distinguish the host's total CPU/memory from current queue and
+network pressure. A slow or failed `docker info` capacity check uses the last reported size
+for up to 30 minutes. Without a recent report, normal new Docker launches are still admitted
+within known limits, but wait in `queued` before provisioning. `ap status` and the activity
+feed show the retry deadline and the sanitized probe diagnostic. The daemon releases the
+queue slot between attempts, retries with backoff (30 s, 60 s, 120 s, then 5 min), restores
+queued retry deadlines on restart, and accepts Kill while waiting. Existing containers do
+not require a fresh host-size report to continue validation. Missing backends and invalid
+allocations are still refused. For a pod failed by the old capacity probe error, use
+`ap rework <pod>` with the retained workspace; `ap recover-infrastructure` is unchanged.
+
 ### Network isolation (`src/containers/docker-network-manager.ts`)
 
 Creates a dedicated Docker bridge network per pod and applies iptables egress rules:

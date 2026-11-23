@@ -2,6 +2,7 @@ import type { InputBundleRef } from '../schemas/input-bundle.schema.js';
 import type { OutputMode } from './actions.js';
 import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
+import type { ExecutionCapacityProbeFailure } from './launch-config.js';
 import type { PodOptions } from './pod-options.js';
 import type { OperatorActor } from './podsitter.js';
 import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
@@ -151,9 +152,27 @@ export interface GitFetchInfrastructureFailure {
   retryNotBefore: string;
 }
 
+/**
+ * Durable pre-provision wait: Docker could not report host capacity, so the queued
+ * pod has not created any workspace or container yet and is re-enqueued automatically.
+ */
+export interface ExecutionCapacityInfrastructureFailure {
+  source: 'execution-capacity';
+  code: 'EXECUTION_CAPACITY_UNVERIFIED';
+  /** The underlying `docker info` failure, when one was recorded. */
+  probe: ExecutionCapacityProbeFailure | null;
+  /** Bounded operator explanation (sanitized). */
+  diagnostics: string;
+  attemptCount: number;
+  recoveryDisposition: 'automatic_retry_scheduled';
+  occurredAt: string;
+  retryNotBefore: string;
+}
+
 export type PodInfrastructureFailure =
   | AzureSandboxInfrastructureFailure
-  | GitFetchInfrastructureFailure;
+  | GitFetchInfrastructureFailure
+  | ExecutionCapacityInfrastructureFailure;
 
 export type ProviderAttemptOutcome = 'completed' | 'failed' | 'aborted' | 'quota_exhausted';
 

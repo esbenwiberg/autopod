@@ -58,6 +58,7 @@ export interface ProvisioningLiveDependencies {
   launchConfiguration?: {
     read(podId: string): EffectiveLaunchConfig | null;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
+    assertExecutionCapacity?(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
     activateWorker?(
       podId: string,

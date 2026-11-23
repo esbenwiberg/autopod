@@ -64,6 +64,49 @@ afterEach(() => {
 });
 
 describe('shared launch request CLI', () => {
+  it.each([true, false])('reports a Docker host-capacity wait on %s (preview)', async (preview) => {
+    const reason = 'Docker host capacity is unverified. New containers wait in the queue.';
+    const client = {
+      listConfigurations: lookup,
+      resolveLaunch: vi.fn(async () => ({
+        digest: 'a'.repeat(64),
+        execution: { target: 'local' },
+      })),
+      previewDispatch: vi.fn(async () => ({ status: 'clear' })),
+      getConfigurationCapabilities: vi.fn(async () => ({
+        execution: [
+          { target: 'local', available: true, hostCapacity: { state: 'unverified', reason } },
+        ],
+      })),
+      launchPod: vi.fn(async () => ({ id: 'created', status: 'queued', executionTarget: 'local' })),
+    };
+    const program = new Command().exitOverride();
+    registerLaunchCommand(
+      program,
+      () => client as unknown as AutopodClient,
+      () => 'receipt',
+    );
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await program.parseAsync([
+      'node',
+      'ap',
+      'run',
+      '--repo',
+      'Project',
+      '--task',
+      'Implement',
+      '--json',
+      ...(preview ? ['--preview'] : []),
+    ]);
+    expect(client.launchPod).toHaveBeenCalledTimes(preview ? 0 : 1);
+    expect(client.getConfigurationCapabilities).toHaveBeenCalledOnce();
+    expect(stderr).toHaveBeenCalledWith(reason);
+    expect(stdout).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(stdout.mock.calls[0]?.[0]))).toMatchObject(
+      preview ? { digest: 'a'.repeat(64) } : { id: 'created', status: 'queued' },
+    );
+  });
   it('uploads references before preview and retries a lost launch without rereading local files', async () => {
     const directory = temporary();
     const file = join(directory, 'wireframe.html');

@@ -443,6 +443,15 @@ function serializeInfrastructureFailure(failure: PodInfrastructureFailure): stri
   if (failure.source === 'git-fetch') {
     return JSON.stringify({ ...failure, diagnostics: failure.diagnostics.slice(0, 500) });
   }
+  if (failure.source === 'execution-capacity') {
+    return JSON.stringify({
+      ...failure,
+      diagnostics: failure.diagnostics.slice(0, 1000),
+      probe: failure.probe
+        ? { ...failure.probe, message: failure.probe.message.slice(0, 300) }
+        : null,
+    });
+  }
   const diagnostics = Object.fromEntries(
     Object.entries(failure.diagnostics)
       .filter(

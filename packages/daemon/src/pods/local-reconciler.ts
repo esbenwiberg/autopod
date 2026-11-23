@@ -265,11 +265,15 @@ async function reconcileSession(
       logger.debug({ podId: pod.id }, 'Queued series dep — leaving for rehydrateDependentSessions');
       return;
     }
-    const retryNotBefore =
-      pod.infrastructureFailure?.source === 'git-fetch'
-        ? new Date(pod.infrastructureFailure.retryNotBefore).getTime()
+    // Queued automatic retries (host fetch, Docker host-capacity gate #665) keep
+    // their durable deadline across a restart instead of retrying immediately.
+    const queuedRetry =
+      pod.infrastructureFailure?.source === 'git-fetch' ||
+      pod.infrastructureFailure?.source === 'execution-capacity'
+        ? pod.infrastructureFailure
         : null;
-    if (retryNotBefore && retryNotBefore > Date.now()) {
+    const retryNotBefore = queuedRetry ? new Date(queuedRetry.retryNotBefore).getTime() : null;
+    if (queuedRetry && retryNotBefore && retryNotBefore > Date.now()) {
       const remaining = retryNotBefore - Date.now();
       const timer = setTimeout(() => {
         let current: Pod;
@@ -280,15 +284,20 @@ async function reconcileSession(
         }
         if (
           current?.status === 'queued' &&
-          current.infrastructureFailure?.source === 'git-fetch' &&
-          current.infrastructureFailure.retryNotBefore === pod.infrastructureFailure?.retryNotBefore
+          current.infrastructureFailure?.source === queuedRetry.source &&
+          current.infrastructureFailure.retryNotBefore === queuedRetry.retryNotBefore
         ) {
           enqueueSession(pod.id);
         }
       }, remaining);
       timer.unref();
       result.recovered.push(pod.id);
-      logger.info({ podId: pod.id, remaining }, 'Queued host-fetch retry rehydrated after restart');
+      logger.info(
+        { podId: pod.id, remaining, source: queuedRetry.source },
+        queuedRetry.source === 'git-fetch'
+          ? 'Queued host-fetch retry rehydrated after restart'
+          : 'Queued Docker host-capacity retry rehydrated after restart',
+      );
       return;
     }
     enqueueSession(pod.id);
