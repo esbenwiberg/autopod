@@ -36,6 +36,10 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import {
+  cleanupPreparedDependencies,
+  consumePreparedDependencySnapshot,
+} from './prepared-dependency-snapshot.js';
 import { prepareLaunchRepository } from './repository-preparation.js';
 import { resolveSections } from './section-resolver.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
@@ -588,6 +592,49 @@ export function createProvisioningAgentMaterials(
       preflightMs = Date.now() - preflightStarted;
       assertCurrent();
     }
+    // Continuation/recovery of a coding run may reuse the previous container's prepared
+    // dependencies (#644). Fresh launches and validation always prepare in full; a stale
+    // snapshot from an earlier continuation is discarded so it can never be consumed later.
+    const reuseEligible =
+      isRecovery && !isFreshContainerValidationOnly && !pod.skipAgent && !!preparationProvenance;
+    if (!reuseEligible)
+      await cleanupPreparedDependencies(podId).catch((err: unknown) =>
+        logger.warn({ podId, err }, 'Stale prepared dependency snapshot cleanup failed'),
+      );
+    const reuse = reuseEligible
+      ? {
+          attempt: async (current: {
+            commandHash: string;
+            configurationHash: string;
+            dependencyInputs: string | null;
+          }) => {
+            const attempt = await consumePreparedDependencySnapshot({
+              cm: containerManager,
+              containerId,
+              current: {
+                ...current,
+                podId,
+                executionTarget: pod.executionTarget,
+                imageDigest: preparationProvenance?.imageDigest ?? null,
+              },
+            });
+            if (attempt.reused) {
+              logger.info({ podId, ...attempt }, 'Reusing prepared dependencies');
+              emitStatus(
+                `Reusing prepared dependencies from the previous container (${attempt.restoredArchives} archive${
+                  attempt.restoredArchives === 1 ? '' : 's'
+                }, ${(attempt.restoredBytes / (1024 * 1024)).toFixed(1)} MiB in ${(
+                  attempt.restoreMs / 1000
+                ).toFixed(1)}s)`,
+              );
+            } else {
+              logger.info({ podId, reason: attempt.reason }, 'Prepared dependency reuse refused');
+              emitStatus(`Full repository preparation: reuse refused — ${attempt.reason}`);
+            }
+            return attempt;
+          },
+        }
+      : undefined;
     const repositoryPreparation = await prepareLaunchRepository(
       launchConfig,
       containerManager,
@@ -601,6 +648,7 @@ export function createProvisioningAgentMaterials(
       {
         assertCurrent,
         ...(preflightMs !== undefined ? { preflightMs } : {}),
+        ...(reuse ? { reuse } : {}),
         sensitiveValues: [
           ...(effectiveRegistryPat ? [effectiveRegistryPat] : []),
           ...(launchRegistry?.redactionSecrets ?? []),

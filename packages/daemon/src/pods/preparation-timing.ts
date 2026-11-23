@@ -172,7 +172,10 @@ export function formatPreparationSummary(evidence: RepositoryPreparationEvidence
   const timing = evidence.timing;
   const parts = [`Repository preparation ${evidence.status}`];
   if (timing) parts[0] += ` in ${seconds(timing.totalMs)}`;
-  if (evidence.reuse?.decision === 'reused') parts.push('reused prepared dependencies');
+  if (evidence.reuse?.decision === 'reused')
+    parts.push(
+      `reused prepared dependencies (${evidence.reuse.restoredArchives ?? 0} archives restored in ${seconds(evidence.reuse.restoreMs)})`,
+    );
   else if (timing?.stages.length) {
     parts.push(
       timing.stages
@@ -195,6 +198,7 @@ export function formatPreparationSummary(evidence: RepositoryPreparationEvidence
     extras.push(`preflight ${seconds(timing.preflightMs)}`);
   if (timing?.sourceProbeMs !== null && timing?.sourceProbeMs !== undefined)
     extras.push(`probes ${seconds(timing.sourceProbeMs)}`);
+  if (evidence.reuse?.decision === 'refused') extras.push(`reuse refused: ${evidence.reuse.reason}`);
   const known = evidence.cache?.signals.filter((signal) => signal.state !== 'unknown') ?? [];
   if (known.length)
     extras.push(`caches before: ${known.map((s) => `${s.name} ${s.state}`).join(', ')}`);

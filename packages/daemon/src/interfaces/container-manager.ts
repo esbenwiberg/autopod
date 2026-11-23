@@ -202,6 +202,24 @@ export interface ContainerManager {
   /** Read actual backend identity; unsupported metadata remains unavailable. */
   getExecutionMetadata?(containerId: string): Promise<ContainerExecutionMetadata>;
   ensureManagedContainer?(config: ContainerSpawnConfig): Promise<string>;
+  /**
+   * Stream the Docker-style tar archive of `containerPath` to `hostFile` (#644 prepared
+   * dependency snapshots). Rejects, leaving a partial file for the caller to remove, when
+   * the archive exceeds `maxBytes` or `timeoutMs`. Unsupported targets omit it.
+   */
+  exportPathArchive?(
+    containerId: string,
+    containerPath: string,
+    hostFile: string,
+    options: { maxBytes: number; timeoutMs: number },
+  ): Promise<{ bytes: number; sha256: string }>;
+  /** Extract a tar archive produced by `exportPathArchive` into `containerDir`. */
+  importPathArchive?(
+    containerId: string,
+    hostFile: string,
+    containerDir: string,
+    options: { timeoutMs: number },
+  ): Promise<void>;
   /** Strict managed /output extraction; unavailable implementations fail preflight. */
   extractManagedOutput?(
     containerId: string,
