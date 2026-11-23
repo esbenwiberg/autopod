@@ -135,6 +135,14 @@ it('boots Dispatcher, operator and saved parent recovery independently, with the
     diskRows(
       'INSERT INTO saved_delegation_admissions (run_id,request_id,owner_digest,plan_digest,seed_evidence_digest) VALUES (?,?,?,?,?)',
     ).run(savedRun, randomUUID(), delegationOwnerDigest(principal), digest('plan'), evidenceDigest);
+    expect(() =>
+      createManagedLaneOwnership(db, {
+        ordinaryInstallations: [ordinaryInstallation],
+        signedRun,
+        savedOwnerDigest: digest('different-owner'),
+        separateSignedRuntime: true,
+      }).assertRecovery(),
+    ).toThrow('saved-delegation-unconfigured-owner-retained');
     insertWorker('ordinary-worker', ordinaryInstallation);
     insertWorker('signed-worker', signedInstallation);
     insertWorker('saved-worker', savedInstallation);
@@ -143,6 +151,7 @@ it('boots Dispatcher, operator and saved parent recovery independently, with the
       const owners = createManagedLaneOwnership(db, {
         ordinaryInstallations: [ordinaryInstallation],
         signedRun,
+        savedOwnerDigest: delegationOwnerDigest(principal),
         separateSignedRuntime: true,
       });
       expect(() => owners.assertRecovery()).not.toThrow();
@@ -292,6 +301,7 @@ it('boots Dispatcher, operator and saved parent recovery independently, with the
     const shared = createManagedLaneOwnership(db, {
       ordinaryInstallations: [ordinaryInstallation],
       signedRun,
+      savedOwnerDigest: delegationOwnerDigest(principal),
       separateSignedRuntime: false,
     });
     expect(shared.ordinaryRuntime(signedInstallation)).toBe(true);
@@ -300,6 +310,7 @@ it('boots Dispatcher, operator and saved parent recovery independently, with the
       createManagedLaneOwnership(db, {
         ordinaryInstallations: [ordinaryInstallation],
         signedRun: savedRun,
+        savedOwnerDigest: delegationOwnerDigest(principal),
         separateSignedRuntime: true,
       }),
     ).toThrow('ownership-overlap');

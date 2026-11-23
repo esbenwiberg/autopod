@@ -7,26 +7,29 @@ export function createManagedLaneOwnership(
   input: {
     ordinaryInstallations: readonly string[];
     signedRun?: string;
+    savedOwnerDigest: string;
     separateSignedRuntime: boolean;
   },
 ) {
-  const { signedRun, separateSignedRuntime } = input;
+  const { signedRun, savedOwnerDigest, separateSignedRuntime } = input;
   const ordinaryIds = new Set(input.ordinaryInstallations);
   if (
     [...ordinaryIds].some((id) => id.startsWith('native.')) ||
     (separateSignedRuntime && !signedRun)
   )
     throw new Error('managed-lane-binding-invalid');
-  const savedRun = db.prepare(`SELECT 1 FROM saved_delegation_admissions a
+  const savedRun = db
+    .prepare(`SELECT a.owner_digest FROM saved_delegation_admissions a
     JOIN parent_managed_runs p ON p.run_id=a.run_id
     JOIN orchestration_runs r ON r.id=a.run_id AND r.operator_owned=1
-    WHERE a.run_id=?`);
+    WHERE a.run_id=?`)
+    .pluck();
   if (signedRun && savedRun.get(signedRun)) throw new Error('managed-lane-ownership-overlap');
   const ordinary = (installation: string) => ordinaryIds.has(installation);
   const signed = (installation: string) =>
     signedRun !== undefined && installation === `native.${signedRun}`;
   const saved = (installation: string) =>
-    installation.startsWith('native.') && !!savedRun.get(installation.slice(7));
+    installation.startsWith('native.') && savedRun.get(installation.slice(7)) === savedOwnerDigest;
   return {
     ordinary,
     signed,
@@ -34,6 +37,14 @@ export function createManagedLaneOwnership(
     ordinaryRuntime: (installation: string) =>
       ordinary(installation) || (!separateSignedRuntime && signed(installation)),
     assertRecovery() {
+      // Even a queued parent with no worker yet requires the configured saved owner.
+      if (
+        db
+          .prepare(`SELECT 1 FROM saved_delegation_admissions a
+        JOIN orchestration_runs r ON r.id=a.run_id WHERE r.canceled=0 AND a.owner_digest<>? LIMIT 1`)
+          .get(savedOwnerDigest)
+      )
+        throw new Error('saved-delegation-unconfigured-owner-retained');
       const unresolved = db
         .prepare(`SELECT DISTINCT dispatcher_installation_id AS installation
         FROM managed_pods WHERE observed_exit=0 OR (runtime_ref IS NOT NULL AND cleanup<>'observed')`)

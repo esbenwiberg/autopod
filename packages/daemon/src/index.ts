@@ -71,6 +71,7 @@ import { operatorPartition } from './orchestration/operator-partition.js';
 import { operatorRunId } from './orchestration/operator-runs.js';
 import { composeOperatorSandboxTarget } from './orchestration/operator-sandbox-target.js';
 import { combineParentLanes } from './orchestration/parent-family-lanes.js';
+import { delegationOwnerDigest } from './orchestration/saved-delegation-policy.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -1344,6 +1345,7 @@ const coexistence =
       ? (managedCliConfig?.bindings.map((binding) => binding.installationId) ?? [])
       : [],
     signedRun,
+    savedOwnerDigest: delegationOwnerDigest(savedPilot.pilot.principal),
     separateSignedRuntime: Boolean(partition),
   });
 coexistence?.assertRecovery();
