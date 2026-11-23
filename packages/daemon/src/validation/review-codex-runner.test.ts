@@ -58,6 +58,9 @@ describe('runCodexReview', () => {
     const command =
       harness.execs.find((entry) => entry.command[0] === 'sh' && entry.command[1] === '-c')
         ?.command ?? [];
+    expect(command.join(' ')).toContain(
+      "AUTOPOD_AGENT_PID_PATH=/dev/null sh '/run/autopod/agent-shim.sh' codex exec",
+    );
     expect(command.join(' ')).toContain('--image');
     expect(command.join(' ')).toContain(String(staged?.[1]));
     expect(

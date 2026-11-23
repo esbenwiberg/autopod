@@ -10,6 +10,7 @@ import {
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
+import { AGENT_SHIM_PATH, CREDENTIAL_ONLY_SHIM_ENV } from '../pods/provisioning-runtime-files.js';
 import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
@@ -71,7 +72,6 @@ export interface ContainerReviewerRunnerConfig {
   reasoningEffort?: string | null;
 }
 
-const SHIM_PATH = '/run/autopod/agent-shim.sh';
 const MAX_DIAGNOSTIC_BYTES = 4_000;
 const MAX_REVIEW_OUTPUT_BYTES = 1_000_000;
 const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
@@ -169,7 +169,7 @@ async function runClaudeContainerReview(
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
   const claudeCommand = [
-    `sh ${shellQuote(SHIM_PATH)} claude -p`,
+    `${CREDENTIAL_ONLY_SHIM_ENV} sh ${shellQuote(AGENT_SHIM_PATH)} claude -p`,
     modelArgs.trim(),
     "--tools ''",
     '--disable-slash-commands',

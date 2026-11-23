@@ -2,6 +2,7 @@ import type { PrivateRegistry } from '@autopod/shared';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
+import { AGENT_SHIM_PATH, CREDENTIAL_ONLY_SHIM_ENV } from './provisioning-runtime-files.js';
 
 export interface RegistryFile {
   /** Absolute path inside the container */
@@ -149,7 +150,6 @@ export function generateNuGetConfig(registries: PrivateRegistry[]): string {
 }
 
 const NUGET_SECRET_PATH = '/run/autopod/nuget-endpoints';
-const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 
 /**
  * Build the NuGet credential payload and return it as a secret file entry
@@ -247,6 +247,8 @@ export function wrapValidationExecCommand(
   const literals = Object.entries(nonSecretEnv ?? {})
     .filter(([key, value]) => env?.[key] === value)
     .map(([key, value]) => `${key}=${value}`);
+  // Keep this override last so profile literals cannot redirect the PID write.
+  if (hasSecretFileEnv) literals.push(CREDENTIAL_ONLY_SHIM_ENV);
   return literals.length ? ['/usr/bin/env', '--', ...literals, ...shell] : shell;
 }
 

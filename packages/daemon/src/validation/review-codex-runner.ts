@@ -14,6 +14,7 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
+import { AGENT_SHIM_PATH, CREDENTIAL_ONLY_SHIM_ENV } from '../pods/provisioning-runtime-files.js';
 import { foundryCodexConfigArgs } from '../providers/foundry-endpoint.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
 import { prepareReviewerLaunch } from './reviewer-launch-preflight.js';
@@ -76,7 +77,6 @@ export interface CodexReviewTokenUsage {
   complete?: boolean;
 }
 
-const SHIM_PATH = '/run/autopod/agent-shim.sh';
 const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 
 /**
@@ -112,7 +112,7 @@ export async function runCodexReview(
     const modelArgs =
       config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
     const codexCommand = [
-      `sh ${shellQuote(SHIM_PATH)} codex exec`,
+      `${CREDENTIAL_ONLY_SHIM_ENV} sh ${shellQuote(AGENT_SHIM_PATH)} codex exec`,
       '--cd /workspace',
       '--sandbox read-only',
       '--skip-git-repo-check',

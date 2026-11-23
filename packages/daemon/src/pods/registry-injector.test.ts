@@ -651,16 +651,23 @@ describe('wrapValidationExecCommand literal child environment', () => {
   it('preserves the optional environment and secret-file shim contracts', () => {
     expect(wrapValidationExecCommand('tool', undefined)).toEqual(['sh', '-c', 'tool']);
     const argv = wrapValidationExecCommand('tool', { TOKEN_FILE: '/private/token' }, {});
-    expect(argv).toHaveLength(5);
-    expect(argv[0]).toBe('sh');
-    expect(argv.slice(-3)).toEqual(['sh', '-c', 'tool']);
+    expect(argv).toEqual([
+      '/usr/bin/env',
+      '--',
+      'AUTOPOD_AGENT_PID_PATH=/dev/null',
+      'sh',
+      '/run/autopod/agent-shim.sh',
+      'sh',
+      '-c',
+      'tool',
+    ]);
     expect(argv).not.toContain('/private/token');
     const prefixed = wrapValidationExecCommand(
       'tool',
       { TOKEN_FILE: '/private/token', CUSTOM: 'literal' },
       { CUSTOM: 'literal' },
     );
-    expect(prefixed).toEqual(['/usr/bin/env', '--', 'CUSTOM=literal', ...argv]);
+    expect(prefixed).toEqual(['/usr/bin/env', '--', 'CUSTOM=literal', ...argv.slice(2)]);
   });
 });
 
