@@ -33,7 +33,7 @@ export function formatNetworkCapacity(health: DaemonHealthSummary): string | nul
     `${pods.releasable === undefined ? '' : `, ${pods.releasable ?? '?'} releasable`}); ${poolText}; ` +
     `headroom ${networks.reclaimableHeadroom ?? '?'}`;
   if (networks.severity !== 'critical' && networks.severity !== 'warning') return line;
-  return `${line}\n  New local pods may fail with HOST_NETWORK_CAPACITY. Kill failed pods you no longer need, release superseded retained bridges (ap release-retained-networks), or enlarge Docker default-address-pools (docs/hosted-daemon-docker-networks.md).`;
+  return `${line}\n  New local pods may wait for a Docker subnet (HOST_NETWORK_CAPACITY) and fail if retries are exhausted. Kill failed pods you no longer need, release superseded retained bridges (ap release-retained-networks), or enlarge Docker default-address-pools (docs/hosted-daemon-docker-networks.md).`;
 }
 
 export function registerDaemonCommands(program: Command): void {

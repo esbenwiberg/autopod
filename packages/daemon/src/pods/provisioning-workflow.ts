@@ -14,6 +14,7 @@ import { createProvisioningWorkspacePopulation } from './provisioning-workspace-
 type Captured = Pick<
   ProvisioningCaptured,
   | 'qualifyCodingCandidate'
+  | 'scheduleDockerNetworkCapacityRetry'
   | 'materializeSpecFiles'
   | 'captureDeployBaselineHashes'
   | 'podRepo'
@@ -59,6 +60,7 @@ type Captured = Pick<
 export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, captured: Captured) {
   const {
     qualifyCodingCandidate,
+    scheduleDockerNetworkCapacityRetry,
     materializeSpecFiles,
     captureDeployBaselineHashes,
     podRepo,
@@ -125,6 +127,7 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     transition,
   });
   const container = createProvisioningContainer(deps, {
+    scheduleDockerNetworkCapacityRetry,
     allocateHostPort,
     CONTAINER_APP_PORT,
     execFileAsync,
@@ -180,6 +183,7 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     const workspaceResult = await workspace.prepareWorkspace(input);
     if (workspaceResult.kind === 'halted') return workspaceResult;
     const containerResult = await container.prepareContainer(workspaceResult);
+    if (containerResult.kind === 'halted') return containerResult;
     const populationResult = await population.populateWorkspace(containerResult);
     const materialsResult = await materials.prepareSessionMaterials(populationResult);
     if (materialsResult.kind === 'halted') return materialsResult;

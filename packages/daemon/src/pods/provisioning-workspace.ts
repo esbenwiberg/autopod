@@ -1,10 +1,12 @@
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import type { PodOptions } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { deriveBareRepoPath } from '../worktrees/bare-push.js';
 import { describeEquivalentConflict, equivalentWorkFixes } from './dispatch-preflight-ledger.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import type { PodUpdates } from './pod-repository.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
@@ -78,6 +80,7 @@ export function createProvisioningWorkspace(
   } = captured;
   async function prepareWorkspace(input: ProvisioningInput) {
     let { launchConfig, pod, podId, lifecycleGeneration } = input;
+    const networkWait = dockerNetworkCapacityWait(pod);
     const { emitStatus, assertStartupCurrent } = input.run;
     const run = input.run;
     if (launchConfig && deps.launchConfiguration) {
@@ -124,6 +127,17 @@ export function createProvisioningWorkspace(
     // the queue's finally block frees activeIds, and without a status update nothing
     // ever re-enqueues the pod.
     let profile = resolveEffectiveBoundProfile(pod);
+    if (
+      networkWait &&
+      !launchConfig &&
+      (pod.profileSnapshot?.repoUrl !== profile.repoUrl ||
+        !isDeepStrictEqual(pod.profileSnapshot?.networkPolicy, profile.networkPolicy))
+    )
+      throw new AutopodError(
+        'Repository or network policy changed while waiting for a Docker subnet; relaunch with the intended configuration.',
+        'DOCKER_NETWORK_BINDING_CHANGED',
+        409,
+      );
     let queuedProviderAttempt = deps.providerAttemptRepo?.getActive(podId);
     let reasoningEffort = resolvedReasoningEffort(
       profile,
@@ -349,7 +363,7 @@ export function createProvisioningWorkspace(
     }
 
     // Detect recovery mode before any provisioning work
-    const isRecovery = !!pod.recoveryWorktreePath;
+    const isRecovery = networkWait?.isRecovery ?? !!pod.recoveryWorktreePath;
     const isInfrastructureRecovery =
       pod.infrastructureFailure?.source === 'azure-sandbox' &&
       pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled';
@@ -408,8 +422,25 @@ export function createProvisioningWorkspace(
     let worktreePath: string | null = null;
     let bareRepoPath: string | null = null;
 
-    const savedWorkspace = await deps.savedDelegationWorkspace?.(podId, lifecycleGeneration);
-    if (savedWorkspace) {
+    const savedWorkspace = networkWait
+      ? undefined
+      : await deps.savedDelegationWorkspace?.(podId, lifecycleGeneration);
+    if (networkWait) {
+      // Do not recreate the branch, refetch its base, or consume recovery a second time.
+      // A lost checkout must not silently turn into a fresh launch against newer source.
+      worktreePath = pod.worktreePath;
+      try {
+        bareRepoPath = worktreePath ? await deriveBareRepoPath(worktreePath) : null;
+        if ((profile.repoUrl && !worktreePath) || bareRepoPath !== networkWait.bareRepoPath)
+          throw new Error('Prepared source binding changed');
+      } catch {
+        throw new AutopodError(
+          'The checkout prepared before Docker subnet exhaustion is unavailable or its Git store changed; no new source was fetched.',
+          'PREPARED_WORKSPACE_UNAVAILABLE',
+          409,
+        );
+      }
+    } else if (savedWorkspace) {
       assertStartupCurrent();
       if (!savedWorkspace.startCommitSha) throw new Error('saved-delegation-worktree-missing-pin');
       worktreePath = savedWorkspace.worktreePath;
@@ -583,8 +614,12 @@ export function createProvisioningWorkspace(
         throw new AutopodError('PIM startup integration is unavailable', 'PIM_UNAVAILABLE', 503);
       await deps.launchConfiguration.pim.startup(podId, launchConfig);
     }
+    if (networkWait) {
+      assertStartupCurrent();
+      provisioningUpdates.recoveryWorktreePath = null;
+    }
     pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
-    if (!launchConfig)
+    if (!launchConfig && !networkWait)
       podRepo.update(podId, { profileSnapshot: profileStore.get(pod.profileName) });
     if (launchConfig) {
       const credentials = executionCredentialsFor(launchConfig);
@@ -646,6 +681,7 @@ export function createProvisioningWorkspace(
     return {
       ...input,
       kind: 'ready' as const,
+      allowNetworkCapacityWait: input.pod.status === 'queued',
       pod,
       launchConfig,
       profile,

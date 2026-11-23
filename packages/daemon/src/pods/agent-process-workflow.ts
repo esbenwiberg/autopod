@@ -24,6 +24,7 @@ import { BUDGET_CONTINUATION_PENDING } from './budget-stop.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { persistEscalation } from './escalation-coordinator.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
 import { assertPreparationSourceCurrent } from './repository-preparation.js';
@@ -111,6 +112,9 @@ export function createAgentProcessWorkflow(
       );
       return;
     }
+
+    const networkWait = dockerNetworkCapacityWait(pod);
+    if (networkWait && Date.parse(networkWait.retryNotBefore) > Date.now()) return;
 
     function emitStatus(message: string): void {
       emitActivityStatus(podId, message);
@@ -937,6 +941,7 @@ export function createAgentProcessWorkflow(
             transition(pod, 'failed', {
               completedAt: new Date().toISOString(),
               failureReason,
+              ...(dockerNetworkCapacityWait(pod) ? { infrastructureFailure: null } : {}),
             });
           } else if (canKill(pod.status)) {
             // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)

@@ -443,10 +443,12 @@ function serializeInfrastructureFailure(failure: PodInfrastructureFailure): stri
   if (failure.source === 'git-fetch') {
     return JSON.stringify({ ...failure, diagnostics: failure.diagnostics.slice(0, 500) });
   }
-  if (failure.source === 'execution-capacity') {
+  if (failure.source === 'execution-capacity' || failure.source === 'docker-network') {
     return JSON.stringify({
       ...failure,
-      diagnostics: failure.diagnostics.slice(0, 1000),
+      ...(failure.source === 'execution-capacity'
+        ? { diagnostics: failure.diagnostics.slice(0, 1000) }
+        : {}),
       probe: failure.probe
         ? { ...failure.probe, message: failure.probe.message.slice(0, 300) }
         : null,

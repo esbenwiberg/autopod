@@ -169,10 +169,27 @@ export interface ExecutionCapacityInfrastructureFailure {
   retryNotBefore: string;
 }
 
+/** Durable wait at the initial Docker bridge allocation, before any pod container or sidecar. */
+export interface DockerNetworkCapacityInfrastructureFailure {
+  source: 'docker-network';
+  code: 'HOST_NETWORK_CAPACITY';
+  lifecycleGeneration: number;
+  /** Preserve normal vs. recovery execution semantics when reusing the prepared checkout. */
+  isRecovery: boolean;
+  bareRepoPath: string | null;
+  /** Set only if the independent host-size gate also blocks a subsequent pass. */
+  probe: ExecutionCapacityProbeFailure | null;
+  attemptCount: number;
+  recoveryDisposition: 'automatic_retry_scheduled';
+  occurredAt: string;
+  retryNotBefore: string;
+}
+
 export type PodInfrastructureFailure =
   | AzureSandboxInfrastructureFailure
   | GitFetchInfrastructureFailure
-  | ExecutionCapacityInfrastructureFailure;
+  | ExecutionCapacityInfrastructureFailure
+  | DockerNetworkCapacityInfrastructureFailure;
 
 export type ProviderAttemptOutcome = 'completed' | 'failed' | 'aborted' | 'quota_exhausted';
 

@@ -1,6 +1,7 @@
 import type { OperatorActor } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { actorLabel } from './approval-policy.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import type { WorkspaceEscapeCaptured } from './workspace-contracts.js';
 
 export function createWorkspaceEscapeControls(captured: WorkspaceEscapeCaptured) {
@@ -82,6 +83,12 @@ export function createWorkspaceEscapeControls(captured: WorkspaceEscapeCaptured)
     const nowIso = new Date().toISOString();
 
     if (pod.status === 'queued') {
+      if (dockerNetworkCapacityWait(pod))
+        throw new AutopodError(
+          'This pod already has a scheduled Docker subnet retry; use Kill to cancel the wait.',
+          'INVALID_STATE',
+          409,
+        );
       // A pod that has been in `queued` long enough for an operator to kick is
       // past any live processPod (status would have moved to provisioning). If the
       // queue still tracks it as active, that's a stale entry from a previous run

@@ -7,6 +7,7 @@ import {
   hasInterruptedArtifactCollection,
 } from './artifact-finalization-recovery.js';
 import type { EventBus } from './event-bus.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import {
   assertFleetRecoveryAllowed,
   FleetRetentionFence,
@@ -259,19 +260,21 @@ async function reconcileSession(
   //    runs later in startup and enqueues only the deps whose parents are
   //    actually done. Enqueueing them here would race the parent's worktree.
   if (pod.status === 'queued') {
+    const networkWait = dockerNetworkCapacityWait(pod);
     const hasUnresolvedDeps = pod.dependsOnPodIds.length > 0 || !!pod.dependsOnPodId;
-    if (hasUnresolvedDeps) {
+    // A subnet wait already passed dependency admission and prepared its source.
+    if (hasUnresolvedDeps && !networkWait) {
       result.skipped.push(pod.id);
       logger.debug({ podId: pod.id }, 'Queued series dep — leaving for rehydrateDependentSessions');
       return;
     }
-    // Queued automatic retries (host fetch, Docker host-capacity gate #665) keep
-    // their durable deadline across a restart instead of retrying immediately.
+    // Queued automatic retries keep their durable deadline across a restart.
     const queuedRetry =
-      pod.infrastructureFailure?.source === 'git-fetch' ||
+      networkWait ??
+      (pod.infrastructureFailure?.source === 'git-fetch' ||
       pod.infrastructureFailure?.source === 'execution-capacity'
         ? pod.infrastructureFailure
-        : null;
+        : null);
     const retryNotBefore = queuedRetry ? new Date(queuedRetry.retryNotBefore).getTime() : null;
     if (queuedRetry && retryNotBefore && retryNotBefore > Date.now()) {
       const remaining = retryNotBefore - Date.now();
@@ -283,7 +286,8 @@ async function reconcileSession(
           return;
         }
         if (
-          current?.status === 'queued' &&
+          current.status === 'queued' &&
+          current.lifecycleGeneration === pod.lifecycleGeneration &&
           current.infrastructureFailure?.source === queuedRetry.source &&
           current.infrastructureFailure.retryNotBefore === queuedRetry.retryNotBefore
         ) {
@@ -294,9 +298,7 @@ async function reconcileSession(
       result.recovered.push(pod.id);
       logger.info(
         { podId: pod.id, remaining, source: queuedRetry.source },
-        queuedRetry.source === 'git-fetch'
-          ? 'Queued host-fetch retry rehydrated after restart'
-          : 'Queued Docker host-capacity retry rehydrated after restart',
+        'Queued provisioning retry rehydrated after restart',
       );
       return;
     }

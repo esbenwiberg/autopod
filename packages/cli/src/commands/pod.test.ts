@@ -1358,6 +1358,44 @@ it('shows a queued Docker capacity wait and its reason in status, not as a fatal
   }
 });
 
+it('shows a queued subnet wait separately from the Docker host-size check', async () => {
+  const client = createMockClient();
+  const pod = await client.getSession('abcd1234');
+  const retryNotBefore = '2026-11-23T10:00:30.000Z';
+  vi.mocked(client.getSession).mockResolvedValue({
+    ...pod,
+    status: 'queued',
+    lifecycleGeneration: 1,
+    failureReason: null,
+    infrastructureFailure: {
+      source: 'docker-network',
+      code: 'HOST_NETWORK_CAPACITY',
+      lifecycleGeneration: 1,
+      isRecovery: false,
+      bareRepoPath: null,
+      attemptCount: 1,
+      probe: null,
+      recoveryDisposition: 'automatic_retry_scheduled',
+      occurredAt: '2026-11-23T10:00:00.000Z',
+      retryNotBefore,
+    },
+  });
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const program = new Command();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+    const text = output.mock.calls.flat().join('\n');
+    expect(text).toContain(
+      `Waiting for a free Docker subnet (HOST_NETWORK_CAPACITY) — retry 1 at ${retryNotBefore}`,
+    );
+    expect(text).not.toContain('Waiting for Docker host capacity check');
+    expect(text).not.toContain('Failure:');
+  } finally {
+    output.mockRestore();
+  }
+});
+
 it('shows the unavailable-review reason through real status HTTP and preserves findings in JSON', async () => {
   const reason =
     'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';

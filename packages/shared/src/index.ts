@@ -65,6 +65,7 @@ export {
 } from './errors.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 export {
+  describeDockerNetworkCapacityWait,
   describeExecutionCapacityProbeFailure,
   describeExecutionCapacityWait,
 } from './execution-capacity.js';
@@ -405,6 +406,7 @@ export type {
   CompactPodPage,
   CostEvidence,
   CreatePodRequest,
+  DockerNetworkCapacityInfrastructureFailure,
   ExecutionCapacityInfrastructureFailure,
   FixFeedback,
   PhaseTokenUsage,

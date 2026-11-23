@@ -109,7 +109,8 @@ export const WORKSPACE_PRESERVATION_FAILED = 'Workspace preservation failed';
 
 export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'awaiting_input', 'failed', 'killing'],
-  provisioning: ['running', 'paused', 'killing', 'failed'],
+  // Initial Docker bridge exhaustion can yield the slot before any worker starts.
+  provisioning: ['queued', 'running', 'paused', 'killing', 'failed'],
   research_ready: ['complete', 'killing'],
   running: [
     'research_ready',

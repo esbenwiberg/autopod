@@ -1,5 +1,8 @@
 import type { ExecutionCapacityProbeFailure } from './types/launch-config.js';
-import type { ExecutionCapacityInfrastructureFailure } from './types/pod.js';
+import type {
+  DockerNetworkCapacityInfrastructureFailure,
+  ExecutionCapacityInfrastructureFailure,
+} from './types/pod.js';
 
 /** Short operator wording for a failed Docker host-capacity check. */
 export function describeExecutionCapacityProbeFailure(
@@ -24,4 +27,16 @@ export function describeExecutionCapacityWait(
     ? ` (last check ${describeExecutionCapacityProbeFailure(failure.probe)})`
     : '';
   return `Waiting for Docker host capacity check — retry ${failure.attemptCount} at ${failure.retryNotBefore}${cause}`;
+}
+
+export function describeDockerNetworkCapacityWait(
+  failure: Pick<
+    DockerNetworkCapacityInfrastructureFailure,
+    'attemptCount' | 'retryNotBefore' | 'probe'
+  >,
+): string {
+  const probe = failure.probe
+    ? ` (Docker host size also unverified: last check ${describeExecutionCapacityProbeFailure(failure.probe)})`
+    : '';
+  return `Waiting for a free Docker subnet (HOST_NETWORK_CAPACITY) — retry ${failure.attemptCount} at ${failure.retryNotBefore}${probe}`;
 }
