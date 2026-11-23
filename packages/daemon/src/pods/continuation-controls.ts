@@ -49,6 +49,33 @@ type Captured = Pick<
   | 'transition'
 >;
 
+/**
+ * Resume only re-checks or publishes finished work. A failed pod whose current
+ * worker cycle never settled (provider limit, crash, restart) has unfinished
+ * source; validating or publishing it would treat partial work as the result.
+ * The cycle phase leaves `running` once the worker settles or the pod enters
+ * validation; `agentSettledAt` alone is only written with usage evidence.
+ */
+export function assertAgentRunSettledForResume(
+  pod: Pick<Pod, 'id' | 'status' | 'lifecycleGeneration' | 'finalization' | 'options'>,
+): void {
+  const cycle = pod.finalization;
+  if (
+    pod.status !== 'failed' ||
+    pod.options?.agentMode === 'interactive' ||
+    !cycle ||
+    cycle.generation !== pod.lifecycleGeneration ||
+    cycle.phase !== 'running' ||
+    cycle.agentSettledAt !== null
+  )
+    return;
+  throw new AutopodError(
+    `The agent did not finish its last run, so Resume would check unfinished work. Continue the agent with Rework (ap rework ${pod.id}).`,
+    'AGENT_RUN_UNFINISHED',
+    409,
+  );
+}
+
 /** Names the control that continues a paused pod when Resume does not apply. */
 export function pausedResumeHint(pod: Pick<Pod, 'id' | 'status' | 'pauseReason'>): string {
   if (pod.status !== 'paused') return '';
@@ -460,6 +487,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     }
 
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
+    assertAgentRunSettledForResume(pod);
 
     // Path 1: validation already passed, downstream step (push / PR) blew up.
     // Push + open PR, no agent rework, no validation rerun. Cheapest possible recovery.

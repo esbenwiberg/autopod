@@ -22831,6 +22831,53 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('refuses Resume when the agent failed before finishing its run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      const revalidateSpy = vi.spyOn(manager, 'revalidateSession');
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+        statusCode: 409,
+        message: expect.stringContaining(`ap rework ${pod.id}`),
+      });
+      expect(revalidateSpy).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('failed');
+    });
+
+    it('does not publish an earlier passing validation over an unfinished agent run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'pass', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'settled',
+      'entered validation',
+    ] as const)('still revalidates when the agent finished its run before failing (%s)', async (finish) => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      // Completion without usage evidence never records agentSettledAt.
+      if (finish === 'settled')
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'done');
+      else ctx.podRepo.completionJournal?.mark(ctx.podRepo.getOrThrow(pod.id), 'finalizing');
+      const revalidateSpy = vi
+        .spyOn(manager, 'revalidateSession')
+        .mockResolvedValue({ newCommits: false, result: 'fail' });
+
+      await expect(manager.resumePod(pod.id)).resolves.toEqual({ action: 'revalidate' });
+      expect(revalidateSpy).toHaveBeenCalledWith(pod.id, { force: true });
+    });
+
     it('HTTP Resume acknowledges a pending validation run and coalesces duplicate requests', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail' });
