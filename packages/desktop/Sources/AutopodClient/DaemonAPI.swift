@@ -238,15 +238,37 @@ public actor DaemonAPI {
     }
   }
 
+  public func listDelegationPolicies(repositoryId: String) async throws -> [LaunchDelegationPolicy] {
+    let items: [LaunchDelegationPolicy] = try await request("GET", "/launch/delegation-policies", query: ["repositoryId": repositoryId])
+    guard items.count <= 64, Set(items.map(\.id)).count == items.count,
+      items.allSatisfy({ $0.repositoryId == repositoryId && $0.selection.isValid && !$0.name.isEmpty }) else {
+      throw URLError(.badServerResponse)
+    }
+    return items
+  }
+
   public func resolveLaunch(_ body: ComposableLaunchRequest) async throws -> EffectiveLaunchPreview {
-    try await request("POST", "/launch/resolve", body: encode(body))
+    try body.validateSavedDelegation(requirePreview: false)
+    let preview: EffectiveLaunchPreview = try await request("POST", "/launch/resolve", body: encode(body),
+      delegate: body.delegation == nil ? nil : RefuseDaemonRedirect())
+    if body.delegation != nil {
+      guard preview.delegation?.matches(body) == true, preview.intent == "task",
+        preview.fields["repository"]?["id"]?.string == body.repositoryId else {
+        throw DaemonError.decodingError("Delegation preview did not match this Task request")
+      }
+    } else if preview.fields["delegationPreview"] != nil {
+      throw DaemonError.decodingError("Unrequested delegation in launch preview")
+    }
+    return preview
   }
   public func getLaunchConfiguration(_ podId: String) async throws -> EffectiveLaunchPreview {
     try await request("GET", "/pods/\(podId)/configuration")
   }
   public func launchPod(_ body: ComposableLaunchRequest) async throws -> SessionResponse {
     try body.validateParentEnrollment()
-    return try await request("POST", "/pods", body: encode(body), delegate: body.requireParentEnrollment == true ? RefuseDaemonRedirect() : nil)
+    try body.validateSavedDelegation(requirePreview: true)
+    return try await request("POST", "/pods", body: encode(body),
+      delegate: body.requireParentEnrollment == true || body.delegation != nil ? RefuseDaemonRedirect() : nil)
   }
   public func discoverGitHubRepositories() async throws -> [ConfigurationJSON] {
     try await request("GET", "/configuration/github/repositories")

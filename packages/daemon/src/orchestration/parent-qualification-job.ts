@@ -17,6 +17,7 @@ export function parentQualificationJob(
   paths: readonly string[],
   gates: ParentIntegrationGates,
   secondPaths?: readonly string[],
+  matchByScope = false,
 ) {
   const scopes = [paths, secondPaths ?? paths].map((names) =>
     names.map((path) => ({ kind: 'file' as const, path })),
@@ -39,12 +40,15 @@ export function parentQualificationJob(
     const rows = select.all(run) as (Omit<ParentIntegrationInput, 'allowlist'> & {
       scope: string;
     })[];
-    if (rows.length !== 2 || rows.some((row, index) => row.scope !== canonical(scopes[index])))
-      return;
-    const inputs = rows.map(({ scope: _, ...row }, index) => ({
-      ...row,
-      allowlist: scopes[index]!,
-    }));
+    if (rows.length !== 2) return;
+    const ordered = matchByScope
+      ? scopes.map((scope) => rows.find((row) => row.scope === canonical(scope)))
+      : rows;
+    if (ordered.some((row, index) => row?.scope !== canonical(scopes[index]))) return;
+    const inputs = ordered.map((row, index) => {
+      const { scope: _, ...input } = row!;
+      return { ...input, allowlist: scopes[index]! };
+    });
     db.prepare(
       "INSERT INTO parent_qualification_jobs (run_id,selection_json,status) VALUES (?,?,'reserved')",
     ).run(run, canonical(inputs));

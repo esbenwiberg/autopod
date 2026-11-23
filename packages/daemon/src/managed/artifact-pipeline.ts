@@ -200,10 +200,10 @@ export class ManagedArtifactPipeline {
       );
     }
   }
-  async tick(): Promise<void> {
+  async tick(installation?: string): Promise<void> {
     const rows = this.service.db
       .prepare(
-        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND cleanup='not-requested' AND
+        `SELECT pod_id,dispatcher_installation_id FROM managed_pods WHERE observed_exit=1 AND cleanup='not-requested' AND (? IS NULL OR dispatcher_installation_id=?) AND
           (state IN ('validating','validated') OR (state='review_required' AND
             (EXISTS (SELECT 1 FROM artifact_exports WHERE artifact_exports.pod_id=managed_pods.pod_id AND error_code='artifact-export-retryable') OR
              EXISTS (SELECT 1 FROM managed_validations WHERE managed_validations.pod_id=managed_pods.pod_id AND
@@ -216,7 +216,10 @@ export class ManagedArtifactPipeline {
               EXISTS (SELECT 1 FROM managed_results,json_each(managed_results.limitations_json)
                 WHERE managed_results.pod_id=managed_pods.pod_id AND json_each.value='validation-incomplete')))))`,
       )
-      .all() as { pod_id: string; dispatcher_installation_id: string }[];
+      .all(installation ?? null, installation ?? null) as {
+      pod_id: string;
+      dispatcher_installation_id: string;
+    }[];
     for (const row of rows) {
       if (!this.service.ownsInstallation(row.dispatcher_installation_id)) continue;
       await this.finish(row.dispatcher_installation_id, row.pod_id).catch(() => {});

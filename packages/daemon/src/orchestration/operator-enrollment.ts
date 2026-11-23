@@ -148,9 +148,14 @@ export function operatorBasePolicy(
 }
 /** Refuse to orphan a commissioned run or silently reattach its workers to a different
  * enrollment. Canceled, fully cleaned history can be retained with the feature off. */
-export function assertOperatorRecovery(db: Database.Database, run: string | null) {
+export function assertOperatorRecovery(
+  db: Database.Database,
+  run: string | null,
+  savedPilot = false,
+) {
   const missing = db
     .prepare(`SELECT 1 FROM orchestration_runs r WHERE r.operator_owned=1 AND r.id IS NOT ?
+ ${savedPilot ? 'AND NOT EXISTS(SELECT 1 FROM saved_delegation_admissions a WHERE a.run_id=r.id)' : ''}
  AND ( (r.canceled=0 AND EXISTS(SELECT 1 FROM orchestration_kickoffs k WHERE k.run_id=r.id))
  OR EXISTS(SELECT 1 FROM managed_pods p WHERE p.dispatcher_installation_id='native.'||r.id AND (p.observed_exit=0 OR (p.runtime_ref IS NOT NULL AND p.cleanup<>'observed')))) LIMIT 1`)
     .get(run);

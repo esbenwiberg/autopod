@@ -143,6 +143,7 @@ export function createHostConfigurationComponents(
     | 'admissionReady'
     | 'authorizeParentLaunch'
     | 'parentCandidate'
+    | 'savedDelegationHost'
   > & {
     cipher: CredentialsCipher;
     githubAuth: DaemonGitHubAuth;

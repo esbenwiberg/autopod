@@ -147,6 +147,55 @@ public struct LaunchSource: Codable, Equatable, Sendable {
     self.podId = podId; self.digest = digest; self.configuration = configuration
   }
 }
+public struct LaunchDelegationSelection: Codable, Hashable, Sendable {
+  public let policyId: String
+  public let revision: Int
+  public init(policyId: String, revision: Int) { self.policyId = policyId; self.revision = revision }
+  public var isValid: Bool { UUID(uuidString: policyId) != nil && revision > 0 }
+}
+
+public struct LaunchDelegationPolicy: Decodable, Identifiable, Sendable {
+  public let policyId: String
+  public let revision: Int
+  public let name: String
+  public let repositoryId: String
+  public var id: String { policyId }
+  public var selection: LaunchDelegationSelection { .init(policyId: policyId, revision: revision) }
+}
+
+public struct LaunchDelegationPreview: Decodable, Sendable {
+  public struct Source: Decodable, Sendable { public let commit: String; public let tree: String; public let ref: String }
+  public struct Worker: Decodable, Sendable {
+    public let role: String; public let files: [String]; public let accountId: String
+    public let modelRequests: Int; public let observedTokenStop: Int; public let wallSeconds: Int
+  }
+  public struct Reviewer: Decodable, Sendable { public let accountId: String; public let tokenBudget: Int }
+  public let digest: String
+  public let requestId: String
+  public let policyId: String
+  public let revision: Int
+  public let name: String
+  public let source: Source
+  public let workers: [Worker]
+  public let workerModelRequests: Int
+  public let maxConcurrentWorkers: Int
+  public let reviewer: Reviewer
+  public func matches(_ request: ComposableLaunchRequest) -> Bool {
+    request.delegation == LaunchDelegationSelection(policyId: policyId, revision: revision)
+      && request.requestId == requestId && Self.hex(digest, count: 64)
+      && Self.hex(source.commit, count: 40) && Self.hex(source.tree, count: 40)
+      && source.ref.hasPrefix("refs/heads/") && workers.count == 2
+      && Set(workers.map(\.role)).count == workers.count
+      && workers.allSatisfy { !$0.files.isEmpty && (1...64).contains($0.modelRequests)
+        && $0.observedTokenStop > 0 && $0.wallSeconds > 0 }
+      && workers.reduce(0) { $0 + $1.modelRequests } == workerModelRequests
+      && (1...2).contains(maxConcurrentWorkers) && reviewer.tokenBudget > 0
+  }
+  fileprivate static func hex(_ value: String, count: Int) -> Bool {
+    value.utf8.count == count && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+  }
+}
+
 public struct ComposableLaunchRequest: Codable, Equatable, Sendable {
   public var source: LaunchSource?
   public var repositoryId: String?
@@ -163,6 +212,7 @@ public struct ComposableLaunchRequest: Codable, Equatable, Sendable {
   public var expectedDigest: String?
   public var requestId: String?
   public var requireParentEnrollment: Bool?
+  public var delegation: LaunchDelegationSelection?
   public init(repositoryId: String? = nil, profileId: String? = nil, task: String = "") {
     self.repositoryId = repositoryId; self.profileId = profileId; self.task = task
   }
@@ -193,6 +243,10 @@ public struct EffectiveLaunchPreview: Codable, Equatable, Sendable {
   public var mainModel: String { fields["ai"]?["main"]?["model"]?.string ?? "" }
   public var executionTarget: String { fields["resolvedExecution"]?["target"]?.string ?? "" }
   public var memoryGb: Double? { fields["resolvedExecution"]?["main"]?["memoryGb"]?.number }
+  public var delegation: LaunchDelegationPreview? {
+    guard let value = fields["delegationPreview"], let bytes = try? JSONEncoder().encode(value) else { return nil }
+    return try? JSONDecoder().decode(LaunchDelegationPreview.self, from: bytes)
+  }
 
   public func referenceInputBundle() throws -> InputBundleReference? {
     guard let value = fields["work"]?["inputBundle"], value != .null else { return nil }
@@ -206,7 +260,7 @@ public extension ComposableLaunchRequest {
   static func decodeJSON(_ data: Data) throws -> Self {
     let value = try JSONDecoder().decode(ConfigurationJSON.self, from: data)
     guard let fields = value.object else { throw LaunchJSONError.invalid("Launch configuration must be an object") }
-    let allowed: Set<String> = ["source", "repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "task", "work", "intent", "selections", "overrides", "requiredSidecarIds", "referenceRepositories", "expectedDigest", "requestId", "requireParentEnrollment"]
+    let allowed: Set<String> = ["source", "repositoryId", "repositorySetupId", "emptyWorkspace", "profileId", "task", "work", "intent", "selections", "overrides", "requiredSidecarIds", "referenceRepositories", "expectedDigest", "requestId", "requireParentEnrollment", "delegation"]
     guard Set(fields.keys).isSubset(of: allowed) else { throw LaunchJSONError.invalid("Unknown launch fields: \(Set(fields.keys).subtracting(allowed).sorted().joined(separator: ", "))") }
     for (key, field) in fields where field == .null { throw LaunchJSONError.invalid("\(key) cannot be null; omit it to use its default") }
     if let source = fields["source"] {
@@ -226,9 +280,27 @@ public extension ComposableLaunchRequest {
       guard Set(selections.keys).isSubset(of: keys) else { throw LaunchJSONError.invalid("Unknown preset selection") }
       for (key, field) in selections where field == .null && key != "githubAccessId" { throw LaunchJSONError.invalid("\(key) cannot be null") }
     }
+    if let delegation = fields["delegation"], Set(delegation.object?.keys.map { $0 } ?? []) != ["policyId", "revision"] {
+      throw LaunchJSONError.invalid("Delegation requires a saved policy and revision.")
+    }
     let request = try JSONDecoder().decode(Self.self, from: data)
     try request.validateParentEnrollment()
+    try request.validateSavedDelegation(requirePreview: false)
     return request
+  }
+
+  func validateSavedDelegation(requirePreview: Bool) throws {
+    guard let delegation else { return }
+    guard delegation.isValid, let repositoryId, !repositoryId.isEmpty, emptyWorkspace != true,
+      intent == nil || intent == "task", source == nil, requireParentEnrollment == nil,
+      let requestId, UUID(uuidString: requestId) != nil else {
+      throw LaunchJSONError.invalid("Saved delegation requires a fresh repository Task and its exact request ID.")
+    }
+    if requirePreview {
+      guard let expectedDigest, LaunchDelegationPreview.hex(expectedDigest, count: 64) else {
+        throw LaunchJSONError.invalid("Review the saved delegation plan before launching.")
+      }
+    }
   }
 
   func validateParentEnrollment() throws {

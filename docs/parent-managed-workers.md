@@ -418,6 +418,94 @@ be made by a child token, reused on different evidence, or used after the run
 or source authority has changed. It is not permission to push, open a PR,
 merge, or advance accepted source.
 
+## Saved delegation policy contract (daemon foundation)
+
+Delegation is off when the launch omits `delegation`. The explicit selector is
+`{policyId, revision}` and is valid only for a fresh repository Task with its own
+request UUID. It is not inherited by follow-ups or available in scheduled
+presets, Native Goals, or the isolated signed-trial path.
+
+The daemon foundation stores immutable policy revisions under the full verified
+human principal (subject, issuer, audience). A policy pins a repository revision
+and branch, two coding roles with disjoint file scopes, worker recipe and account
+pins, worker ceilings, and separate checks/reviewer policy pins. These values are
+constraints, not credentials or permission to launch an arbitrary recipe. The
+internal read-only planner resolves the ordinary Task configuration and requires
+trusted host observations of the exact source commit, tree and bundle digest,
+recipe pins and runtime. Its review digest binds all those inputs. Changes to the
+source, runtime pins, Task configuration or saved policy require a new preview.
+
+The trusted, internal admission entrypoint requires the reviewed digest. It
+validates a bounded Git bundle against the pinned predecessor, commit and tree
+before atomically inserting the Task, launch snapshot, request ledger, parent
+binding and private source custody. The retained seed records source identity
+only; it is not a passing check or independent-review receipt. Exact replay
+reads the retained admission, even after policy edits or daemon restart. An
+attempt-scoped lookup binds worker operations to the running Task and its
+current lifecycle generation. Fixture tests cover sibling-run cursor and budget
+isolation using the real continuation ledger.
+
+The local saved-policy runtime attaches to one retained Task. It requires the
+reviewed worker execution-spec digests and the exact public pins of both
+independent signers. A parent gets an attempt credential only after a trusted
+checkout observation matches the retained commit and tree and reports no local
+changes. Each worker role can
+be reserved once, with its own file scope and budget. The watchdog is scoped to
+that installation, uses verified private mirrors, collects explicit submissions,
+and qualifies the combined tree through the existing two-receipt gate. On
+reattachment, recorded worker identities and reservations are reused; uncertain
+evaluation claims are fenced instead of replayed.
+
+The normal launch API and Desktop composer can select and preview a saved
+policy **only** when a trusted host composition advertises readiness. The
+ordinary config digest is not sufficient for admission: the composer sends the
+exact request UUID, selected revision and reviewed delegation digest. If the
+host becomes unavailable, the launch is refused rather than starting an
+ordinary Task. The local smoke uses the ordinary preview and pod routes with
+fixture checkout, runtime and signer ports; it makes no cloud calls.
+
+### Opt-in one-repository host pilot
+
+The daemon installs the concrete ports only when `AUTOPOD_SAVED_DELEGATION_PILOT`
+points to a host-owned pilot JSON file. With no pilot configured, the picker
+stays hidden and a retained saved-policy Task cannot use ordinary provisioning.
+The pilot is mutually exclusive with signed trial and Dispatcher execution
+configurations; do not enable it while unrelated managed work still needs its
+runtime. Ordinary nondelegated Tasks are not enrolled by this setting.
+
+The file and its pinned `HEAD` Git bundle must be regular owner-only files in
+the same canonical 0700 directory. The version-1 record pins the exact Entra
+subject/issuer/audience, saved policy ID and contents, repository configuration
+digest, seed predecessor/commit/tree/bundle digest, reviewed sandbox profile
+set, exact managed recipes for the two roles, a dedicated Azure group scope and
+ready disk, and separate checks and review endpoints and public pins. Use the
+existing daemon-side GitHub read authority and worker accounts. The separate
+`AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET` must resolve to the pinned dedicated
+group, not the ordinary fleet. Supply each evaluator's role-scoped mTLS and
+Ed25519 dispatch credentials through `CREDENTIALS_DIRECTORY`; never place
+credentials in the pilot JSON or a worker environment.
+
+Preview verifies the configured GitHub branch still points at the staged
+commit. The preview response's `delegationPreview` includes `runId`,
+`evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for the operator to
+provision **both** role-owned, one-shot evaluator leases for that exact run,
+seed commit, repository and ordered paths. Use the reviewed preview from the
+same open Task draft; staging leases is not owner approval or a launch. A
+fresh admission probes both exact leases over authenticated TLS. A missing,
+mismatched, expired, or already-claimed lease refuses the launch before any
+Task or worker reservation is written. Probes carry no bundle and do not
+consume the one-shot claim. A network failure after actual dispatch is still
+uncertain and is not replayed.
+
+Provisioning creates a new detached parent worktree from retained Git custody,
+with no remote. The saved runtime owns attempt-scoped delegate operations and
+reattaches its original workers and watchdog on daemon restart. Killing the
+parent in Desktop fences its pending starts and revokes its live workers; the
+run-scoped watchdog stops them. Task history, private custody and spent request
+reservations are retained. This first pilot does not support silently restaging a
+changed policy, selecting another repo, or automatic worktree recovery/reuse.
+It never publishes or merges.
+
 ## Evidence and remaining milestones
 
 Run the offline contract:

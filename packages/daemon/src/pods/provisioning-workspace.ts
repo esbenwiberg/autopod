@@ -389,7 +389,15 @@ export function createProvisioningWorkspace(
     let worktreePath: string | null = null;
     let bareRepoPath: string | null = null;
 
-    if (profile.repoUrl) {
+    const savedWorkspace = await deps.savedDelegationWorkspace?.(podId, lifecycleGeneration);
+    if (savedWorkspace) {
+      assertStartupCurrent();
+      if (!savedWorkspace.startCommitSha) throw new Error('saved-delegation-worktree-missing-pin');
+      worktreePath = savedWorkspace.worktreePath;
+      bareRepoPath = savedWorkspace.bareRepoPath;
+      podRepo.update(podId, { startCommitSha: savedWorkspace.startCommitSha });
+      pod = podRepo.getOrThrow(podId);
+    } else if (profile.repoUrl) {
       // Validate recovery worktree is still a usable git directory.
       // It may have been cleaned up by another pod's kill (e.g. shared worktree path).
       let recoveryViable = false;

@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import {
   createEvaluatorDispatchVerifier,
   evaluatorDispatchSchema,
 } from './parent-evaluator-dispatch.js';
+import { evaluatorReadinessSchema, readinessDigest } from './parent-evaluator-readiness.js';
 import {
   type ParentEvaluatorPorts,
   ParentEvaluatorVeto,
@@ -108,6 +109,31 @@ export function registerParentEvaluatorEndpoint(app: FastifyInstance, config: En
       },
     },
     async (request, reply) => {
+      const probe = evaluatorReadinessSchema.safeParse(request.body);
+      if (probe.success) {
+        const { readiness, dispatch } = probe.data;
+        const bindingDigest = readinessDigest(readiness);
+        if (
+          !verifyDispatch ||
+          !verifyDispatch(bindingDigest, dispatch) ||
+          readiness.run !== lease.run ||
+          readiness.repository !== lease.repository ||
+          readiness.predecessor !== lease.predecessor ||
+          readiness.policyDigest !== policyDigest ||
+          canonical(readiness.paths) !== expectedPaths ||
+          expired()
+        ) {
+          return reply.code(403).send({ code: 'evaluator-readiness-not-enrolled' });
+        }
+        try {
+          await lstat(path.join(stateDir, role + '-' + lease.run + '.claim'));
+          return reply.code(409).send({ code: 'evaluator-attempt-already-claimed' });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+            return reply.code(503).send({ code: 'evaluator-claim-unavailable' });
+        }
+        return { ready: true, bindingDigest };
+      }
       const parsed = bodySchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ code: 'evaluator-input-invalid' });
       const { request: input, bundle: encoded, dispatch } = parsed.data;

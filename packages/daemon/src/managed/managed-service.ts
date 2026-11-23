@@ -455,10 +455,12 @@ export class ManagedPodService {
       throw new Error('grant-inactive');
   }
   /** AutoPod's own watchdog; no Dispatcher connection is needed. Runtime also has its own expiry guard. */
-  async enforceExpiry(): Promise<void> {
+  async enforceExpiry(installation?: string): Promise<void> {
     const rows = this.db
-      .prepare('SELECT * FROM managed_pods WHERE observed_exit=0')
-      .all() as ManagedPodRow[];
+      .prepare(
+        'SELECT * FROM managed_pods WHERE observed_exit=0 AND (? IS NULL OR dispatcher_installation_id=?)',
+      )
+      .all(installation ?? null, installation ?? null) as ManagedPodRow[];
     for (const row of rows) {
       if (!this.ownsInstallation(row.dispatcher_installation_id)) continue;
       if (row.runtime_ref && !this.starts.has(row.pod_id)) {
