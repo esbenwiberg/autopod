@@ -157,6 +157,64 @@ describe('approval controls', () => {
   });
 });
 
+describe('force approval on a compromised worktree (#663)', () => {
+  it('refuses a failed compromised pod with 409 and leaves it unchanged', async () => {
+    const f = fixture(true);
+    f.validated();
+    f.podRepo.update('prepare', {
+      status: 'failed',
+      worktreeCompromised: true,
+      lastValidationResult: createFailingValidationResult('prepare'),
+    });
+    const before = f.pod();
+    const events = f.db.prepare('SELECT COUNT(*) AS n FROM events').get();
+
+    await expect(
+      f.controls().forceApprove('prepare', 'Ship it', { type: 'human', userId: 'operator' }),
+    ).rejects.toMatchObject({
+      code: 'WORKTREE_COMPROMISED',
+      statusCode: 409,
+      message: expect.stringContaining('/pods/prepare/recover-worktree'),
+    });
+
+    expect(f.pod()).toEqual(before);
+    expect(f.pod()).toMatchObject({ status: 'failed', validationWaiver: null });
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM events').get()).toEqual(events);
+    expect(f.mainCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+    expect(f.reopen().pods.getOrThrow('prepare')).toEqual(before);
+  });
+
+  it('retains a pending human decision when the worktree is compromised', async () => {
+    const f = fixture();
+    f.validated();
+    const escalation = {
+      id: 'question',
+      podId: 'prepare',
+      type: 'ask_human' as const,
+      timestamp: new Date().toISOString(),
+      payload: { question: 'Proceed?' },
+      response: null,
+    };
+    f.deps.escalationRepo.insert(escalation);
+    f.podRepo.update('prepare', {
+      status: 'awaiting_input',
+      pendingEscalation: escalation,
+      worktreeCompromised: true,
+    });
+    const before = f.pod();
+
+    await expect(
+      f.controls().forceApprove('prepare', 'Ship it', { type: 'human', userId: 'operator' }),
+    ).rejects.toMatchObject({ code: 'WORKTREE_COMPROMISED', statusCode: 409 });
+
+    expect(f.pod()).toEqual(before);
+    expect(f.deps.escalationRepo.getOrThrow('question').response).toBeNull();
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM completion_decisions').get()).toEqual({
+      n: 0,
+    });
+  });
+});
+
 describe('settled fact waiver safety', () => {
   it.each([
     'guidance',

@@ -156,6 +156,17 @@ export function createApprovalControls(captured: ApprovalControlsCaptured) {
         409,
       );
     }
+    // Approval refuses compromised source, so overriding validation here would
+    // only create a validated pod that can never be delivered (#663).
+    if (pod.worktreeCompromised) {
+      throw new AutopodError(
+        `Cannot force-approve pod ${podId}: its worktree is marked compromised, so approval could not deliver the result. ` +
+          `Recover the worktree first (Recover worktree, or POST /pods/${podId}/recover-worktree) and revalidate, ` +
+          'or kill the pod and deliver the branch manually.',
+        'WORKTREE_COMPROMISED',
+        409,
+      );
+    }
     let decision = pod.pendingEscalation;
     if (pendingDecisionId && decision?.id !== pendingDecisionId) {
       if (!repairingDecision || decision) {
