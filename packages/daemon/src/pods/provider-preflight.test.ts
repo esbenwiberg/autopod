@@ -1,6 +1,7 @@
 import {
   type CompiledProviderManifest,
   createProviderCatalog,
+  PROVIDER_CATALOG,
   type Profile,
   type ProviderAccount,
   type ProviderCredentials,
@@ -15,11 +16,7 @@ function manifest(
 ): CompiledProviderManifest {
   return createProviderCatalog({
     manifestVersion: 1,
-    piCompatibility: {
-      packageName: '@earendil-works/pi-coding-agent',
-      packageVersion: '0.80.6',
-      source: 'pinned-distribution',
-    },
+    piCompatibility: PROVIDER_CATALOG.piCompatibility,
     providers: [
       {
         id: 'fixture-cloud',

@@ -1080,6 +1080,30 @@ function createTestContext(
   };
 }
 
+/** GitHub approval requires an observation of the exact published source and target. */
+function mockOpenPublishedPr(
+  ctx: TestContext,
+  pod: Pick<Pod, 'id' | 'branch'>,
+  overrides: Partial<Awaited<ReturnType<PrManager['getPrStatus']>>> = {},
+) {
+  const current = ctx.podRepo.getOrThrow(pod.id);
+  vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+    merged: false,
+    open: true,
+    blockReason: null,
+    reviewDecision: 'APPROVED',
+    ciFailures: [],
+    reviewComments: [],
+    headSha: 'a'.repeat(40),
+    sourceTarget: {
+      repository: 'https://github.com/org/repo',
+      branch: pod.branch,
+      baseBranch: current.baseBranch ?? 'main',
+    },
+    ...overrides,
+  });
+}
+
 /** Synthetic published source/admission for poll ownership fault tests. */
 function seedPollDelivery(ctx: TestContext, id: string, planned = false) {
   const original = ctx.podRepo.getOrThrow(id);
@@ -8455,6 +8479,7 @@ describe('PodManager', () => {
           await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
             code: 'READINESS_REASON_REQUIRED',
           });
+          mockOpenPublishedPr(ctx, pod);
           await manager.approveSession(pod.id, {
             reason: 'Fixture operator reviewed retained source after revalidation',
           });
@@ -9309,13 +9334,9 @@ describe('PodManager', () => {
           filesChanged: 1,
           ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
         });
-        vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
-          merged: false,
-          open: true,
+        mockOpenPublishedPr(ctx, pod, {
           blockReason: 'Review required',
           reviewDecision: 'REVIEW_REQUIRED',
-          ciFailures: [],
-          reviewComments: [],
         });
         await manager.approveSession(pod.id, { squash: true });
         await vi.advanceTimersByTimeAsync(0);
@@ -9396,14 +9417,7 @@ describe('PodManager', () => {
           filesChanged: 2,
           ...(path === 'existing' ? { prUrl: 'https://github.com/org/repo/pull/42' } : {}),
         });
-        vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
-          merged: false,
-          open: true,
-          blockReason: null,
-          reviewDecision: 'APPROVED',
-          ciFailures: [],
-          reviewComments: [],
-        });
+        mockOpenPublishedPr(ctx, pod);
         vi.mocked(ctx.prManager.mergePr).mockImplementationOnce(async (config) => {
           config.onPrepared?.();
           throw new Error('provider response lost after mutation');
@@ -9525,6 +9539,7 @@ describe('PodManager', () => {
         filesChanged: 2,
         prUrl: 'https://github.com/org/repo/pull/42',
       });
+      mockOpenPublishedPr(ctx, pod);
       let mutationStarted = false;
       vi.mocked(ctx.prManager.mergePr).mockImplementation(async (config) => {
         ctx.db
@@ -9560,6 +9575,7 @@ describe('PodManager', () => {
         filesChanged: 2,
         ...(path === 'new' ? {} : { prUrl: 'https://github.com/org/repo/pull/42' }),
       });
+      mockOpenPublishedPr(ctx, pod);
       let publicationCount = 0;
       vi.mocked(ctx.worktreeManager.pushBranch).mockImplementation(
         async (worktree, branch, options) => {
@@ -9684,7 +9700,9 @@ describe('PodManager', () => {
     ] as const)('keeps failed PR preparation out of merge polling across restart (%s)', async (failure) => {
       vi.useFakeTimers();
       try {
-        const ctx = createTestContext();
+        const ctx = createTestContext(undefined, {
+          prProvider: failure === 'initial-push' ? undefined : 'ado',
+        });
         const manager = createPodManager(ctx.deps);
         const pod = manager.createSession(
           { profileName: 'test-profile', task: 'Preserve unpublished source' },
@@ -9758,14 +9776,7 @@ describe('PodManager', () => {
         expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
         expect(completed).toEqual([]);
-        vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
-          merged: false,
-          open: true,
-          reviewDecision: 'APPROVED',
-          blockReason: null,
-          ciFailures: [],
-          reviewComments: [],
-        });
+        mockOpenPublishedPr(ctx, pod);
         await restarted.approveSession(pod.id);
         expect(restarted.getSession(pod.id)).toMatchObject({
           status: 'complete',
@@ -10174,6 +10185,7 @@ describe('PodManager', () => {
         code: 'READINESS_REASON_REQUIRED',
       });
 
+      mockOpenPublishedPr(ctx, owner);
       const events: unknown[] = [];
       ctx.eventBus.subscribe((event) => events.push(event));
       await manager.approveSession(owner.id, { reason: 'Series risk accepted' });
@@ -10209,6 +10221,7 @@ describe('PodManager', () => {
         prUrl: 'https://github.com/org/repo/pull/42',
       });
 
+      mockOpenPublishedPr(ctx, pod);
       await manager.approveSession(pod.id);
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
@@ -10307,6 +10320,7 @@ describe('PodManager', () => {
         prUrl: 'https://github.com/org/repo/pull/42',
       });
 
+      mockOpenPublishedPr(ctx, pod);
       await manager.approveSession(pod.id, { squash: true });
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(expect.objectContaining({ squash: true }));
@@ -10490,7 +10504,9 @@ describe('PodManager', () => {
       'merging',
       'complete',
     ] as const)('rejects a replacement lifecycle during normal approval %s', async (step) => {
-      const ctx = createTestContext();
+      const ctx = createTestContext(undefined, {
+        prProvider: step === 'rebase' ? 'ado' : undefined,
+      });
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Fence normal delivery' },
@@ -10619,6 +10635,7 @@ describe('PodManager', () => {
         filesChanged: 1,
         prUrl: 'https://github.com/org/repo/pull/42',
       });
+      mockOpenPublishedPr(ctx, pod);
       vi.mocked(ctx.prManager.mergePr).mockRejectedValue(new Error('connection lost after merge'));
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
         code: 'APPROVAL_DELIVERY_FAILED',
@@ -10629,7 +10646,7 @@ describe('PodManager', () => {
     });
 
     it('retains delivery after the pre-merge rebase operation rejects', async () => {
-      const ctx = createTestContext();
+      const ctx = createTestContext(undefined, { prProvider: 'ado' });
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Preserve failed rebase' },
@@ -15605,6 +15622,7 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('validated');
       });
 
+      mockOpenPublishedPr(ctx, pod);
       const approvalPromise = manager.approveSession(pod.id);
       await new Promise((resolve) => setImmediate(resolve));
 
@@ -25502,6 +25520,7 @@ describe('updateFromBase', () => {
       { head: 'c'.repeat(40), tree: 'd'.repeat(40) },
     );
 
+    mockOpenPublishedPr(ctx, pod, { headSha: 'c'.repeat(40) });
     await manager.approveSession(pod.id);
 
     const pushCalls = vi.mocked(ctx.worktreeManager.pushBranch).mock.calls;

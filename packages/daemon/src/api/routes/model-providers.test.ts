@@ -1,3 +1,4 @@
+import { PROVIDER_CATALOG } from '@autopod/shared';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { modelProviderRoutes } from './model-providers.js';
@@ -18,7 +19,7 @@ describe('model provider catalog route', () => {
       manifestVersion: 1,
       piCompatibility: {
         packageName: '@earendil-works/pi-coding-agent',
-        packageVersion: '0.80.6',
+        packageVersion: PROVIDER_CATALOG.piCompatibility.packageVersion,
         source: 'pinned-distribution',
       },
     });
