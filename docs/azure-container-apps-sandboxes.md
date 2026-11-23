@@ -113,9 +113,10 @@ Other repositories and profiles keep L.
 
 Cost: while running, sandboxes are billed per vCPU-second and per GiB-second
 (see [sandbox compute cost](sandbox-compute-cost.md)). XL costs about 2× L, 2XL about 4× L and 3XL about 8× L
-for each second they run. The isolated reviewer is allocated with the same bundle as the main
-worker, so one task can hold twice the bundle's cores while both run (for example 32 cores for
-3XL). Those cores count against the concurrent-core quota of the subscription and region (300 by
+for each second they run. Every isolated reviewer run (review, advisor and memory) gets its own
+sandbox with the same bundle as the main worker. A task therefore holds at least twice the
+bundle's cores while one of them runs alongside the worker (for example 32 cores for 3XL), and
+more if runs overlap. Those cores count against the concurrent-core quota of the subscription and region (300 by
 default), which is shared with every other sandbox there. Reaching it blocks all sandbox creates
 and starts. Choose a larger bundle only where the repository needs it.
 
