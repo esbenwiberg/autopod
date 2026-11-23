@@ -177,14 +177,19 @@ describe('workspace preservation on abnormal worker exit (#670)', () => {
       'Provider reset; continue from preserved source',
       { type: 'human', userId: 'operator' },
     );
-    const order: string[] = [];
-    vi.mocked(f.ctx.containerManager.kill).mockImplementation(async () => {
-      order.push('kill');
-    });
+    // Start Rework from a host tree that lacks the container-only work, so only
+    // a Rework-time sync can restore it before the container is removed.
+    fs.rmSync(path.join(f.worktree, 'phase2-snapshot.ts'));
     const syncsBefore = f.syncCalls.length;
+    const atKill: Array<{ syncs: number; untracked: boolean }> = [];
+    vi.mocked(f.ctx.containerManager.kill).mockImplementation(async () => {
+      atKill.push({
+        syncs: f.syncCalls.length - syncsBefore,
+        untracked: fs.existsSync(path.join(f.worktree, 'phase2-snapshot.ts')),
+      });
+    });
     await f.manager.triggerValidation(f.pod.id, { force: true });
-    order.unshift(...Array(f.syncCalls.length - syncsBefore).fill('sync'));
-    expect(order).toEqual(['sync', 'kill']);
+    expect(atKill).toEqual([{ syncs: 1, untracked: true }]);
     const queued = f.ctx.podRepo.getOrThrow(f.pod.id);
     expect(queued).toMatchObject({
       status: 'queued',
