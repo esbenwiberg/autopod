@@ -142,6 +142,19 @@ run it whenever you're adding a `PodStatus` value. Skipping a layer typically me
 the state is unreachable (transition table miss) or pods land in it and idle
 (`processPod()` miss).
 
+### Docker fix-pod rebase adoption
+
+Every container-to-bare push in `pods/workspace-transfer.ts` goes through
+`pushCommitsToBareViaStagingRef`. A non-fast-forward tip is refused unless the
+pod has rewrite authority (`pods/fix-history-rewrite-policy.ts`: only the
+parent's canonical PR fix pod on local Docker) and
+`worktrees/rebase-rewrite-proof.ts` proves the rewrite is a rebase. Adoption
+reuses the CAS `update-ref` against the captured tip and emits a durable activity
+record. `prepareWorkspaceForValidation` adopts a proven rewrite before mirroring
+files. Every other Docker divergence keeps the strict
+`ValidationWorkspaceReconcileError`. `forceApprove` refuses compromised
+worktrees (409 `WORKTREE_COMPROMISED`).
+
 ### Approval-time source updates
 
 Ordinary GitHub approval preserves the exact validated published head when the
