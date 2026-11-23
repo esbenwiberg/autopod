@@ -1,5 +1,6 @@
 import type { NativeGoalProcessIdentity } from '@autopod/shared';
 import type { ContainerStartOptions } from '../interfaces/container-manager.js';
+import type { SandboxResourceTier } from './sandbox-tiers.js';
 
 /**
  * Seam over the Azure Container Apps **Sandboxes** preview data-plane.
@@ -17,8 +18,8 @@ import type { ContainerStartOptions } from '../interfaces/container-manager.js';
  * `pods/reconciler.ts`).
  */
 
-/** Resource tier, mapping to the preview product's published tiers. */
-export type SandboxResourceTier = 'XS' | 'S' | 'M' | 'L';
+/** Resource tier from the single sandbox catalog (`sandbox-tiers.ts`). */
+export type { SandboxResourceTier };
 
 export interface SandboxEgressRule {
   pattern: string;
@@ -294,39 +295,6 @@ export interface SandboxApiClient {
 // ---------------------------------------------------------------------------
 // Pure mapping helpers — no Azure, no SDK. Unit-tested in sandbox-api-client.test.ts.
 // ---------------------------------------------------------------------------
-
-/** Published memory ceiling per tier, in bytes. */
-export const SANDBOX_TIER_MEMORY_BYTES: Record<SandboxResourceTier, number> = {
-  XS: 512 * 1024 * 1024, // 0.5 GB
-  S: 1024 * 1024 * 1024, // 1 GB
-  M: 2 * 1024 * 1024 * 1024, // 2 GB
-  L: 4 * 1024 * 1024 * 1024, // 4 GB
-};
-
-const TIER_ORDER: readonly SandboxResourceTier[] = ['XS', 'S', 'M', 'L'];
-
-/**
- * Hard platform ceiling for a sandbox pod: the largest published tier. Nothing a
- * profile asks for can exceed this — `pickSandboxTier` clamps to `L` — so tooling
- * that needs more RAM than this cannot run on the sandbox target at all.
- */
-export const MAX_SANDBOX_MEMORY_BYTES = SANDBOX_TIER_MEMORY_BYTES.L;
-
-/**
- * Pick the smallest tier whose memory ceiling satisfies `memoryBytes`. Falls back
- * to `defaultTier` when no memory hint is given, and to the largest tier (`L`)
- * when the request exceeds every published tier.
- */
-export function pickSandboxTier(
-  memoryBytes: number | undefined,
-  defaultTier: SandboxResourceTier,
-): SandboxResourceTier {
-  if (!memoryBytes || memoryBytes <= 0) return defaultTier;
-  for (const tier of TIER_ORDER) {
-    if (SANDBOX_TIER_MEMORY_BYTES[tier] >= memoryBytes) return tier;
-  }
-  return 'L';
-}
 
 /**
  * Translate a network-policy mode + host allowlist into a sandbox egress policy:

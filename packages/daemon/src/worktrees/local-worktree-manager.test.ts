@@ -780,8 +780,8 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(true);
-      // git add -A, diff --cached --quiet, mode-only scan, deletion guard, commit
-      expect(execFileMock).toHaveBeenCalledTimes(5);
+      // Two ignore-policy scans, git add -A, cached diff, mode scan, deletion guard, commit.
+      expect(execFileMock).toHaveBeenCalledTimes(7);
     });
 
     it('returns false when working tree is clean', async () => {
@@ -789,8 +789,27 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(false);
-      // Only git add -A and diff --cached --quiet (no commit, no deletion check)
-      expect(execFileMock).toHaveBeenCalledTimes(2);
+      // Two ignore-policy scans, git add -A and cached diff (no commit or deletion check).
+      expect(execFileMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('refuses staging when the ignore-policy probe cannot be verified', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          cb(args.includes('ls-files') ? new Error('local Git failure') : null, {
+            stdout: '',
+            stderr: '',
+          });
+          return {} as ChildProcess;
+        },
+      );
+      await expect(
+        manager.commitPendingChanges('/tmp/worktree/sess', 'test commit'),
+      ).rejects.toMatchObject({
+        code: 'AUTO_COMMIT_IGNORE_UNVERIFIED',
+      });
+      expect(execFileMock.mock.calls.every((call) => call[1].includes('ls-files'))).toBe(true);
     });
 
     it('discards mode-only staged changes and skips the auto-commit when nothing remains', async () => {
@@ -2488,7 +2507,7 @@ describe('LocalWorktreeManager', () => {
         },
       );
       fsReadFileMock.mockResolvedValueOnce(
-        '# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n.autopod/provider-failover.md\n',
+        '# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n/.autopod/provider-failover.md\n',
       );
 
       await manager.create({

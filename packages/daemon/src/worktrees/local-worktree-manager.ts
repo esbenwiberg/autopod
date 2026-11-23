@@ -53,10 +53,12 @@ import {
 import { assertMergeRepository } from './merge-source-identity.js';
 import { prepareRetainedCheckpointWorkspace } from './retained-checkpoint-workspace.js';
 import {
+  AutoCommitIgnoreError,
   applyPinnedAdoption,
   inspectAdoptionGit,
   inspectPreservationGit,
   inspectSupplementalAdoptionGit,
+  PORTABLE_GIT_EXCLUDES,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -605,6 +607,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       commitSha: source.head,
       treeSha: source.tree,
       worktreeClean: source.worktreeClean,
+      changes: source.changes,
     };
   }
 
@@ -997,7 +1000,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         await this.appendWorktreeExcludes(worktreePath, [
           '.mcp.json',
           '.autopod/pi-handoff.md',
-          '.autopod/provider-failover.md',
+          '/.autopod/provider-failover.md',
         ]).catch((err) => {
           this.logger.warn(
             { err, worktreePath },
@@ -1076,9 +1079,19 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   async ensureExcludes(worktreePath: string, entries: string[]): Promise<void> {
-    await this.appendWorktreeExcludes(worktreePath, entries);
+    // Daemon paths are relative to the worktree root. Do not hide a user's
+    // same-named file in another directory.
+    await this.appendWorktreeExcludes(
+      worktreePath,
+      entries.map((entry) => `/${entry}`),
+    );
     for (const entry of entries) {
-      await git(['check-ignore', '-q', '--', entry], { cwd: worktreePath });
+      // A global ignore is not proof: finalization and recovery disable it.
+      // A tracked file must also fail this check before the handoff is written.
+      await git(['-c', PORTABLE_GIT_EXCLUDES, 'check-ignore', '-q', '--', entry], {
+        cwd: worktreePath,
+        env: SOURCE_GIT_ENV,
+      });
     }
   }
 
@@ -1595,6 +1608,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       // to "everything" but pathspecs must be explicit when any are present.
       args.push('--', '.', ...effective.map((p) => `:(exclude)${p}`));
     }
+    await this.assertConsistentAutoCommitExcludes(worktreePath);
     await git(args, { cwd: worktreePath });
     try {
       await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
@@ -1614,6 +1628,23 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch {
       return true;
     }
+  }
+
+  private async assertConsistentAutoCommitExcludes(worktreePath: string): Promise<void> {
+    // Do not silently stage files the host marks private, or leave them behind
+    // while claiming the same set of files was considered by finalization.
+    const args = ['-c', 'core.fsmonitor=false', 'ls-files', '--others', '--exclude-standard', '-z'];
+    const options = { cwd: worktreePath, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 };
+    const same = await Promise.all([
+      git(args, options),
+      git(['-c', PORTABLE_GIT_EXCLUDES, ...args], { ...options, env: SOURCE_GIT_ENV }),
+    ]).then(
+      ([ambient, portable]) => ambient.stdout === portable.stdout,
+      () => {
+        throw new AutoCommitIgnoreError('AUTO_COMMIT_IGNORE_UNVERIFIED');
+      },
+    );
+    if (!same) throw new AutoCommitIgnoreError('AUTO_COMMIT_IGNORE_MISMATCH');
   }
 
   /**

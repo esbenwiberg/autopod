@@ -896,6 +896,7 @@ export class AdoPrManager implements PrManager {
       mergeBlocked: reasons.length > 0,
       squashRequired,
       reviewDecision,
+      ...(pr.mergeStatus === 'conflicts' ? { mergeConflict: true } : {}),
       ciFailures,
       reviewComments,
     };

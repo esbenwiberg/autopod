@@ -6127,6 +6127,11 @@ describe('PodManager', () => {
       .mock.calls.map(([, command]) => command.join(' '))
       .filter((script) => script.includes('# autopod: provider failover handoff'));
     expect(handoffGuardScripts).toHaveLength(2);
+    for (const script of handoffGuardScripts) {
+      expect(script).toContain("grep -qFx '/.autopod/provider-failover.md'");
+      expect(script).toContain('GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null');
+      expect(script).toContain('core.excludesFile=/dev/null');
+    }
     expect(handoffGuardScripts[0]).toContain(
       'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
     );
@@ -12094,11 +12099,15 @@ describe('PodManager', () => {
       );
     });
 
-    it('refuses an undersized sandbox through the actual adapter before allocating or starting a worker', async () => {
+    it('refuses an unsupported sandbox size through the actual adapter before allocating or starting a worker', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
       });
+      // An explicit non-bundle size above L is refused, never rounded up to 2XL.
+      ctx.db
+        .prepare('UPDATE profiles SET container_memory_gb = 10 WHERE name = ?')
+        .run('test-profile');
       const createSandbox = vi.fn();
       const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
       vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
@@ -12112,6 +12121,27 @@ describe('PodManager', () => {
       expect(createSandbox).not.toHaveBeenCalled();
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).failureReason).toContain('requested 10 GiB');
+    });
+
+    it('gives a legacy sandbox pod without a size the default bundle, not the 10 GiB Docker default', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const createSandbox = vi.fn(async () => {
+        throw new Error('stop after recording the create request');
+      });
+      const sandbox = new SandboxContainerManager({ createSandbox } as never, logger);
+      vi.mocked(ctx.containerManager.spawn).mockImplementation((config) => sandbox.spawn(config));
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Use the default sandbox bundle' },
+        'operator',
+      );
+      await manager.processPod(pod.id);
+      expect(createSandbox).toHaveBeenCalledTimes(1);
+      expect(createSandbox).toHaveBeenCalledWith(expect.objectContaining({ tier: 'L' }));
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
     });
 
     it('does not start a coding agent when its runtime version cannot be verified', async () => {
@@ -22826,6 +22856,53 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('refuses Resume when the agent failed before finishing its run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      const revalidateSpy = vi.spyOn(manager, 'revalidateSession');
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+        statusCode: 409,
+        message: expect.stringContaining(`ap rework ${pod.id}`),
+      });
+      expect(revalidateSpy).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('failed');
+    });
+
+    it('does not publish an earlier passing validation over an unfinished agent run', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'pass', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'AGENT_RUN_UNFINISHED',
+      });
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'settled',
+      'entered validation',
+    ] as const)('still revalidates when the agent finished its run before failing (%s)', async (finish) => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail', prUrl: null });
+      ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(pod.id));
+      // Completion without usage evidence never records agentSettledAt.
+      if (finish === 'settled')
+        ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'done');
+      else ctx.podRepo.completionJournal?.mark(ctx.podRepo.getOrThrow(pod.id), 'finalizing');
+      const revalidateSpy = vi
+        .spyOn(manager, 'revalidateSession')
+        .mockResolvedValue({ newCommits: false, result: 'fail' });
+
+      await expect(manager.resumePod(pod.id)).resolves.toEqual({ action: 'revalidate' });
+      expect(revalidateSpy).toHaveBeenCalledWith(pod.id, { force: true });
+    });
+
     it('HTTP Resume acknowledges a pending validation run and coalesces duplicate requests', async () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail' });
@@ -28173,6 +28250,63 @@ describe('validation inputs compatibility', () => {
         ['diff', 'log', 'paths'].includes(stage) ? 'review_required' : 'failed',
       );
       expect(f.ctx.containerManager.stop).toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  function dirtySource(f: ReturnType<typeof fixture>, persistent: boolean) {
+    const blocked = new AutopodError(
+      'Source branch/cleanliness unavailable; preserve and reconcile it before adoption.',
+      'SOURCE_ADOPTION_BLOCKED',
+      409,
+    );
+    const adoption = f.ctx.worktreeManager.inspectSourceAdoption;
+    if (!adoption) throw new Error('Missing source adoption fixture');
+    const inspect = vi.mocked(adoption);
+    if (persistent) inspect.mockRejectedValue(blocked);
+    else inspect.mockRejectedValueOnce(blocked);
+    f.ctx.worktreeManager.inspectSourcePreservation = vi.fn(async (_path, branch) => ({
+      branch,
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      worktreeClean: false,
+      changes: { untracked: ['thoughts/'], changed: [] },
+    }));
+  }
+
+  it('returns dirty review source to the live agent with the exact paths', async () => {
+    const f = fixture();
+    try {
+      dirtySource(f, false);
+      await f.manager.triggerValidation(f.pod.id);
+      const resumes = vi.mocked(f.ctx.runtime.resume).mock.calls;
+      expect(resumes).toHaveLength(1);
+      expect(resumes[0]?.[1]).toContain('Workspace not clean — validation did not run');
+      expect(resumes[0]?.[1]).toContain('- `thoughts/`');
+      expect(resumes[0]?.[1]).toContain('.git/info/exclude');
+      // After the agent finishes, completion re-enters validation on clean source.
+      expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(f.manager.getSession(f.pod.id).status).not.toBe('review_required');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('parks dirty review source with a sanitized cause once no attempt remains', async () => {
+    const f = fixture();
+    try {
+      f.ctx.podRepo.update(f.pod.id, { maxValidationAttempts: 1 });
+      dirtySource(f, true);
+      await f.manager.triggerValidation(f.pod.id);
+      const parked = f.manager.getSession(f.pod.id);
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(parked.status).toBe('review_required');
+      expect(parked.validationAttempts).toBe(0);
+      expect(parked.failureReason).toContain(
+        'Review source has uncommitted files (untracked: 1 path under thoughts/)',
+      );
     } finally {
       f.ctx.db.close();
     }

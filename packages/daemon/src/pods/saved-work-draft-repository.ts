@@ -220,6 +220,25 @@ export function createSavedWorkDraftRepository(db: Database.Database) {
       if (result.changes !== 1) draftError('Operation changed; observe it without resubmitting.');
       return next;
     },
+    /** Record publication-scan evidence on a prepared operation without changing its state. */
+    recordPublicationScan(
+      op: SavedWorkDraftOperation,
+      scan: NonNullable<SavedWorkDraftOperation['publicationScan']>,
+      message?: string,
+    ): SavedWorkDraftOperation {
+      if (op.state !== 'prepared') draftError('Only a prepared operation records scan evidence.');
+      const { message: _previous, ...rest } = op;
+      const next: SavedWorkDraftOperation = {
+        ...rest,
+        publicationScan: scan,
+        ...(message ? { message } : {}),
+      };
+      const result = db
+        .prepare('UPDATE saved_work_draft_pr_operations SET body=? WHERE id=? AND body=?')
+        .run(JSON.stringify(next), op.id, JSON.stringify(op));
+      if (result.changes !== 1) draftError('Operation changed; observe it without resubmitting.');
+      return next;
+    },
     assertAvailable: (podId: string) => assertSavedDraftAvailable(db, podId),
   };
 }

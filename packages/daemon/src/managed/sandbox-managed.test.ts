@@ -78,6 +78,118 @@ it('reconciles a lost Sandbox create response by exact labels and never creates 
     db.close();
   }
 });
+function managedTierHarness() {
+  const db = new Database(':memory:');
+  db.exec(
+    readFileSync(
+      new URL('../db/migrations/149_managed_sandbox_allocations.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  const created: CreateSandboxOptions[] = [];
+  const sandboxes = new Map<string, string>();
+  let lose = false;
+  const client = {
+    async findManagedSandbox(pod: string) {
+      return sandboxes.get(pod) ?? null;
+    },
+    async createSandbox(options: CreateSandboxOptions) {
+      created.push(options);
+      const id = `sandbox-${created.length}`;
+      sandboxes.set(options.podId, id);
+      if (lose) {
+        lose = false;
+        throw new Error('lost-response');
+      }
+      return id;
+    },
+    async getStatus() {
+      return 'running';
+    },
+    async updateEgress() {},
+    async exec() {
+      return { exitCode: 0, stdout: '', stderr: '' };
+    },
+  } as unknown as SandboxApiClient;
+  const manager = () =>
+    new SandboxContainerManager(client, pino({ level: 'silent' }), { managedDatabase: db });
+  const config = (podId: string, memoryGiB?: number) => ({
+    podId,
+    image: `registry.invalid/worker@sha256:${'a'.repeat(64)}`,
+    env: {},
+    networkPolicyMode: 'deny-all' as const,
+    managedSpecDigest: `sha256:${'1'.repeat(64)}`,
+    ...(memoryGiB === undefined ? {} : { memoryBytes: memoryGiB * 1024 ** 3 }),
+  });
+  const claims = () =>
+    (db.prepare('SELECT COUNT(*) AS n FROM managed_sandbox_allocations').get() as { n: number }).n;
+  return {
+    db,
+    created,
+    manager,
+    config,
+    claims,
+    loseNextResponse: () => {
+      lose = true;
+    },
+  };
+}
+
+it('managed allocation applies the shared tier resolver: default L, exact XL/2XL/3XL', async () => {
+  const h = managedTierHarness();
+  try {
+    await h.manager().ensureManagedContainer(h.config('managed-default'));
+    await h.manager().ensureManagedContainer(h.config('managed-xl', 8));
+    await h.manager().ensureManagedContainer(h.config('managed-2xl', 16));
+    await h.manager().ensureManagedContainer(h.config('managed-3xl', 32));
+    await h.manager().ensureManagedContainer(h.config('managed-small', 1.5));
+    expect(h.created.map((c) => [c.podId, c.tier])).toEqual([
+      ['managed-default', 'L'],
+      ['managed-xl', 'XL'],
+      ['managed-2xl', '2XL'],
+      ['managed-3xl', '3XL'],
+      ['managed-small', 'M'],
+    ]);
+  } finally {
+    h.db.close();
+  }
+});
+
+it.each([
+  10, 64,
+])('managed allocation refuses %s GiB before any claim, discovery or create', async (gib) => {
+  const h = managedTierHarness();
+  try {
+    await expect(
+      h.manager().ensureManagedContainer(h.config('managed-refused', gib)),
+    ).rejects.toMatchObject({ code: 'PREFLIGHT_INSUFFICIENT_MEMORY' });
+    expect(h.created).toHaveLength(0);
+    expect(h.claims()).toBe(0);
+  } finally {
+    h.db.close();
+  }
+});
+
+it('a lost 2XL create response is reconciled without a duplicate or a size change', async () => {
+  const h = managedTierHarness();
+  try {
+    h.loseNextResponse();
+    await expect(h.manager().ensureManagedContainer(h.config('managed-retry', 16))).rejects.toThrow(
+      'lost-response',
+    );
+    expect(await h.manager().ensureManagedContainer(h.config('managed-retry', 16))).toBe(
+      'sandbox-1',
+    );
+    expect(await h.manager().ensureManagedContainer(h.config('managed-retry', 16))).toBe(
+      'sandbox-1',
+    );
+    expect(h.created.map((c) => c.tier)).toEqual(['2XL']);
+    expect(h.claims()).toBe(1);
+  } finally {
+    h.db.close();
+  }
+});
+
 it('a suspended Sandbox is not observed exit, and an unavailable sandbox route never falls back to Docker', async () => {
   const request = JSON.parse(
     readFileSync(

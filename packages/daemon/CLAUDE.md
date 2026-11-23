@@ -174,8 +174,11 @@ imported proof reverified against local objects and its pod-owned quarantine ref
 Never substitute `latestVerified` for the latest imported snapshot or claim host
 HEAD contains dirty sandbox work. Older source requires explicit selection.
 Independent preparation preserves originals; push uses an empty exact-ref lease.
-Uncertain effects reconcile positive exact evidence without replay. Keep the
-receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
+Uncertain effects reconcile positive exact evidence without replay. The
+publication scan (`saved-work-publication-scan.ts`) diffs against a verified
+target merge-base when available, otherwise scans the full tree, and records
+redacted `publicationScan` evidence with distinct blocked/incomplete/failed codes.
+Keep the receipt separate from `pod.prUrl` and ordinary delivery/merge controls. See
 `docs/saved-work-draft-pr.md`; preserve the dedicated suites and Mac verification.
 
 ### Retention-safe task continuation
@@ -293,8 +296,9 @@ Implements the same `ContainerManager` interface and is selected when
 
 The manager logic is **implemented and unit-tested** against a `SandboxApiClient` seam
 (`sandbox-api-client.ts`) and a concrete Azure adapter (`azure-sandbox-api-client.ts`). It owns
-the mapping between the `ContainerManager` contract and the Sandboxes data plane: tier selection
-from `memoryBytes` (`pickSandboxTier`), egress-policy translation from `networkPolicyMode` +
+the mapping between the `ContainerManager` contract and the Sandboxes data plane: bundle selection
+from `memoryBytes` (`resolveSandboxTier` over the single XS–3XL catalog in `sandbox-tiers.ts`;
+L default, XL/2XL/3XL exact opt-in, no clamp or fallback), egress-policy translation from `networkPolicyMode` +
 `allowedHosts` (`egressPolicyForMode`), buffered exec/file I/O, host-volume upload at spawn,
 directory sync-back through file list/read, `stop`/`start` → `begin_stop`/`begin_resume`, and an
 `execStreaming` native-or-buffered fallback.
@@ -373,6 +377,24 @@ Each runtime in `src/runtimes/` implements the `Runtime` interface:
 `RuntimeEvent` includes internal usage checkpoints outside the public `AgentEvent`
 activity union. See [Codex usage accounting](../../docs/codex-usage-accounting.md)
 for live counters, verified cap stops, finality, and non-waiving review deferral.
+
+### Claude turn finality
+
+One `claude -p` process can write several `result` frames: it waits for background
+tasks (Bash `run_in_background`, background agents) and continues in the same session
+on their notification, and a resumed session can settle leftover work first.
+`runtimes/claude-turn-finality.ts` therefore holds each result until it is final.
+More turn frames make it intermediate: no kill, and its usage is carried into the
+released `complete`. A result written with non-ambient background tasks pending,
+before `report_task_summary` in that invocation, while the pod is `running` with no
+pending human decision, waits for the CLI to continue. The wait is bounded by
+`AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS` (default 25 min, clamped 3 min below
+`AUTOPOD_STUCK_RUNNING_THRESHOLD_MS`). A turn that never finished yields a fatal
+`turnInterrupted` error after verified termination. The consumer then fails the pod
+without validation and settles the run as `turn_interrupted`. It preserves the
+workspace through the budget-stop owner, so `ap rework` continues without a retry
+authorization; Resume and Retry checks are refused. A final result keeps the 30 s
+`AUTOPOD_POST_COMPLETE_GRACE_MS` retained-completion behaviour.
 
 Stream parsers are the tricky part — each vendor's SSE format is different. When adding parser logic,
 add test cases to the co-located `.test.ts` covering partial chunks, multi-event lines, and error frames.

@@ -1,6 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
+  createReadStream,
+  createWriteStream,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -12,7 +14,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { PassThrough, Writable } from 'node:stream';
+import { PassThrough, Transform, Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -862,6 +865,78 @@ export class DockerContainerManager implements ContainerManager {
     });
   }
 
+  async exportPathArchive(
+    containerId: string,
+    containerPath: string,
+    hostFile: string,
+    options: { maxBytes: number; timeoutMs: number },
+  ): Promise<{ bytes: number; sha256: string }> {
+    this.assertNotRetained(containerId);
+    const deadline = Date.now() + options.timeoutMs;
+    const archive = (await boundedDockerCall(
+      this.docker.getContainer(containerId).getArchive({ path: containerPath }),
+      {
+        label: 'container.getArchive (exportPathArchive)',
+        timeoutMs: Math.min(DOCKER_CALL_TIMEOUTS.getArchive, options.timeoutMs),
+        logger: this.logger,
+        containerId,
+      },
+    )) as NodeJS.ReadableStream & { destroy?(error?: Error): void };
+    const hash = createHash('sha256');
+    let bytes = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length;
+        if (bytes > options.maxBytes) {
+          callback(new Error('Archive exceeds its byte limit'));
+          return;
+        }
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new Error('Archive export timed out')),
+      Math.max(0, deadline - Date.now()),
+    );
+    timer.unref?.();
+    try {
+      await pipeline(archive, limiter, createWriteStream(hostFile, { mode: 0o600 }), {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      archive.destroy?.();
+      throw controller.signal.aborted ? new Error('Archive export timed out') : error;
+    } finally {
+      clearTimeout(timer);
+    }
+    return { bytes, sha256: hash.digest('hex') };
+  }
+
+  async importPathArchive(
+    containerId: string,
+    hostFile: string,
+    containerDir: string,
+    options: { timeoutMs: number },
+  ): Promise<void> {
+    this.assertNotRetained(containerId);
+    const source = createReadStream(hostFile);
+    try {
+      await boundedDockerCall(
+        this.docker.getContainer(containerId).putArchive(source, { path: containerDir }),
+        {
+          label: 'container.putArchive (importPathArchive)',
+          timeoutMs: options.timeoutMs,
+          logger: this.logger,
+          containerId,
+        },
+      );
+    } finally {
+      source.destroy();
+    }
+  }
+
   async extractManagedOutput(
     containerId: string,
     staging: string,
@@ -1186,50 +1261,94 @@ export class DockerContainerManager implements ContainerManager {
       options?.maxOutputBytes,
     );
 
-    let exitCode = 1;
+    let end: BufferedExecEnd;
     try {
-      const inspection = await boundedDockerCall(exec.inspect(), {
-        label: 'exec.inspect (execInContainer)',
-        timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
-        logger: this.logger,
-        containerId,
-      });
-      // A success code authorizes callers such as verified process-group kill.
-      // Never manufacture that success while inspection still reports running.
-      if (
-        options?.requireObservedExit &&
-        !(inspection.Running === false && isObservedExitCode(inspection.ExitCode))
-      )
-        throw new AutopodError(
-          `Buffered Docker exec ${exec.id} has no observed stopped exit`,
-          'EXEC_EXIT_UNVERIFIED',
-          409,
-        );
-      exitCode =
-        inspection.Running === false && isObservedExitCode(inspection.ExitCode)
-          ? inspection.ExitCode
-          : 1;
+      end = await this.observeBufferedExecEnd(exec, containerId);
     } catch (err: unknown) {
-      if (options?.requireObservedExit) {
-        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED') throw err;
+      if (!options?.requireObservedExit) throw err;
+      throw new AutopodError(
+        `Buffered Docker exec ${exec.id} termination could not be observed: ${err instanceof Error ? err.message : String(err)}`,
+        'EXEC_EXIT_UNVERIFIED',
+        409,
+      );
+    }
+
+    let exitCode: number;
+    if (end.observed) {
+      exitCode = end.exitCode;
+    } else {
+      // A success code authorizes callers such as verified process-group kill.
+      // Never manufacture that success while the exit is unobserved; strict
+      // callers get the raw end status instead of a synthetic failure.
+      const status = JSON.stringify(end.evidence);
+      if (options?.requireObservedExit)
         throw new AutopodError(
-          `Buffered Docker exec ${exec.id} termination could not be observed`,
+          `Buffered Docker exec ${exec.id} has no observed stopped exit: ${status}`,
           'EXEC_EXIT_UNVERIFIED',
           409,
         );
-      }
-      if (err instanceof DockerCallTimeoutError) {
-        this.logger.warn(
-          { containerId, command: safeCommand },
-          'exec.inspect timed out — assuming exit code 1',
-        );
-      } else {
-        throw err;
-      }
+      this.logger.warn(
+        { containerId, command: safeCommand, execEnd: end.evidence },
+        end.evidence.inspectError === 'timeout'
+          ? 'exec.inspect timed out — assuming exit code 1'
+          : 'exec exit not observed after stream end — assuming exit code 1',
+      );
+      exitCode = 1;
     }
 
     this.logger.debug({ containerId, command: safeCommand, exitCode }, 'Exec completed');
     return { stdout, stderr, exitCode };
+  }
+
+  /**
+   * Docker can end the hijacked attach stream before it records the exec's exit:
+   * inspect still reports `Running: true` with no ExitCode. Re-inspect for a
+   * bounded interval rather than reading that window as a failed command (#665).
+   * Non-timeout inspect errors propagate; the caller decides how to classify them.
+   */
+  private async observeBufferedExecEnd(
+    exec: Dockerode.Exec,
+    containerId: string,
+  ): Promise<BufferedExecEnd> {
+    let lastInspection: BufferedExecEndEvidence['lastInspection'] = null;
+    for (let attempt = 1; ; attempt++) {
+      let inspection: Dockerode.ExecInspectInfo;
+      try {
+        inspection = await boundedDockerCall(exec.inspect(), {
+          label: 'exec.inspect (execInContainer)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+          logger: this.logger,
+          containerId,
+        });
+      } catch (err) {
+        if (!(err instanceof DockerCallTimeoutError)) throw err;
+        return {
+          observed: false,
+          evidence: {
+            execId: exec.id,
+            streamEnded: true,
+            inspections: attempt,
+            inspectError: 'timeout',
+            lastInspection,
+          },
+        };
+      }
+      if (inspection.Running === false && isObservedExitCode(inspection.ExitCode))
+        return { observed: true, exitCode: inspection.ExitCode };
+      lastInspection = {
+        Running: inspection.Running ?? null,
+        ExitCode: (inspection.ExitCode as unknown) ?? null,
+        Pid: inspection.Pid ?? null,
+      };
+      // Only a still-running exec can be the stream-end race; any other
+      // unobserved state will not improve by waiting.
+      if (inspection.Running !== true || attempt > EXEC_EXIT_INSPECT_RETRIES)
+        return {
+          observed: false,
+          evidence: { execId: exec.id, streamEnded: true, inspections: attempt, lastInspection },
+        };
+      await new Promise((settle) => setTimeout(settle, EXEC_EXIT_INSPECT_INTERVAL_MS));
+    }
   }
 
   async execStreaming(
@@ -1359,11 +1478,11 @@ export class DockerContainerManager implements ContainerManager {
               resolve(inspection.ExitCode);
               return;
             }
-            if (inspection.Running !== true || attempt >= STREAMING_EXIT_INSPECT_RETRIES) {
+            if (inspection.Running !== true || attempt >= EXEC_EXIT_INSPECT_RETRIES) {
               reject(unverifiedExecExit());
               return;
             }
-            await new Promise((settle) => setTimeout(settle, STREAMING_EXIT_INSPECT_INTERVAL_MS));
+            await new Promise((settle) => setTimeout(settle, EXEC_EXIT_INSPECT_INTERVAL_MS));
           }
         } catch {
           reject(unverifiedExecExit());
@@ -1607,8 +1726,23 @@ interface DemuxWriterContext {
 /** Ceiling for the in-container tree termination (two 2 s signal rounds plus /proc scans). */
 export const STREAMING_TERMINATION_TIMEOUT_MS = 15_000;
 /** Bounded re-inspection while Docker has not yet recorded a closed exec's exit. */
-const STREAMING_EXIT_INSPECT_RETRIES = 10;
-const STREAMING_EXIT_INSPECT_INTERVAL_MS = 250;
+const EXEC_EXIT_INSPECT_RETRIES = 10;
+const EXEC_EXIT_INSPECT_INTERVAL_MS = 250;
+
+/** Raw exec end status retained when a buffered exec's exit was not observed. */
+interface BufferedExecEndEvidence {
+  execId: string;
+  /** The attach stream ended; that alone does not prove the process exited. */
+  streamEnded: true;
+  inspections: number;
+  inspectError?: 'timeout';
+  /** Last inspect fields as Docker reported them; null when no inspect returned. */
+  lastInspection: { Running: boolean | null; ExitCode: unknown; Pid: number | null } | null;
+}
+
+type BufferedExecEnd =
+  | { observed: true; exitCode: number }
+  | { observed: false; evidence: BufferedExecEndEvidence };
 
 /**
  * Verified termination of a streaming exec and everything it started.

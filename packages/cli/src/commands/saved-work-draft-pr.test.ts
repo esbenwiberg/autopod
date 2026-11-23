@@ -1,7 +1,8 @@
+import type { SavedWorkDraftPublicationScan } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AutopodClient } from '../api/client.js';
-import { registerSavedWorkDraftPrCommand } from './saved-work-draft-pr.js';
+import { publicationScanLines, registerSavedWorkDraftPrCommand } from './saved-work-draft-pr.js';
 
 const mockFetch = vi.hoisted(() => vi.fn());
 vi.mock('undici', () => ({ fetch: (...args: unknown[]) => mockFetch(...args) }));
@@ -127,6 +128,79 @@ describe('saved-work draft CLI exact confirmation', () => {
     const f = fixture();
     await expect(f.run(...args)).rejects.toThrow();
     expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it('reports a publication scan refusal as definitive with the daemon detail', async () => {
+    const f = fixture();
+    const detail =
+      'Saved-work publication security scan blocked by 1 finding(s); nothing was pushed: secretlint rule @secretlint/secretlint-rule-basicauth at docs/guide.md:12.';
+    f.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'SECURITY_SCAN_BLOCKED', message: detail }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const error = await f
+      .run('--confirm', '--request-id', 'stable-request', '--binding', binding)
+      .catch((e: unknown) => e as Error);
+    expect(error.message).toContain('was not published (SECURITY_SCAN_BLOCKED)');
+    expect(error.message).toContain('docs/guide.md:12');
+    expect(error.message).toContain('--observe --request-id stable-request');
+    expect(error.message).not.toContain('outcome unconfirmed');
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+  it('renders recorded publication scan detail when observing', async () => {
+    const f = fixture();
+    const scan: SavedWorkDraftPublicationScan = {
+      outcome: 'blocked',
+      code: 'SECURITY_SCAN_BLOCKED',
+      scope: 'diff',
+      baseCommit: 'a'.repeat(40),
+      decision: 'block',
+      filesScanned: 2,
+      filesSkipped: 0,
+      findingCount: 1,
+      blockingCount: 1,
+      findings: [
+        {
+          scanner: 'secretlint',
+          detector: 'secrets',
+          ruleId: '@secretlint/secretlint-rule-basicauth',
+          severity: 'critical',
+          file: 'docs/guide.md',
+          line: 12,
+          action: 'block',
+        },
+      ],
+      reasons: [],
+      scannedAt: '2026-11-23T00:00:00.000Z',
+    };
+    f.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ state: 'prepared', publicationScan: scan }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await f.run('--observe', '--request-id', 'stable-request');
+    const printed = vi.mocked(console.log).mock.calls.map((c) => String(c[0]));
+    expect(printed).toContain(
+      'Publication security scan: blocked (SECURITY_SCAN_BLOCKED); scope changes since aaaaaaaaaaaa; 2 file(s) scanned.',
+    );
+    expect(printed).toContain(
+      '  block: secretlint rule @secretlint/secretlint-rule-basicauth at docs/guide.md:12 (value redacted)',
+    );
+    expect(
+      publicationScanLines({
+        ...scan,
+        outcome: 'failed',
+        code: 'SECURITY_SCAN_FAILED',
+        findings: [],
+        findingCount: 0,
+        reasons: ['Scanner error: boom'],
+      }),
+    ).toEqual([
+      'Publication security scan: failed (SECURITY_SCAN_FAILED); scope changes since aaaaaaaaaaaa; 2 file(s) scanned.',
+      '  reason: Scanner error: boom',
+    ]);
   });
   it('does not retry a timed-out confirmation or substitute a new request', async () => {
     const f = fixture();

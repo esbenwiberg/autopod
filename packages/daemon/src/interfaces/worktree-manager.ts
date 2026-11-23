@@ -261,7 +261,14 @@ export interface WorktreeManager {
   inspectSourcePreservation?(
     worktreePath: string,
     branch: string,
-  ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
+  ): Promise<{
+    branch: string;
+    commitSha: string;
+    treeSha: string;
+    worktreeClean: boolean;
+    /** Bounded dirty paths under the same status rules as the strict clean check. */
+    changes?: { untracked: string[]; changed: string[] };
+  }>;
   inspectSourceAdoption?(
     worktreePath: string,
     branch: string,

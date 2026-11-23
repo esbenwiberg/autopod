@@ -207,7 +207,7 @@ struct LaunchConfigurationEditor: View {
           Picker("Memory", selection: allocationChoice("memoryGb")) {
             Text("Profile default").tag("profile")
             Text("Backend default").tag("backend")
-            ForEach(tiers, id: \.self) { value in Text("\(value.formatted()) GB").tag(String(value)) }
+            ForEach(tiers, id: \.self) { value in Text(ExecutionMemoryLabel.text(memoryGb: value, backend: backend)).tag(String(value)) }
             if let value = request.overrides?.execution?["main"]?["memoryGb"]?.number, !tiers.contains(value) { Text("\(value.formatted()) GB · unavailable").tag(String(value)) }
           }
         } else { HStack {

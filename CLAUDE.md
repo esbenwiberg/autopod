@@ -288,8 +288,9 @@ queued → provisioning → running → validating → validated → approved �
                                      ↓                        ↓             ↓
                                    failed ←──── retry ────── rejected  merge_pending
                                                                              ↓
-                                                                   fix pod spawned on CI failure
-                                                                   or CHANGES_REQUESTED review comments
+                                                                   fix pod spawned on CI failure,
+                                                                   CHANGES_REQUESTED review comments
+                                                                   or confirmed merge conflicts
                                                                    (up to maxPrFixAttempts, default 3)
 
 Any non-terminal state can → killing → killed

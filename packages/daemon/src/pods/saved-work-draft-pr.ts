@@ -9,6 +9,7 @@ import type {
   SavedWorkDraftOperation,
   SavedWorkDraftPrepare,
   SavedWorkDraftPreview,
+  SavedWorkDraftPublicationScan,
   SavedWorkSource,
 } from '@autopod/shared';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
@@ -20,11 +21,13 @@ import {
   localSavedSource,
   prepareSavedSource,
   savedGit,
+  savedPublicationBase,
   verifySavedSource,
 } from '../worktrees/saved-work-source.js';
 import type { PodRepository } from './pod-repository.js';
 import { finalizationSourceLocations } from './retained-finalization-repository.js';
 import { draftError, draftHash } from './saved-work-draft-repository.js';
+import { describePublicationScan, publicationScanError } from './saved-work-publication-scan.js';
 import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
 export function createSavedWorkDraftPr(deps: {
@@ -35,8 +38,15 @@ export function createSavedWorkDraftPr(deps: {
   root: string;
   isIdle(podId: string): boolean;
   isGoal(podId: string): boolean;
-  /** Existing publication security policy, applied only to the independent exact checkout. */
-  scanPublication?(pod: Pod, worktree: string): Promise<void>;
+  /**
+   * Existing publication security policy, applied only to the independent exact checkout.
+   * `baseCommit` is a verified merge-base with the frozen target, or null for full-tree.
+   */
+  scanPublication?(
+    pod: Pod,
+    worktree: string,
+    options: { baseCommit: string | null },
+  ): Promise<SavedWorkDraftPublicationScan>;
   now?: () => number;
 }) {
   const pods = deps.podRepo;
@@ -334,7 +344,27 @@ export function createSavedWorkDraftPr(deps: {
       if (copy.commit !== op.source.commit || copy.tree !== op.source.tree)
         draftError('Prepared checkout changed.');
       await current(op);
-      await deps.scanPublication?.(pods.getOrThrow(podId), checkout(op));
+      if (deps.scanPublication) {
+        const scanned = pods.getOrThrow(podId);
+        // A compromised original cannot vouch for its target ref: keep full-tree scope.
+        const baseCommit = scanned.worktreeCompromised
+          ? null
+          : await savedPublicationBase({
+              original: op.originalWorktreePath,
+              checkout: checkout(op),
+              baseBranch: op.baseBranch,
+              commit: op.source.commit,
+            });
+        const scan = await deps.scanPublication(scanned, checkout(op), { baseCommit });
+        await current(op);
+        // Durable, redacted evidence so observation explains a refusal.
+        op = ledger.recordPublicationScan(
+          op,
+          scan,
+          scan.outcome === 'passed' ? undefined : describePublicationScan(scan),
+        );
+        if (scan.outcome !== 'passed') throw publicationScanError(scan);
+      }
       await current(op);
       try {
         await deps.worktreeManager.pushBranch(checkout(op), op.branch, {

@@ -2,6 +2,7 @@ import { AutopodError } from '@autopod/shared';
 import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState } from '../runtimes/codex-state-store.js';
 import type { OperatorKillCaptured, OperatorKillLiveDependencies } from './operator-contracts.js';
+import { cleanupPreparedDependencies } from './prepared-dependency-snapshot.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { canKill } from './state-machine.js';
 export function createOperatorKill(
@@ -158,6 +159,9 @@ export function createOperatorKill(
       assertDestructionAllowed();
       await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
         logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir`);
+      });
+      await cleanupPreparedDependencies(podId).catch((err) => {
+        logger.warn({ err, podId }, 'Failed to cleanup prepared dependency snapshot');
       });
     };
 

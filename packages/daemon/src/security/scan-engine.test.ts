@@ -96,6 +96,7 @@ describe('scan-engine', () => {
     };
     const normal = await scanner.scan('push', context);
     expect(normal).toMatchObject({ scanIncomplete: true, filesScanned: 1 });
+    expect(normal.incompleteReasons).toEqual(['Scan budget of 60s exceeded after 1 of 2 file(s).']);
     const longer = await scanner.scan('push', { ...context, budgetMs: 8 * 60_000 });
     expect(longer).toMatchObject({ decision: 'pass', scanIncomplete: false, filesScanned: 2 });
   });
@@ -230,6 +231,48 @@ describe('scan-engine', () => {
     });
     expect(result.findings).toHaveLength(0);
     expect(result.decision).toBe('pass');
+    // Unknown findings are not clean coverage.
+    expect(result.scanIncomplete).toBe(true);
+    expect(result.incompleteReasons).toEqual([
+      "Detector 'secrets' failed on one or more files; their findings are unknown.",
+    ]);
+  });
+
+  it('flags a full-scope detector failure that scan() would hide as no findings', async () => {
+    const detector: Detector = {
+      name: 'secrets',
+      async warmup() {},
+      async scan() {
+        return [];
+      },
+      async scanWithBaselineIdentity() {
+        return null;
+      },
+    };
+    const engine = createScanEngine({ detectors: [detector], logger });
+    const policy = getPreset('default');
+    policy.push.scope = 'full';
+    const result = await engine.run({ podId: 'p6b', workdir, policy, checkpoint: 'push' });
+    expect(result).toMatchObject({ decision: 'pass', scanIncomplete: true });
+    expect(result.incompleteReasons).toHaveLength(1);
+  });
+
+  it('reports a full-scope scan that cannot list files as incomplete', async () => {
+    const plain = mkdtempSync(path.join(os.tmpdir(), 'autopod-eng-plain-'));
+    try {
+      const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+      const policy = getPreset('default');
+      policy.push.scope = 'full';
+      const result = await engine.run({ podId: 'p6c', workdir: plain, policy, checkpoint: 'push' });
+      expect(result).toMatchObject({
+        decision: 'pass',
+        filesScanned: 0,
+        scanIncomplete: true,
+        incompleteReasons: ['Could not list repository files to scan.'],
+      });
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
   });
 
   it('push diff scan with missing origin/<branch> falls back to local branch and warns', async () => {

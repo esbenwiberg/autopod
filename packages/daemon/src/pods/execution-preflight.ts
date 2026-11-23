@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
-import {
-  AutopodError,
-  DEFAULT_CONTAINER_MEMORY_GB,
-  type ExecutionProvenanceInput,
-  type Pod,
-} from '@autopod/shared';
+import { AutopodError, type ExecutionProvenanceInput, type Pod } from '@autopod/shared';
+import { containerMemoryRequestBytes } from '../containers/container-memory.js';
 import type {
   ContainerExecutionMetadata,
   ContainerManager,
@@ -158,8 +154,10 @@ export async function inspectExecutionPreflight(
         typeof metadata.networkMode === 'string' && metadata.networkMode.length <= 256
           ? metadata.networkMode
           : null;
+      // An omitted sandbox size means the configured default bundle, not the
+      // generic Docker default; only explicit/frozen sizes add a floor here.
       const required = Math.max(
-        (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 ** 3,
+        containerMemoryRequestBytes(profile.containerMemoryGb, pod.executionTarget) ?? 0,
         declared?.minimumMemoryBytes ?? 0,
       );
       if (

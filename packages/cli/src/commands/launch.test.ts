@@ -544,6 +544,7 @@ describe('shared launch request CLI', () => {
     const program = new Command().exitOverride();
     registerLaunchCommand(program, () => client as unknown as AutopodClient, vi.fn(), { name });
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await program.parseAsync([
       'node',
       'ap',

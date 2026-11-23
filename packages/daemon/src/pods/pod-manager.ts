@@ -11,6 +11,7 @@ import { checkpointError } from './retained-checkpoint-repository.js';
 import { createRetainedCleanup } from './retained-cleanup.js';
 import { createRetainedFinalization } from './retained-finalization.js';
 import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
+import { scanSavedWorkPublication } from './saved-work-publication-scan.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
@@ -73,6 +74,7 @@ import {
   buildPrFixTask,
   createFixCyclePolicy,
 } from './fix-policy.js';
+import { formatPreparationSummary } from './preparation-timing.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { createProviderContinuation } from './provider-continuation.js';
@@ -802,6 +804,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       readLaunch: (id) => deps.launchConfiguration?.read(id) ?? null,
       preparationSecrets: async (launch) =>
         (await executionCredentialsFor(launch)?.registries(launch))?.redactionSecrets ?? [],
+      reportPreparation: (podId, evidence) => {
+        logger.info(
+          {
+            podId,
+            purpose: 'validation',
+            status: evidence.status,
+            timing: evidence.timing,
+            cache: evidence.cache,
+          },
+          'Repository preparation timing',
+        );
+        emitActivityStatus(podId, `Validation: ${formatPreparationSummary(evidence)}`);
+      },
     });
 
   const { publishValidationResult } = createValidationPublication({
@@ -1837,29 +1852,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           !stalledWorkerRecovery?.isActive(id) &&
           !retainedFinalization?.isActive(id) &&
           !checkpointRecovery?.isActive(id),
-        scanPublication: async (pod, worktree) => {
-          if (!repoScanner) return;
-          const settings = executionForPod(pod);
-          const policy = resolveSecurityScanPolicy(settings.securityScan);
-          // Independent bundles need not carry a usable base ref. Scan the exact
-          // whole saved tree rather than silently degrading a configured diff scan.
-          const scan = await repoScanner.scan('push', {
-            podId: pod.id,
-            workdir: worktree,
-            profile: { securityScan: { ...policy, push: { ...policy.push, scope: 'full' } } },
-            // This scans the entire tree, not the normal push diff. The daemon
-            // owns this larger finite budget; callers cannot weaken scan policy.
-            budgetMs: 8 * 60_000,
-          });
-          if (scan.decision === 'block' || scan.scanIncomplete)
-            throw new AutopodError(
-              scan.decision === 'block'
-                ? 'Saved-work publication security scan blocked; nothing was pushed.'
-                : 'Saved-work publication security scan did not complete within its required coverage; nothing was pushed.',
-              'SECURITY_SCAN_BLOCKED',
-              409,
-            );
-        },
+        scanPublication: repoScanner
+          ? (pod, worktree, { baseCommit }) =>
+              scanSavedWorkPublication({
+                scanner: repoScanner,
+                podId: pod.id,
+                worktree,
+                policy: resolveSecurityScanPolicy(executionForPod(pod).securityScan),
+                baseCommit,
+              })
+          : undefined,
       })
     : undefined;
   const sandboxRecovery = createSandboxRecovery({
@@ -2040,5 +2042,3 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }),
   );
 }
-
-import { AutopodError } from '@autopod/shared';

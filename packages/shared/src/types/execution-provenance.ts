@@ -11,6 +11,48 @@ export interface RepositoryPreparationEvidence {
   source: { head: string; fingerprint: string } | null;
   exitCode: number | null;
   detail?: string;
+  /** Wall-clock breakdown (#644). Absent on historical records. */
+  timing?: RepositoryPreparationTiming;
+  /** Package/tool cache state observed before the command ran. Absent when not observed. */
+  cache?: { signals: Array<{ name: string; state: 'present' | 'absent' | 'unknown' }> };
+  /** Hash of dependency manifests/lockfiles and command-named files; null when unverified. */
+  dependencyInputs?: string | null;
+  /** Whether the passing command wrote outside /workspace (excluding re-downloadable caches). */
+  outsideWorkspaceWrites?: 'none' | 'detected' | 'unverified';
+  /** Continuation reuse decision; absent when reuse was not considered. */
+  reuse?: RepositoryPreparationReuse;
+}
+
+export interface RepositoryPreparationStageTiming {
+  /** 1-based position among the command's top-level `&&` stages. */
+  index: number;
+  /** Leading non-secret command words, e.g. `npm ci`; `stage <n>` when withheld. */
+  label: string;
+  durationMs: number | null;
+  status: 'passed' | 'failed' | 'not-run' | 'unknown';
+}
+
+export interface RepositoryPreparationTiming {
+  /** Whole preparation, including probes and any reuse restore. */
+  totalMs: number;
+  /** Configured command exec as observed by the daemon; null when it did not run. */
+  commandMs: number | null;
+  /** Execution preflight run immediately before preparation, when measured by the caller. */
+  preflightMs?: number | null;
+  /** Source/dependency-input probes before and after the command. */
+  sourceProbeMs: number | null;
+  /** `unavailable` when in-container stage markers could not be read. */
+  stageTiming: 'measured' | 'unavailable';
+  stages: RepositoryPreparationStageTiming[];
+}
+
+export interface RepositoryPreparationReuse {
+  decision: 'reused' | 'refused' | 'not-applicable';
+  reason: string;
+  sourceContainerId?: string;
+  restoredArchives?: number;
+  restoredBytes?: number;
+  restoreMs?: number;
 }
 
 export interface ExecutionProvenance {

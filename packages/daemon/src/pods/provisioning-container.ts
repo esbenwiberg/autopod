@@ -5,12 +5,12 @@ import path from 'node:path';
 import {
   AutopodError,
   CONTAINER_HOME_DIR,
-  DEFAULT_CONTAINER_MEMORY_GB,
   generateId,
   INPUTS_CONTAINER_DIR,
   resolveContainerNanoCpus,
 } from '@autopod/shared';
 import type { LaunchRegistryMaterial } from '../configuration/execution-credentials.js';
+import { containerMemoryRequestBytes } from '../containers/container-memory.js';
 import { computeNetworkPolicyAllowlist } from '../containers/docker-network-manager.js';
 import { launchSidecarSpec } from '../containers/launch-sidecars.js';
 import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
@@ -498,8 +498,9 @@ export function createProvisioningContainer(
         firewallScript,
         networkPolicyMode: runtimeNetworkPolicyMode,
         allowedHosts: sandboxAllowedHosts,
-        memoryBytes:
-          (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
+        // An omitted sandbox size resolves to the manager's configured default
+        // bundle, not the generic Docker default (which would select 2XL-scale RAM).
+        memoryBytes: containerMemoryRequestBytes(profile.containerMemoryGb, pod.executionTarget),
         nanoCpus: launchConfig
           ? launchConfig.resolvedExecution.main.cpus === null
             ? undefined

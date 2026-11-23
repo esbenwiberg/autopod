@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PodManager } from '../../pods/pod-manager.js';
 import { observeCheckpointSelection } from '../../pods/retained-checkpoint-recovery.js';
+import { dirtyReviewSourceRecoveryHint } from '../../pods/validation-review-source.js';
 
 export function checkpointRecoveryRoutes(
   app: FastifyInstance,
@@ -21,7 +22,7 @@ export function checkpointRecoveryRoutes(
     | 'checkRewriteRepair'
     | 'getApprovalSourceRewrite'
   > &
-    Partial<Pick<PodManager, 'inspectRetainedContinuation'>>,
+    Partial<Pick<PodManager, 'inspectRetainedContinuation' | 'getSession'>>,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
   const buildOnlyKeys = z
@@ -230,9 +231,15 @@ export function checkpointRecoveryRoutes(
     const observed = observeCheckpointSelection(() =>
       manager.getCheckpointRecoverySelection(podId),
     );
+    const operations = manager.getCheckpointRecoveries(podId);
+    const recoveryHint =
+      !operations.length && !observed.selection
+        ? dirtyReviewSourceRecoveryHint(manager.getSession?.(podId))
+        : undefined;
     return {
-      operations: manager.getCheckpointRecoveries(podId),
+      operations,
       selection: observed.selection,
+      ...(recoveryHint ? { recoveryHint } : {}),
       ...(observed.refusal ? { selectionRefusal: observed.refusal } : {}),
       inspection: manager.inspectRetainedContinuation?.(podId) ?? null,
     };

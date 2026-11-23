@@ -7,6 +7,11 @@ import type {
 } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
 import { resolveContainerMemory } from '../containers/container-memory.js';
+import {
+  DEFAULT_SANDBOX_TIER,
+  MAX_SANDBOX_TIER,
+  sandboxTierLabel,
+} from '../containers/sandbox-tiers.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { RelevantMemory } from './memory-selector.js';
 import { hasPendingProviderContinuation } from './recovery-context.js';
@@ -203,6 +208,7 @@ export function generateSystemInstructions(
   // the task, not buried in the MCP server catalogue.
   generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
   if (profile.outputMode !== 'artifact') generateFileEditingRules(lines, pod.runtime);
+  generateBackgroundWorkRules(lines, pod.runtime);
 
   // Operating Environment section (adapts to profile config)
   generateOperatingEnvironment(
@@ -596,7 +602,10 @@ export function generateSystemInstructions(
     '   - **Before calling `report_task_summary`, commit any remaining changes.** ' +
       'If you leave uncommitted work behind, the daemon will auto-commit it with ' +
       'a generic `chore: auto-commit ...` message that pollutes the PR history. ' +
-      'Owning your commits is part of the task.',
+      'Owning your commits is part of the task. Keep scratch notes and other files that must not ' +
+      'ship outside `/workspace` (for example under `/tmp`), or delete them before finishing: ' +
+      '`.git/info/exclude` in this container is not shared with Autopod, so excluding a path ' +
+      'there does not hide it from delivery.',
   );
   lines.push(
     '   - Do not edit `.husky/**`, `.githooks/**`, `.git/hooks/**`, `.claude/**`, `.codex/**`, or `.mcp.json` to bypass sandbox, permission, or hook execution failures unless the task explicitly asks you to change those operational files. If a hook or environment policy blocks you, report the blocker and commit only the task-scoped code changes.',
@@ -885,19 +894,25 @@ function generateOperatingEnvironment(
   // environment ceiling from a bug in its change, and burns a human escalation
   // rediscovering a documented platform limit.
   const memory = resolveContainerMemory(profile.containerMemoryGb, executionTarget);
-  if (memory.grantedGb !== null) {
+  if (executionTarget === 'sandbox') {
+    lines.push('### Resources');
+    if (memory.bundleLabel) {
+      lines.push(
+        `- Container resources: **${memory.bundleLabel}** (fixed sandbox bundle). The memory is a hard ceiling.`,
+      );
+    } else if (!memory.unsupported) {
+      lines.push(
+        `- Container resources: the daemon's default sandbox bundle (normally **${sandboxTierLabel(DEFAULT_SANDBOX_TIER)}**). The memory is a hard ceiling.`,
+      );
+    }
+    lines.push(
+      `- The bundle is fixed for this pod and cannot be resized from inside the container. Larger bundles (up to ${sandboxTierLabel(MAX_SANDBOX_TIER)}) are a per-repository opt-in selected before launch; if the work genuinely needs one, report it via \`report_blocker\`.`,
+    );
+  } else if (memory.grantedGb !== null) {
     lines.push('### Resources');
     lines.push(`- Container memory limit: **${memory.grantedGb} GB**. This is a hard ceiling.`);
-    if (executionTarget === 'sandbox') {
-      lines.push(
-        `- ${memory.grantedGb} GB is the largest tier this execution target offers; it cannot be raised from inside the container or by the profile.`,
-      );
-    }
-    if (memory.clamped) {
-      lines.push(
-        `- The profile asked for ${memory.requestedGb} GB, but this target caps at ${memory.grantedGb} GB. Do not trust the profile's number.`,
-      );
-    }
+  }
+  if (executionTarget === 'sandbox' || memory.grantedGb !== null) {
     lines.push(
       '- Serialize install, typecheck, build, test and browser workloads under the admitted memory and CPU limits; prefer a repository-owned serial verifier when available.',
     );
@@ -1191,6 +1206,22 @@ function generateFileEditingRules(lines: string[], runtime: Pod['runtime']): voi
       'Python, shell redirection, or scripted text replacement. Shell/script edits remain appropriate ' +
       'for generators, justified bulk transformations, or when no suitable native tool is available. ' +
       'Inspect the resulting diff and run relevant checks whichever editing path you use.',
+  );
+  lines.push('');
+}
+
+/**
+ * Claude Code can background long commands and end its turn while they run.
+ * The daemon waits only a bounded time for them and treats a turn that ended
+ * waiting on background work as interrupted (#648) — defence in depth.
+ */
+function generateBackgroundWorkRules(lines: string[], runtime: Pod['runtime']): void {
+  if (runtime !== 'claude') return;
+  lines.push('## Background Commands');
+  lines.push('');
+  lines.push(
+    'Prefer foreground commands. If you background a long command, do not end your turn until ' +
+      'it has finished and you have reported. Poll or wait for it instead.',
   );
   lines.push('');
 }

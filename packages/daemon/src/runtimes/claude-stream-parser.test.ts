@@ -504,3 +504,34 @@ describe('ClaudeStreamParser.parse — assistant multi-block', () => {
     expect(events[0]).toMatchObject({ type: 'status', message: 'Only text' });
   });
 });
+
+describe('ClaudeStreamParser.parse raw-frame observer', () => {
+  it('observes every JSON frame in order, including frames that map to no event', async () => {
+    const frames = [
+      { type: 'system', subtype: 'init', session_id: 's-1' },
+      {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'b1',
+        description: 'suite',
+        is_backgrounded: true,
+      },
+      { type: 'result', subtype: 'success', result: 'Waiting' },
+      { type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' },
+    ];
+    const ndjson = `${frames.map((e) => JSON.stringify(e)).join('\n')}\nnot json\n`;
+    const observed: unknown[] = [];
+    const mapped: AgentEvent[] = [];
+    for await (const ev of ClaudeStreamParser.parse(
+      Readable.from([ndjson]),
+      POD_ID,
+      fakeLogger(),
+      (raw) => observed.push(raw),
+    )) {
+      mapped.push(ev);
+    }
+    expect(observed).toEqual(frames);
+    // Mapping is unchanged by the observer: task frames still yield nothing.
+    expect(mapped.map((e) => e.type)).toEqual(['status', 'complete', 'status']);
+  });
+});

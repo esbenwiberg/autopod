@@ -9,7 +9,14 @@ import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createMockContainerManager, createTestDb } from '../test-utils/mock-helpers.js';
-import { PREPARATION_SOURCE_PROBE, prepareLaunchRepository } from './repository-preparation.js';
+import { CACHE_SIGNAL_SCRIPT } from './preparation-timing.js';
+import {
+  commandNamedPaths,
+  OUTSIDE_WORKSPACE_WRITES_SCRIPT,
+  PREPARATION_DEPENDENCY_PROBE,
+  PREPARATION_SOURCE_PROBE,
+  prepareLaunchRepository,
+} from './repository-preparation.js';
 
 const exec = promisify(execFile);
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -68,7 +75,9 @@ describe('repository preparation', () => {
         'PUBLIC_VALUE=visible',
         'sh',
         '-c',
-        'set -e\npnpm install --frozen-lockfile',
+        expect.stringMatching(
+          /^set -e\n__autopod_prep_mark\(\) [^\n]+\ntrap '__autopod_prep_mark end' EXIT\n__autopod_prep_mark 1\npnpm install --frozen-lockfile$/,
+        ),
       ],
       {
         cwd: '/workspace/app',
@@ -203,6 +212,115 @@ describe('repository preparation', () => {
     expect(detail).not.toContain('private-fixture');
   });
 
+  function timedExec(
+    f: Awaited<ReturnType<typeof fixture>>,
+    markers: string | null,
+    cacheLines = 'absent\nabsent\nabsent\nabsent\nabsent\nabsent\nabsent',
+  ) {
+    vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, argv) => {
+      if (argv[2] === PREPARATION_SOURCE_PROBE)
+        return { exitCode: 0, stdout: JSON.stringify(source), stderr: '' };
+      if (argv[2] === CACHE_SIGNAL_SCRIPT) return { exitCode: 0, stdout: cacheLines, stderr: '' };
+      if (String(argv[2]).startsWith('cat -- "$1"'))
+        return markers === null
+          ? { exitCode: 1, stdout: '', stderr: '' }
+          : { exitCode: 0, stdout: markers, stderr: '' };
+      return f.result;
+    });
+  }
+
+  it('records per-stage durations and cache signals for a passing run', async () => {
+    const f = await fixture('npm ci && npm run bootstrap && node scripts/probe.mjs');
+    timedExec(
+      f,
+      '1 100.00\n2 801.50\n3 838.00\nend 842.25\n',
+      ['present', 'absent', 'absent', 'absent', 'absent', 'absent', 'absent'].join('\n'),
+    );
+    const record = vi.fn();
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        record,
+        preflightMs: 1500,
+      },
+    );
+    expect(evidence.status).toBe('passed');
+    expect(evidence.timing).toMatchObject({
+      preflightMs: 1500,
+      stageTiming: 'measured',
+      stages: [
+        { index: 1, label: 'npm ci', durationMs: 701500, status: 'passed' },
+        { index: 2, label: 'npm run bootstrap', durationMs: 36500, status: 'passed' },
+        { index: 3, label: 'node scripts/probe.mjs', durationMs: 4250, status: 'passed' },
+      ],
+    });
+    expect(evidence.timing?.totalMs).toEqual(expect.any(Number));
+    expect(evidence.timing?.commandMs).toEqual(expect.any(Number));
+    expect(evidence.timing?.sourceProbeMs).toEqual(expect.any(Number));
+    expect(evidence.cache?.signals[0]).toEqual({ name: 'npm-cache', state: 'present' });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ timing: evidence.timing }));
+    const script = vi
+      .mocked(f.cm.execInContainer)
+      .mock.calls.map(([, argv]) => argv)
+      .find((argv) => String(argv.at(-1)).startsWith('set -e'));
+    expect(script?.at(-1)).toContain(
+      '__autopod_prep_mark 1 && npm ci && __autopod_prep_mark 2 && npm run bootstrap && __autopod_prep_mark 3 && node scripts/probe.mjs',
+    );
+  });
+
+  it('records the failing stage with unchanged failure detail', async () => {
+    const run = async (markers: string | null) => {
+      const f = await fixture('npm ci && npm run bootstrap && npm run verify');
+      f.result.exitCode = 2;
+      f.result.stderr = 'bootstrap exploded';
+      timedExec(f, markers);
+      let evidence: RepositoryPreparationEvidence | undefined;
+      const error = await prepareLaunchRepository(
+        f.config,
+        f.cm,
+        'candidate',
+        {},
+        {
+          record: (value) => {
+            evidence = value;
+          },
+        },
+      ).catch((e: Error) => e);
+      return { evidence, error };
+    };
+    const timed = await run('1 10.00\n2 20.00\nend 95.50\n');
+    const untimed = await run(null);
+    expect(timed.error).toBeInstanceOf(Error);
+    expect(timed.evidence).toMatchObject({ status: 'failed', exitCode: 2 });
+    expect(timed.evidence?.timing?.stages).toEqual([
+      { index: 1, label: 'npm ci', durationMs: 10000, status: 'passed' },
+      { index: 2, label: 'npm run bootstrap', durationMs: 75500, status: 'failed' },
+      { index: 3, label: 'npm run verify', durationMs: null, status: 'not-run' },
+    ]);
+    expect(timed.evidence?.detail).toBe(untimed.evidence?.detail);
+    expect((timed.error as Error).message).toBe((untimed.error as Error).message);
+    expect(untimed.evidence?.timing?.stageTiming).toBe('unavailable');
+  });
+
+  it('records timing with every stage not run when the source probe fails first', async () => {
+    const f = await fixture('npm ci && npm test');
+    vi.mocked(f.cm.execInContainer).mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
+    const record = vi.fn();
+    await expect(
+      prepareLaunchRepository(f.config, f.cm, 'candidate', {}, { record }),
+    ).rejects.toThrow();
+    expect(record.mock.calls[0]?.[0].timing).toMatchObject({
+      commandMs: null,
+      stages: [
+        { index: 1, status: 'not-run' },
+        { index: 2, status: 'not-run' },
+      ],
+    });
+  });
+
   it.each([
     'unknown',
     'timeout',
@@ -282,5 +400,194 @@ describe('repository preparation', () => {
     expect(await probe()).toEqual(before);
     await writeFile(path.join(root, 'prepare.sh'), 'echo changed');
     expect((await probe()).fingerprint).not.toBe(before.fingerprint);
+  });
+
+  it('fingerprints dependency manifests and command-named files, not other source', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'preparation-deps-'));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    await exec('git', ['init', '-q', root]);
+    await exec('mkdir', ['-p', path.join(root, 'scripts'), path.join(root, 'node_modules/x')]);
+    await writeFile(path.join(root, '.gitignore'), 'node_modules\n');
+    await writeFile(path.join(root, 'package-lock.json'), '{"v":1}');
+    await writeFile(path.join(root, 'scripts/bootstrap.sh'), 'echo boot');
+    await writeFile(path.join(root, 'src.ts'), 'export {}');
+    await writeFile(path.join(root, 'node_modules/x/package.json'), '{}');
+    const script = PREPARATION_DEPENDENCY_PROBE.replace(
+      "const root='/workspace'",
+      `const root=${JSON.stringify(root)}`,
+    );
+    const command = 'npm ci && sh scripts/bootstrap.sh';
+    const probe = async () =>
+      (
+        JSON.parse(
+          (await exec(process.execPath, ['-e', script, '.', ...commandNamedPaths(command)])).stdout,
+        ) as { fingerprint: string }
+      ).fingerprint;
+    const before = await probe();
+    expect(before).toMatch(/^[a-f0-9]{64}$/);
+    await writeFile(path.join(root, 'src.ts'), 'export const changed = 1');
+    await writeFile(path.join(root, 'node_modules/x/package.json'), '{"edited":true}');
+    expect(await probe()).toBe(before);
+    await writeFile(path.join(root, 'package-lock.json'), '{"v":2}');
+    const lockChanged = await probe();
+    expect(lockChanged).not.toBe(before);
+    await writeFile(path.join(root, 'scripts/bootstrap.sh'), 'echo changed');
+    expect(await probe()).not.toBe(lockChanged);
+  });
+
+  it('extracts only relative path-like command words', () => {
+    expect(
+      commandNamedPaths('npm ci && ./scripts/boot.sh --flag && node tools/probe.mjs /etc/passwd'),
+    ).toEqual(['./scripts/boot.sh', 'tools/probe.mjs']);
+  });
+
+  it('detects writes outside the workspace after the marker and prunes package caches', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'preparation-home-'));
+    cleanups.push(() => rm(home, { recursive: true, force: true }));
+    const script = OUTSIDE_WORKSPACE_WRITES_SCRIPT.replace(' /usr/local /opt /workspace/.git', '');
+    const run = async () => {
+      const marker = path.join(home, '..', `${path.basename(home)}.marker`);
+      await writeFile(marker, '');
+      cleanups.push(() => rm(marker, { force: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return marker;
+    };
+    let marker = await run();
+    await exec('mkdir', ['-p', path.join(home, '.npm/_cacache')]);
+    await writeFile(path.join(home, '.npm/_cacache/entry'), 'cache');
+    const env = { ...process.env, HOME: home };
+    expect((await exec('sh', ['-c', script, 'x', marker], { env })).stdout.trim()).toBe('none');
+    marker = await run();
+    await exec('mkdir', ['-p', path.join(home, '.cache/ms-playwright')]);
+    await writeFile(path.join(home, '.cache/ms-playwright/chromium'), 'browser');
+    expect((await exec('sh', ['-c', script, 'x', marker], { env })).stdout.trim()).toBe('detected');
+    // A missing marker or a failing find never reads as "none".
+    expect((await exec('sh', ['-c', script, 'x', `${marker}.gone`], { env })).stdout.trim()).toBe(
+      'unverified',
+    );
+    marker = await run();
+    const broken = script.replace('-cnewer', '-no-such-predicate');
+    expect((await exec('sh', ['-c', broken, 'x', marker], { env })).stdout.trim()).toBe(
+      'unverified',
+    );
+  });
+
+  it('skips the prepare command when continuation reuse restores matching dependencies', async () => {
+    const f = await fixture('npm ci && npm run bootstrap');
+    const attempt = vi.fn(async () => ({
+      reused: true as const,
+      sourceContainerId: 'old-container',
+      restoredArchives: 2,
+      restoredBytes: 2048,
+      restoreMs: 120,
+    }));
+    const recorded: RepositoryPreparationEvidence[] = [];
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: { attempt },
+        record: (e) => recorded.push(structuredClone(e)),
+      },
+    );
+    expect(attempt).toHaveBeenCalledWith({
+      commandHash: evidence.commandHash,
+      configurationHash: evidence.configurationHash,
+      dependencyInputs: null,
+    });
+    expect(evidence).toMatchObject({
+      status: 'passed',
+      source,
+      exitCode: null,
+      outsideWorkspaceWrites: 'none',
+      reuse: {
+        decision: 'reused',
+        sourceContainerId: 'old-container',
+        restoredArchives: 2,
+        restoredBytes: 2048,
+      },
+    });
+    expect(evidence.timing?.commandMs).toBeNull();
+    const commands = vi.mocked(f.cm.execInContainer).mock.calls.map(([, argv]) => argv.join(' '));
+    expect(commands.some((c) => c.includes('npm ci'))).toBe(false);
+    expect(recorded).toHaveLength(1);
+  });
+
+  it('runs the full command and records the reason when reuse is refused', async () => {
+    const f = await fixture('npm ci && npm run bootstrap');
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: { attempt: async () => ({ reused: false, reason: 'dependency-inputs-changed' }) },
+      },
+    );
+    expect(evidence).toMatchObject({
+      status: 'passed',
+      exitCode: 0,
+      reuse: { decision: 'refused', reason: 'dependency-inputs-changed' },
+    });
+    const commands = vi.mocked(f.cm.execInContainer).mock.calls.map(([, argv]) => argv.join(' '));
+    expect(commands.some((c) => c.includes('npm ci'))).toBe(true);
+  });
+
+  it('refuses a restore that changes source inputs and prepares in full', async () => {
+    const f = await fixture('npm ci');
+    let probes = 0;
+    vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, argv) =>
+      argv[2] === PREPARATION_SOURCE_PROBE
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify(
+              ++probes === 2 ? { ...source, fingerprint: 'c'.repeat(64) } : source,
+            ),
+            stderr: '',
+          }
+        : f.result,
+    );
+    const evidence = await prepareLaunchRepository(
+      f.config,
+      f.cm,
+      'candidate',
+      {},
+      {
+        reuse: {
+          attempt: async () => ({
+            reused: true,
+            sourceContainerId: 'old',
+            restoredArchives: 1,
+            restoredBytes: 1,
+            restoreMs: 1,
+          }),
+        },
+      },
+    );
+    expect(evidence.reuse).toEqual({ decision: 'refused', reason: 'source-changed-after-restore' });
+    expect(evidence.status).toBe('passed');
+    expect(evidence.exitCode).toBe(0);
+  });
+
+  it('records outside-workspace writes and the dependency fingerprint on a full run', async () => {
+    const f = await fixture('npm ci');
+    vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, argv) => {
+      if (argv[2] === PREPARATION_SOURCE_PROBE)
+        return { exitCode: 0, stdout: JSON.stringify(source), stderr: '' };
+      if (argv[2] === PREPARATION_DEPENDENCY_PROBE)
+        return { exitCode: 0, stdout: JSON.stringify({ fingerprint: 'd'.repeat(64) }), stderr: '' };
+      if (argv[2] === OUTSIDE_WORKSPACE_WRITES_SCRIPT)
+        return { exitCode: 0, stdout: 'detected\n', stderr: '' };
+      return f.result;
+    });
+    const evidence = await prepareLaunchRepository(f.config, f.cm, 'candidate', {});
+    expect(evidence).toMatchObject({
+      status: 'passed',
+      dependencyInputs: 'd'.repeat(64),
+      outsideWorkspaceWrites: 'detected',
+    });
+    expect(evidence.reuse).toBeUndefined();
   });
 });

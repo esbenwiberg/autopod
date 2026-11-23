@@ -26,6 +26,11 @@ import { inspectNetworkCapacity } from './containers/docker-network-capacity.js'
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { createRetainedCleanupDocker } from './containers/retained-cleanup-docker.js';
 import { RoutingContainerManager } from './containers/routing-container-manager.js';
+import {
+  DEFAULT_SANDBOX_TIER,
+  parseSandboxDefaultTier,
+  type SandboxDefaultTier,
+} from './containers/sandbox-tiers.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
@@ -85,6 +90,7 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { sweepPreparedDependencySnapshots } from './pods/prepared-dependency-snapshot.js';
 import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
 import { assertFinalizationPathAvailable } from './pods/retained-finalization-repository.js';
 import {
@@ -551,11 +557,12 @@ if (sidecarManager) {
   );
 }
 
-function parseSandboxTier(value: string | undefined): SandboxResourceTier | undefined {
-  if (!value) return undefined;
-  if (value === 'XS' || value === 'S' || value === 'M' || value === 'L') return value;
-  logger.warn({ value }, 'Ignoring invalid sandbox tier; expected XS, S, M, or L');
-  return undefined;
+function parseSandboxTier(value: string | undefined): SandboxDefaultTier | undefined {
+  // Fleet default only: XL–3XL are per-repository opt-in and are rejected like
+  // any unknown value (warn, ignore, fall back to the L default).
+  const parsed = parseSandboxDefaultTier(value);
+  if (parsed.warning) logger.warn({ value }, parsed.warning);
+  return parsed.tier;
 }
 
 function parseSandboxRegistryCredentials(): { username: string; token: string } | undefined {
@@ -636,7 +643,6 @@ const SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID =
   process.env.AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID ??
   process.env.SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID;
 const SANDBOX_REGISTRY_CREDENTIALS = parseSandboxRegistryCredentials();
-type SandboxResourceTier = import('./containers/sandbox-api-client.js').SandboxResourceTier;
 const SANDBOX_TIER = parseSandboxTier(process.env.AZURE_SANDBOX_TIER ?? process.env.SANDBOX_TIER);
 
 let sandboxContainerManager:
@@ -670,7 +676,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
       imagePullIdentityConfigured: Boolean(SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID),
       registryCredentialsConfigured: Boolean(SANDBOX_REGISTRY_CREDENTIALS),
-      tier: SANDBOX_TIER ?? 'L',
+      tier: SANDBOX_TIER ?? DEFAULT_SANDBOX_TIER,
     },
     'Sandbox execution target enabled',
   );
@@ -745,7 +751,15 @@ const validationEngine = createLocalValidationEngine(
 );
 
 const runtimeRegistry = createRuntimeRegistry([
-  new ClaudeRuntime(logger, runtimeContainerManager),
+  new ClaudeRuntime(logger, runtimeContainerManager, {
+    // A turn ending with background work pending may wait (bounded) for Claude to
+    // continue — but not while a human decision is pending: a retained run would
+    // only queue the reply instead of resuming the agent with it (#648).
+    awaitBackgroundTasks: (podId) => {
+      const pod = podRepo.getOrThrow(podId);
+      return pod.status === 'running' && !pod.pendingEscalation;
+    },
+  }),
   new CodexRuntime(logger, runtimeContainerManager, podRepo, eventBus),
   new CopilotRuntime(logger, runtimeContainerManager),
   new PiRuntime(logger, runtimeContainerManager),
@@ -951,7 +965,7 @@ const configuration = createHostConfigurationComponents({
   network: networkManager,
   docker,
   sandboxEnabled: !!sandboxContainerManager,
-  sandboxDefaultTier: SANDBOX_TIER ?? 'L',
+  sandboxDefaultTier: SANDBOX_TIER ?? DEFAULT_SANDBOX_TIER,
   // The node22 base carries the runtime CLIs and no repository content, so it doubles as the
   // isolated reviewer image when the host file names none. Pinned to its digest per resolution.
   ...(reviewerRegistry
@@ -1570,6 +1584,22 @@ const sandboxOrphanReaperTimer = sandboxOrphanReaper
   : null;
 sandboxOrphanReaperTimer?.unref();
 
+// Prepared-dependency snapshots (#644) live only between a continuation teardown and the
+// next provisioning. Remove any whose pod is missing or settled, or that went stale.
+const sweepPreparedDependencies = (phase: string) =>
+  sweepPreparedDependencySnapshots((id) => podRepo.getOrThrow(id))
+    .then((removed) => {
+      if (removed.length)
+        logger.info({ removed, phase }, 'Removed stale prepared dependency snapshots');
+    })
+    .catch((err) => logger.warn({ err, phase }, 'Prepared dependency snapshot sweep failed'));
+void sweepPreparedDependencies('startup');
+const preparedDependencySweepTimer = setInterval(
+  () => void sweepPreparedDependencies('periodic'),
+  15 * 60 * 1000,
+);
+preparedDependencySweepTimer.unref();
+
 // Start listening
 try {
   if (savedPilot) {
@@ -1760,6 +1790,7 @@ async function shutdown(signal: string) {
   if (systemSandboxReaper) clearInterval(systemSandboxReaper);
   if (sandboxTerminalReaperTimer) clearInterval(sandboxTerminalReaperTimer);
   if (sandboxOrphanReaperTimer) clearInterval(sandboxOrphanReaperTimer);
+  clearInterval(preparedDependencySweepTimer);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

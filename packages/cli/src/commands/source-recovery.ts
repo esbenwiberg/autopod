@@ -85,7 +85,8 @@ export function registerSourceRecoveryCommand(
       if (!apply) {
         const list = await client.getSourceAdoptions(podId);
         withJsonOutput(opts, list, (value) => {
-          if (!value.operations.length && !value.approvalRewrite)
+          if (value.recoveryHint) console.log(value.recoveryHint);
+          else if (!value.operations.length && !value.approvalRewrite)
             console.log('No source adoption operations.');
           for (const state of value.operations) print(state);
           if (value.approvalRewrite) {

@@ -1014,6 +1014,73 @@ describe('DockerContainerManager', () => {
     });
   });
 
+  describe('exportPathArchive() / importPathArchive()', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'archive-export-'));
+    });
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('streams the archive to a host file with its size and sha256', async () => {
+      const payload = Buffer.from('a'.repeat(5000));
+      const stream = new PassThrough();
+      stream.end(payload);
+      container.getArchive.mockResolvedValue(stream);
+      const file = join(dir, 'out.tar');
+      const result = await manager.exportPathArchive('abc123', '/workspace/node_modules', file, {
+        maxBytes: 10_000,
+        timeoutMs: 5_000,
+      });
+      expect(container.getArchive).toHaveBeenCalledWith({ path: '/workspace/node_modules' });
+      expect(result.bytes).toBe(5000);
+      expect(result.sha256).toBe(
+        (await import('node:crypto')).createHash('sha256').update(payload).digest('hex'),
+      );
+      expect(readFileSync(file)).toEqual(payload);
+      expect((await import('node:fs')).statSync(file).mode & 0o777).toBe(0o600);
+    });
+
+    it('rejects an archive above the byte limit', async () => {
+      const stream = new PassThrough();
+      stream.end(Buffer.alloc(2048));
+      container.getArchive.mockResolvedValue(stream);
+      await expect(
+        manager.exportPathArchive('abc123', '/workspace/node_modules', join(dir, 'big.tar'), {
+          maxBytes: 1024,
+          timeoutMs: 5_000,
+        }),
+      ).rejects.toThrow('byte limit');
+    });
+
+    it('rejects an export that exceeds its time bound', async () => {
+      container.getArchive.mockResolvedValue(new PassThrough());
+      await expect(
+        manager.exportPathArchive('abc123', '/workspace/node_modules', join(dir, 'slow.tar'), {
+          maxBytes: 1024,
+          timeoutMs: 50,
+        }),
+      ).rejects.toThrow('timed out');
+    });
+
+    it('streams a host archive into the container directory', async () => {
+      const file = join(dir, 'in.tar');
+      writeFileSync(file, 'tar-bytes');
+      let received = '';
+      container.putArchive.mockImplementation(async (source: NodeJS.ReadableStream) => {
+        for await (const chunk of source) received += chunk.toString();
+      });
+      await manager.importPathArchive('abc123', file, '/workspace/packages/a', {
+        timeoutMs: 5_000,
+      });
+      expect(container.putArchive).toHaveBeenCalledWith(expect.anything(), {
+        path: '/workspace/packages/a',
+      });
+      expect(received).toBe('tar-bytes');
+    });
+  });
+
   describe('extractDirectoryFromContainer()', () => {
     let hostPath: string;
 
@@ -1334,6 +1401,52 @@ describe('DockerContainerManager', () => {
       await expect(
         manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
       ).resolves.toMatchObject({ exitCode });
+    });
+
+    // #665: the hijacked attach stream can end before Docker records the exec's
+    // exit. Reading that window as "exit 1" turned a passing command into a failure.
+    it.each([
+      false,
+      true,
+    ])('reads the exit Docker records after the attach stream ends (strict=%s)', async (strict) => {
+      const output = 'checked 273 Markdown files: 0 problem(s)\n';
+      const inspect = vi
+        .fn()
+        .mockResolvedValueOnce({ Running: true, ExitCode: null })
+        .mockResolvedValueOnce({ Running: false, ExitCode: 0 });
+      container.exec.mockResolvedValue({
+        id: 'race-exec',
+        start: vi.fn().mockResolvedValue(createMockMuxStream(output, '')),
+        inspect,
+      });
+      const result = await manager.execInContainer(
+        'abc123',
+        ['sh', '-c', 'python3 scripts/check_docs.py'],
+        strict ? { requireObservedExit: true } : undefined,
+      );
+      expect(result).toEqual({ stdout: output, stderr: '', exitCode: 0 });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports the raw exec end status when strict execution never observes an exit', async () => {
+      container.exec.mockResolvedValue({
+        id: 'still-running-exec',
+        start: vi.fn().mockResolvedValue(createMockMuxStream('done\n', '')),
+        inspect: vi.fn().mockResolvedValue({ Running: true, ExitCode: null, Pid: 4242 }),
+      });
+      const rejection = await manager
+        .execInContainer('abc123', ['proof'], { requireObservedExit: true })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(rejection).toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      const message = (rejection as Error).message;
+      expect(message).toContain('still-running-exec');
+      expect(message).toContain('"streamEnded":true');
+      expect(message).toContain('"Running":true');
+      expect(message).toContain('"ExitCode":null');
+      expect(message).toContain('"Pid":4242');
     });
 
     it('defaults to exit code 1 when ExitCode is null', async () => {
@@ -1913,7 +2026,10 @@ describe('DockerContainerManager', () => {
       });
       await expect(
         manager.execInContainer('abc123', ['proof'], { requireObservedExit: true }),
-      ).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      ).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: expect.stringContaining('"inspectError":"timeout"'),
+      });
     });
 
     it('redacts long args in exec.inspect timed out warn log', async () => {

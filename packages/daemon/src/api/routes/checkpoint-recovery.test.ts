@@ -32,6 +32,7 @@ describe('human-only retained checkpoint selection', () => {
       getApprovalSourceRewrite: f.manager.getApprovalSourceRewrite,
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
+      getSession: (id) => f.ctx.podRepo.getOrThrow(id),
       getCheckpointRecoverySelection: f.recovery.selection,
       inspectRetainedContinuation: (...args) => f.recovery.inspect(...args),
       recoverInfrastructure: f.recovery.recoverInfrastructure,
@@ -85,6 +86,21 @@ describe('human-only retained checkpoint selection', () => {
       }
     }
     expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.recovery.list(f.podId)).toEqual([]);
+  });
+  it('explains dirty-source rework without admitting an infrastructure operation', async () => {
+    f.ctx.podRepo.update(f.podId, {
+      status: 'review_required',
+      lastValidationResult: null,
+      failureReason: 'Review source has uncommitted files (untracked: 1 path under thoughts/).',
+    });
+    const response = await app.inject({ method: 'GET', url: endpoint(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      operations: [],
+      recoveryHint: expect.stringContaining(`ap rework ${f.podId}`),
+    });
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.recovery.list(f.podId)).toEqual([]);
   });

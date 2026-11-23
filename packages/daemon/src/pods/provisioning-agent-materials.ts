@@ -12,6 +12,11 @@ import {
   PARENT_DELEGATE_INSTRUCTIONS,
   provisionParentDelegate,
 } from './parent-delegate-materials.js';
+import { formatPreparationSummary } from './preparation-timing.js';
+import {
+  cleanupPreparedDependencies,
+  consumePreparedDependencySnapshot,
+} from './prepared-dependency-snapshot.js';
 import { projectMemoryScope } from './project-memory-scope.js';
 import { provisioningExecTimeout } from './provisioning-exec-timeout.js';
 import type {
@@ -569,10 +574,12 @@ export function createProvisioningAgentMaterials(
     };
     assertCurrent();
     let preparationProvenance: Awaited<ReturnType<typeof inspectExecutionPreflight>> | undefined;
+    let preflightMs: number | null | undefined;
     if (launchConfig?.repository?.setup.prepareCommand) {
       emitStatus('Preparing repository dependencies…');
       if (!podRepo.executionProvenance)
         throw new Error('Repository preparation provenance ledger is unavailable');
+      const preflightStarted = Date.now();
       preparationProvenance = await inspectExecutionPreflight(
         containerManager,
         containerId,
@@ -582,8 +589,52 @@ export function createProvisioningAgentMaterials(
         'worker',
         { assertCurrent },
       );
+      preflightMs = Date.now() - preflightStarted;
       assertCurrent();
     }
+    // Continuation/recovery of a coding run may reuse the previous container's prepared
+    // dependencies (#644). Fresh launches and validation always prepare in full; a stale
+    // snapshot from an earlier continuation is discarded so it can never be consumed later.
+    const reuseEligible =
+      isRecovery && !isFreshContainerValidationOnly && !pod.skipAgent && !!preparationProvenance;
+    if (!reuseEligible)
+      await cleanupPreparedDependencies(podId).catch((err: unknown) =>
+        logger.warn({ podId, err }, 'Stale prepared dependency snapshot cleanup failed'),
+      );
+    const reuse = reuseEligible
+      ? {
+          attempt: async (current: {
+            commandHash: string;
+            configurationHash: string;
+            dependencyInputs: string | null;
+          }) => {
+            const attempt = await consumePreparedDependencySnapshot({
+              cm: containerManager,
+              containerId,
+              current: {
+                ...current,
+                podId,
+                executionTarget: pod.executionTarget,
+                imageDigest: preparationProvenance?.imageDigest ?? null,
+              },
+            });
+            if (attempt.reused) {
+              logger.info({ podId, ...attempt }, 'Reusing prepared dependencies');
+              emitStatus(
+                `Reusing prepared dependencies from the previous container (${attempt.restoredArchives} archive${
+                  attempt.restoredArchives === 1 ? '' : 's'
+                }, ${(attempt.restoredBytes / (1024 * 1024)).toFixed(1)} MiB in ${(
+                  attempt.restoreMs / 1000
+                ).toFixed(1)}s)`,
+              );
+            } else {
+              logger.info({ podId, reason: attempt.reason }, 'Prepared dependency reuse refused');
+              emitStatus(`Full repository preparation: reuse refused — ${attempt.reason}`);
+            }
+            return attempt;
+          },
+        }
+      : undefined;
     const repositoryPreparation = await prepareLaunchRepository(
       launchConfig,
       containerManager,
@@ -596,12 +647,27 @@ export function createProvisioningAgentMaterials(
       },
       {
         assertCurrent,
+        ...(preflightMs !== undefined ? { preflightMs } : {}),
+        ...(reuse ? { reuse } : {}),
         sensitiveValues: [
           ...(effectiveRegistryPat ? [effectiveRegistryPat] : []),
           ...(launchRegistry?.redactionSecrets ?? []),
         ],
         record(evidence) {
           assertCurrent();
+          if (evidence.timing) {
+            logger.info(
+              {
+                podId,
+                status: evidence.status,
+                timing: evidence.timing,
+                cache: evidence.cache,
+                reuse: evidence.reuse,
+              },
+              'Repository preparation timing',
+            );
+            emitStatus(formatPreparationSummary(evidence));
+          }
           if (!preparationProvenance) return;
           preparationProvenance.repositoryPreparation = evidence;
           if (evidence.status === 'failed' || evidence.status === 'unverified')

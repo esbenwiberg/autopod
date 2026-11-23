@@ -4,6 +4,7 @@ import type {
   FirewallDeniedEvent,
   Pod,
   PodStatus,
+  RepositoryPreparationEvidence,
   SystemEvent,
   ValidationExecutionRecoveryState,
 } from '@autopod/shared';
@@ -145,6 +146,35 @@ function printApproveAllResult(result: {
   }
 }
 
+function formatSeconds(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return 'unmeasured';
+  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`;
+}
+
+/** Repository preparation status, per-stage timing, cache signals and reuse decision (#644). */
+export function printRepositoryPreparation(
+  preparation: RepositoryPreparationEvidence | undefined,
+): void {
+  if (!preparation || preparation.status === 'not-configured') return;
+  const timing = preparation.timing;
+  console.log(
+    `Repository preparation ${preparation.status}${timing ? ` in ${formatSeconds(timing.totalMs)} (command ${formatSeconds(timing.commandMs)}; probes ${formatSeconds(timing.sourceProbeMs)}${timing.preflightMs !== undefined ? `; preflight ${formatSeconds(timing.preflightMs)}` : ''})` : ''}`,
+  );
+  if (preparation.reuse)
+    console.log(
+      `  Reuse: ${preparation.reuse.decision} — ${preparation.reuse.reason}${preparation.reuse.restoreMs !== undefined ? ` (restored ${preparation.reuse.restoredArchives ?? 0} archives, ${Math.round((preparation.reuse.restoredBytes ?? 0) / 1048576)} MiB in ${formatSeconds(preparation.reuse.restoreMs)})` : ''}`,
+    );
+  if (timing?.stageTiming === 'unavailable' && timing.stages.length)
+    console.log('  Stage timing unavailable');
+  for (const stage of timing?.stages ?? [])
+    console.log(
+      `  [${stage.index}] ${stage.label}: ${stage.status}${stage.durationMs !== null ? ` ${formatSeconds(stage.durationMs)}` : ''}`,
+    );
+  const signals = preparation.cache?.signals.filter((signal) => signal.state !== 'unknown') ?? [];
+  if (signals.length)
+    console.log(`  Caches before: ${signals.map((s) => `${s.name} ${s.state}`).join(', ')}`);
+}
+
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   registerGoalCommands(program, getClient);
   registerBudgetCommand(program, getClient);
@@ -193,6 +223,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           console.log(
             `${command.source}: ${command.executable} ${command.available === null ? 'unverified' : command.available ? 'available' : 'missing'}`,
           );
+        printRepositoryPreparation(latest.repositoryPreparation);
         for (const diagnostic of latest.diagnostics)
           console.log(`${diagnostic.code}: ${diagnostic.detail}`);
       });
@@ -1106,7 +1137,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(chalk.green(`Pod ${resolvedId} re-enqueued.`));
       } else {
         console.log(chalk.yellow(`Pod ${resolvedId} force-failed — slot freed.`));
-        console.log(chalk.dim('Recover with: ap resume <id> or ap force-complete <id>'));
+        console.log(
+          chalk.dim(
+            'Recover with: ap rework <id> (agent unfinished), ap resume <id> (retry checks/delivery) or ap force-complete <id>',
+          ),
+        );
       }
     });
 
