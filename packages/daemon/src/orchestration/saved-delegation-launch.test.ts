@@ -47,12 +47,17 @@ import { fixtureSigner } from '../test-utils/gate-signer.js';
 import { resign } from '../test-utils/managed-fixture.js';
 import { createMockContainerManager, createTestDb, logger } from '../test-utils/mock-helpers.js';
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
+import {
+  MAX_ANCHORED_INTEGRATION_BYTES,
+  withVerifiedAnchoredDelegationMirror,
+} from './anchored-delegation-source.js';
 import { OrchestrationContinuations } from './continuations.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
 import { claimDaemonLifetime } from './local-recovery-claim.js';
 import { parentExactTreeEvaluator } from './parent-exact-tree-evaluator.js';
 import { readQualifiedParentIntegration } from './parent-integration-qualified.js';
 import { ParentReportResults } from './parent-report-results.js';
+import { ParentReviewHandoff } from './parent-review-handoff.js';
 import {
   admitSavedDelegationLaunch,
   readSavedDelegationAdmission,
@@ -410,16 +415,29 @@ it('cannot run as an ordinary Task even if the delegated option has a valid prev
   }
 });
 
-async function admissionFixture(db = createTestDb()) {
+async function admissionFixture(db = createTestDb(), anchored = false) {
   const f = fixture(db);
-  const source = await setupOrchestrationRun();
+  const source = await setupOrchestrationRun(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    anchored ? 3 * 1024 * 1024 : 0,
+  );
   const original = f.pins.getMockImplementation()!;
   f.pins.mockImplementation(async (policy, config) => {
     const pins = await original(policy, config);
     const { predecessor, commit, tree } = source.cp;
     return {
       ...pins,
-      source: { ...pins.source, predecessor, commit, tree, bundleDigest: sha256(source.bytes) },
+      source: {
+        ...pins.source,
+        predecessor,
+        commit,
+        tree,
+        bundleDigest: sha256(source.bytes),
+        ...(anchored ? { resultTransport: 'anchored/v1' as const } : {}),
+      },
     };
   });
   const readSeedBundle = vi.fn(async () => Buffer.from(source.bytes));
@@ -773,7 +791,11 @@ it('isolates two admitted parent attempts, real worker reservations, and result 
   }
 }, 25_000);
 
-it('executes two saved roles from private pinned source and qualifies once across a daemon DB reopen', async () => {
+it.each([
+  'full',
+  'anchored',
+] as const)('qualifies and hands off two saved roles with %s bundles after a daemon DB reopen', async (mode) => {
+  const anchored = mode === 'anchored';
   const root = mkdtempSync(path.join(tmpdir(), 'ap-saved-runtime-'));
   const dbPath = path.join(root, 'state.db');
   let db = createHistoricalDiskDatabase(dbPath, [{ dir: MIGRATIONS_DIR, through: 282 }]);
@@ -782,7 +804,8 @@ it('executes two saved roles from private pinned source and qualifies once acros
   let daemonOwner: ReturnType<typeof claimDaemonLifetime> | undefined;
   try {
     await runMigrationsWithBackups(db, MIGRATIONS_DIR, logger);
-    const f = await admissionFixture(db);
+    const f = await admissionFixture(db, anchored);
+    if (anchored) expect(f.source.bytes.length).toBeGreaterThan(MAX_ANCHORED_INTEGRATION_BYTES);
     const template = structuredClone(f.source.request);
     template.task.kind = 'implementation';
     template.validation.verifierPolicy = PRIVATE_PARENT_VERIFIER;
@@ -1003,37 +1026,71 @@ it('executes two saved roles from private pinned source and qualifies once acros
     );
     const gatePolicy = savedDelegationGatePolicy(plan);
     const seen: Array<{ role: string; tree: string; commit: string }> = [];
+    const anchor = (role: string) =>
+      anchored
+        ? async (predecessor: string) => {
+            expect(predecessor).toBe(checkpoint.commit);
+            return {
+              base: checkpoint.commit,
+              tree: checkpoint.tree,
+              withBase: <T>(use: (mirror: string) => Promise<T>) =>
+                withVerifiedCheckpointMirror(
+                  path.join(root, role),
+                  checkpoint,
+                  f.source.bytes,
+                  use,
+                ),
+            };
+          }
+        : undefined;
     const gates = {
       policy: gatePolicy,
-      checks: parentExactTreeEvaluator(root, gatePolicy, 'checks', {
-        async evaluate({ mirror, commit, tree }) {
-          seen.push({ role: 'checks', tree, commit });
-          const passed =
-            (await managedGitBytes(mirror, ['show', commit + ':sample/count.txt'])).equals(
-              Buffer.from('24\n'),
-            ) &&
-            (await managedGitBytes(mirror, ['show', commit + ':sample/reason.txt'])).equals(
-              Buffer.from('24 is twice 12\n'),
-            );
-          return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+      checks: parentExactTreeEvaluator(
+        root,
+        gatePolicy,
+        'checks',
+        {
+          async evaluate({ mirror, commit, tree }) {
+            seen.push({ role: 'checks', tree, commit });
+            const passed =
+              (await managedGitBytes(mirror, ['show', commit + ':sample/count.txt'])).equals(
+                Buffer.from('24\n'),
+              ) &&
+              (await managedGitBytes(mirror, ['show', commit + ':sample/reason.txt'])).equals(
+                Buffer.from('24 is twice 12\n'),
+              );
+            return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+          },
+          async sign(statement) {
+            return checksSigner.attest(statement);
+          },
         },
-        async sign(statement) {
-          return checksSigner.attest(statement);
+        anchor('checks-source'),
+      ),
+      independentReview: parentExactTreeEvaluator(
+        root,
+        gatePolicy,
+        'independentReview',
+        {
+          async evaluate({ mirror, commit, tree, predecessor }) {
+            seen.push({ role: 'review', tree, commit });
+            const passed =
+              predecessor === checkpoint.commit &&
+              (await managedGit(mirror, [
+                'diff-tree',
+                '--name-only',
+                '-r',
+                predecessor,
+                commit,
+              ])) === 'sample/count.txt\nsample/reason.txt';
+            return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
+          },
+          async sign(statement) {
+            return reviewSigner.attest(statement);
+          },
         },
-      }),
-      independentReview: parentExactTreeEvaluator(root, gatePolicy, 'independentReview', {
-        async evaluate({ mirror, commit, tree, predecessor }) {
-          seen.push({ role: 'review', tree, commit });
-          const passed =
-            predecessor === checkpoint.commit &&
-            (await managedGit(mirror, ['diff-tree', '--name-only', '-r', predecessor, commit])) ===
-              'sample/count.txt\nsample/reason.txt';
-          return { status: passed ? 'passed' : 'failed', evidence: Buffer.from(tree) };
-        },
-        async sign(statement) {
-          return reviewSigner.attest(statement);
-        },
-      }),
+        anchor('review-source'),
+      ),
     };
     const pinnedWorkerSource = new AsyncLocalStorage<string>();
     const launches: string[] = [];
@@ -1234,6 +1291,34 @@ it('executes two saved roles from private pinned source and qualifies once acros
     expect(launches).toHaveLength(2);
     expect(seen).toHaveLength(2);
     expect(db.prepare('SELECT count(*) FROM parent_review_approvals').pluck().get()).toBe(0);
+    if (anchored) expect(result.bundle.length).toBeLessThan(MAX_ANCHORED_INTEGRATION_BYTES);
+    expect(result.gateRequest.resultTransport).toBe(anchored ? 'anchored/v1' : undefined);
+    const handoff = new ParentReviewHandoff(db);
+    const reviewOwner = { run: plan.runId, podId, actorDigest: digest(owner) };
+    const evidence = qualified.evidence_digest;
+    const preview = handoff.preview(reviewOwner, evidence);
+    expect(preview.bundleBaseCommit).toBe(anchored ? checkpoint.commit : undefined);
+    expect(() => handoff.download(reviewOwner, evidence)).toThrow();
+    handoff.approve(reviewOwner, {
+      evidenceDigest: evidence,
+      expectedReviewDigest: preview.reviewDigest,
+    });
+    const saved = handoff.download(reviewOwner, evidence);
+    expect(saved.bundle.equals(result.bundle)).toBe(true);
+    expect(sha256(saved.bundle)).toBe(preview.bundleDigest);
+    if (anchored)
+      await withVerifiedCheckpointMirror(root, checkpoint, f.source.bytes, (baseMirror) =>
+        withVerifiedAnchoredDelegationMirror(
+          {
+            baseMirror,
+            scratch: root,
+            bundle: saved.bundle,
+            selection: { ...result.checkpoint, predecessorTree: checkpoint.tree },
+          },
+          async (mirror) =>
+            expect(await managedGit(mirror, ['rev-parse', 'HEAD^{tree}'])).toBe(preview.tree),
+        ),
+      );
   } finally {
     await registry?.close();
     await runtime?.close();
@@ -1244,4 +1329,4 @@ it('executes two saved roles from private pinned source and qualifies once acros
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
-}, 30_000);
+}, 45_000);

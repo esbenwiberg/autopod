@@ -11,6 +11,7 @@ import {
   assertPrivateParentCommit,
   isPrivateSubmission,
 } from '../managed/private-commit-policy.js';
+import type { ParentDeltaSource } from './anchored-delegation-source.js';
 import { OrchestrationContinuations } from './continuations.js';
 import { projectManagedRecipe } from './controller-turns.js';
 import { LocalCheckpointHost, withVerifiedCheckpointMirror } from './local-checkpoints.js';
@@ -113,6 +114,10 @@ export function attachSavedDelegationRuntime(input: {
       throw new Error('saved-delegation-seed-changed');
     return withVerifiedCheckpointMirror(scratch, checkpoint, seed.bundle, use);
   };
+  const delta: ParentDeltaSource | undefined =
+    plan.pins.source.resultTransport === 'anchored/v1'
+      ? { base: commit, tree, withBase: withParentSeed }
+      : undefined;
   const ledger = new OrchestrationContinuations(db, async (cp, use) => {
     if (canonical(cp) !== canonical(checkpoint)) throw new Error('saved-delegation-seed-mismatch');
     return withParentSeed((mirror) => input.withWorkerSource(mirror, run, () => use(service)));
@@ -130,6 +135,7 @@ export function attachSavedDelegationRuntime(input: {
     input.gates,
     right.files,
     true,
+    delta,
   );
   const completion = parentPrivateCompletion(
     service,
@@ -139,6 +145,7 @@ export function attachSavedDelegationRuntime(input: {
     left.files,
     job.reserve,
     right.files,
+    delta,
   );
   const release = tryControllerOwner(db, run);
   if (!release) throw new Error('saved-delegation-runtime-already-attached');

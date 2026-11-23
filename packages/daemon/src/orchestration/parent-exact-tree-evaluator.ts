@@ -1,5 +1,6 @@
 import { canonical, sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES } from '../managed/source-git.js';
+import { type ParentDeltaSource, restoreParentSource } from './anchored-delegation-source.js';
 import {
   type CombinedPolicy,
   combinedPolicyDigest,
@@ -40,6 +41,7 @@ export function parentExactTreeEvaluator(
   pinned: CombinedPolicy,
   role: Role,
   ports: ParentEvaluatorPorts,
+  delta?: (predecessor: string) => Promise<ParentDeltaSource>,
 ) {
   const policy = gatePolicySchema.parse(pinned);
   const { identity, configurationDigest } = policy[role];
@@ -53,11 +55,15 @@ export function parentExactTreeEvaluator(
       request.subject.policyDigest !== combinedPolicyDigest(policy)
     )
       throw new Error('parent-evaluator-policy-binding');
+    if (Boolean(delta) !== (request.resultTransport === 'anchored/v1'))
+      throw new Error('parent-evaluator-result-transport-mismatch');
     const bundle = Buffer.from(source);
     if (sha256(bundle) !== request.bundleDigest) throw new Error('parent-evaluator-bundle-digest');
     const { commit, tree, predecessor } = request.subject;
     const inputDigest = parentIntegrationGateDigest(request);
-    const result = await withVerifiedCheckpointMirror(
+    const result = await restoreParentSource(
+      withVerifiedCheckpointMirror,
+      delta && (await delta(predecessor)),
       scratch,
       { commit, tree, predecessor },
       bundle,

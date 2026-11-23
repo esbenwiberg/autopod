@@ -4,6 +4,11 @@ import { canonical, sha256 } from '../managed/canonical.js';
 import { PRIVATE_SUBMISSION_MAX_BYTES } from '../managed/private-commit-policy.js';
 import { MAX_PRIVATE_HEAD_BYTES } from '../managed/private-head-export.js';
 import { managedGit, managedGitBytes } from '../managed/source-git.js';
+import {
+  exportAnchoredDelegationBundle,
+  type ParentDeltaSource,
+  withAnchoredBaseWorkspace,
+} from './anchored-delegation-source.js';
 import type { CandidatePathAllowance } from './candidate-path-scope.js';
 import type { ContinuationCheckpoint } from './continuations.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
@@ -58,27 +63,14 @@ export async function buildParentSubmissionHead(
   raw: Buffer,
   maxBytes: number,
   assertCurrent: () => void,
+  delta?: ParentDeltaSource,
 ) {
   const files = parseSubmission(raw, scope);
   const { evidenceDigest, ...subject } = checkpoint;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 128 || maxBytes > MAX_PRIVATE_HEAD_BYTES)
     throw new Error('parent-private-submission-bound');
   assertCurrent();
-  const row = db
-    .prepare(`SELECT manifest,bundle FROM orchestration_checkpoint_custody
-    WHERE run_id=? AND evidence_digest=? AND length(bundle) BETWEEN 1 AND ?`)
-    .get(subject.run, evidenceDigest, maxBytes) as { manifest: string; bundle: Buffer } | undefined;
-  if (!row || sha256(row.manifest) !== evidenceDigest)
-    throw new Error('checkpoint-custody-integrity');
-  const manifest = JSON.parse(row.manifest);
-  if (
-    manifest.version !== 1 ||
-    canonical(manifest.subject) !== canonical(subject) ||
-    manifest.bundleDigest !== sha256(row.bundle)
-  )
-    throw new Error('checkpoint-custody-integrity');
-
-  return withVerifiedCheckpointMirror(scratch, subject, row.bundle, async (mirror) => {
+  const apply = async (mirror: string) => {
     assertCurrent();
     await managedGit(mirror, ['read-tree', subject.commit]);
     for (const { path, content } of files) {
@@ -115,6 +107,20 @@ export async function buildParentSubmissionHead(
     ]);
     if (![commit, tree].every((value) => /^[a-f0-9]{40}$/.test(value)))
       throw new Error('parent-private-submission-object');
+    if (delta) {
+      const bundle = await exportAnchoredDelegationBundle(
+        mirror,
+        {
+          commit,
+          tree,
+          predecessor: delta.base,
+          predecessorTree: delta.tree,
+        },
+        maxBytes,
+      );
+      assertCurrent();
+      return { commit, tree, bundle };
+    }
     const header = Buffer.from(`# v2 git bundle\n${commit} HEAD\n\n`);
     const pack = await managedGitBytes(
       mirror,
@@ -135,5 +141,26 @@ export async function buildParentSubmissionHead(
     );
     assertCurrent();
     return { commit, tree, bundle: Buffer.concat([header, pack]) };
-  });
+  };
+  if (delta) {
+    if (delta.base !== subject.commit || delta.tree !== subject.tree)
+      throw new Error('anchored-delegation-base-mismatch');
+    return delta.withBase((baseMirror) =>
+      withAnchoredBaseWorkspace(scratch, baseMirror, delta.base, delta.tree, apply),
+    );
+  }
+  const row = db
+    .prepare(`SELECT manifest,bundle FROM orchestration_checkpoint_custody
+    WHERE run_id=? AND evidence_digest=? AND length(bundle) BETWEEN 1 AND ?`)
+    .get(subject.run, evidenceDigest, maxBytes) as { manifest: string; bundle: Buffer } | undefined;
+  if (!row || sha256(row.manifest) !== evidenceDigest)
+    throw new Error('checkpoint-custody-integrity');
+  const manifest = JSON.parse(row.manifest);
+  if (
+    manifest.version !== 1 ||
+    canonical(manifest.subject) !== canonical(subject) ||
+    manifest.bundleDigest !== sha256(row.bundle)
+  )
+    throw new Error('checkpoint-custody-integrity');
+  return withVerifiedCheckpointMirror(scratch, subject, row.bundle, apply);
 }

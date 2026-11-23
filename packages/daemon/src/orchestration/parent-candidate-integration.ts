@@ -4,6 +4,11 @@ import type Database from 'better-sqlite3';
 import { canonical, digest, sha256 } from '../managed/canonical.js';
 import { MAX_CANDIDATE_BYTES, managedGit, managedGitBytes } from '../managed/source-git.js';
 import {
+  exportAnchoredDelegationBundle,
+  type ParentDeltaSource,
+  restoreParentSource,
+} from './anchored-delegation-source.js';
+import {
   assertPortableCandidateTree,
   type CandidatePathAllowance,
   validateCandidatePathScope,
@@ -96,6 +101,7 @@ export async function buildParentIntegration(
   scratch: string,
   run: string,
   inputs: readonly [Readonly<ParentIntegrationInput>, Readonly<ParentIntegrationInput>],
+  delta?: ParentDeltaSource,
 ) {
   const frozen = structuredClone(inputs);
   const [left, right] = frozen;
@@ -123,14 +129,19 @@ export async function buildParentIntegration(
       candidate: material.receipt.newCommit,
       expectedTree: selected.expectedTree,
       allowlist: selected.allowlist,
+      allowInheritedLinks: Boolean(delta),
     });
-  const rightScope = await withVerifiedCheckpointMirror(
+  const rightScope = await restoreParentSource(
+    withVerifiedCheckpointMirror,
+    delta,
     scratch,
     subject(b, right),
     b.bundle,
     (mirror) => validate(mirror, right, b),
   );
-  const snapshot = await withVerifiedCheckpointMirror(
+  const snapshot = await restoreParentSource(
+    withVerifiedCheckpointMirror,
+    delta,
     scratch,
     subject(a, left),
     a.bundle,
@@ -162,7 +173,7 @@ export async function buildParentIntegration(
       const parents = [a.receipt.newCommit, b.receipt.newCommit];
       const tree = await managedGit(mirror, ['merge-tree', '--write-tree', ...parents]);
       if (!/^[0-9a-f]{40}$/.test(tree)) throw new Error('parent-integration-tree-invalid');
-      await assertPortableCandidateTree(mirror, tree);
+      await assertPortableCandidateTree(mirror, tree, delta?.base);
       const actual = await changes(mirror, base, tree);
       if (
         actual.size !== expected.size ||
@@ -199,15 +210,31 @@ export async function buildParentIntegration(
         commitFile,
       ]);
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('parent-integration-commit-invalid');
-      await managedGit(mirror, ['fsck', '--strict', '--no-reflogs', commit]);
+      await managedGit(mirror, [
+        'fsck',
+        '--strict',
+        '--no-reflogs',
+        ...(delta ? ['--no-full'] : []),
+        commit,
+      ]);
       await managedGit(mirror, ['update-ref', '--no-deref', 'HEAD', commit]);
-      const bundleFile = path.join(mirror, 'integration.bundle');
-      await managedGit(mirror, ['bundle', 'create', bundleFile, 'HEAD']);
-      const size = (await stat(bundleFile)).size;
-      if (size <= 0 || size > MAX_CANDIDATE_BYTES)
-        throw new Error('parent-integration-bundle-size');
-      const bundle = await readFile(bundleFile);
-      if (bundle.length !== size) throw new Error('parent-integration-bundle-size');
+      const bundle = delta
+        ? await exportAnchoredDelegationBundle(mirror, {
+            predecessor: base,
+            predecessorTree: delta.tree,
+            commit,
+            tree,
+          })
+        : await (async () => {
+            const bundleFile = path.join(mirror, 'integration.bundle');
+            await managedGit(mirror, ['bundle', 'create', bundleFile, 'HEAD']);
+            const size = (await stat(bundleFile)).size;
+            if (size <= 0 || size > MAX_CANDIDATE_BYTES)
+              throw new Error('parent-integration-bundle-size');
+            const bundle = await readFile(bundleFile);
+            if (bundle.length !== size) throw new Error('parent-integration-bundle-size');
+            return bundle;
+          })();
       return {
         base,
         commit,

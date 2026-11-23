@@ -7,11 +7,58 @@ import { managedGit, managedGitBytes } from '../managed/source-git.js';
 const oid = /^[a-f0-9]{40}$/;
 export const MAX_ANCHORED_INTEGRATION_BYTES = 2 * MAX_PRIVATE_HEAD_BYTES;
 
-interface AnchoredSelection {
+export interface AnchoredSelection {
   commit: string;
   tree: string;
   predecessor: string;
   predecessorTree: string;
+}
+
+export interface ParentDeltaSource {
+  withBase<T>(use: (mirror: string) => Promise<T>): Promise<T>;
+  base: string;
+  tree: string;
+}
+type DeltaHead = Readonly<Pick<AnchoredSelection, 'commit' | 'tree' | 'predecessor'>>;
+
+/** Trusted host or evaluator resolver, independent of the transported bytes. */
+export function restoreParentDelta<T>(
+  source: ParentDeltaSource,
+  scratch: string,
+  subject: DeltaHead,
+  bundle: Buffer,
+  use: (mirror: string) => Promise<T>,
+) {
+  if (source.base !== subject.predecessor) throw new Error('anchored-delegation-base-mismatch');
+  return source.withBase((baseMirror) =>
+    withVerifiedAnchoredDelegationMirror(
+      {
+        scratch,
+        baseMirror,
+        selection: { ...subject, predecessorTree: source.tree },
+        bundle,
+      },
+      use,
+    ),
+  );
+}
+
+export function restoreParentSource<T>(
+  legacy: <R>(
+    scratch: string,
+    subject: DeltaHead,
+    bundle: Buffer,
+    use: (mirror: string) => Promise<R>,
+  ) => Promise<R>,
+  delta: ParentDeltaSource | undefined,
+  scratch: string,
+  subject: DeltaHead,
+  bundle: Buffer,
+  use: (mirror: string) => Promise<T>,
+) {
+  return delta
+    ? restoreParentDelta(delta, scratch, subject, bundle, use)
+    : legacy(scratch, subject, bundle, use);
 }
 
 function assertSelection(selection: Readonly<AnchoredSelection>, maxBytes: number) {
@@ -90,8 +137,36 @@ export async function withVerifiedAnchoredDelegationMirror<T>(
   const bundle = Buffer.from(input.bundle);
   const { commit, tree, predecessor, predecessorTree } = selection;
   await assertBoundedAnchoredHeadPack(bundle, predecessor, commit);
-  if (!path.isAbsolute(input.baseMirror)) throw new Error('anchored-delegation-base-mirror');
-  const root = await realpath(input.baseMirror);
+  return withAnchoredBaseWorkspace(
+    input.scratch,
+    input.baseMirror,
+    predecessor,
+    predecessorTree,
+    async (mirror) => {
+      const file = path.join(path.dirname(mirror), 'delta.bundle');
+      await writeFile(file, bundle, { flag: 'wx', mode: 0o600 });
+      const heads = await managedGit(mirror, ['bundle', 'unbundle', file]);
+      if (heads !== `${commit} HEAD`) throw new Error('anchored-delegation-head-mismatch');
+      await requireCommitTree(mirror, commit, tree);
+      await managedGit(mirror, ['merge-base', '--is-ancestor', predecessor, commit]);
+      await managedGit(mirror, ['fsck', '--strict', '--no-reflogs', '--no-full', commit]);
+      await managedGit(mirror, ['update-ref', 'refs/heads/main', commit, predecessor]);
+      return use(mirror);
+    },
+  );
+}
+
+/** All writes are to the disposable mirror, never the retained base. */
+export async function withAnchoredBaseWorkspace<T>(
+  scratch: string,
+  baseMirror: string,
+  predecessor: string,
+  predecessorTree: string,
+  use: (mirror: string) => Promise<T>,
+): Promise<T> {
+  if (!path.isAbsolute(baseMirror) || !oid.test(predecessor) || !oid.test(predecessorTree))
+    throw new Error('anchored-delegation-base-mirror');
+  const root = await realpath(baseMirror);
   const objects = path.join(root, 'objects');
   if (
     /[\r\n\0]/.test(objects) ||
@@ -99,11 +174,10 @@ export async function withVerifiedAnchoredDelegationMirror<T>(
     !(await stat(objects)).isDirectory()
   )
     throw new Error('anchored-delegation-base-mirror');
-  await mkdir(input.scratch, { recursive: true, mode: 0o700 });
-  const temp = await mkdtemp(path.join(input.scratch, 'anchor-'));
+  await mkdir(scratch, { recursive: true, mode: 0o700 });
+  const temp = await mkdtemp(path.join(scratch, 'anchor-'));
   try {
     const mirror = path.join(temp, 'mirror.git');
-    const file = path.join(temp, 'delta.bundle');
     await managedGit(temp, ['init', '--bare', '-b', 'main', '--object-format=sha1', mirror]);
     await writeFile(path.join(mirror, 'objects', 'info', 'alternates'), `${objects}\n`, {
       flag: 'wx',
@@ -111,13 +185,6 @@ export async function withVerifiedAnchoredDelegationMirror<T>(
     });
     await requireCommitTree(mirror, predecessor, predecessorTree);
     await managedGit(mirror, ['update-ref', 'refs/heads/main', predecessor]);
-    await writeFile(file, bundle, { flag: 'wx', mode: 0o600 });
-    const heads = await managedGit(mirror, ['bundle', 'unbundle', file]);
-    if (heads !== `${commit} HEAD`) throw new Error('anchored-delegation-head-mismatch');
-    await requireCommitTree(mirror, commit, tree);
-    await managedGit(mirror, ['merge-base', '--is-ancestor', predecessor, commit]);
-    await managedGit(mirror, ['fsck', '--strict', '--no-reflogs', '--no-full', commit]);
-    await managedGit(mirror, ['update-ref', 'refs/heads/main', commit, predecessor]);
     return await use(mirror);
   } finally {
     await rm(temp, { recursive: true, force: true });

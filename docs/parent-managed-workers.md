@@ -511,6 +511,23 @@ The preview response's `delegationPreview` includes `runId`,
 `evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for that fixed-lease
 setup. Neither mode approves or publishes a result.
 
+For an explicit change-only result, set `source.resultTransport` to
+`"anchored/v1"` with automatic registration. Each evaluator needs its own
+trusted, read-only `publishedMirror` containing the pinned commit. Both reject
+registration if the configured transport differs or the base is unavailable.
+The private worker submissions and final approved bundle then carry only
+objects after that base. The standalone evaluators reconstruct and verify the
+combined tree in scratch. Desktop shows the required base commit with the
+bundle; it is not a self-contained copy of the repository. A checkout that
+already has that commit can import the approved bundle with
+`git fetch /path/to/result.bundle HEAD` without publishing anything. Existing
+fixed and self-contained runs are unchanged.
+
+This changes result transport only. The current host still needs a retained
+seed, and its sandbox bootstrap still has the existing narrow source projection
+limits. Do not use the change-only result setting to claim large-repo worker
+readiness or to raise those limits.
+
 Provisioning creates a new detached parent worktree from retained Git custody,
 with no remote. The saved runtime owns attempt-scoped delegate operations and
 reattaches its original workers and watchdog on daemon restart. Killing the

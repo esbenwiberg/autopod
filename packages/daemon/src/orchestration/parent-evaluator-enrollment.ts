@@ -54,6 +54,7 @@ const enrollmentSchema = bindingSchema
   .extend({
     paths: orderedPaths,
     basePolicyDigest: gatePolicySchema.shape.basePolicyDigest,
+    resultTransport: z.literal('anchored/v1').optional(),
   })
   .strict();
 export type EvaluatorEnrollment = z.infer<typeof enrollmentSchema>;
@@ -122,6 +123,7 @@ export function createEvaluatorEnrollmentStore(input: {
   stateDir: string;
   policy: CombinedPolicy;
   enrollment: z.input<typeof evaluatorEnrollmentConfigSchema>;
+  assertBase?: (predecessor: string) => Promise<unknown>;
 }) {
   const { role, stateDir } = input;
   const config = evaluatorEnrollmentConfigSchema.parse(input.enrollment);
@@ -185,8 +187,13 @@ export function createEvaluatorEnrollmentStore(input: {
     async enroll({ enrollment, dispatch }: z.infer<typeof evaluatorEnrollmentRequestSchema>) {
       const policyDigest = combinedPolicyDigest(policyFor(enrollment.basePolicyDigest));
       const id = enrollmentDigest(enrollment, policyDigest);
-      if (!permitted(enrollment) || !verifyDispatch(id, dispatch))
+      if (
+        !permitted(enrollment) ||
+        !verifyDispatch(id, dispatch) ||
+        Boolean(input.assertBase) !== (enrollment.resultTransport === 'anchored/v1')
+      )
         return { status: 'denied' } as const;
+      await input.assertBase?.(enrollment.predecessor);
       let current = await read(enrollment.run);
       if (!current) {
         await create({
@@ -223,8 +230,11 @@ export function createEvaluatorEnrollmentStore(input: {
     async resolve(run: string) {
       const record = await read(run);
       if (!record) return;
-      const { basePolicyDigest, ...binding } = record.enrollment;
+      const { basePolicyDigest, resultTransport, ...binding } = record.enrollment;
+      if (Boolean(input.assertBase) !== (resultTransport === 'anchored/v1'))
+        throw new Error('evaluator-enrollment-transport-mismatch');
       return {
+        resultTransport,
         lease: {
           ...binding,
           expiresAt: record.expiresAt,

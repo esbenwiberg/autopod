@@ -8,6 +8,7 @@ import { expect, it, onTestFinished, vi } from 'vitest';
 import { digest, sha256 } from '../managed/canonical.js';
 import { managedGit, managedGitBytes } from '../managed/source-git.js';
 import { fixtureSigner } from '../test-utils/gate-signer.js';
+import { exportAnchoredDelegationBundle } from './anchored-delegation-source.js';
 import { combinedPolicyDigest, verifyGateReceipt } from './combined-attestation.js';
 import { createParentEvaluatorClient } from './parent-evaluator-client.js';
 import { createEvaluatorDispatchSigner } from './parent-evaluator-dispatch.js';
@@ -166,7 +167,7 @@ async function fixture(unexpectedCombinedPath = false) {
   return { request, bundle, policy, endpoint, lease, root };
 }
 
-it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
+it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic', 'anchored'] as const)(
   'runs the %s standalone evaluator on a protected Unix socket only',
   async (mode) => {
     const f = await fixture();
@@ -194,17 +195,38 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
       ...f.lease,
       dispatchPublicKey: dispatch.publicKey.export({ format: 'jwk' }).x!,
     };
+    const resultTransport = mode === 'anchored' ? ('anchored/v1' as const) : undefined;
     const request = {
       ...f.request,
       subject: { ...f.request.subject, policyDigest: combinedPolicyDigest(policy) },
+      ...(resultTransport ? { resultTransport } : {}),
     };
+    const publishedMirror = path.join(root, 'published.git');
+    let bundle = f.bundle;
+    if (resultTransport) {
+      const repo = path.join(root, 'repo');
+      await managedGit(root, ['init', '--bare', '-b', 'main', publishedMirror]);
+      await managedGit(publishedMirror, [
+        'fetch',
+        '--no-tags',
+        '--',
+        repo,
+        lease.predecessor + ':refs/heads/main',
+      ]);
+      const predecessorTree = await managedGit(publishedMirror, ['rev-parse', 'HEAD^{tree}']);
+      bundle = await exportAnchoredDelegationBundle(repo, { ...request.subject, predecessorTree });
+      request.bundleDigest = sha256(bundle);
+    }
     const enrollment = {
       repository: lease.repository,
       paths: lease.paths,
       dispatchPublicKey: lease.dispatchPublicKey,
       leaseSeconds: 600,
     };
-    const leaseConfig = mode === 'fixed' ? { lease } : { enrollment };
+    const leaseConfig =
+      mode === 'fixed'
+        ? { lease }
+        : { enrollment, ...(resultTransport ? { publishedMirror } : {}) };
     await writeFile(recipe, 'export const evaluate = 1', { mode: 0o600 });
     await writeFile(
       cfg,
@@ -270,7 +292,7 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
         req.setTimeout(3000, () => req.destroy(new Error('fixture timeout')));
         req.end(body);
       });
-    if (mode === 'automatic') {
+    if (mode !== 'fixed') {
       const urls = {
         checks: 'https://checks.fixture.example/verify',
         independentReview: 'https://review.fixture.example/verify',
@@ -293,6 +315,7 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
             predecessor: lease.predecessor,
             paths: lease.paths,
             basePolicyDigest: policy.basePolicyDigest,
+            ...(resultTransport ? { resultTransport } : {}),
           },
           policy,
         ),
@@ -301,7 +324,7 @@ it.skipIf(process.getuid?.() === 0).each(['fixed', 'automatic'] as const)(
     const result = await post(
       JSON.stringify({
         request,
-        bundle: f.bundle.toString('base64'),
+        bundle: bundle.toString('base64'),
         dispatch: authorize('checks', input),
       }),
     );

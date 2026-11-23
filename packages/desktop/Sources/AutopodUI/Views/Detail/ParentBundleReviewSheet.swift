@@ -25,6 +25,11 @@ struct ParentBundleReviewSheet: View {
             digest("Commit", review.commit)
             digest("Tree", review.tree)
             digest("Bundle SHA-256", review.bundleDigest)
+            if let base = review.bundleBaseCommit {
+              Text("This bundle contains only the changes. To open it with Git, use a checkout that already contains the base commit below.")
+                .font(.caption).foregroundStyle(.secondary)
+              digest("Required base commit", base)
+            }
             Text("Changed files (\(review.paths.count))").font(.caption.weight(.semibold))
             ForEach(Array(review.paths.enumerated()), id: \.offset) { _, path in
               Text(path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

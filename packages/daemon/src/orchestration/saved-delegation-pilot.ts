@@ -69,6 +69,7 @@ const pilotSchema = z
         tree: gitId,
         bundleDigest: delegationPin,
         bundlePath: z.string().max(4096).refine(path.isAbsolute),
+        resultTransport: z.literal('anchored/v1').optional(),
       })
       .strict(),
     sandbox: z
@@ -135,6 +136,7 @@ export async function readSavedDelegationPilot(file: string, scratch: string) {
   );
   if (
     path.dirname(spec.source.bundlePath) !== path.dirname(file) ||
+    (spec.source.resultTransport && spec.evaluatorEnrollment !== 'automatic') ||
     spec.authorities.checks.configurationDigest !== spec.policy.checksDigest ||
     spec.authorities.independentReview.configurationDigest !== spec.policy.reviewer.policyDigest ||
     !gatePolicySchema.safeParse({ ...spec.authorities, basePolicyDigest: digest(spec.policy) })
@@ -344,6 +346,7 @@ export async function composeSavedDelegationPilot(input: {
             {
               ...binding,
               basePolicyDigest: policy.basePolicyDigest,
+              ...(source.resultTransport ? { resultTransport: source.resultTransport } : {}),
             },
             policy,
           );

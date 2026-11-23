@@ -37,6 +37,7 @@ const verifiedPinsSchema = z
         commit: oid,
         tree: oid,
         bundleDigest: delegationPin,
+        resultTransport: z.literal('anchored/v1').optional(),
       })
       .strict(),
     workers: z.tuple([recipeBinding, recipeBinding]),
