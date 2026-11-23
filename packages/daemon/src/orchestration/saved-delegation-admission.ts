@@ -153,7 +153,7 @@ export async function admitSavedDelegationLaunch(
   input: Planning & {
     db: Database.Database;
     scratch: string;
-    readSeedBundle(plan: Readonly<Plan>): Promise<Buffer>;
+    readSeedBundle(plan: Readonly<Plan>, config: Readonly<EffectiveLaunchConfig>): Promise<Buffer>;
     verifyPublishedSeed?(plan: Readonly<Plan>): Promise<void>;
     insertPod(config: EffectiveLaunchConfig): string;
   },
@@ -189,7 +189,7 @@ export async function admitSavedDelegationLaunch(
     request,
     principal,
   });
-  const raw = await input.readSeedBundle(structuredClone(plan));
+  const raw = await input.readSeedBundle(structuredClone(plan), structuredClone(config));
   if (!Buffer.isBuffer(raw) || raw.length < 1 || raw.length > MAX_CANDIDATE_BYTES)
     configurationError(
       'Saved delegation seed bundle is outside custody limits',

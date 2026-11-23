@@ -81,6 +81,10 @@ export function publishedDelegationSource(input: {
   }
   return {
     initialize: prepare,
+    async assertCurrent(repository: RepositoryConfig, branch: string, commit: string) {
+      if (!oid.test(commit) || (await input.readBranchHead(repository, branch)) !== commit)
+        throw new Error('published-delegation-branch-moved');
+    },
     resolve(
       repository: RepositoryConfig,
       branch: string,

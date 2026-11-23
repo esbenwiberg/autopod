@@ -425,7 +425,7 @@ export async function composeSavedDelegationPilot(input: {
         runtimeDigest,
       };
     },
-    async readSeedBundle(plan) {
+    async readSeedBundle(plan, config) {
       const source = plan.pins.source;
       if (
         plan.policyId !== spec.policyId ||
@@ -435,6 +435,30 @@ export async function composeSavedDelegationPilot(input: {
           : source.baseTransport !== publishedBaseTransport)
       )
         throw new Error('saved-delegation-pilot-plan-refused');
+      if (published) {
+        const repository = config.repository;
+        if (!repository || configurationDigest(repository.config) !== source.repositoryDigest)
+          configurationError(
+            'The reviewed repository configuration changed.',
+            'DELEGATION_PILOT_SOURCE_CHANGED',
+            409,
+          );
+        try {
+          await published.assertCurrent(repository.config, spec.policy.sourceBranch, source.commit);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'published-delegation-branch-moved')
+            configurationError(
+              'The branch moved. Review a new pinned source.',
+              'DELEGATION_PILOT_SOURCE_CHANGED',
+              409,
+            );
+          configurationError(
+            'Could not recheck the authenticated published branch. Nothing was launched.',
+            'DELEGATION_PUBLISHED_SOURCE_UNAVAILABLE',
+            503,
+          );
+        }
+      }
       const policy = savedDelegationGatePolicy(plan);
       const signer = createEvaluatorDispatchSigner(dispatchKeys, policy);
       const binding = {

@@ -105,9 +105,9 @@ export function createSavedDelegationLaunchLane(
           ready();
           return pins;
         },
-        readSeedBundle: async (plan) => {
+        readSeedBundle: async (plan, config) => {
           ready();
-          const bundle = await host.readSeedBundle(plan);
+          const bundle = await host.readSeedBundle(plan, config);
           ready();
           return bundle;
         },

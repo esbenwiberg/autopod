@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { launchRequestSchema, savedLaunchSelectionSchema } from '@autopod/shared';
+import {
+  type EffectiveLaunchConfig,
+  launchRequestSchema,
+  savedLaunchSelectionSchema,
+} from '@autopod/shared';
 import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { createActionAuditRepository } from '../actions/audit-repository.js';
@@ -11,7 +15,10 @@ import { errorHandler } from '../api/error-handler.js';
 import { configurationRoutes } from '../api/routes/configuration.js';
 import { podRoutes } from '../api/routes/pods.js';
 import { createConfigurationComponents } from '../configuration/components.js';
-import { createConfigurationStore } from '../configuration/configuration-store.js';
+import {
+  configurationError,
+  createConfigurationStore,
+} from '../configuration/configuration-store.js';
 import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { configurationDigest, resolveLaunch } from '../configuration/launch-resolver.js';
@@ -436,6 +443,7 @@ async function admissionFixture(db = createTestDb(), anchored = false, published
     undefined,
     anchored ? 3 * 1024 * 1024 : 0,
   );
+  let branchHead = source.cp.commit;
   const published = publishedMode
     ? await (async () => {
         const upstream = path.join(source.root, 'upstream.git');
@@ -449,7 +457,7 @@ async function admissionFixture(db = createTestDb(), anchored = false, published
             resolveCredential: async () => ({ username: 'fixture', token: 'fixture-only' }),
             getStatus: vi.fn(),
           },
-          readBranchHead: async () => source.cp.commit,
+          readBranchHead: async () => branchHead,
           fetchBranch: (cwd, args, credential) =>
             managedGit(
               cwd,
@@ -490,8 +498,24 @@ async function admissionFixture(db = createTestDb(), anchored = false, published
       },
     };
   });
-  const readSeedBundle = vi.fn(async (plan?: Readonly<SavedDelegationPlan>) =>
-    published ? publishedSeedReceipt(plan!.pins.source) : Buffer.from(source.bytes),
+  const readSeedBundle = vi.fn(
+    async (plan?: Readonly<SavedDelegationPlan>, config?: Readonly<EffectiveLaunchConfig>) => {
+      if (!published) return Buffer.from(source.bytes);
+      try {
+        await published.assertCurrent(
+          config!.repository!.config,
+          plan!.policy.sourceBranch,
+          plan!.pins.source.commit,
+        );
+      } catch {
+        configurationError(
+          'The branch moved. Review a new pinned source.',
+          'DELEGATION_PILOT_SOURCE_CHANGED',
+          409,
+        );
+      }
+      return publishedSeedReceipt(plan!.pins.source);
+    },
   );
   const verifyPublishedSeed = published
     ? vi.fn(async (plan: Readonly<SavedDelegationPlan>) => {
@@ -527,6 +551,9 @@ async function admissionFixture(db = createTestDb(), anchored = false, published
     readSeedBundle,
     verifyPublishedSeed,
     published,
+    setBranchHead: (commit: string) => {
+      branchHead = commit;
+    },
     insertPod,
     submit,
     reviewed,
@@ -1106,6 +1133,20 @@ it.each([
       expect(drifted.statusCode, drifted.body).toBe(409);
       expect(drifted.json().error).toBe('DELEGATION_PREVIEW_CHANGED');
       expect(f.insertPod).not.toHaveBeenCalled();
+      if (publishedMode) {
+        // Move the branch after the authenticated planning read, not during Preview.
+        f.pins.mockImplementationOnce(async (...args) => {
+          const pins = await trustedPins(...args);
+          f.setBranchHead('8'.repeat(40));
+          return pins;
+        });
+        const movedDuringStaging = await submit(reviewed.delegationPreview.digest);
+        expect(movedDuringStaging.statusCode, movedDuringStaging.body).toBe(409);
+        expect(movedDuringStaging.json().error).toBe('DELEGATION_PILOT_SOURCE_CHANGED');
+        expect(f.verifyPublishedSeed).not.toHaveBeenCalled();
+        expect(f.insertPod).not.toHaveBeenCalled();
+        f.setBranchHead(f.source.cp.commit);
+      }
       const launched = await submit(reviewed.delegationPreview.digest);
       expect(launched.statusCode, launched.body).toBe(201);
       podId = launched.json().id as string;
