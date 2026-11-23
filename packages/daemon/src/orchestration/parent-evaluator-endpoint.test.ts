@@ -12,6 +12,7 @@ import { combinedPolicyDigest, verifyGateReceipt } from './combined-attestation.
 import { createParentEvaluatorClient } from './parent-evaluator-client.js';
 import { createEvaluatorDispatchSigner } from './parent-evaluator-dispatch.js';
 import { registerParentEvaluatorEndpoint } from './parent-evaluator-endpoint.js';
+import { readinessDigest, requireEvaluatorReadiness } from './parent-evaluator-readiness.js';
 import { startParentEvaluatorService } from './parent-evaluator-service.js';
 import { parentIntegrationGateDigest } from './parent-integration-qualified.js';
 
@@ -328,16 +329,33 @@ it('authorizes an unknown-at-enrollment integration on loopback with a separate 
     checks: 'https://checks.fixture.example/verify',
     independentReview: 'https://review.fixture.example/verify',
   };
-  const client = createParentEvaluatorClient(
-    urls,
-    f.policy,
-    (url, init) => fetch((url === urls.checks ? checkAddress : reviewAddress) + '/verify', init),
-    authorize,
-  );
+  const transport: typeof fetch = (url, init) =>
+    fetch((url === urls.checks ? checkAddress : reviewAddress) + '/verify', init);
+  const { run, repository, predecessor, policyDigest } = f.request.subject;
+  const readiness = { run, repository, predecessor, policyDigest, paths: f.request.paths };
+  expect(
+    (
+      await verify({
+        readiness,
+        dispatch: authorize('independentReview', readinessDigest(readiness)),
+      })
+    ).statusCode,
+  ).toBe(403);
+  await expect(
+    requireEvaluatorReadiness(urls, transport, authorize, {
+      ...readiness,
+      repository: 'unrelated',
+    }),
+  ).rejects.toThrow();
+  await requireEvaluatorReadiness(urls, transport, authorize, readiness);
+  expect(checks.evaluate).not.toHaveBeenCalled();
+  expect(review.evaluate).not.toHaveBeenCalled();
+  const client = createParentEvaluatorClient(urls, f.policy, transport, authorize);
   for (const role of ['checks', 'independentReview'] as const) {
     const receipt = await client[role](f.request, f.bundle);
     expect(verifyGateReceipt(f.policy, role, input, receipt).receipt).toEqual(receipt);
   }
+  await expect(requireEvaluatorReadiness(urls, transport, authorize, readiness)).rejects.toThrow();
   const restarted = await f.endpoint('checks', { dispatchPublicKey: pin });
   expect(
     (

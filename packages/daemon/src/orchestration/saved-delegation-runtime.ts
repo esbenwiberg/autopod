@@ -254,8 +254,10 @@ export function attachSavedDelegationRuntime(input: {
         active(token);
         return { requestKey: request.requestKey, reserved: true as const };
       }),
+    authorizeAttempt: active,
     results: (token: string, raw: unknown) =>
       track(() => reports.results(raw, () => active(token))),
+    wait: (token: string, raw: unknown) => track(() => reports.wait(raw, () => active(token))),
     tick() {
       ticking ??= track(async () => {
         await ledger.recover(run);

@@ -99,7 +99,10 @@ import './types.js';
 export interface ServerDependencies {
   authModule: AuthModule;
   operatorRuns?: OperatorRunsConfig;
-  parentManaged?: import('../orchestration/parent-managed-launch.js').ParentManagedLaunch;
+  parentManaged?: Pick<
+    import('../orchestration/parent-managed-launch.js').ParentManagedLaunch,
+    'registerFamily' | 'withIngress'
+  >;
   /** Absent by default; adding routes never enables starts implicitly. */
   managed?:
     | { config: ManagedComponentsConfig; bindings: readonly ManagedUserBinding[] }

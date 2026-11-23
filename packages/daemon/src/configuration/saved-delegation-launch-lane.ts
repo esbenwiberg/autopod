@@ -1,6 +1,10 @@
 import type { EffectiveLaunchConfig } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import { admitSavedDelegationLaunch } from '../orchestration/saved-delegation-admission.js';
+import { combinedPolicyDigest } from '../orchestration/combined-attestation.js';
+import {
+  admitSavedDelegationLaunch,
+  savedDelegationGatePolicy,
+} from '../orchestration/saved-delegation-admission.js';
 import { prepareSavedDelegationLaunch } from '../orchestration/saved-delegation-launch.js';
 import {
   createSavedDelegationPolicyStore,
@@ -48,6 +52,9 @@ export function createSavedDelegationLaunchLane(
         delegationPreview: {
           digest: plan.digest,
           requestId: plan.requestId,
+          runId: plan.runId,
+          evaluatorBasePolicyDigest: savedDelegationGatePolicy(plan).basePolicyDigest,
+          evaluatorPolicyDigest: combinedPolicyDigest(savedDelegationGatePolicy(plan)),
           policyId: plan.policyId,
           revision: plan.revision,
           name: plan.policy.name,

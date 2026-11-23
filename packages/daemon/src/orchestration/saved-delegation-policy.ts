@@ -150,6 +150,22 @@ export function createSavedDelegationPolicyStore(db: Database.Database) {
     usesDatabase(candidate: Database.Database) {
       return db === candidate;
     },
+    /** Host-owned idempotent install; never overwrite a reviewed policy at boot. */
+    installPilot(principal: DelegationPrincipal, policyId: string, raw: unknown) {
+      const owner = delegationOwnerDigest(principal);
+      const policy = savedDelegationPolicySchema.parse(raw);
+      const id = z.uuid().parse(policyId);
+      return db
+        .transaction(() => {
+          const row = current.get(owner, id) as PolicyRow | undefined;
+          if (!row) return put(owner, id, 1, policy);
+          const saved = decode(row);
+          if (saved.policyDigest !== digest(policy))
+            throw new Error('saved-delegation-pilot-policy-changed');
+          return saved;
+        })
+        .immediate();
+    },
     create(principal: DelegationPrincipal, raw: unknown) {
       const owner = delegationOwnerDigest(principal);
       return put(owner, randomUUID(), 1, raw);

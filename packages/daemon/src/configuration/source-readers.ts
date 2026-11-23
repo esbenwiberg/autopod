@@ -84,6 +84,15 @@ export function createConfigurationSourceReaders(options: {
   }
   return {
     referenceRevision,
+    async branchRevision(repository: RepositoryConfig, branch: string) {
+      const { id } = await githubRepository(repository);
+      const value = z
+        .object({ commit: z.object({ sha }) })
+        .parse(
+          await options.github.get(`/repositories/${id}/branches/${encodeURIComponent(branch)}`),
+        );
+      return value.commit.sha;
+    },
     async publishedDefault(repository: RepositoryConfig) {
       const remote = await githubRepository(repository);
       // Resolve an explicit branch, not the commits endpoint's ambiguous branch/tag shorthand.

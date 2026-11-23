@@ -48,6 +48,7 @@ import { createMockContainerManager, createTestDb, logger } from '../test-utils/
 import { setupOrchestrationRun } from '../test-utils/orchestration-run-fixture.js';
 import { OrchestrationContinuations } from './continuations.js';
 import { withVerifiedCheckpointMirror } from './local-checkpoints.js';
+import { claimDaemonLifetime } from './local-recovery-claim.js';
 import { parentExactTreeEvaluator } from './parent-exact-tree-evaluator.js';
 import { readQualifiedParentIntegration } from './parent-integration-qualified.js';
 import { ParentReportResults } from './parent-report-results.js';
@@ -62,6 +63,7 @@ import {
   createSavedDelegationPolicyStore,
   type DelegationPrincipal,
 } from './saved-delegation-policy.js';
+import { createSavedDelegationRegistry } from './saved-delegation-registry.js';
 import { attachSavedDelegationRuntime } from './saved-delegation-runtime.js';
 
 const owner = {
@@ -701,6 +703,8 @@ it('executes two saved roles from private pinned source and qualifies once acros
   const dbPath = path.join(root, 'state.db');
   let db = createHistoricalDiskDatabase(dbPath, [{ dir: MIGRATIONS_DIR, through: 282 }]);
   let runtime: ReturnType<typeof attachSavedDelegationRuntime> | undefined;
+  let registry: ReturnType<typeof createSavedDelegationRegistry> | undefined;
+  let daemonOwner: ReturnType<typeof claimDaemonLifetime> | undefined;
   try {
     const f = await admissionFixture(db);
     const template = structuredClone(f.source.request);
@@ -1041,11 +1045,45 @@ it('executes two saved roles from private pinned source and qualifies once acros
     await runtime.close();
     db.close();
     db = openTestDiskDatabase(dbPath);
-    runtime = attach();
+    const advertise = vi.fn();
+    daemonOwner = claimDaemonLifetime(db);
+    registry = createSavedDelegationRegistry(
+      db,
+      {
+        principal: owner,
+        advertise,
+        stopAdvertising: vi.fn(),
+        async attach(id) {
+          expect(id).toBe(podId);
+          runtime = attach();
+          return {
+            ...runtime,
+            materializeParent: async () => {
+              throw new Error('restart must reuse the checkout');
+            },
+          };
+        },
+      },
+      logger,
+      daemonOwner,
+    );
+    await registry.start();
+    expect(advertise).toHaveBeenCalledOnce();
+    if (!runtime) throw new Error('restart failed to attach');
     await runtime.tick();
     expect(launches).toHaveLength(1);
     expect(remaining()).toBe(6);
-    const current = await runtime.provision();
+    const current = await registry.provision(podId);
+    const tools = registry.tools(podId)!;
+    await expect(tools.managedFamily!()).rejects.toThrow('parent-session-required');
+    await expect(
+      registry.withIngress(podId, beforeRestart, async () => {
+        await tools.managedFamily!();
+      }),
+    ).rejects.toThrow('parent-session-stale');
+    await registry.withIngress(podId, current, async () => {
+      expect(await tools.managedFamily!()).toMatchObject({ parent: podId, run: plan.runId });
+    });
     await expect(runtime.commission(beforeRestart, first)).rejects.toThrow('parent-session-stale');
     await runtime.commission(current, first);
     await expect(
@@ -1080,7 +1118,12 @@ it('executes two saved roles from private pinned source and qualifies once acros
     expect(seen).toHaveLength(2);
     expect(db.prepare('SELECT count(*) FROM parent_review_approvals').pluck().get()).toBe(0);
   } finally {
+    await registry?.close();
     await runtime?.close();
+    if (daemonOwner) {
+      expect(daemonOwner.owns(db)).toBe(true);
+      daemonOwner.close();
+    }
     db.close();
     rmSync(root, { recursive: true, force: true });
   }

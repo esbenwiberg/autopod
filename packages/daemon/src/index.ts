@@ -860,7 +860,82 @@ if (
 )
   throw new Error('parent-candidate-host-settings-refused');
 const candidateBinding = getParentCandidateBinding();
+const savedPilotFile = process.env.AUTOPOD_SAVED_DELEGATION_PILOT;
+const savedPilot =
+  savedPilotFile !== undefined
+    ? await (async () => {
+        if (
+          candidate ||
+          enrollment ||
+          managedProfileSetConfig ||
+          managedAcceptanceConfig ||
+          !managedCliConfig ||
+          !ENTRA_TENANT_ID ||
+          !ENTRA_CLIENT_ID ||
+          ALLOW_DEV_AUTH ||
+          MOCK_DOCKER ||
+          !docker ||
+          !process.env.AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET ||
+          process.env.AUTOPOD_REPOFIT_WAVE_CANARY === '1'
+        )
+          throw new Error('saved-delegation-pilot-host-boundary-refused');
+        if (
+          db
+            .prepare(`SELECT 1 FROM managed_pods m
+    WHERE (m.observed_exit=0 OR (m.runtime_ref IS NOT NULL AND m.cleanup<>'observed'))
+      AND NOT EXISTS (SELECT 1 FROM saved_delegation_admissions a WHERE m.dispatcher_installation_id='native.'||a.run_id)
+    LIMIT 1`)
+            .get()
+        )
+          throw new Error('saved-delegation-pilot-unrelated-managed-work-retained');
+        const { composeSavedDelegationPilot, observeSavedPilotWorktree } = await import(
+          './orchestration/saved-delegation-pilot.js'
+        );
+        const { createConfigurationSourceReaders } = await import(
+          './configuration/source-readers.js'
+        );
+        const { createConfigurationStore } = await import('./configuration/configuration-store.js');
+        const { createGitHubApiClient } = await import('./github/api-client.js');
+        const { createSavedDelegationRegistry } = await import(
+          './orchestration/saved-delegation-registry.js'
+        );
+        const sources = createConfigurationSourceReaders({
+          store: createConfigurationStore(db),
+          github: createGitHubApiClient(githubAuth),
+          skillRoots: [],
+        });
+        const pilot = await composeSavedDelegationPilot({
+          db,
+          databasePath: DB_PATH,
+          logger,
+          issuer: sessionTokenIssuer,
+          cli: managedCliConfig,
+          providerAccounts: providerAccountStore,
+          githubAuth,
+          file: savedPilotFile,
+          rawAzureTarget: process.env.AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET,
+          ordinarySandboxScope: sandboxContainerManager?.executionResourceScope,
+          credentialsDirectory: process.env.CREDENTIALS_DIRECTORY,
+          wakeupJournal: podRepo.sandboxWakeups,
+          worktreeDirectory:
+            process.env.AUTOPOD_WORKTREE_DIR ?? path.join(os.homedir(), '.autopod', 'worktrees'),
+          readBranchHead: sources.branchRevision,
+          observeParentSource: async (id) => {
+            const pod = podRepo.getOrThrow(id);
+            if (!pod.worktreePath) throw new Error('saved-delegation-pilot-worktree-missing');
+            return observeSavedPilotWorktree(pod.worktreePath);
+          },
+        });
+        return { pilot, registry: createSavedDelegationRegistry(db, pilot, logger, lifetimeOwner) };
+      })()
+    : undefined;
+const isSavedDelegationPod = (podId: string) =>
+  !!db
+    .prepare(`SELECT 1 FROM saved_delegation_admissions a
+  JOIN parent_managed_runs p ON p.run_id=a.run_id WHERE p.pod_id=?`)
+    .get(podId);
 const configuration = createHostConfigurationComponents({
+  ...(savedPilot && { savedDelegationHost: savedPilot.pilot.launchHost }),
   db,
   logger,
   pods: podRepo,
@@ -942,17 +1017,15 @@ podManager = createPodManager({
   },
   pendingRequestsByPod,
   sessionTokenIssuer,
+  savedDelegationWorkspace: async (podId, generation) => {
+    if (!isSavedDelegationPod(podId)) return undefined;
+    if (!savedPilot) throw new Error('saved-delegation-runtime-not-attached');
+    return savedPilot.registry.materialize(podId, generation);
+  },
   provisionParentSession: async (podId) => {
-    // A retained saved-policy Task must not start an ordinary agent session
-    // while this bootstrap has no saved runtime attached.
-    if (
-      db
-        .prepare(`SELECT 1 FROM saved_delegation_admissions a
-      JOIN parent_managed_runs p ON p.run_id=a.run_id WHERE p.pod_id=?`)
-        .get(podId)
-    )
-      throw new Error('saved-delegation-runtime-not-attached');
-    return parentManaged?.provision(podId);
+    if (!isSavedDelegationPod(podId)) return parentManaged?.provision(podId);
+    if (!savedPilot) throw new Error('saved-delegation-runtime-not-attached');
+    return savedPilot.registry.provision(podId);
   },
   memoryRepo,
   memoryUsageRepo,
@@ -1051,6 +1124,7 @@ const podBridge = createSessionBridge({
   scopedTools: (podId) => ({
     ...configuration.scopedTools.get(podId),
     ...parentManaged?.tools(podId),
+    ...savedPilot?.registry.tools(podId),
   }),
   podManager,
   podRepo,
@@ -1365,7 +1439,7 @@ const operatorRuns = enrollment
     })
   : undefined;
 if (!operatorRuns) {
-  assertOperatorRecovery(db, null);
+  assertOperatorRecovery(db, null, !!savedPilot);
 }
 if (!operatorRuns || separateRuntime) await managedRuntime?.resume();
 if (operatorRuns?.slots.some((s) => s.parent)) {
@@ -1377,7 +1451,7 @@ if (operatorRuns?.slots.some((s) => s.parent)) {
 
 // Server
 const app = await createServer({
-  parentManaged,
+  parentManaged: parentManaged ?? savedPilot?.registry,
   configuration: {
     ...configuration.routes,
     ...(candidate &&
@@ -1399,9 +1473,10 @@ const app = await createServer({
       finishOutputs: () => separateRuntime.components.pipeline.tick(),
     },
   },
-  managed: candidate
-    ? undefined
-    : (managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH)),
+  managed:
+    candidate || savedPilot
+      ? undefined
+      : (managedRuntime ?? composeDarkManagedCli(managedCliConfig, db, DB_PATH)),
   podManager,
   profileStore,
   providerAccountStore,
@@ -1497,6 +1572,10 @@ sandboxOrphanReaperTimer?.unref();
 
 // Start listening
 try {
+  if (savedPilot) {
+    app.addHook('onReady', () => savedPilot.registry.start());
+    app.addHook('onClose', () => savedPilot.registry.close());
+  }
   await app.listen({ port: PORT, host: HOST });
   app.log.info({ port: PORT, host: HOST }, 'Autopod daemon started');
 } catch (err) {

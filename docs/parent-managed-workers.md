@@ -464,10 +464,44 @@ host becomes unavailable, the launch is refused rather than starting an
 ordinary Task. The local smoke uses the ordinary preview and pod routes with
 fixture checkout, runtime and signer ports; it makes no cloud calls.
 
-The default daemon bootstrap does not yet install those concrete ports, the
-scoped delegate bridge or the startup watchdog. Its picker is hidden and a
-retained saved-policy Task cannot start without an attached runtime. No policy
-editor or new evaluator permission is enabled here.
+### Opt-in one-repository host pilot
+
+The daemon installs the concrete ports only when `AUTOPOD_SAVED_DELEGATION_PILOT`
+points to a host-owned pilot JSON file. With no pilot configured, the picker
+stays hidden and a retained saved-policy Task cannot use ordinary provisioning.
+The pilot is mutually exclusive with signed trial and Dispatcher execution
+configurations; do not enable it while unrelated managed work still needs its
+runtime. Ordinary nondelegated Tasks are not enrolled by this setting.
+
+The file and its pinned `HEAD` Git bundle must be regular owner-only files in
+the same canonical 0700 directory. The version-1 record pins the exact Entra
+subject/issuer/audience, saved policy ID and contents, repository configuration
+digest, seed predecessor/commit/tree/bundle digest, reviewed sandbox profile
+set, exact managed recipes for the two roles, a dedicated Azure group scope and
+ready disk, and separate checks and review endpoints and public pins. Use the
+existing daemon-side GitHub read authority and worker accounts. The separate
+`AUTOPOD_SAVED_DELEGATION_SANDBOX_TARGET` must resolve to the pinned dedicated
+group, not the ordinary fleet. Supply each evaluator's role-scoped mTLS and
+Ed25519 dispatch credentials through `CREDENTIALS_DIRECTORY`; never place
+credentials in the pilot JSON or a worker environment.
+
+Preview verifies the configured GitHub branch still points at the staged
+commit. The preview response's `delegationPreview` includes `runId`,
+`evaluatorBasePolicyDigest`, and `evaluatorPolicyDigest` for the operator to
+provision **both** role-owned, one-shot evaluator leases for that exact run,
+seed commit, repository and ordered paths. Use the reviewed preview from the
+same open Task draft; staging leases is not owner approval or a launch. A
+fresh admission probes both exact leases over authenticated TLS. A missing,
+mismatched, expired, or already-claimed lease refuses the launch before any
+Task or worker reservation is written. Probes carry no bundle and do not
+consume the one-shot claim. A network failure after actual dispatch is still
+uncertain and is not replayed.
+
+Provisioning creates a new detached parent worktree from retained Git custody,
+with no remote. The saved runtime owns attempt-scoped delegate operations and
+reattaches its original workers and watchdog on daemon restart. This first
+pilot does not support silently restaging a changed policy, selecting another
+repo, or automatic Worktree recovery/reuse. It never publishes or merges.
 
 ## Evidence and remaining milestones
 

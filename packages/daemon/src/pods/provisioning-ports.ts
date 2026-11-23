@@ -77,6 +77,10 @@ export interface ProvisioningLiveDependencies {
   getSecret: (ref: string) => string | undefined;
   sessionTokenIssuer?: PodTokenIssuer;
   provisionParentSession?: (podId: string) => Promise<string | undefined>;
+  savedDelegationWorkspace?: (
+    podId: string,
+    generation: number,
+  ) => Promise<import('../interfaces/worktree-manager.js').WorktreeResult | undefined>;
   actionEngine?: {
     getAvailableActions: (
       policy: import('@autopod/shared').ActionPolicy,
