@@ -13,6 +13,30 @@ function codexAt(version: string) {
 }
 
 describe('verifyAgentCli', () => {
+  it.each(['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.2'])(
+    'rejects stale GPT-6.2 images and admits the supported pin for %s', async (model) => {
+      for (const version of ['0.160.1', '0.170.9']) {
+        await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).rejects.toMatchObject({
+          code: 'PREFLIGHT_RUNTIME_INCOMPATIBLE',
+          message: `Codex CLI ${version} is incompatible with ${model}; Autopod requires 0.171.0 or newer. Rebuild the codex base/warm image.`,
+        });
+      }
+      for (const version of ['0.171.0', '0.172.0', '1.0.0']) {
+        await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).resolves.toMatchObject({
+          cliVersion: version,
+        });
+      }
+    },
+  );
+
+  it('retains the existing floor for earlier GPT-6 families', async () => {
+    for (const model of ['gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-astra']) {
+      await expect(verifyAgentCli(codexAt('0.160.1'), 'c', 'codex', model)).resolves.toMatchObject({
+        cliVersion: '0.160.1',
+      });
+    }
+  });
+
   it('keeps the general Codex floor for pre-GPT-6 models', async () => {
     for (const model of [undefined, null, 'auto', 'gpt-5.6-sol'])
       await expect(verifyAgentCli(codexAt('0.144.4'), 'c', 'codex', model)).resolves.toMatchObject({

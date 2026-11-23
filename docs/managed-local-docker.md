@@ -19,7 +19,7 @@ docker image inspect autopod-managed-local:reviewed --format '{{.Id}}'
 Use that immutable `sha256:…` image ID in `AUTOPOD_MANAGED_PROFILE_SET.image`.
 Registry `repository@sha256:…` references also work. Mutable tags are rejected.
 A sandbox profile still requires a registry digest. The image includes Python,
-Git, the firewall utilities and Codex CLI 0.160.1. A build's resulting image ID,
+Git, the firewall utilities and Codex CLI 0.171.0. A build's resulting image ID,
 rather than its mutable tag, is the execution binding.
 
 Set each reviewed profile's `route.executionTarget` to `local` and recompute the
