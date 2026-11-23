@@ -176,6 +176,19 @@ export interface AgentCompleteEvent {
   costUsd?: number;
 }
 
+/** Redacted native Codex final-usage refusal, not source or exit evidence. */
+export type CodexFinalProofRefusal =
+  | 'missing_session'
+  | 'missing_rollout'
+  | 'missing_response'
+  | 'missing_terminal'
+  | 'missing_aggregate'
+  | 'aggregate_mismatch'
+  | 'sequence_mismatch'
+  | 'invalid_metadata'
+  | 'snapshot_unavailable'
+  | 'timeout';
+
 export interface AgentErrorEvent {
   type: 'error';
   timestamp: string;
@@ -187,6 +200,7 @@ export interface AgentErrorEvent {
   executionTermination?: 'unverified';
   /** A trusted adapter detected an accounting gap; does not imply an execution-exit failure. */
   usageIncomplete?: true;
+  codexFinalProofRefusal?: CodexFinalProofRefusal;
   /**
    * Trusted runtime adapter evidence, set only after verified process exit, that the
    * agent's turn ended unfinished (stopped mid-turn or while waiting on background

@@ -49,6 +49,9 @@ export function createStalledWorkerRecovery(deps: {
   function selection(podId: string) {
     const pod = pods.getOrThrow(podId);
     const runs = journal.unsettled(podId);
+    const hold = pods.taskExecutions?.codexFinalProofHold?.(podId, pod.lifecycleGeneration);
+    const settledRun =
+      hold?.endedAt && !runs.length ? journal.settledCodexRun(podId, hold.runId) : null;
     const reports = journal.reports(podId);
     const fingerprint = stalledHash([
       pod.id,
@@ -74,12 +77,13 @@ export function createStalledWorkerRecovery(deps: {
       pod.finalization,
       reports,
       runs,
+      ...(hold ? [hold, settledRun] : []),
     ]);
-    return { pod, runs, reports, fingerprint };
+    return { pod, runs, reports, fingerprint, hold, settledRun };
   }
   function policy(podId: string) {
     const s = selection(podId),
-      { pod, runs } = s;
+      { pod, runs, hold, settledRun } = s;
     if (
       !['running', 'failed'].includes(pod.status) ||
       pod.executionTarget !== 'local' ||
@@ -90,6 +94,7 @@ export function createStalledWorkerRecovery(deps: {
         'Only blocked ordinary local Docker tasks support stop-and-retain; interactive and native Goal controls remain separate.',
       );
     if (
+      !hold &&
       !pods.hasInfrastructureBlocker?.(podId) &&
       !(
         pod.lastRecoveryTrigger &&
@@ -110,15 +115,18 @@ export function createStalledWorkerRecovery(deps: {
       !pods.atomically
     )
       stalledError('Exact execution and custody evidence is unavailable.');
+    const run = settledRun ?? (runs.length === 1 ? runs[0] : undefined);
     if (
-      runs.length !== 1 ||
-      runs[0]!.podId !== podId ||
-      runs[0]!.generation !== pod.lifecycleGeneration
+      !run ||
+      run.podId !== podId ||
+      run.generation !== pod.lifecycleGeneration ||
+      (hold && (run.id !== hold.runId || pod.status !== 'failed'))
     )
       stalledError(
-        'One exact unsettled run in the current lifecycle is required. Inspect other task owners separately.',
+        hold
+          ? 'Exact Codex worker settlement is unavailable or a different task execution owns the resource. No source seal is authorized.'
+          : 'One exact unsettled run in the current lifecycle is required. Inspect other task owners separately.',
       );
-    const run = runs[0]!;
     if (!pods.completionJournal || pod.finalization?.cycle !== run.cycle)
       stalledError(
         'Exact original completion cycle is unavailable; no settlement can be inferred.',
@@ -205,7 +213,9 @@ export function createStalledWorkerRecovery(deps: {
       binding = selection(podId).fingerprint;
       if (operation?.state === 'settled')
         blockers.push(
-          'Execution is settled, not repaired. Inspect Validation and the qualified environment repair/continuation controls for the remaining failure.',
+          pods.taskExecutions?.codexFinalProofHold?.(podId, pod.lifecycleGeneration)
+            ? 'Docker execution is settled. Inspect ap retained-continuation POD --json for the exact sealed HEAD and checks-only eligibility. Accounting is still partial.'
+            : 'Execution is settled, not repaired. Inspect Validation and the qualified environment repair/continuation controls for the remaining failure.',
         );
       else {
         policy(podId);
@@ -515,8 +525,9 @@ export function createStalledWorkerRecovery(deps: {
           pods.update(podId, {
             autoApprove: false,
             completedAt: new Date().toISOString(),
-            lastCorrectionMessage:
-              'Execution stopped with verified Docker resource proof and workspace archive. Failed checks remain failed. Choose validation recovery separately; pending guidance, budgets and retry authorization remain in force.',
+            lastCorrectionMessage: original.hold
+              ? 'Docker execution stopped and archived. Inspect retained continuation for exact-source checks only; final Codex accounting remains incomplete.'
+              : 'Execution stopped with verified Docker resource proof and workspace archive. Failed checks remain failed. Choose validation recovery separately; pending guidance, budgets and retry authorization remain in force.',
           });
         },
       );

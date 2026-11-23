@@ -295,6 +295,7 @@ export function createAgentEventConsumption(
     // checkpoints) means this run may have consumed model tokens (#646).
     let modelWorkObserved = false;
     let usageIncompleteObserved = false;
+    let finalProofRefused = false;
     let providerRetryNotBefore: string | null = null;
     const retainUnverifiedTermination = () => {
       executionTerminationUnverified = true;
@@ -414,15 +415,23 @@ export function createAgentEventConsumption(
           outcome = 'stopped';
           return outcome;
         }
-        if (event.type === 'error' && event.usageIncomplete)
-          podRepo.update(podId, { tokenTelemetryAccuracy: 'partial' });
+        if (event.type === 'error' && event.usageIncomplete) {
+          const refusal = event.fatal ? event.codexFinalProofRefusal : undefined;
+          atomicPodChange(podRepo, () => {
+            podRepo.update(podId, { tokenTelemetryAccuracy: 'partial' });
+            if (taskRunId && refusal)
+              podRepo.taskExecutions?.recordCodexFinalProofRefusal?.(taskRunId, refusal);
+          });
+          finalProofRefused = Boolean(refusal);
+        }
         const claudeSessionReady =
           initialPod.runtime === 'claude' && event.type === 'status' && !!event.sessionId;
         if (
           pauseIntents.has(podId) &&
           event.type !== 'usage' &&
           !claudeUsage &&
-          !claudeSessionReady
+          !claudeSessionReady &&
+          !finalProofRefused
         ) {
           outcome = 'paused';
           continue;
@@ -944,7 +953,7 @@ export function createAgentEventConsumption(
         superseded = true;
         // No terminal event was accepted for this run after it lost ownership.
         outcome = 'stopped';
-      } else if (pauseIntents.has(podId)) outcome = 'paused';
+      } else if (pauseIntents.has(podId) && !finalProofRefused) outcome = 'paused';
       // An accepted old completion is historical evidence even when control
       // must stop before touching a replacement lifecycle.
       const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;

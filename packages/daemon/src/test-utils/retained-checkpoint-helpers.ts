@@ -12,6 +12,7 @@ import { resolveLaunchExecutionSettings } from '../configuration/launch-executio
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createCompletionEvents } from '../pods/completion-events.js';
 import { createPodManager } from '../pods/pod-manager.js';
+import { createProviderAttemptRepository } from '../pods/provider-attempt-repository.js';
 import { createRetainedCheckpointRecovery } from '../pods/retained-checkpoint-recovery.js';
 import { checkpointHash } from '../pods/retained-checkpoint-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from '../pods/runtime-resolver.js';
@@ -260,8 +261,13 @@ export async function retainedCheckpointFixture(
   >,
   originalHandoff?: string,
   linkedFix = false,
+  codex?: {
+    prManagerFactory?: ReturnType<typeof createTestContext>['deps']['prManagerFactory'];
+    hardTokenBudget?: number;
+  },
 ) {
   const ctx = createTestContext();
+  ctx.deps.prManagerFactory = codex?.prManagerFactory;
   vi.mocked(ctx.profileStore.get).mockReturnValue({
     ...ctx.profileStore.get('test-profile'),
     warmImageTag: 'fixture.azurecr.io/autopod:retained',
@@ -343,6 +349,19 @@ export async function retainedCheckpointFixture(
       provider: 'anthropic',
       credentials: { provider: 'anthropic', apiKey: 'fixture-main' },
     });
+    if (codex) {
+      accounts.create({
+        id: 'codex-account',
+        name: 'Fixture Codex account',
+        provider: 'openai',
+        credentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: '{"tokens":{"access_token":"synthetic"}}',
+        },
+      });
+      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+    }
     vi.mocked(nativeConfiguration.services.resolveAgentRoute).mockImplementation(async (route) =>
       resolveLaunchAgentRoute(route, accounts),
     );
@@ -393,7 +412,17 @@ export async function retainedCheckpointFixture(
                   },
                 }
               : {}),
-            overrides: { execution: { target } },
+            overrides: {
+              execution: { target },
+              ...(codex && {
+                ...(codex.hardTokenBudget !== undefined && {
+                  workflow: { tokenBudget: codex.hardTokenBudget, tokenBudgetPolicy: 'hard' },
+                }),
+                ai: {
+                  main: { providerAccountId: 'codex-account', runtime: 'codex', model: 'gpt-5.5' },
+                },
+              }),
+            },
           },
           actorId: 'operator',
           services: nativeConfiguration.services,

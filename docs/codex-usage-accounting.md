@@ -67,6 +67,38 @@ Previously incomplete usage is not made complete by a later successful invocatio
 Likewise, a new incomplete invocation can make a previously repaired pod partial;
 the older repair records and provider history remain preserved.
 
+## Recover committed Docker source after a final-proof refusal
+
+The fatal activity reports a redacted `codexFinalProofRefusal` code; the daemon
+records the same code against the exact worker run. A missing response or
+terminal record, aggregate or sequence mismatch, and snapshot failures are
+different observations, not explanations of what caused the provider to omit
+proof. Measured usage remains partial. Neither a preceding **Agent completed**
+event nor a final task summary is process-exit evidence.
+
+1. In the desktop Recovery hub, choose **Inspect stalled execution…** (authenticated
+   `GET /pods/:podId/stalled-worker-recovery`). For an eligible ordinary local
+   Docker task, explicitly confirm the exact inspected request. If the
+   container is still running, this may stop it once, but never removes it.
+   Even after verified native exec termination, this control verifies the same
+   Docker resource is stopped and seals a private workspace archive. An unknown
+   resource, unresolved stop, conflicting ownership or mismatched preserved
+   source blocks the seal; observe the same request rather than repeating a stop.
+2. Run `ap retained-continuation POD --json`. It reports why checks remain
+   blocked, or returns the exact sealed commit/tree and selection hash.
+   Use [exact-source checks-only selection](retained-pod-continuation.md#checks-from-sealed-pre-validation-source)
+   with that commit, generation and hash. Dirty/unverified source does not
+   qualify. This does not start coding, repair usage, waive budget or retry
+   rules, or satisfy independent review. If unknown final usage blocks a
+   reviewer under a finite hard task cap, review stays pending under that
+   existing accounting gate. When exact checks and independent review pass,
+   **Validated** allows ordinary separate human approval (including PR-only
+   publication); nothing is automatically pushed, and usage stays partial.
+
+This is prospective and does not infer receipts for old refusals from a log or
+summary. Other execution targets do not qualify for the Docker source-seal route.
+Do not use Resume, Rework or provider continuation to replay a worker on this hold.
+
 ## Inline review is not a budget escape
 
 Under a finite hard cap, unavailable final worker accounting still refuses reviewer
