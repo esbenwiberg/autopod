@@ -17,10 +17,11 @@ import { managedUserAuthenticator } from '../managed/user-auth.js';
 import { projectManagedRecipe } from './controller-turns.js';
 import type { OperatorRunSlot, OperatorRunsConfig } from './operator-runs.js';
 import { parentEvaluatorEndpointsSchema } from './parent-evaluator-client.js';
+import { type ParentFamilyAccess, registerParentFamilySurface } from './parent-family-lanes.js';
 import { readParentFamily } from './parent-family-read.js';
 import { bindParentReportBrief } from './parent-report-brief.js';
 import { ParentReportResults } from './parent-report-results.js';
-import { ParentReviewHandoff, registerParentReviewRoutes } from './parent-review-handoff.js';
+import { ParentReviewHandoff } from './parent-review-handoff.js';
 
 const codingPaths = z
   .array(
@@ -117,9 +118,15 @@ export class ParentManagedLaunch {
     return this.config.db;
   }
   private binding(podId: string) {
-    return this.db.prepare('SELECT * FROM parent_managed_runs WHERE pod_id=?').get(podId) as
+    const bound = this.db.prepare('SELECT * FROM parent_managed_runs WHERE pod_id=?').get(podId) as
       | Binding
       | undefined;
+    return bound && this.slots.some((slot) => slot.checkpoint.run === bound.run_id)
+      ? bound
+      : undefined;
+  }
+  owns(podId: string) {
+    return Boolean(this.binding(podId));
   }
   private policy(slot: OperatorRunSlot) {
     return canonical({
@@ -389,7 +396,7 @@ export class ParentManagedLaunch {
     };
     return tools;
   }
-  registerFamily(app: FastifyInstance, auth: AuthModule) {
+  familyAccess(auth: AuthModule): ParentFamilyAccess {
     const authorize = managedUserAuthenticator(
       auth,
       this.slots.map((s) => ({
@@ -415,23 +422,29 @@ export class ParentManagedLaunch {
         return null;
       }
     };
-    app.get('/orchestration/parents/:podId/family', async (req, reply) => {
-      reply.header('cache-control', 'no-store');
-      const actor = await authorize(req);
-      if (!actor) return reply.code(401).send({ code: 'parent-owner-required' });
-      const { podId } = req.params as { podId: string };
-      const binding = this.binding(podId);
-      if (!binding || binding.run_id !== actor)
-        return reply.code(404).send({ code: 'parent-family-not-found' });
-      const family = this.family(podId, true);
-      const owner = reviewOwner(actor, podId, binding);
-      return owner ? { ...family, review: review.familyReview(owner, owner.automatic) } : family;
-    });
-    registerParentReviewRoutes(app, review, async (request, podId) => {
-      const actor = await authorize(request);
-      const binding = actor && this.binding(podId);
-      return actor && binding ? reviewOwner(actor, podId, binding) : null;
-    });
+    return {
+      family: async (request, podId) => {
+        const actor = await authorize(request);
+        if (!actor) return { status: 401, code: 'parent-owner-required' };
+        const binding = this.binding(podId);
+        if (!binding || binding.run_id !== actor)
+          return { status: 404, code: 'parent-family-not-found' };
+        const family = this.family(podId, true);
+        const owner = reviewOwner(actor, podId, binding);
+        return {
+          body: owner ? { ...family, review: review.familyReview(owner, owner.automatic) } : family,
+        };
+      },
+      authorizeReview: async (request, podId) => {
+        const actor = await authorize(request);
+        const binding = actor && this.binding(podId);
+        return actor && binding ? reviewOwner(actor, podId, binding) : null;
+      },
+    };
+  }
+  registerFamily(app: FastifyInstance, auth: AuthModule) {
+    const access = this.familyAccess(auth);
+    registerParentFamilySurface(app, this.db, () => access);
   }
   /** Caller must independently authorize the selected parent; returns no request, grants or credentials. */
   family(podId: string, ownerDetails = false) {
