@@ -218,7 +218,7 @@ export async function runPiLogin(providerId: PiOAuthProviderId): Promise<Provide
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(
-          'Pi CLI not found. Install @earendil-works/pi-coding-agent@0.80.6 and retry.',
+          'Pi CLI not found. Install @earendil-works/pi-coding-agent@1.6.0 and retry.',
         );
       }
       throw error;

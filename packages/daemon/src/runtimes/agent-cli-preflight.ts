@@ -10,8 +10,14 @@ const cliByRuntime: Record<RuntimeType, string> = {
 const minimumCodexVersion = [0, 144, 4] as const;
 /** GPT-6 model families are unknown to Codex CLIs released before them. */
 const minimumCodexVersionForGpt6 = [0, 160, 1] as const;
+/** Supported image pin containing the GPT-6.2 Sol and Astra catalogs. */
+const minimumCodexVersionForGpt62 = [0, 171, 0] as const;
 const codexMinimum = (model: string | null | undefined) =>
-  model?.startsWith('gpt-6') ? minimumCodexVersionForGpt6 : minimumCodexVersion;
+  model?.startsWith('gpt-6.2-')
+    ? minimumCodexVersionForGpt62
+    : model?.startsWith('gpt-6')
+      ? minimumCodexVersionForGpt6
+      : minimumCodexVersion;
 export interface VerifiedAgentCli {
   cliPath: string | null;
   cliVersion: string;
