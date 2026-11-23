@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises';
 import type { RuntimeEvent as AgentEvent, EscalationRequest } from '@autopod/shared';
 import { AutopodError, generateId, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
+import { isExecutionCapacityUnverified } from '../configuration/backend-capabilities.js';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import type { CodexRuntime } from '../runtimes/codex-runtime.js';
@@ -23,6 +24,7 @@ import { BUDGET_CONTINUATION_PENDING } from './budget-stop.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { persistEscalation } from './escalation-coordinator.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
 import { assertPreparationSourceCurrent } from './repository-preparation.js';
@@ -60,6 +62,7 @@ export function createAgentProcessWorkflow(
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,
     scheduleHostFetchRetry,
+    scheduleExecutionCapacityRetry,
     emitActivityError,
     transition,
     escalationRepo,
@@ -109,6 +112,9 @@ export function createAgentProcessWorkflow(
       );
       return;
     }
+
+    const networkWait = dockerNetworkCapacityWait(pod);
+    if (networkWait && Date.parse(networkWait.retryNotBefore) > Date.now()) return;
 
     function emitStatus(message: string): void {
       emitActivityStatus(podId, message);
@@ -738,6 +744,9 @@ export function createAgentProcessWorkflow(
         visibleFailurePhase = 'completion';
         await this.handleCompletion(podId);
       } else if (outcome === 'failed') {
+        // This hold owns a separate, exact stop-and-retain archive. Do not
+        // release a zero-usage worker or treat an ordinary mirror as the seal.
+        if (podRepo.taskExecutions?.codexFinalProofHold?.(podId, lifecycleGeneration)) return;
         await preserveWorkspaceAfterAgentFailure(podId, 'fatal agent exit');
         await releaseZeroWorkFailure(podId, lifecycleGeneration, containerId);
       }
@@ -786,6 +795,15 @@ export function createAgentProcessWorkflow(
         const current = podRepo.getOrThrow(podId);
         if (current.status === 'queued') scheduleHostFetchRetry(current, err);
         return;
+      }
+      // Provisioning gate (#665): Docker could not report host capacity before any
+      // workspace/container effect. Transient — wait in the queue, never fail.
+      if (isExecutionCapacityUnverified(err) && !podRepo.retainedCoding?.isOwner(podId)) {
+        const current = podRepo.getOrThrow(podId);
+        if (current.status === 'queued') {
+          scheduleExecutionCapacityRetry(current, err);
+          return;
+        }
       }
       if (err instanceof GitMissingRemoteBranchError) {
         const current = podRepo.getOrThrow(podId);
@@ -926,6 +944,7 @@ export function createAgentProcessWorkflow(
             transition(pod, 'failed', {
               completedAt: new Date().toISOString(),
               failureReason,
+              ...(dockerNetworkCapacityWait(pod) ? { infrastructureFailure: null } : {}),
             });
           } else if (canKill(pod.status)) {
             // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)

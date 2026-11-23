@@ -114,13 +114,17 @@ export interface CodexUsageConflictEvent extends AgentErrorEvent {
 }
 
 type CodexParserEvent = AgentEvent | CodexTurnAbortedEvent | CodexUsageConflictEvent;
-function usageConflict(env: CodexEnvelope): CodexUsageConflictEvent {
+function usageConflict(
+  env: CodexEnvelope,
+  finalReason?: CodexUsageConflictEvent['codexFinalProofRefusal'],
+): CodexUsageConflictEvent {
   return {
     type: 'error',
     timestamp: tsOf(env),
     fatal: true,
     codexUsageConflict: true,
     usageIncomplete: true,
+    ...(finalReason && { codexFinalProofRefusal: finalReason }),
     message:
       'Native Codex usage evidence is missing, invalid or conflicting; stop and retain measured usage.',
   };
@@ -972,7 +976,10 @@ async function* parse(
             (key) => usageState.nativeTurnUsage?.[key] !== (usageState.nativeUsage[key] ?? 0),
           ))
       ) {
-        yield usageConflict(env);
+        yield usageConflict(
+          env,
+          usageState.nativeTurnUsage ? 'aggregate_mismatch' : 'missing_aggregate',
+        );
         return;
       }
       const complete = completeEventFromState(

@@ -1,4 +1,5 @@
 import { AutopodError } from '@autopod/shared';
+import { assertNoCodexFinalProofHold } from './codex-final-proof-hold.js';
 import type { CompletionGuardsCaptured } from './completion-ports.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 
@@ -8,6 +9,7 @@ export function createCompletionGuards(captured: CompletionGuardsCaptured) {
   function assertExecutionTerminationVerified(podId: string): void {
     podRepo.sourceAdoptions?.assertAvailable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    assertNoCodexFinalProofHold(podRepo.taskExecutions, podRepo.getOrThrow(podId));
     assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
     podRepo.validationExecutions?.assertTaskSettled(podId);
   }

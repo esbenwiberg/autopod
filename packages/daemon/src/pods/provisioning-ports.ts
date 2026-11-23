@@ -58,6 +58,7 @@ export interface ProvisioningLiveDependencies {
   launchConfiguration?: {
     read(podId: string): EffectiveLaunchConfig | null;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
+    assertExecutionCapacity?(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
     activateWorker?(
       podId: string,
@@ -92,6 +93,9 @@ export interface ProvisioningLiveDependencies {
 
 export interface ProvisioningCaptured {
   qualifyCodingCandidate?(input: PreparedExecution): Promise<void>;
+  scheduleDockerNetworkCapacityRetry?: ReturnType<
+    typeof import('./execution-capacity-retry.js').createExecutionCapacityRetry
+  >['scheduleDockerNetworkCapacityRetry'];
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   logger: Logger;
   podRepo: PodRepository;

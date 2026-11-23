@@ -63,10 +63,37 @@ export interface SandboxMemoryBundle {
   /** Display text, e.g. `XL · 4 vCPU · 8 GiB RAM · 80 GiB disk`. */
   label: string;
 }
+/** The underlying failure of a Docker host-capacity (`docker info`) check. */
+export interface ExecutionCapacityProbeFailure {
+  kind: 'timeout' | 'error';
+  /** Sanitized, bounded error message. */
+  message: string;
+  durationMs: number;
+  /** When the failed check finished. */
+  at: string;
+}
+/**
+ * Docker only: how the host size behind `maxMemoryGb`/`maxCpus` was obtained.
+ * `live` was just reported by Docker; `cached` is a report from the last 30 minutes
+ * reused because the latest check failed; `unverified` means Docker has not reported
+ * it recently. Unverified is transient: launches are admitted and in-flight work
+ * continues, but new containers wait in the queue until Docker reports it.
+ */
+export interface ExecutionHostCapacity {
+  state: 'live' | 'cached' | 'unverified';
+  /** When Docker last reported the host size; null when it has not since daemon start. */
+  observedAt: string | null;
+  /** The latest failed check, when the state is not `live`. */
+  probeFailure?: ExecutionCapacityProbeFailure;
+  /** Operator-facing explanation, when the state is not `live`. */
+  reason?: string;
+}
 export interface ExecutionCapabilities {
   target: ExecutionSettings['target'];
   available: boolean;
   unavailableReason?: string;
+  /** Docker only; absent for targets with a static catalog. */
+  hostCapacity?: ExecutionHostCapacity;
   defaults: ResolvedAllocation;
   maxMemoryGb: number;
   maxCpus: number | null;

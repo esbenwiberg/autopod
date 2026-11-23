@@ -64,6 +64,11 @@ export {
   ValidationError,
 } from './errors.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
+export {
+  describeDockerNetworkCapacityWait,
+  describeExecutionCapacityProbeFailure,
+  describeExecutionCapacityWait,
+} from './execution-capacity.js';
 // ID generation utility
 export { generateId, generatePodId } from './id.js';
 export * from './managed-protocol.js';
@@ -401,6 +406,8 @@ export type {
   CompactPodPage,
   CostEvidence,
   CreatePodRequest,
+  DockerNetworkCapacityInfrastructureFailure,
+  ExecutionCapacityInfrastructureFailure,
   FixFeedback,
   PhaseTokenUsage,
   Pod,
@@ -574,6 +581,8 @@ export type {
   AgentTaskSummaryEvent,
   AgentToolUseEvent,
   AgentUsageEvent,
+  ClaudeResultUsageEvent,
+  CodexFinalProofRefusal,
   HttpMcpServerConfig,
   McpServerConfig,
   ProviderFailureCategory,

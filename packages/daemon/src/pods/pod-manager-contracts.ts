@@ -78,6 +78,11 @@ export interface PodManagerDependencies {
     read(podId: string): EffectiveLaunchConfig | null;
     executionSettings(config: EffectiveLaunchConfig): PodExecutionSettings;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
+    /**
+     * Provisioning gate: like `assertCurrentCapabilities`, but also rejects with
+     * `EXECUTION_CAPACITY_UNVERIFIED` while Docker cannot report host capacity.
+     */
+    assertExecutionCapacity?(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
     assertRecoveryAdmissionReady?(): void;
     availableRecoveryProfiles?(): Array<{ id: string; label: string }>;

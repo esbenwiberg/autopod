@@ -30,6 +30,7 @@ import {
   BUDGET_CONTINUATION_CODING,
   BUDGET_CONTINUATION_PENDING,
 } from './budget-stop.js';
+import { claudeResultCost } from './claude-cost-cursor.js';
 import { assertNoInfrastructureBlocker, isBlockingEscalation } from './escalation-coordinator.js';
 import { TURN_INTERRUPTED_FAILURE_CATEGORY } from './interrupted-turn.js';
 import type { PodUpdates } from './pod-repository.js';
@@ -157,6 +158,11 @@ export function createAgentEventConsumption(
           deps.providerAttemptRepo.getActive(podId)?.ordinal === runOwner.providerOrdinal));
     runOwner.isCurrent = ownsRun;
     const runtimeUsageDelta = createRuntimeUsageCounter();
+    // The durable cursor belongs to the native session, not the attempt, phase
+    // or pod totals. Keep an invocation-local fallback for streams without an ID.
+    let localClaudeCursor: { sessionId?: string; total: number } | undefined;
+    let claudeResultObserved = false;
+    let claudeTokensIncomplete = false;
     const priorUsageIncomplete =
       initialPod.tokenTelemetryAccuracy === 'partial' &&
       (initialPod.inputTokens > 0 ||
@@ -289,6 +295,7 @@ export function createAgentEventConsumption(
     // checkpoints) means this run may have consumed model tokens (#646).
     let modelWorkObserved = false;
     let usageIncompleteObserved = false;
+    let finalProofRefused = false;
     let providerRetryNotBefore: string | null = null;
     const retainUnverifiedTermination = () => {
       executionTerminationUnverified = true;
@@ -392,7 +399,9 @@ export function createAgentEventConsumption(
       assertNoInfrastructureBlocker(podRepo, podId);
       for await (const event of events) {
         workerEventObserved = true;
-        if (event.type !== 'status' && event.type !== 'error') modelWorkObserved = true;
+        const claudeUsage = event.type === 'claude_result_usage';
+        if (!claudeUsage && event.type !== 'status' && event.type !== 'error')
+          modelWorkObserved = true;
         if (event.type === 'error' && event.usageIncomplete) usageIncompleteObserved = true;
         // Negative termination evidence belongs to this immutable run, even
         // when ordinary events are suppressed by pause or lifecycle replacement.
@@ -406,9 +415,24 @@ export function createAgentEventConsumption(
           outcome = 'stopped';
           return outcome;
         }
-        if (event.type === 'error' && event.usageIncomplete)
-          podRepo.update(podId, { tokenTelemetryAccuracy: 'partial' });
-        if (pauseIntents.has(podId) && event.type !== 'usage') {
+        if (event.type === 'error' && event.usageIncomplete) {
+          const refusal = event.fatal ? event.codexFinalProofRefusal : undefined;
+          atomicPodChange(podRepo, () => {
+            podRepo.update(podId, { tokenTelemetryAccuracy: 'partial' });
+            if (taskRunId && refusal)
+              podRepo.taskExecutions?.recordCodexFinalProofRefusal?.(taskRunId, refusal);
+          });
+          finalProofRefused = Boolean(refusal);
+        }
+        const claudeSessionReady =
+          initialPod.runtime === 'claude' && event.type === 'status' && !!event.sessionId;
+        if (
+          pauseIntents.has(podId) &&
+          event.type !== 'usage' &&
+          !claudeUsage &&
+          !claudeSessionReady &&
+          !finalProofRefused
+        ) {
           outcome = 'paused';
           continue;
         }
@@ -444,7 +468,7 @@ export function createAgentEventConsumption(
           continue;
         }
         // Usage checkpoints are runtime metadata, not a new public agent-activity wire type.
-        if (event.type !== 'usage')
+        if (event.type !== 'usage' && !claudeUsage)
           eventBus.emit({
             type: 'pod.agent_activity',
             timestamp: event.timestamp,
@@ -521,7 +545,22 @@ export function createAgentEventConsumption(
           if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
           else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
           else if (sessionPod.runtime === 'pi') sessionUpdate.piSessionId = event.sessionId;
-          if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
+          if (sessionPod.runtime === 'claude') {
+            atomicPodChange(podRepo, () => {
+              podRepo.update(podId, sessionUpdate);
+              const cursors = podRepo.claudeCostCursor;
+              const sessionId = event.sessionId;
+              // A new native session is known to start at zero even if the
+              // process/daemon dies before it observes the first result.
+              if (
+                sessionId &&
+                sessionId !== sessionPod.claudeSessionId &&
+                cursors &&
+                cursors.get(podId, sessionId) === undefined
+              )
+                cursors.set(podId, sessionId, 0);
+            });
+          } else if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
           const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
           if (activeAttempt) {
             deps.providerAttemptRepo?.updateActive(podId, {
@@ -532,9 +571,10 @@ export function createAgentEventConsumption(
               costUsd: activeAttempt.costUsd,
             });
           }
-        } else if (event.type === 'usage' || event.type === 'complete') {
+        } else if (event.type === 'usage' || event.type === 'complete' || claudeUsage) {
           const currentSession = podRepo.getOrThrow(podId);
           let usage: ReturnType<ReturnType<typeof createRuntimeUsageCounter>>;
+          let nextClaudeCursor: number | undefined;
           try {
             if (
               event.type === 'usage' &&
@@ -545,9 +585,51 @@ export function createAgentEventConsumption(
                 'RUNTIME_USAGE_CONFLICT',
                 409,
               );
-            usage = runtimeUsageDelta(event);
+            if (claudeUsage) {
+              if (
+                currentSession.runtime !== 'claude' ||
+                (event.sessionId && event.sessionId !== currentSession.claudeSessionId)
+              ) {
+                throw new AutopodError(
+                  'Claude result usage does not match the admitted native session',
+                  'RUNTIME_USAGE_CONFLICT',
+                  409,
+                );
+              }
+              const previous =
+                (event.sessionId && podRepo.claudeCostCursor
+                  ? podRepo.claudeCostCursor.get(podId, event.sessionId)
+                  : undefined) ??
+                (localClaudeCursor?.sessionId === event.sessionId
+                  ? localClaudeCursor?.total
+                  : undefined);
+              const cost = claudeResultCost(event, previous);
+              nextClaudeCursor = cost.cursor;
+              usage = { ...event, costUsd: cost.delta };
+              claudeResultObserved = true;
+              claudeTokensIncomplete ||=
+                event.totalInputTokens === undefined || event.totalOutputTokens === undefined;
+              usageIncompleteObserved ||= claudeTokensIncomplete;
+              modelWorkObserved ||=
+                (usage.totalInputTokens ?? 0) > 0 ||
+                (usage.totalOutputTokens ?? 0) > 0 ||
+                (usage.costUsd ?? 0) > 0;
+              if (
+                cost.delta === undefined &&
+                event.cumulativeCostUsd !== undefined &&
+                event.cumulativeCostUsd > 0
+              )
+                logger.warn(
+                  { podId },
+                  'Claude result cost is missing a usable baseline or native delta',
+                );
+            } else usage = runtimeUsageDelta(event);
             const tokenUpdates: PodUpdates = {};
-            if (usage.totalInputTokens !== undefined || usage.totalOutputTokens !== undefined) {
+            if (
+              usage.totalInputTokens !== undefined ||
+              usage.totalOutputTokens !== undefined ||
+              (claudeUsage && usage.costUsd !== undefined && usage.costUsd > 0)
+            ) {
               tokenUpdates.inputTokens = currentSession.inputTokens + (usage.totalInputTokens ?? 0);
               tokenUpdates.outputTokens =
                 currentSession.outputTokens + (usage.totalOutputTokens ?? 0);
@@ -582,10 +664,11 @@ export function createAgentEventConsumption(
             }
             if (usage.costUsd !== undefined)
               tokenUpdates.costUsd = currentSession.costUsd + usage.costUsd;
-            if (event.type === 'usage') tokenUpdates.tokenTelemetryAccuracy = 'partial';
+            if (event.type !== 'complete') tokenUpdates.tokenTelemetryAccuracy = 'partial';
             else if (
-              event.totalInputTokens !== undefined &&
-              event.totalOutputTokens !== undefined &&
+              (claudeResultObserved
+                ? !claudeTokensIncomplete
+                : event.totalInputTokens !== undefined && event.totalOutputTokens !== undefined) &&
               !event.usageIncomplete &&
               !runtimeUsageDelta.hasUnsettledSegments()
             )
@@ -597,6 +680,8 @@ export function createAgentEventConsumption(
             else tokenUpdates.tokenTelemetryAccuracy = 'partial';
             atomicPodChange(podRepo, () => {
               podRepo.update(podId, tokenUpdates);
+              if (claudeUsage && event.sessionId && nextClaudeCursor !== undefined)
+                podRepo.claudeCostCursor?.set(podId, event.sessionId, nextClaudeCursor);
               const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
               if (activeAttempt)
                 deps.providerAttemptRepo?.updateActive(podId, {
@@ -619,6 +704,13 @@ export function createAgentEventConsumption(
             // A live worker cannot continue spending after its counters become unusable.
             if (event.type === 'usage') await stopUsageWorker();
             throw error;
+          }
+          if (claudeUsage) {
+            if (nextClaudeCursor !== undefined)
+              localClaudeCursor = { sessionId: event.sessionId, total: nextClaudeCursor };
+            // Claude checkpoints count spend, not completion or a live budget stop.
+            // Budget enforcement still happens at the final result.
+            continue;
           }
           if (event.type === 'complete') {
             outcome = 'completed';
@@ -861,7 +953,7 @@ export function createAgentEventConsumption(
         superseded = true;
         // No terminal event was accepted for this run after it lost ownership.
         outcome = 'stopped';
-      } else if (pauseIntents.has(podId)) outcome = 'paused';
+      } else if (pauseIntents.has(podId) && !finalProofRefused) outcome = 'paused';
       // An accepted old completion is historical evidence even when control
       // must stop before touching a replacement lifecycle.
       const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;

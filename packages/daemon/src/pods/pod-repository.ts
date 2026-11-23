@@ -49,6 +49,7 @@ import {
   type ApprovalSourceRewriteRepository,
   createApprovalSourceRewriteRepository,
 } from './approval-source-rewrite-repository.js';
+import { createClaudeCostCursor } from './claude-cost-cursor.js';
 import {
   COMPACT_JSON_FIELDS,
   COMPACT_POD_COLUMNS,
@@ -383,6 +384,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   deletionOwnership?: DeletionOwnership;
   fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
+  claudeCostCursor?: ReturnType<typeof createClaudeCostCursor>;
   hasUnansweredDecision?(podId: string): boolean;
   hasInfrastructureBlocker?(podId: string): boolean;
   insert(pod: NewPod): void;
@@ -442,6 +444,17 @@ const SAFE_AZURE_DIAGNOSTIC_HEADERS = new Set([
 function serializeInfrastructureFailure(failure: PodInfrastructureFailure): string {
   if (failure.source === 'git-fetch') {
     return JSON.stringify({ ...failure, diagnostics: failure.diagnostics.slice(0, 500) });
+  }
+  if (failure.source === 'execution-capacity' || failure.source === 'docker-network') {
+    return JSON.stringify({
+      ...failure,
+      ...(failure.source === 'execution-capacity'
+        ? { diagnostics: failure.diagnostics.slice(0, 1000) }
+        : {}),
+      probe: failure.probe
+        ? { ...failure.probe, message: failure.probe.message.slice(0, 300) }
+        : null,
+    });
   }
   const diagnostics = Object.fromEntries(
     Object.entries(failure.diagnostics)
@@ -944,6 +957,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     dispatchPreflight,
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,
+    claudeCostCursor: createClaudeCostCursor(db),
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     hasInfrastructureBlocker: (podId) =>
       Boolean(

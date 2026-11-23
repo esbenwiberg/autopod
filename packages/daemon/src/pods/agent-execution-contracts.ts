@@ -11,6 +11,7 @@ import type {
   ProviderFailureClassification,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ExecutionCapacityUnverifiedError } from '../configuration/backend-capabilities.js';
 import type { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import type { ContainerManager, RuntimeRegistry } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
@@ -106,6 +107,7 @@ export interface AgentProcessCaptured {
   ) => Promise<boolean>;
   closeProviderAttempt: ReturnType<typeof createProviderAttemptContext>['closeProviderAttempt'];
   scheduleHostFetchRetry: (pod: Pod, error: GitTransientFetchError) => void;
+  scheduleExecutionCapacityRetry: (pod: Pod, error: ExecutionCapacityUnverifiedError) => void;
   emitActivityError: (podId: string, message: string, fatal?: boolean) => void;
   transition: (pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates> | undefined) => Pod;
   escalationRepo: EscalationRepository;

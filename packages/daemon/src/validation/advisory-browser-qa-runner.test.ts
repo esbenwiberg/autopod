@@ -387,7 +387,9 @@ describe('runAdvisoryBrowserQa', () => {
       expect.stringContaining('You do not receive screenshot images'),
     );
     const execCommand = vi.mocked(containerManager.execInContainer).mock.calls[0]?.[1].join(' ');
-    expect(execCommand).toContain('claude -p');
+    expect(execCommand).toContain(
+      "AUTOPOD_AGENT_PID_PATH=/dev/null sh '/run/autopod/agent-shim.sh' claude -p",
+    );
     expect(execCommand).toContain('--model');
     expect(execCommand).toContain('claude-sonnet-4-6');
   });

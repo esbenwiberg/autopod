@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AutopodError,
   budgetCountedTaskTokens,
+  type CodexFinalProofRefusal,
   cacheWeightedTokens,
   describeTaskBudgetUsage,
   type ExecutionTarget,
@@ -9,6 +10,7 @@ import {
   type TaskExecutionSummary,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { codexFinalProofHeld, readCodexFinalProofHold } from './codex-final-proof-hold.js';
 import { readComposableUsage } from './composable-usage.js';
 import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
 import {
@@ -99,6 +101,11 @@ export interface TaskExecutionLedger
   /** Across this logical task, including retained failed runs in linked pods. */
   hasUnverifiedTermination(podId: string): boolean;
   beginRun(podId: string, generation: number, cycle: number, binding: ExecutionBinding): string;
+  codexFinalProofHold?(
+    podId: string,
+    generation: number,
+  ): ReturnType<typeof readCodexFinalProofHold>;
+  recordCodexFinalProofRefusal?(runId: string, reason: CodexFinalProofRefusal): void;
   /** Record failed execution evidence without releasing its unresolved process claim. */
   retainUnverifiedRun(id: string): void;
   reconcileNativeGoalRun(id: string): void;
@@ -729,7 +736,24 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         AND r.ended_at IS NULL AND r.failure_category = 'execution_termination_unverified' LIMIT 1`)
           .get(podId),
       ),
+    codexFinalProofHold: (podId, generation) => readCodexFinalProofHold(db, podId, generation),
+    recordCodexFinalProofRefusal(id, reason) {
+      const change = db
+        .prepare(`INSERT INTO codex_final_proof_refusals(run_id,task_id,reason)
+        SELECT r.id,e.task_id,? FROM task_agent_runs r JOIN task_executions e ON e.pod_id=r.pod_id
+        WHERE r.id=? AND r.ended_at IS NULL AND json_extract(r.binding,'$.runtime')='codex'`)
+        .run(reason, id);
+      if (change.changes !== 1)
+        throw new Error('Exact open Codex run required for final proof refusal');
+    },
     beginRun: db.transaction((podId, generation, cycle, binding) => {
+      if (
+        db
+          .prepare(`SELECT 1 FROM codex_final_proof_refusals f JOIN task_executions e
+        ON e.task_id=f.task_id WHERE e.pod_id=? LIMIT 1`)
+          .get(podId)
+      )
+        codexFinalProofHeld();
       const forks = createRecoveryForkRepository(db);
       const forkWorker = forks.assertWorkerAllowed(podId);
       const retained = createRetainedCheckpointRepository(db);

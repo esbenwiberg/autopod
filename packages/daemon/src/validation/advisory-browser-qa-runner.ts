@@ -17,6 +17,7 @@ import {
   type ReviewerImage,
 } from '../inputs/reviewer-images.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { AGENT_SHIM_PATH, CREDENTIAL_ONLY_SHIM_ENV } from '../pods/provisioning-runtime-files.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { createProviderAnthropicClient, resolveAnthropicModelId } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
@@ -2016,7 +2017,7 @@ async function runClaudeContainerReview(input: {
       ? ` --model ${shellQuote(resolveAnthropicModelId(input.model))}`
       : '';
   const claudeCommand = [
-    `sh ${shellQuote('/run/autopod/agent-shim.sh')} claude -p`,
+    `${CREDENTIAL_ONLY_SHIM_ENV} sh ${shellQuote(AGENT_SHIM_PATH)} claude -p`,
     modelArgs.trim(),
     '--output-format json',
     '--',

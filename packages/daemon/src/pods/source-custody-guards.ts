@@ -6,6 +6,7 @@ import {
   assertArtifactChecksAvailable,
   assertArtifactChecksResourceAvailable,
 } from './artifact-checks-recovery-repository.js';
+import { codexFinalProofHeld, readCodexFinalProofHold } from './codex-final-proof-hold.js';
 import {
   assertRecoveryForkResourceAvailable,
   createRecoveryForkRepository,
@@ -170,6 +171,13 @@ function assertSourceDeliveryEligibility(
         'RECOVERY_FORK_DELIVERY_HELD',
       );
   }
+  const currentGeneration = (
+    db.prepare('SELECT lifecycle_generation AS generation FROM pods WHERE id=?').get(podId) as
+      | { generation: number }
+      | undefined
+  )?.generation;
+  if (currentGeneration !== undefined && readCodexFinalProofHold(db, podId, currentGeneration))
+    codexFinalProofHeld();
   const recovery = createRetainedCheckpointRepository(db).latest(podId);
   if (recovery?.binding.continuation) {
     const current = db

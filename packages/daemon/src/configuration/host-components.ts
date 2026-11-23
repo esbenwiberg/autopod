@@ -22,7 +22,11 @@ import {
   nativeGoalCapability,
   nativeGoalEvidenceSchema,
 } from '../runtimes/native-goal-capability.js';
-import { dockerCapabilities, sandboxCapabilities } from './backend-capabilities.js';
+import {
+  createDockerHostCapacityProbe,
+  dockerCapabilities,
+  sandboxCapabilities,
+} from './backend-capabilities.js';
 import {
   type ConfigurationComponentsOptions,
   createConfigurationComponents,
@@ -194,6 +198,10 @@ export function createHostConfigurationComponents(
     fallback: options.defaultReviewerImage,
     logger: options.logger,
   });
+  // One shared host-size reader: coalesces checks and keeps the last report (#665).
+  const dockerCapacityProbe = options.docker
+    ? createDockerHostCapacityProbe({ docker: options.docker, logger: options.logger })
+    : null;
   const requireImages = () => {
     if (!options.images)
       configurationError(
@@ -248,7 +256,7 @@ export function createHostConfigurationComponents(
       ...sources,
       executionCapabilities: (target) =>
         target === 'local'
-          ? dockerCapabilities({ docker: options.docker ?? null, ...settings.docker })
+          ? dockerCapabilities({ probe: dockerCapacityProbe, ...settings.docker })
           : Promise.resolve(
               sandboxCapabilities({
                 enabled: options.sandboxEnabled,

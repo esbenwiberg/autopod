@@ -277,6 +277,17 @@ Wraps Dockerode. Key responsibilities:
 - **Log streaming** — `streamLogs()` returns an async iterable of log lines
 - **Kill / remove** — `stopContainer()` + `removeContainer()` (always cleans up even on error)
 
+Docker launch capabilities distinguish the host's total CPU/memory from current queue and
+network pressure. A slow or failed `docker info` capacity check uses the last reported size
+for up to 30 minutes. Without a recent report, normal new Docker launches are still admitted
+within known limits, but wait in `queued` before provisioning. `ap status` and the activity
+feed show the retry deadline and the sanitized probe diagnostic. The daemon releases the
+queue slot between attempts, retries with backoff (30 s, 60 s, 120 s, then 5 min), restores
+queued retry deadlines on restart, and accepts Kill while waiting. Existing containers do
+not require a fresh host-size report to continue validation. Missing backends and invalid
+allocations are still refused. For a pod failed by the old capacity probe error, use
+`ap rework <pod>` with the retained workspace; `ap recover-infrastructure` is unchanged.
+
 ### Network isolation (`src/containers/docker-network-manager.ts`)
 
 Creates a dedicated Docker bridge network per pod and applies iptables egress rules:
@@ -292,8 +303,12 @@ Each bridge consumes one dockerd address-pool subnet. Ordinary pruning never
 touches retained-checkpoint bridges. On pool exhaustion,
 `containers/retained-network-release.ts` releases superseded retained bridges,
 oldest first, after recording them in `retained_network_releases`. Operators can
-also run `ap release-retained-networks`. If no subnet can be freed, new pods
-fail with `HOST_NETWORK_CAPACITY`. `/health?detail=full` reports
+also run `ap release-retained-networks`. If no subnet can be freed at an ordinary
+queued pod's first bridge allocation, the pod returns to `queued` with
+`HOST_NETWORK_CAPACITY` and its prepared checkout. It releases the slot, retains
+the deadline across restart, and retries four times (30 s, 60 s, 120 s, 5 min)
+unless killed. Custody-owned dispatches and handoffs keep their own settlement
+rules. Other network errors are not retried here. `/health?detail=full` reports
 `docker.networks` pressure. Health and pressure pruning share the same
 ownership checks. A stale completed Docker pod may release only its exact
 empty bridge, after Docker confirms that the recorded container is missing
@@ -397,8 +412,9 @@ One `claude -p` process can write several `result` frames: it waits for backgrou
 tasks (Bash `run_in_background`, background agents) and continues in the same session
 on their notification, and a resumed session can settle leftover work first.
 `runtimes/claude-turn-finality.ts` therefore holds each result until it is final.
-More turn frames make it intermediate: no kill, and its usage is carried into the
-released `complete`. A result written with non-ambient background tasks pending,
+More turn frames make it intermediate: no kill and no completion. Result usage
+is committed separately, as soon as each result arrives. A result written with
+non-ambient background tasks pending,
 before `report_task_summary` in that invocation, while the pod is `running` with no
 pending human decision, waits for the CLI to continue. The wait is bounded by
 `AUTOPOD_CLAUDE_BACKGROUND_WAIT_MS` (default 25 min, clamped 3 min below
@@ -408,6 +424,30 @@ without validation and settles the run as `turn_interrupted`. It preserves the
 workspace through the budget-stop owner, so `ap rework` continues without a retry
 authorization; Resume and Retry checks are refused. A final result keeps the 30 s
 `AUTOPOD_POST_COMPLETE_GRACE_MS` retained-completion behaviour.
+
+### Claude result accounting
+
+A no-credentials Claude Code **2.1.318** probe used a temporary HOME/config and a
+loopback Anthropic Messages SSE stub. The stub returned different token counts
+on every request. Two prompts on one `-p --input-format stream-json` process,
+and separate `-p` processes joined by `--resume`, produced:
+
+| Result | `usage` (direct input / cache read / cache creation / output) | `total_cost_usd` | Sum of `model_usage_since_last_result.*.costUSD` |
+| --- | --- | ---: | ---: |
+| First invocation | 100 / 200 / 300 / 10 | 0.001635 | 0.001635 |
+| Resumed invocation | 200 / 400 / 600 / 20 | 0.004905 | 0.003270 |
+| Multi-result process, first | 300 / 600 / 900 / 30 | 0.004905 | 0.004905 |
+| Multi-result process, second | 400 / 800 / 1200 / 40 | 0.011445 | 0.006540 |
+
+`usage` is per result (do not difference it); `modelUsage` and
+`total_cost_usd` include previous results and resumed history. Store the cost
+cursor by pod and native session in the same transaction as pod, phase and
+provider-attempt accounting. A legacy resume without a cursor takes the native
+per-result cost when available. Otherwise its first cumulative value only
+establishes a baseline: historical spend and new spend cannot be separated.
+Later cumulative results can recover cost across gaps. Usage that the CLI
+neither emitted nor included in a later cumulative observation cannot be
+recovered by this path; an interrupted turn remains partial, not completed.
 
 Stream parsers are the tricky part — each vendor's SSE format is different. When adding parser logic,
 add test cases to the co-located `.test.ts` covering partial chunks, multi-event lines, and error frames.

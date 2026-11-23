@@ -330,9 +330,23 @@ export function registerLaunchCommand(
       // instead of failing at provisioning. The daemon guard remains authoritative.
       const dispatch = effective ? await client.previewDispatch(request) : undefined;
       const dispatchReport = dispatch ? describeDispatchPreview(dispatch) : null;
+      const reportDockerWait = async (target: 'local' | 'sandbox' | undefined) => {
+        if (target !== 'local') return;
+        // Advisory only: never refuse a launch based on a separate observation.
+        const result = await client.getConfigurationCapabilities?.().catch(() => null);
+        const local = result?.execution?.find((item) => item.target === 'local');
+        if (local?.available && local.hostCapacity?.state === 'unverified') {
+          console.error(
+            local.hostCapacity.reason ??
+              'Docker host capacity is unverified. Launches wait in the queue until Docker reports it.',
+          );
+        }
+      };
       if (opts.preview) {
         if (!effective) throw new Error('Launch preview is unavailable.');
         console.log(opts.json ? JSON.stringify(effective, null, 2) : summarize(effective));
+        if (dispatch?.status !== 'review_required')
+          await reportDockerWait(effective.execution?.target);
         if (dispatch === null)
           console.error('Equivalent-work check unavailable on this daemon; not verified.');
         if (dispatchReport) (opts.json ? console.error : console.log)(dispatchReport);
@@ -351,6 +365,7 @@ export function registerLaunchCommand(
         `Launch request saved: ${receipt}\nRetry the same request with: ap run --config ${JSON.stringify(receipt)}`,
       );
       const pod = await client.launchPod(admitted);
+      if (pod.status === 'queued') await reportDockerWait(pod.executionTarget);
       if (opts.json) console.log(JSON.stringify(pod, null, 2));
       else
         console.log(

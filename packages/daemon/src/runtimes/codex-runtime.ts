@@ -313,7 +313,7 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const summary = this.observeTaskSummary(config.podId, config.executionTarget === 'sandbox');
+    const summary = this.observeTaskSummary(config.podId);
     let interrupted: boolean;
     try {
       const handle = await this.containerManager.execStreaming(
@@ -332,6 +332,8 @@ export class CodexRuntime implements Runtime {
         config.executionTarget === 'sandbox'
           ? { containerId: config.containerId, taskSummarySignal: summary.signal }
           : undefined,
+        undefined,
+        summary.observed,
       );
     } finally {
       summary.dispose();
@@ -429,7 +431,7 @@ export class CodexRuntime implements Runtime {
     });
 
     const shimPath = '/run/autopod/agent-shim.sh';
-    const summary = this.observeTaskSummary(podId, pod.executionTarget === 'sandbox');
+    const summary = this.observeTaskSummary(podId);
     let interrupted: boolean;
     try {
       beforeRecoveryLaunch?.();
@@ -453,6 +455,7 @@ export class CodexRuntime implements Runtime {
           ? { containerId, taskSummarySignal: summary.signal }
           : undefined,
         rolloutTail,
+        summary.observed,
       );
     } finally {
       summary.dispose();
@@ -540,6 +543,7 @@ export class CodexRuntime implements Runtime {
     modelHint?: string,
     recovery?: SandboxRolloutRecovery,
     rolloutTail?: RolloutTailState,
+    summaryObserved?: () => boolean,
   ): AsyncGenerator<AgentEvent, boolean, void> {
     const outputState: OutputState = {
       events: 0,
@@ -558,12 +562,19 @@ export class CodexRuntime implements Runtime {
       event: CodexUsageConflictEvent,
     ): Promise<CodexUsageConflictEvent> => {
       this.intentionalTerminations.add(handle);
-      try {
-        await handle.kill();
-        return { ...event, usageIncomplete: true };
-      } catch {
-        return { ...event, usageIncomplete: true, executionTermination: 'unverified' };
-      }
+      const stop = await settlePromiseWithin(
+        Promise.resolve().then(() => handle.kill()),
+        stalledExecKillTimeoutMs(),
+      );
+      const reason = event.codexFinalProofRefusal;
+      return {
+        ...event,
+        usageIncomplete: true,
+        ...(reason && {
+          message: `Native Codex final usage could not be verified (${reason}). Measured usage retained as partial. For ordinary Docker tasks, inspect Stop & Retain before retained checks; do not Resume or Rework.`,
+        }),
+        ...(stop.status !== 'fulfilled' && { executionTermination: 'unverified' as const }),
+      };
     };
     this.usageAccumulators.set(podId, usageAccumulator);
     this.usageBoundaries.set(
@@ -663,6 +674,26 @@ export class CodexRuntime implements Runtime {
         }
       }
 
+      // A summary is a recovery hint, not completion or exit proof. A native
+      // invocation with measured responses and no terminal record must not replay coding.
+      if (
+        !this.intentionalTerminations.has(handle) &&
+        !sawNonRecoverableFatal &&
+        !terminalUsage &&
+        usageAccumulator.nativeResponses.size > 0 &&
+        summaryObserved?.()
+      ) {
+        yield await stopUsageConflict({
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          fatal: true,
+          codexUsageConflict: true,
+          codexFinalProofRefusal: 'missing_terminal',
+          message: 'Native Codex final usage could not be verified',
+        });
+        return false;
+      }
+
       if (interrupted && !this.intentionalTerminations.has(handle) && !outputState.sawComplete) {
         const settled = await this.settleInterruptedInvocation(podId, handle);
         if (!settled) {
@@ -701,23 +732,24 @@ export class CodexRuntime implements Runtime {
   }
 
   /** Subscribe before launch: the worker may report while execStreaming is still opening. */
-  private observeTaskSummary(
-    podId: string,
-    enabled: boolean,
-  ): {
+  private observeTaskSummary(podId: string): {
     signal: Promise<void> | undefined;
+    observed: () => boolean;
     dispose: () => void;
   } {
-    if (!enabled || !this.eventBus) return { signal: undefined, dispose: () => {} };
+    if (!this.eventBus) return { signal: undefined, observed: () => false, dispose: () => {} };
+    let observed = false;
     let resolveSummary: () => void = () => {};
     const signal = new Promise<void>((resolve) => {
       resolveSummary = resolve;
     });
     const dispose = this.eventBus.subscribeToSession(podId, (event) => {
-      if (event.type === 'pod.agent_activity' && event.event.type === 'task_summary')
+      if (event.type === 'pod.agent_activity' && event.event.type === 'task_summary') {
+        observed = true;
         resolveSummary();
+      }
     });
-    return { signal, dispose };
+    return { signal, observed: () => observed, dispose };
   }
 
   private async settleInterruptedInvocation(
@@ -1310,25 +1342,28 @@ export class CodexRuntime implements Runtime {
     sandboxRollout?: CodexSandboxRollout,
   ) {
     const sessionId = this.codexSessionIds.get(podId);
-    if (!sessionId) {
-      if (sandboxRollout) throw new Error('Codex sandbox completion has no active session');
-      return { native: false };
-    }
     let native = (this.usageAccumulators.get(podId)?.nativeResponses.size ?? 0) > 0;
+    if (!sessionId) {
+      native ||= Boolean(sandboxRollout);
+      return { native, refusal: 'missing_session' as const };
+    }
     let observed = '';
     let snapshot: Awaited<ReturnType<typeof readNativeCompletionUsage>> = { native };
     const deadline = Date.now() + (sandboxRollout ? sandboxFinalUsageTimeoutMs() : 1000);
     // CLI stdout can beat the asynchronous rollout writer/poller. Never certify a
     // stale prefix or reattribute a resumed thread's public cumulative totals.
-    let refreshError: unknown;
+    let refreshRefusal: CodexUsageConflictEvent['codexFinalProofRefusal'];
     while (Date.now() < deadline) {
       if (sandboxRollout) {
         sandboxRollout.assertCurrent();
         try {
           await sandboxRollout.refresh(Math.max(1, deadline - Date.now()));
           sandboxRollout.assertCurrent();
-        } catch (err) {
-          refreshError = err;
+        } catch (error) {
+          refreshRefusal =
+            error instanceof Error && error.name === 'TimeoutError'
+              ? 'timeout'
+              : 'snapshot_unavailable';
           await sleep(Math.min(50, Math.max(0, deadline - Date.now())));
           continue;
         }
@@ -1338,7 +1373,7 @@ export class CodexRuntime implements Runtime {
         sessionId,
       );
       if (!rollout) {
-        if (!sandboxRollout) return { native };
+        if (!sandboxRollout) return { native, refusal: 'missing_rollout' as const };
         await sleep(50);
         continue;
       }
@@ -1359,10 +1394,16 @@ export class CodexRuntime implements Runtime {
             appendOnly ? { offset: boundary.offset } : { notBefore: boundary?.notBefore },
             deadline,
           );
-        } catch {
+        } catch (error) {
           // A writer can be in the middle of a JSONL append. Retry only within
           // this bounded finalization window, never certify a corrupt snapshot.
-          snapshot = { native: true };
+          snapshot = {
+            native: true,
+            refusal:
+              Date.now() >= deadline || (error instanceof Error && error.name === 'AbortError')
+                ? 'timeout'
+                : 'invalid_metadata',
+          };
         }
         native ||= snapshot.native;
         observed = revision;
@@ -1370,17 +1411,13 @@ export class CodexRuntime implements Runtime {
       if (snapshot.lines || !native) return snapshot;
       await sleep(50);
     }
-    if (sandboxRollout) {
-      sandboxRollout.assertCurrent();
-      if (refreshError || !observed) {
-        this.logger.warn(
-          { component: 'codex-runtime', podId, err: refreshError },
-          'Could not acquire current sandbox Codex final usage metadata',
-        );
-        throw new Error('Codex sandbox final usage snapshot unavailable');
-      }
-    }
-    return { native };
+    sandboxRollout?.assertCurrent();
+    if (sandboxRollout && !observed)
+      return {
+        native: true,
+        refusal: refreshRefusal ?? ('missing_rollout' as const),
+      };
+    return { native, refusal: snapshot.refusal ?? ('timeout' as const) };
   }
 
   private async *parseCodexLines(
@@ -1390,6 +1427,7 @@ export class CodexRuntime implements Runtime {
     outputState: OutputState,
     modelHint?: string,
     sandboxRollout?: CodexSandboxRollout,
+    finalProofDrain = false,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const iterator = this.parseCodexLinesRaw(lines, podId, modelHint)[Symbol.asyncIterator]();
     for (;;) {
@@ -1405,11 +1443,15 @@ export class CodexRuntime implements Runtime {
       const key = dedupeKey(event);
       if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       if (event.type === 'complete' && event.usageSegmentId !== 'codex-parser') {
+        let refusal: CodexUsageConflictEvent['codexFinalProofRefusal'];
         try {
           const native = await this.nativeUsageAtCompletion(podId, event, sandboxRollout);
           sandboxRollout?.assertCurrent();
           if (native.native) {
-            if (!native.lines) throw new Error('Native Codex final usage proof is unavailable');
+            if (!native.lines) {
+              refusal = native.refusal ?? 'missing_response';
+              throw new Error('Native Codex final usage proof is unavailable');
+            }
             yield* this.parseCodexLines(
               Readable.from([native.lines]),
               podId,
@@ -1417,6 +1459,7 @@ export class CodexRuntime implements Runtime {
               outputState,
               modelHint,
               sandboxRollout,
+              true,
             );
             continue;
           }
@@ -1435,14 +1478,21 @@ export class CodexRuntime implements Runtime {
             fatal: true,
             codexUsageConflict: true,
             usageIncomplete: true,
-            message:
-              'Native Codex final usage could not be verified; retain measured usage and reconcile.',
+            codexFinalProofRefusal: refusal ?? 'snapshot_unavailable',
+            message: 'Native Codex final usage could not be verified',
           } as CodexUsageConflictEvent;
           return { events: 1, nonStatusEvents: 1, sawComplete: false };
         }
       }
       seen.add(key);
-      yield event;
+      if (
+        finalProofDrain &&
+        event.type === 'error' &&
+        (event as CodexUsageConflictEvent).codexUsageConflict &&
+        !event.codexFinalProofRefusal
+      ) {
+        yield { ...event, codexFinalProofRefusal: 'sequence_mismatch' };
+      } else yield event;
       recordOutputEvent(outputState, event);
     }
   }

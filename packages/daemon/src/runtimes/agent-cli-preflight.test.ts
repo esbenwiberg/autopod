@@ -17,26 +17,24 @@ describe('verifyAgentCli', () => {
     'gpt-6.2-sol',
     'gpt-6.2-astra',
     'gpt-6.2',
-  ])('rejects stale GPT-6.2 images and admits the supported pin for %s', async (model) => {
+  ])('rejects stale images for %s and admits the supported boundary', async (model) => {
     for (const version of ['0.160.1', '0.170.9']) {
       await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).rejects.toMatchObject({
         code: 'PREFLIGHT_RUNTIME_INCOMPATIBLE',
         message: `Codex CLI ${version} is incompatible with ${model}; Autopod requires 0.171.0 or newer. Rebuild the codex base/warm image.`,
       });
     }
-    for (const version of ['0.171.0', '0.172.0', '1.0.0']) {
+    for (const version of ['0.171.0', '0.171.1', '0.172.0', '1.0.0']) {
       await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).resolves.toMatchObject({
         cliVersion: version,
       });
     }
   });
 
-  it('retains the existing floor for earlier GPT-6 families', async () => {
-    for (const model of ['gpt-6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-astra']) {
-      await expect(verifyAgentCli(codexAt('0.160.1'), 'c', 'codex', model)).resolves.toMatchObject({
-        cliVersion: '0.160.1',
-      });
-    }
+  it('includes the GPT-6.2 floor when a version cannot be verified', async () => {
+    await expect(verifyAgentCli(codexAt('unknown'), 'c', 'codex', 'gpt-6.2-sol')).rejects.toThrow(
+      'Rebuild the codex base/warm image with Codex CLI 0.171.0 or newer',
+    );
   });
 
   it('keeps the general Codex floor for pre-GPT-6 models', async () => {
@@ -56,9 +54,17 @@ describe('verifyAgentCli', () => {
     await expect(verifyAgentCli(codexAt('0.159.9'), 'c', 'codex', 'gpt-6-astra')).rejects.toThrow(
       '0.160.1 or newer',
     );
-    for (const version of ['0.160.1', '0.161.0', '1.0.0'])
-      await expect(
-        verifyAgentCli(codexAt(version), 'c', 'codex', 'gpt-6-astra'),
-      ).resolves.toMatchObject({ cliVersion: version });
+    for (const model of [
+      'gpt-6-sol',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-6.1-sol',
+      'gpt-6.1-astra',
+      'gpt-6.1-terra',
+    ])
+      for (const version of ['0.160.1', '0.161.0', '1.0.0'])
+        await expect(verifyAgentCli(codexAt(version), 'c', 'codex', model)).resolves.toMatchObject({
+          cliVersion: version,
+        });
   });
 });

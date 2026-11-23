@@ -34,7 +34,8 @@ export function createCodexSandboxRollout(options: {
       };
       const cancel = () => controller.abort(options.signal.reason);
       options.signal.addEventListener('abort', cancel, { once: true });
-      const timeout = () => controller.abort(new Error('Codex sandbox snapshot timed out'));
+      const timeout = () =>
+        controller.abort(new DOMException('Codex sandbox snapshot timed out', 'TimeoutError'));
       let expiresAt = Date.now() + timeoutMs;
       let timer = setTimeout(timeout, timeoutMs);
       shortenPending = (remainingMs) => {

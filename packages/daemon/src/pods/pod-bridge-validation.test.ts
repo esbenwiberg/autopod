@@ -255,7 +255,16 @@ describe('PodBridge.runValidationPhase', () => {
     expect(execMock).not.toHaveBeenCalled();
     expect(streamImpl).toHaveBeenCalledExactlyOnceWith(
       'container-abc',
-      ['sh', '/run/autopod/agent-shim.sh', 'sh', '-c', phase === 'tests' ? 'test' : phase],
+      [
+        '/usr/bin/env',
+        '--',
+        'AUTOPOD_AGENT_PID_PATH=/dev/null',
+        'sh',
+        '/run/autopod/agent-shim.sh',
+        'sh',
+        '-c',
+        phase === 'tests' ? 'test' : phase,
+      ],
       expect.objectContaining({
         cwd: '/workspace/nested',
         timeout: expect.any(Number),

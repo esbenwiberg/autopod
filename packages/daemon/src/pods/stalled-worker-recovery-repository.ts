@@ -19,6 +19,8 @@ export interface StalledRun {
   binding: string;
   outcome: string | null;
   failureCategory: string | null;
+  /** Present only when sealing an already closed Codex final-proof run. */
+  endedAt?: string;
 }
 export interface StalledBinding {
   fingerprint: string;
@@ -167,10 +169,19 @@ export function createStalledWorkerRecoveryRepository(db: Database.Database) {
         `SELECT r.id,r.pod_id AS podId,r.generation,r.cycle,r.binding,r.outcome,r.failure_category AS failureCategory FROM task_agent_runs r JOIN task_executions e ON e.pod_id=r.pod_id WHERE e.task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) AND r.ended_at IS NULL ORDER BY r.started_at,r.id`,
       )
       .all(podId) as StalledRun[];
+  const settledCodexRun = (podId: string, runId: string) =>
+    (db
+      .prepare(`SELECT r.id,r.pod_id AS podId,r.generation,r.cycle,r.binding,r.outcome,
+      r.failure_category AS failureCategory,r.ended_at AS endedAt
+      FROM task_agent_runs r JOIN codex_final_proof_refusals f ON f.run_id=r.id
+      WHERE r.pod_id=? AND r.id=? AND r.ended_at IS NOT NULL AND r.outcome='failed'
+        AND r.failure_category IS NOT 'execution_termination_unverified'`)
+      .get(podId, runId) as StalledRun | undefined) ?? null;
   return {
     get,
     latest,
     unsettled,
+    settledCodexRun,
     pendingMessage(key: string, message: string) {
       const row = get(key);
       if (!row || row.receipt.state !== 'pending') return;
@@ -273,17 +284,25 @@ export function createStalledWorkerRecoveryRepository(db: Database.Database) {
       const saved = get(record.receipt.request.requestKey);
       if (!saved || saved.hash !== record.hash || saved.receipt.state !== 'pending')
         stalledError('Exact pending recovery required.');
-      const runs = unsettled(record.receipt.podId);
-      if (runs.length !== 1 || stalledHash(runs[0]) !== stalledHash(record.binding.run))
-        stalledError('Original worker run changed before settlement.');
-      // Ended_at is positive resource settlement, NOT an observed worker exit code or success.
-      db.prepare('UPDATE task_agent_runs SET ended_at=? WHERE id=? AND ended_at IS NULL').run(
-        new Date().toISOString(),
-        record.binding.run.id,
-      );
-      db.prepare(
-        "UPDATE task_retry_attempts SET ended_at=?,outcome='unknown',measured_duration_ms=NULL WHERE id=? AND stage='worker' AND ended_at IS NULL",
-      ).run(new Date().toISOString(), record.binding.run.id);
+      const { podId } = record.receipt;
+      const run = record.binding.run;
+      const runs = unsettled(podId);
+      if (run.endedAt) {
+        if (runs.length || stalledHash(settledCodexRun(podId, run.id)) !== stalledHash(run))
+          stalledError('Original settled Codex worker run changed before sealing.');
+        // Its verified process settlement and failed outcome remain immutable.
+      } else {
+        if (runs.length !== 1 || stalledHash(runs[0]) !== stalledHash(run))
+          stalledError('Original worker run changed before settlement.');
+        // Ended_at is positive resource settlement, NOT a worker exit code or success.
+        db.prepare('UPDATE task_agent_runs SET ended_at=? WHERE id=? AND ended_at IS NULL').run(
+          new Date().toISOString(),
+          run.id,
+        );
+        db.prepare(
+          "UPDATE task_retry_attempts SET ended_at=?,outcome='unknown',measured_duration_ms=NULL WHERE id=? AND stage='worker' AND ended_at IS NULL",
+        ).run(new Date().toISOString(), run.id);
+      }
       scope(db).run({ podId: record.receipt.podId, kind: 'settle' }, work);
       const receipt: StalledWorkerRecoveryReceipt = {
         ...saved.receipt,

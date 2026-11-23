@@ -1,6 +1,7 @@
 import type { Pod } from '@autopod/shared';
 import type { AdmissionDependentsCaptured } from './admission-contracts.js';
 import { isSinglePrSeriesPod } from './delivery-policy.js';
+import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 export function createAdmissionDependents(captured: AdmissionDependentsCaptured) {
   const { podRepo, logger, eventBus, enqueueSession } = captured;
   function maybeTriggerDependents(completedPod: Pod): void {
@@ -13,6 +14,7 @@ export function createAdmissionDependents(captured: AdmissionDependentsCaptured)
         dep.status === 'failed' &&
         dep.mergeBlockReason === `dependency pod ${completedPod.id} failed`;
       if (dep.status !== 'queued' && !cascadeFailed) continue;
+      if (dep.status === 'queued' && dockerNetworkCapacityWait(dep)) continue;
 
       const parentIds =
         dep.dependsOnPodIds.length > 0
@@ -117,7 +119,10 @@ export function createAdmissionDependents(captured: AdmissionDependentsCaptured)
     const PARENT_DONE = new Set(['validated', 'approved', 'merging', 'merge_pending', 'complete']);
     const stuckDeps = podRepo
       .list({ status: 'queued' })
-      .filter((p) => p.dependsOnPodIds.length > 0 || !!p.dependsOnPodId);
+      .filter(
+        (p) =>
+          !dockerNetworkCapacityWait(p) && (p.dependsOnPodIds.length > 0 || !!p.dependsOnPodId),
+      );
 
     for (const dep of stuckDeps) {
       const parentIds =

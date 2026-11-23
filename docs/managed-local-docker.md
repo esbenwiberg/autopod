@@ -22,6 +22,9 @@ A sandbox profile still requires a registry digest. The image includes Python,
 Git, the firewall utilities and Codex CLI 0.171.0. A build's resulting image ID,
 rather than its mutable tag, is the execution binding.
 
+See [GPT-6.2 runtime qualification](gpt-6.2-worker-runtimes.md) for the rebuild
+inventory, package evidence, isolated candidate smoke steps and remaining Pi gap.
+
 Set each reviewed profile's `route.executionTarget` to `local` and recompute the
 snapshot/request digests. The rest of the existing profile-set contract applies:
 exact enrolled repository revision, provider account, model, reasoning, task kind,

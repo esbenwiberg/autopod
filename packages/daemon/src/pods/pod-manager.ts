@@ -162,6 +162,7 @@ import { createResourcePreviewTimers } from './resource-preview-timers.js';
 export type { PodCreator } from './workspace-contracts.js';
 
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
+import { createExecutionCapacityRetry } from './execution-capacity-retry.js';
 import { createSandboxRecovery } from './sandbox-recovery.js';
 import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
@@ -395,6 +396,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo,
       refreshReadiness,
     });
+  const { scheduleExecutionCapacityRetry, scheduleDockerNetworkCapacityRetry } =
+    createExecutionCapacityRetry({ podRepo, enqueueSession, emitActivityStatus, transition });
   const { hasDurableAgentExecutionEvidence, tryRecoverTransientSandboxFailure } =
     createWorkspaceInfrastructureRecovery(deps, {
       ownsLifecycle,
@@ -1067,6 +1070,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const provisioningWorkflow = createProvisioningWorkflow(deps, {
+    scheduleDockerNetworkCapacityRetry,
     // Keep live dependencies by reference; this private integration callback is
     // captured separately so late-bound cooldown/provider controls stay live.
     qualifyCodingCandidate: async (input) => {
@@ -1144,6 +1148,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     tryRecoverTransientSandboxFailure,
     closeProviderAttempt,
     scheduleHostFetchRetry,
+    scheduleExecutionCapacityRetry,
     emitActivityError,
     transition,
     escalationRepo,

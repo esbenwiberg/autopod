@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Profile } from '@autopod/shared';
+import { PROVIDER_CATALOG, type Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { generateDockerfile, getBaseImage, getInstallCommand } from './dockerfile-generator.js';
 
@@ -88,22 +88,21 @@ describe('getBaseImage', () => {
 });
 
 describe('base image templates', () => {
-  it('pins managed and system-decision OpenAI runtimes too', () => {
+  it('pins managed and system-decision images to the supported GPT-6.2 runtimes', () => {
+    expect(PROVIDER_CATALOG.piCompatibility.packageVersion).toBe('1.6.0');
     const templatesDir = path.resolve(import.meta.dirname, '../../../../templates');
-    expect(
-      fs.readFileSync(path.join(templatesDir, 'managed/Dockerfile.codex-local'), 'utf-8'),
-    ).toContain('@openai/codex@0.171.0');
+    const read = (name: string) => fs.readFileSync(path.join(templatesDir, name), 'utf-8');
+    expect(read('managed/Dockerfile.codex-local')).toContain('@openai/codex@0.171.0');
     for (const name of ['managed/Dockerfile.codex-portfolio', 'system/Dockerfile.decision']) {
-      const content = fs.readFileSync(path.join(templatesDir, name), 'utf-8');
-      expect(content, name).toContain('ARG CODEX_VERSION=0.171.0');
-      expect(content, name).toContain('@openai/codex@${CODEX_VERSION}');
+      expect(read(name), name).toContain('ARG CODEX_VERSION=0.171.0');
+      expect(read(name), name).toMatch(/"@openai\/codex@\$\{CODEX_VERSION\}"/);
     }
-    const decision = fs.readFileSync(
-      path.join(templatesDir, 'system/Dockerfile.decision'),
-      'utf-8',
-    );
+    const decision = read('system/Dockerfile.decision');
     expect(decision).toContain('ARG PI_VERSION=1.6.0');
-    expect(decision).toContain('@earendil-works/pi-coding-agent@${PI_VERSION}');
+    expect(decision).toMatch(/"@earendil-works\/pi-coding-agent@\$\{PI_VERSION\}"/);
+    // Pi 1.6.0 requires Node >=22.19.0. Other bases use floating Node 22/24
+    // images or NodeSource 22; keep the fixed system-decision floor explicit.
+    expect(decision).toMatch(/^FROM node:22\.19\.0-slim/m);
   });
 
   it('installs every supported agent CLI with the current Codex version pinned', () => {

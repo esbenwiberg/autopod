@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
-import type { AgentCompleteEvent } from '@autopod/shared';
+import type { AgentCompleteEvent, CodexFinalProofRefusal } from '@autopod/shared';
 import { checkedCodexUsage } from './codex-stream-parser.js';
 
 interface Boundary {
@@ -43,8 +43,10 @@ function selection(sessionId: string, completion: AgentCompleteEvent, boundary: 
         if (
           !usage ||
           typeof payload.response_id !== 'string' ||
+          !payload.response_id ||
           payload.response_id.length > 512 ||
           typeof payload.turn_id !== 'string' ||
+          !payload.turn_id ||
           payload.turn_id.length > 256
         )
           throw new Error('Invalid Codex response usage metadata');
@@ -63,8 +65,10 @@ function selection(sessionId: string, completion: AgentCompleteEvent, boundary: 
       } else if (payload.type === 'task_complete') terminal = true;
       else if (payload.type === 'task_started' || payload.type === 'turn_aborted') terminal = false;
     },
-    result(): { native: boolean; lines?: string } {
-      if (!native || !terminal || responses.length === 0) return { native };
+    result(): { native: boolean; lines?: string; refusal?: CodexFinalProofRefusal } {
+      if (!native) return { native };
+      if (responses.length === 0) return { native, refusal: 'missing_response' };
+      if (!terminal) return { native, refusal: 'missing_terminal' };
       return {
         native,
         lines: [

@@ -309,7 +309,10 @@ describe('reconcileLocalSessions', () => {
     expect(enqueuedSessions).toEqual([]);
     expect(containerManager.kill).not.toHaveBeenCalled();
   });
-  it('rehydrates a queued host fetch retry without consuming capacity before retryNotBefore', async () => {
+  it.each([
+    'git-fetch',
+    'execution-capacity',
+  ] as const)('rehydrates a queued %s retry without consuming capacity before retryNotBefore', async (source) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
     try {
@@ -332,10 +335,14 @@ describe('reconcileLocalSessions', () => {
         });
       }
       const incident = (retryNotBefore: string, attemptCount: number) => ({
-        source: 'git-fetch' as const,
-        code: 'GIT_FETCH_TRANSIENT' as const,
-        branch: 'main',
-        purpose: 'base' as const,
+        ...(source === 'git-fetch'
+          ? {
+              source,
+              code: 'GIT_FETCH_TRANSIENT' as const,
+              branch: 'main',
+              purpose: 'base' as const,
+            }
+          : { source, code: 'EXECUTION_CAPACITY_UNVERIFIED' as const, probe: null }),
         diagnostics: 'connection reset',
         attemptCount,
         occurredAt: '2026-08-20T11:59:00.000Z',
