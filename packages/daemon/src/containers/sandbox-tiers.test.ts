@@ -14,15 +14,15 @@ import {
 const GB = 1024 * 1024 * 1024;
 
 describe('sandbox tier catalog', () => {
-  it('is ordered ascending and ends at 2XL without offering 3XL', () => {
-    expect(SANDBOX_TIERS.map((t) => t.tier)).toEqual(['XS', 'S', 'M', 'L', 'XL', '2XL']);
+  it('is ordered ascending and offers every documented Azure tier up to 3XL', () => {
+    expect(SANDBOX_TIERS.map((t) => t.tier)).toEqual(['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']);
     const memory = SANDBOX_TIERS.map((t) => t.memoryGiB);
     expect([...memory].sort((a, b) => a - b)).toEqual(memory);
-    expect(MAX_SANDBOX_TIER).toBe('2XL');
-    expect(MAX_SANDBOX_MEMORY_BYTES).toBe(16 * GB);
+    expect(MAX_SANDBOX_TIER).toBe('3XL');
+    expect(MAX_SANDBOX_MEMORY_BYTES).toBe(32 * GB);
   });
 
-  it('keeps the L default separate from the 2XL maximum', () => {
+  it('keeps the L default separate from the 3XL maximum', () => {
     expect(DEFAULT_SANDBOX_TIER).toBe('L');
     expect(DEFAULT_SANDBOX_TIER).not.toBe(MAX_SANDBOX_TIER);
   });
@@ -34,12 +34,17 @@ describe('sandbox tier catalog', () => {
     expect(sandboxTierResources('L')).toEqual({ cpu: '2000m', memory: '4096Mi', disk: '40Gi' });
   });
 
-  it('derives the XL and 2XL Azure payloads from the catalog', () => {
+  it('derives the XL, 2XL and 3XL Azure payloads from the catalog', () => {
     expect(sandboxTierResources('XL')).toEqual({ cpu: '4000m', memory: '8192Mi', disk: '80Gi' });
     expect(sandboxTierResources('2XL')).toEqual({
       cpu: '8000m',
       memory: '16384Mi',
       disk: '160Gi',
+    });
+    expect(sandboxTierResources('3XL')).toEqual({
+      cpu: '16000m',
+      memory: '32768Mi',
+      disk: '320Gi',
     });
   });
 
@@ -47,6 +52,7 @@ describe('sandbox tier catalog', () => {
     expect(sandboxTierLabel('L')).toBe('L · 2 vCPU · 4 GiB RAM · 40 GiB disk');
     expect(sandboxTierLabel('XL')).toBe('XL · 4 vCPU · 8 GiB RAM · 80 GiB disk');
     expect(sandboxTierLabel('2XL')).toBe('2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk');
+    expect(sandboxTierLabel('3XL')).toBe('3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk');
     expect(sandboxTierLabel('XS')).toBe('XS · 0.25 vCPU · 0.5 GiB RAM · 5 GiB disk');
     expect(sandboxTierMemoryBytes('XL')).toBe(8 * GB);
   });
@@ -70,13 +76,14 @@ describe('resolveSandboxTier', () => {
     expect(resolveSandboxTier(4 * GB, 'XS')).toBe('L');
   });
 
-  it('selects XL and 2XL only for their exact RAM size', () => {
+  it('selects XL, 2XL and 3XL only for their exact RAM size', () => {
     expect(resolveSandboxTier(8 * GB, 'L')).toBe('XL');
     expect(resolveSandboxTier(16 * GB, 'L')).toBe('2XL');
+    expect(resolveSandboxTier(32 * GB, 'L')).toBe('3XL');
   });
 
   it.each([
-    5, 6, 10, 12, 16.5, 32, 64,
+    5, 6, 10, 12, 16.5, 24, 31, 33, 64,
   ])('refuses %s GiB rather than rounding up or clamping', (gib) => {
     let error: unknown;
     try {
@@ -86,7 +93,7 @@ describe('resolveSandboxTier', () => {
     }
     expect(error).toMatchObject({ code: 'PREFLIGHT_INSUFFICIENT_MEMORY', statusCode: 409 });
     expect(String((error as Error).message)).toContain(`requested ${gib} GiB`);
-    expect(String((error as Error).message)).toContain('XL (8 GiB) or 2XL (16 GiB)');
+    expect(String((error as Error).message)).toContain('XL (8 GiB), 2XL (16 GiB) or 3XL (32 GiB)');
   });
 });
 
@@ -98,8 +105,8 @@ describe('parseSandboxDefaultTier', () => {
       expect(parseSandboxDefaultTier(tier)).toEqual({ tier });
   });
 
-  it('treats opt-in XL/2XL like an unknown value, explaining they are per-repository', () => {
-    for (const tier of ['XL', '2XL']) {
+  it('treats opt-in XL/2XL/3XL like an unknown value, explaining they are per-repository', () => {
+    for (const tier of ['XL', '2XL', '3XL']) {
       const parsed = parseSandboxDefaultTier(tier);
       expect(parsed.tier).toBeUndefined();
       expect(parsed.warning).toContain('per-repository opt-in');
@@ -107,8 +114,8 @@ describe('parseSandboxDefaultTier', () => {
     }
   });
 
-  it('ignores unknown tiers including 3XL', () => {
-    for (const value of ['3XL', 'huge', 'l']) {
+  it('ignores unknown tiers', () => {
+    for (const value of ['4XL', 'huge', 'l', '3xl']) {
       const parsed = parseSandboxDefaultTier(value);
       expect(parsed.tier).toBeUndefined();
       expect(parsed.warning).toBe('Ignoring invalid sandbox tier; expected XS, S, M, L');

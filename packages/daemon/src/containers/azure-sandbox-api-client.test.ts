@@ -930,7 +930,7 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
-  describe('opt-in XL and 2XL bundles', () => {
+  describe('opt-in XL, 2XL and 3XL bundles', () => {
     const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
     const sourceDigest = `sha256:${'1'.repeat(64)}`;
     const diskImage = {
@@ -953,6 +953,7 @@ describe('AzureSandboxApiClient', () => {
     it.each([
       ['XL', { cpu: '4000m', memory: '8192Mi', disk: '80Gi' }],
       ['2XL', { cpu: '8000m', memory: '16384Mi', disk: '160Gi' }],
+      ['3XL', { cpu: '16000m', memory: '32768Mi', disk: '320Gi' }],
     ] as const)('sends the whole %s bundle in the create payload', async (tier, resources) => {
       const { client, requests } = makeClient(
         [

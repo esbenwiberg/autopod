@@ -93,7 +93,7 @@ describe('execution admission', () => {
       capabilities: sandboxCapabilities({ enabled: true, defaultTier: 'L' }),
     });
 
-    it('freezes L for an omitted size and the exact XL/2XL bundle when selected', () => {
+    it('freezes L for an omitted size and the exact XL/2XL/3XL bundle when selected', () => {
       expect(resolveExecution(sandbox()).main).toEqual({
         memoryGb: 4,
         cpus: null,
@@ -109,9 +109,16 @@ describe('execution admission', () => {
         cpus: null,
         storageGb: null,
       });
+      expect(resolveExecution(sandbox(32)).main).toEqual({
+        memoryGb: 32,
+        cpus: null,
+        storageGb: null,
+      });
     });
 
-    it.each([3, 6, 10, 32])('rejects a non-advertised %s GB selection before admission', (gb) => {
+    it.each([
+      3, 6, 10, 24, 64,
+    ])('rejects a non-advertised %s GB selection before admission', (gb) => {
       expect(() => resolveExecution(sandbox(gb))).toThrow(
         expect.objectContaining({ code: 'ALLOCATION_UNSUPPORTED' }),
       );
@@ -122,8 +129,8 @@ describe('execution admission', () => {
       expect(() => resolveExecution(sandbox(16, { storageGb: 160 }))).toThrow('storage');
     });
 
-    it('re-resolves a frozen XL/2XL allocation identically and never downgrades it', () => {
-      for (const gb of [8, 16]) {
+    it('re-resolves a frozen XL/2XL/3XL allocation identically and never downgrades it', () => {
+      for (const gb of [8, 16, 32]) {
         const frozen = resolveExecution(sandbox(gb));
         // Recovery replays the frozen allocation as an explicit request.
         const replay = sandbox();

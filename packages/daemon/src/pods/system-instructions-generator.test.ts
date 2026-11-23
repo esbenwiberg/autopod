@@ -1217,6 +1217,7 @@ human_review: []
       [4, 'L · 2 vCPU · 4 GiB RAM · 40 GiB disk'],
       [8, 'XL · 4 vCPU · 8 GiB RAM · 80 GiB disk'],
       [16, '2XL · 8 vCPU · 16 GiB RAM · 160 GiB disk'],
+      [32, '3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk'],
     ])('states the selected %s GiB sandbox bundle as the hard ceiling', (memoryGb, label) => {
       const md = generateSystemInstructions(
         makeProfile({ executionTarget: 'sandbox', containerMemoryGb: memoryGb }),

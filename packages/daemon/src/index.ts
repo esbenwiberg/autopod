@@ -558,7 +558,7 @@ if (sidecarManager) {
 }
 
 function parseSandboxTier(value: string | undefined): SandboxDefaultTier | undefined {
-  // Fleet default only: XL/2XL are per-repository opt-in and are rejected like
+  // Fleet default only: XL–3XL are per-repository opt-in and are rejected like
   // any unknown value (warn, ignore, fall back to the L default).
   const parsed = parseSandboxDefaultTier(value);
   if (parsed.warning) logger.warn({ value }, parsed.warning);

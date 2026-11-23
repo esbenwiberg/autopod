@@ -106,12 +106,14 @@ function admit(memoryGb?: number): ResolvedExecution {
 const L = { cpu: '2000m', memory: '4096Mi', disk: '40Gi' };
 const XL = { cpu: '4000m', memory: '8192Mi', disk: '80Gi' };
 const XXL = { cpu: '8000m', memory: '16384Mi', disk: '160Gi' };
+const XXXL = { cpu: '16000m', memory: '32768Mi', disk: '320Gi' };
 
 describe('hosted sandbox sizing from admission to the Azure create payload', () => {
   it.each([
     ['omitted', undefined, L],
     ['XL', 8, XL],
     ['2XL', 16, XXL],
+    ['3XL', 32, XXXL],
   ] as const)('ordinary spawn: %s selection', async (_name, selected, resources) => {
     const frozen = admit(selected);
     const { client, creates } = azure();
@@ -129,6 +131,7 @@ describe('hosted sandbox sizing from admission to the Azure create payload', () 
     ['omitted', undefined, L],
     ['XL', 8, XL],
     ['2XL', 16, XXL],
+    ['3XL', 32, XXXL],
   ] as const)('managed allocation: %s selection, reused without duplication', async (_name, selected, resources) => {
     const db = new Database(':memory:');
     db.exec(
@@ -169,15 +172,15 @@ describe('hosted sandbox sizing from admission to the Azure create payload', () 
     expect(creates.map((create) => create.resources)).toEqual([L]);
   });
 
-  it('3XL (32 GB) fails at admission and, if replayed past it, before any Azure request', async () => {
-    expect(() => admit(32)).toThrow(expect.objectContaining({ code: 'ALLOCATION_UNSUPPORTED' }));
+  it('a size above 3XL (64 GB) fails at admission and, if replayed past it, before any Azure request', async () => {
+    expect(() => admit(64)).toThrow(expect.objectContaining({ code: 'ALLOCATION_UNSUPPORTED' }));
     const { client, creates } = azure();
     await expect(
       new SandboxContainerManager(client, logger).spawn({
         image,
         podId: 'pod-1',
         env: {},
-        memoryBytes: containerMemoryRequestBytes(32, 'sandbox'),
+        memoryBytes: containerMemoryRequestBytes(64, 'sandbox'),
       }),
     ).rejects.toMatchObject({ code: 'PREFLIGHT_INSUFFICIENT_MEMORY' });
     expect(creates).toHaveLength(0);

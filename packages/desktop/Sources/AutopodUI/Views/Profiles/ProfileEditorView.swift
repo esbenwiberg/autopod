@@ -1829,19 +1829,19 @@ public struct ProfileEditorView: View {
     /// Daemon default when `containerMemoryGb` is unset — mirrors
     /// `DEFAULT_CONTAINER_MEMORY_GB` in @autopod/shared.
     static let defaultContainerMemoryGb = 10
-    /// Largest Azure Sandboxes bundle (2XL) — mirrors `MAX_SANDBOX_MEMORY_BYTES` in the daemon.
-    static let maxSandboxMemoryGb = 16
+    /// Largest Azure Sandboxes bundle (3XL) — mirrors `MAX_SANDBOX_MEMORY_BYTES` in the daemon.
+    static let maxSandboxMemoryGb = 32
     /// Largest bundle a request rounds up to (L). Above it, only exact opt-in sizes are accepted.
     static let largestRoundedSandboxMemoryGb = 4.0
-    /// Opt-in XL and 2XL bundles, selected only by their exact size.
-    static let optInSandboxMemoryGb: [Double] = [8, 16]
+    /// Opt-in XL, 2XL and 3XL bundles, selected only by their exact size.
+    static let optInSandboxMemoryGb: [Double] = [8, 16, 32]
 
     /// Non-nil when a sandbox-targeted profile asks for a size no sandbox bundle provides.
     private var sandboxMemoryClampNotice: String? {
         guard let requested = profile.containerMemoryGb,
               requested > Self.largestRoundedSandboxMemoryGb,
               !Self.optInSandboxMemoryGb.contains(requested) else { return nil }
-        return "\(requested.formatted()) GB is not a sandbox bundle. Above 4 GB, use exactly 8 (XL · 4 vCPU) or 16 (2XL · 8 vCPU); other sizes fail before a sandbox is created. Use Local (Docker) for other sizes."
+        return "\(requested.formatted()) GB is not a sandbox bundle. Above 4 GB, use exactly 8 (XL · 4 vCPU), 16 (2XL · 8 vCPU) or 32 (3XL · 16 vCPU); other sizes fail before a sandbox is created. Use Local (Docker) for other sizes."
     }
 
     @ViewBuilder
@@ -1856,7 +1856,7 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 240)
             }
-            fieldRow("Memory Limit", help: "Container RAM cap in GB. Docker honours the value as-is; empty means the daemon default (\(Self.defaultContainerMemoryGb) GB). Azure Sandboxes use fixed bundles: empty means the sandbox default bundle (normally L, 4 GB); up to 4 GB rounds up to the nearest bundle; 8 GB (XL) and 16 GB (2XL) are opt-in and cost more per running second; other sizes fail before allocation.") {
+            fieldRow("Memory Limit", help: "Container RAM cap in GB. Docker honours the value as-is; empty means the daemon default (\(Self.defaultContainerMemoryGb) GB). Azure Sandboxes use fixed bundles: empty means the sandbox default bundle (normally L, 4 GB); up to 4 GB rounds up to the nearest bundle; 8 GB (XL), 16 GB (2XL) and 32 GB (3XL) are opt-in and cost more per running second; other sizes fail before allocation.") {
                 HStack(spacing: 4) {
                     TextField("—", value: Binding(
                         get: { profile.containerMemoryGb ?? 0 },

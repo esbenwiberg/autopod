@@ -87,7 +87,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     .option('--execution <target>', 'local or sandbox')
     .option(
       '--memory-gb <number>',
-      'Main container memory (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL)',
+      'Main container memory (hosted sandbox: an advertised bundle, e.g. 8 = XL, 16 = 2XL, 32 = 3XL)',
       Number,
     )
     .option('--cpus <number>', 'Main container CPU allocation', Number)

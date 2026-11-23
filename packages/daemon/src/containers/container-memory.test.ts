@@ -18,6 +18,7 @@ describe('containerMemoryRequestBytes', () => {
   it('never reinterprets an explicit or frozen sandbox size as omitted', () => {
     expect(containerMemoryRequestBytes(8, 'sandbox')).toBe(8 * GB);
     expect(containerMemoryRequestBytes(16, 'sandbox')).toBe(16 * GB);
+    expect(containerMemoryRequestBytes(32, 'sandbox')).toBe(32 * GB);
     // An explicit 10 stays 10 so the resolver refuses it, rather than being
     // treated as omitted (default L) or rounded up to 2XL.
     expect(containerMemoryRequestBytes(10, 'sandbox')).toBe(10 * GB);
@@ -50,10 +51,16 @@ describe('resolveContainerMemory', () => {
       grantedGb: 16,
       sandboxTier: '2XL',
     });
+    expect(resolveContainerMemory(32, 'sandbox')).toMatchObject({
+      grantedGb: 32,
+      sandboxTier: '3XL',
+      bundleLabel: '3XL · 16 vCPU · 32 GiB RAM · 320 GiB disk',
+      unsupported: false,
+    });
   });
 
   it('flags a non-bundle sandbox request above L as unsupported instead of clamping', () => {
-    for (const gb of [10, 32])
+    for (const gb of [10, 64])
       expect(resolveContainerMemory(gb, 'sandbox')).toMatchObject({
         requestedGb: gb,
         grantedGb: null,
