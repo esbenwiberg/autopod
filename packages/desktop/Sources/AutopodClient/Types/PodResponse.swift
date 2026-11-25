@@ -116,6 +116,7 @@ public struct CompactPodResponse: Codable, Sendable {
   public let finalization: FinalizationResponse?
   public let id: String
   public let completionPolicy: String?
+  public let failureClosedAt: String?
   public let title: String
   public let taskExcerpt: String?
   public let taskSummary: String?
@@ -256,6 +257,7 @@ public struct SessionResponse: Codable, Sendable {
   public let linkedSessionId: String?
   public let completionPolicy: String?
   public let researchFindings: ResearchFindingsResponse?
+  public let failureClosedAt: String?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
   public let lastRecoveryTrigger: String?
@@ -323,7 +325,7 @@ public struct SessionResponse: Codable, Sendable {
     case id, profileName, profileDisplay, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt, retainedDockerCustody
-    case completionPolicy, researchFindings
+    case completionPolicy, researchFindings, failureClosedAt
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, pauseReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl

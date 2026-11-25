@@ -203,6 +203,8 @@ export interface ContainerManager {
   /** Read actual backend identity; unsupported metadata remains unavailable. */
   getExecutionMetadata?(containerId: string): Promise<ContainerExecutionMetadata>;
   ensureManagedContainer?(config: ContainerSpawnConfig): Promise<string>;
+  /** Read-only exhaustive observation for an ordinary pod, including unbound allocations. */
+  isPodExecutionStopped?(podId: string, containerId: string | null): Promise<boolean>;
   /**
    * Stream the Docker-style tar archive of `containerPath` to `hostFile` (#644 prepared
    * dependency snapshots). Rejects, leaving a partial file for the caller to remove, when

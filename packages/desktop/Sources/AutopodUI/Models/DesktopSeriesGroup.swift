@@ -8,7 +8,7 @@ struct DesktopSeriesGroup: Identifiable {
     var description: String? { pods.compactMap(\.seriesDescription).first { !$0.isEmpty } }
     var completedCount: Int { pods.filter { $0.status == .complete }.count }
     var failedCount: Int { pods.filter { $0.status == .failed || $0.status == .killed }.count }
-    var attentionCount: Int { pods.filter { $0.status.needsAttention }.count }
+    var attentionCount: Int { pods.filter { $0.needsAttention }.count }
     var queuedCount: Int { pods.filter { $0.status == .queued || $0.status == .paused }.count }
     var totalCost: Double { pods.reduce(0) { $0 + $1.costUsd } }
     var isActive: Bool { pods.contains { ![PodStatus.complete, .failed, .killed].contains($0.status) } }

@@ -244,6 +244,8 @@ export class PodsitterActionExecutor {
       // Re-read after the transactional reservation so lifecycle races still
       // become audited not_executed outcomes before any operational call.
       const currentPod = this.podManager.getSession(input.podId);
+      if (currentPod.failureClosedAt)
+        throw new AutopodError('The operator closed this failure.', 'FAILURE_ALREADY_CLOSED', 409);
       assertActionStatus(decision.action, currentPod);
       assertLastResortPreconditions(decision, currentPod);
       await this.dispatch(input.podId, decision, actor);

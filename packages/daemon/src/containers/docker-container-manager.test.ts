@@ -816,6 +816,22 @@ describe('DockerContainerManager', () => {
     });
   });
 
+  it('checks labeled, legacy-named and exact Docker resources before failure closeout', async () => {
+    const id = 'a'.repeat(64);
+    const labeled = { label: ['com.autopod.pod-id=failed-pod'] };
+    const legacy = { name: ['^/autopod-failed-pod$'] };
+    docker.listContainers
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ State: 'restarting' }]);
+    await expect(manager.isPodExecutionStopped('failed-pod', id)).resolves.toBe(false);
+    for (const filters of [labeled, legacy, { id: [id] }])
+      expect(docker.listContainers).toHaveBeenCalledWith({ all: true, filters });
+    docker.listContainers.mockResolvedValue([{ State: 'exited' }]);
+    await expect(manager.isPodExecutionStopped('failed-pod', id)).resolves.toBe(true);
+    expect(container.stop).not.toHaveBeenCalled();
+    expect(container.remove).not.toHaveBeenCalled();
+  });
+
   describe('observeFinalizationResource()', () => {
     const id = 'a'.repeat(64);
     it('reports exact running and stopped identity on this engine', async () => {

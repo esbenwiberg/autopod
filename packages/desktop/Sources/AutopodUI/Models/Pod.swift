@@ -903,6 +903,12 @@ public struct TaskSummary: Sendable {
 public struct Pod: Identifiable, Sendable {
     public var completionPolicy: String? = nil
     public var researchFindings: ResearchFindingsResponse? = nil
+    public var failureClosedAt: String? = nil
+    // The original daemon string is used for the compare-and-set request.
+    public var failureRevision: String? = nil
+    public var isClosedFailure: Bool { status == .failed && failureClosedAt != nil }
+    public var needsAttention: Bool { status.needsAttention && !isClosedFailure }
+    public var isInCompletedFleet: Bool { status == .complete || status == .killed || isClosedFailure }
     public let id: String
     /// Visibility only. Does not certify termination or release retained resources.
     public var fleetArchivedAt: String? = nil

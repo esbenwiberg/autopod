@@ -1121,6 +1121,30 @@ export class DockerContainerManager implements ContainerManager {
     return JSON.stringify(['docker', engine.ID, container.Id]);
   }
 
+  async isPodExecutionStopped(podId: string, containerId: string | null): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]+$/.test(podId) || (containerId && !/^[a-f0-9]{64}$/.test(containerId)))
+      return false;
+    const queries = [
+      { label: [`com.autopod.pod-id=${podId}`] },
+      // Older Docker pods have a deterministic name but no pod ownership label.
+      { name: [`^/autopod-${podId}$`] },
+      ...(containerId ? [{ id: [containerId] }] : []),
+    ];
+    const observations = await Promise.all(
+      queries.map((filters) =>
+        boundedDockerCall(this.docker.listContainers({ all: true, filters }), {
+          label: 'list containers (failure closeout)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+          logger: this.logger,
+          containerId: containerId ?? undefined,
+        }),
+      ),
+    );
+    return observations
+      .flat()
+      .every((entry) => ['exited', 'dead', 'created'].includes(entry.State));
+  }
+
   async observeFinalizationResource(
     containerId: string,
   ): Promise<{ resourceKey: string; status: 'running' | 'stopped' | 'deleted' }> {

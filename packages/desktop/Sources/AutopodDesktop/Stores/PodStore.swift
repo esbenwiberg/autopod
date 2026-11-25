@@ -37,7 +37,7 @@ public final class PodStore {
   }
 
   public var attentionSessions: [Pod] {
-    pods.filter { $0.status.needsAttention }
+    pods.filter { $0.needsAttention }
   }
 
   public var runningSessions: [Pod] {
@@ -49,7 +49,7 @@ public final class PodStore {
   }
 
   public var completedSessions: [Pod] {
-    pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
+    pods.filter { $0.isInCompletedFleet && !$0.isWorkspace }
   }
 
   // MARK: - API
@@ -187,6 +187,10 @@ public final class PodStore {
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
       copyDecision(from: current, to: &merged)
     }
+    if preserveCurrentStatus || current.updatedAt > incoming.updatedAt {
+      merged.failureClosedAt = current.failureClosedAt
+      merged.failureRevision = current.failureRevision
+    }
     if preserveCurrentStatus {
       merged.status = current.status
     } else if current.updatedAt > incoming.updatedAt {
@@ -242,6 +246,8 @@ public final class PodStore {
     var merged = hydrated
     if !preserveCurrentStatus {
       merged.status = incoming.status
+      merged.failureClosedAt = incoming.failureClosedAt
+      merged.failureRevision = incoming.failureRevision
     }
     if incoming.fleetDisplay != nil {
       merged.fleetDisplay = incoming.fleetDisplay
@@ -503,6 +509,8 @@ public final class PodStore {
     if pods[index].status != status {
       failureDetailRevisions[podId, default: 0] += 1
       pods[index].failureDetail = nil
+      pods[index].failureClosedAt = nil
+      pods[index].failureRevision = nil
     }
     pods[index].status = status
     statusRevisions[podId, default: 0] += 1

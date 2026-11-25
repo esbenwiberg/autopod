@@ -140,6 +140,7 @@ public struct ValidationPhaseResult: Sendable {
 public enum SystemEvent: Sendable {
   case sessionCreated(SessionSummaryResponse)
   case statusChanged(podId: String, from: String, to: String)
+  case failureClosed(podId: String)
   case agentActivity(podId: String, event: AgentEventResponse)
   case validationStarted(podId: String, attempt: Int)
   case validationCompleted(podId: String, result: ValidationResponse)
@@ -169,6 +170,10 @@ public enum SystemEvent: Sendable {
       guard let id = raw.podId, let from = raw.previousStatus, let to = raw.newStatus
       else { return nil }
       return .statusChanged(podId: id, from: from, to: to)
+
+    case "pod.failure_closed":
+      guard let id = raw.podId else { return nil }
+      return .failureClosed(podId: id)
 
     case "pod.agent_activity":
       guard let id = raw.podId, let event = raw.event else { return nil }

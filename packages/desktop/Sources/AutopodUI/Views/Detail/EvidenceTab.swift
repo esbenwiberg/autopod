@@ -36,6 +36,7 @@ public struct EvidenceTab: View {
   public var loadContent: ((String, String) async throws -> SessionFileContent)?
   public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
   public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
+  private var researchActions: PodActions?
   @Binding private var requestedSection: EvidenceSection?
 
   public init(
@@ -45,7 +46,8 @@ public struct EvidenceTab: View {
     loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
     loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
     loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
-    requestedSection: Binding<EvidenceSection?> = .constant(nil)
+    requestedSection: Binding<EvidenceSection?> = .constant(nil),
+    researchActions: PodActions? = nil
   ) {
     self.pod = pod
     self.loadFiles = loadFiles
@@ -54,6 +56,7 @@ public struct EvidenceTab: View {
     self.loadFirewallDenials = loadFirewallDenials
     self.loadActionAudit = loadActionAudit
     self._requestedSection = requestedSection
+    self.researchActions = researchActions
   }
 
   @State private var selectedSection: EvidenceSection = .screenshots
@@ -96,7 +99,13 @@ public struct EvidenceTab: View {
   public var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       if pod.completionPolicy == "accept-findings" {
-        Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Retained research evidence").textSelection(.enabled).padding()
+        VStack(alignment: .leading, spacing: 8) {
+          Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Retained research evidence")
+            .textSelection(.enabled)
+          if pod.status == .researchReady, let researchActions {
+            ResearchFindingsAcceptance(pod: pod, actions: researchActions)
+          }
+        }.padding()
       }
       evidenceBody
     }

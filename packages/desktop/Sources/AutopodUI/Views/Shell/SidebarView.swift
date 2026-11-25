@@ -41,11 +41,11 @@ public struct SidebarView: View {
         self.onShowSettings = onShowSettings
     }
 
-    private var attentionCount: Int { pods.filter { $0.status.needsAttention }.count }
-    private var activeCount: Int { pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }.count }
+    private var attentionCount: Int { pods.filter { $0.needsAttention }.count }
+    private var activeCount: Int { pods.filter { ($0.status.isActive || $0.needsAttention) && !$0.isWorkspace }.count }
     private var runningCount: Int { pods.filter { $0.status.isActive && !$0.isWorkspace }.count }
     private var workspaceCount: Int { pods.filter { $0.isWorkspace }.count }
-    private var completedCount: Int { pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }.count }
+    private var completedCount: Int { pods.filter { $0.isInCompletedFleet && !$0.isWorkspace }.count }
     /// Count of series that have at least one non-terminal pod.
     private var activeSeriesCount: Int {
         let terminalStatuses: Set<PodStatus> = [.complete, .killed, .failed]

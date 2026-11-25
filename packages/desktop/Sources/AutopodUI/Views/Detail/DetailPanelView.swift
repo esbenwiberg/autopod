@@ -177,9 +177,7 @@ public struct DetailPanelView: View {
     }
 
     @State private var requestedEvidenceSection: EvidenceSection?
-    @State private var findingsError: String?
     @State private var showSavedWorkDraft = false
-    @State private var findingsPending = false
     @State private var isInfrastructureResumePending = false
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
@@ -376,7 +374,11 @@ public struct DetailPanelView: View {
                     seriesReadiness: seriesReadiness,
                     loadQuality: loadQuality,
                     loadPreviewStatus: loadPreviewStatus,
-                    onOpenReadiness: { selectedTab = .readiness }
+                    onOpenReadiness: { selectedTab = .readiness },
+                    onOpenResearchReports: {
+                        requestedEvidenceSection = .artifacts
+                        selectedTab = .evidence
+                    }
                 )
                 case .logs:       LogStreamView(
                     events: events,
@@ -420,7 +422,8 @@ public struct DetailPanelView: View {
                     loadContent: findingsContentLoader,
                     loadFirewallDenials: loadFirewallDenials,
                     loadActionAudit: loadActionAudit,
-                    requestedSection: $requestedEvidenceSection
+                    requestedSection: $requestedEvidenceSection,
+                    researchActions: actions
                 )
                 .id("\(pod.id):\(pod.researchFindings?.evidenceHash ?? "current")")
                 case .terminal:   EmptyView()
@@ -1054,19 +1057,7 @@ public struct DetailPanelView: View {
                 }
 
             case .researchReady:
-                Button("Open report / summary") { requestedEvidenceSection = .artifacts; selectedTab = .evidence }
-                if let findings = pod.researchFindings {
-                    Button(findingsPending ? "Accepting…" : "Accept findings") {
-                        findingsPending = true
-                        Task {
-                            defer { findingsPending = false }
-                            do { try await actions.acceptFindings(pod.id, findings); findingsError = nil }
-                            catch { findingsError = error.localizedDescription }
-                        }
-                    }.disabled(findingsPending)
-                }
-                Text("Acknowledges receipt, not a fix or implementation permission.").font(.caption)
-                if let findingsError { Text(findingsError).foregroundStyle(.red) }
+                Button("Open reports") { requestedEvidenceSection = .artifacts; selectedTab = .evidence }
             case .validated:
                 if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
                     // All checks passed, or a human explicitly waived the failures.
@@ -1256,18 +1247,19 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     .tint(.orange)
                 }
-                // Force Complete — admin override. Skips push/PR/merge entirely.
-                // Last-resort escape when downstream is broken and re-running burns tokens.
-                Button {
-                    forceCompleteReasonText = ""
-                    showForceCompleteSheet = true
-                } label: {
-                    Label("Force Complete", systemImage: "checkmark.shield")
+                // This override is not a substitute for research acceptance or failure closeout.
+                if pod.completionPolicy != "accept-findings" {
+                    Button {
+                        forceCompleteReasonText = ""
+                        showForceCompleteSheet = true
+                    } label: {
+                        Label("Force Complete", systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                    .help("Admin override — mark this pod complete without pushing/PR/merge. May unblock dependent pods.")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.red)
-                .help("Admin override — mark this pod complete without pushing/PR/merge. Reason persisted for audit.")
                 if !pod.usesRetainedDockerControls {
                     Button(role: .destructive) {
                         showDeleteConfirmation = true

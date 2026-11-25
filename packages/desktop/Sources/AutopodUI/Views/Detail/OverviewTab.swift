@@ -21,6 +21,7 @@ struct OverviewTab: View {
     /// Preview card is static (shows last cached status or nil). Polled every 5 s.
     var loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil
     var onOpenReadiness: () -> Void = {}
+    var onOpenResearchReports: (() -> Void)? = nil
 
     @State private var replySurface = DecisionReplySurface()
     private var replyContext: DecisionReplyContext {
@@ -69,9 +70,15 @@ struct OverviewTab: View {
                 if pod.completionPolicy == "accept-findings" {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(pod.status == .complete ? "Accepted findings" : "Research findings").font(.headline)
-                        Text("Acceptance acknowledges receipt, not a fix or permission to implement or publish.")
                         Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Summary is not yet available.")
                             .textSelection(.enabled)
+                        if pod.status == .researchReady {
+                            if let onOpenResearchReports {
+                                Button("Open reports", action: onOpenResearchReports)
+                            }
+                            ResearchFindingsAcceptance(pod: pod, actions: actions)
+                                .id(pod.researchFindings?.evidenceHash)
+                        }
                         if let accepted = pod.researchFindings?.acceptance {
                             Text("Accepted by \(accepted.actor["displayName"]?.string ?? accepted.actor["userId"]?.string ?? "human") at \(accepted.acceptedAt)").font(.caption)
                         }
@@ -81,6 +88,9 @@ struct OverviewTab: View {
 
                 if [.failed, .reviewRequired, .killed].contains(pod.status) {
                     OverviewFailureReason(detail: pod.currentFailureDetail)
+                    if pod.status == .failed {
+                        FailureCloseoutControl(pod: pod, close: actions.closeFailure).id(pod.id)
+                    }
                 }
 
                 readinessCompactCard

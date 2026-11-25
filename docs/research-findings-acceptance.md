@@ -21,7 +21,9 @@ failed cleanup do not expose acceptance. Resources remain retained for recovery.
 After snapshot verification and worker cleanup, the task enters **Research ready**.
 It stays in Attention until a human accepts findings. Native validation is **Not
 required for this research task**; other security and safety evidence remains visible.
-Open the summary and reports in desktop/phone details, or use:
+On desktop, choose **Review findings** on the card, then **Accept findings** next
+to the reviewed summary or in **Evidence**. In the phone app, use pod details.
+From the CLI:
 
 ```sh
 ap status <full-pod-id> --json

@@ -282,7 +282,7 @@ export interface SandboxApiClient {
    * clients that cannot list, in which case orphan reaping is disabled rather
    * than silently skipped.
    */
-  listSandboxes?(): Promise<SandboxDescriptor[]>;
+  listSandboxes?(options?: { requireComplete: boolean }): Promise<SandboxDescriptor[]>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */

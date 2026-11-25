@@ -452,6 +452,17 @@ public final class ActionHandler {
       try await self.perform { try await self.api.acceptFindings(id, findings: findings) }
       try await self.perform { await self.podStore.refreshSession(id) }
     }
+    result.closeFailure = { [weak self] id, revision in
+      guard let self else { throw DaemonError.badRequest("Connection unavailable") }
+      do {
+        try await self.perform { try await self.api.closeFailure(id, expectedUpdatedAt: revision) }
+      } catch {
+        // Observe the latest row before offering another manual request; never replay a write.
+        try? await self.perform { await self.podStore.refreshSession(id) }
+        throw error
+      }
+      try await self.perform { await self.podStore.refreshSession(id) }
+    }
     result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
     result.parentFamilyConnectionID = replyContextID
     result.loadParentFamily = { [weak self] id in

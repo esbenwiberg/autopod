@@ -67,8 +67,8 @@ struct DesktopRepositoryIndex {
         visible = MainView.visiblePods(pods, selection: selection, browseScope: browseScope,
             query: query, sortOrder: sortOrder, selectedPodId: selectedPodID,
             repositoryID: repositoryID, repositoryIndex: index)
-        attention = visible.filter { $0.status.needsAttention }
-        remainder = visible.filter { !$0.status.needsAttention }
+        attention = visible.filter { $0.needsAttention }
+        remainder = visible.filter { !$0.needsAttention }
         scopedTotal = repositoryID.map { index.countsByRepositoryID[$0, default: 0] } ?? pods.count
     }
 }

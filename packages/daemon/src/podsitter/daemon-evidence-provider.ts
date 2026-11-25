@@ -231,7 +231,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
       STALE_STATUSES.has(pod.status) &&
       Number.isFinite(referenceTime) &&
       now.getTime() - referenceTime >= STALE_MS;
-    if (!ATTENTION_STATUSES.has(pod.status) && !stale) return null;
+    if (pod.failureClosedAt || (!ATTENTION_STATUSES.has(pod.status) && !stale)) return null;
     const escalations = deps.escalationRepo.listBySession(pod.id);
     const pendingEscalations = escalations.filter((item) => !item.response);
     const validationHistory = deps.podManager.getValidationHistory(pod.id);

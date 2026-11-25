@@ -535,12 +535,26 @@ for root in sys.argv[1:]:
     return id;
   }
 
-  /**
-   * Enumerate every sandbox in the configured group, or `undefined` when the
-   * underlying client cannot list. Not part of the `ContainerManager` contract —
-   * Docker has no equivalent need, because a stopped local container costs
-   * nothing while an orphaned sandbox bills cold storage forever.
-   */
+  async isPodExecutionStopped(podId: string, containerId: string | null): Promise<boolean> {
+    const managed = this.managedDatabase
+      ?.prepare('SELECT sandbox_id FROM managed_sandbox_allocations WHERE pod_id=?')
+      .get(podId) as { sandbox_id: string | null } | undefined;
+    if (managed && !managed.sandbox_id) return false;
+    const listed = await this.client.listSandboxes?.({ requireComplete: true });
+    if (!listed) return false;
+    const matches = (resource: SandboxDescriptor) =>
+      resource.labels.podId === podId ||
+      resource.id === containerId ||
+      resource.id === managed?.sandbox_id;
+    // Without any exact identity we cannot rule out a create whose reply was lost.
+    if (!containerId && !managed?.sandbox_id && !listed.some(matches)) return false;
+    return listed.every((resource) => {
+      if (matches(resource)) return ['Stopped', 'Suspended', 'Idle'].includes(resource.state ?? '');
+      return resource.labels.managedBy !== 'autopod' || Boolean(resource.labels.podId);
+    });
+  }
+
+  /** Enumerate the configured group for the orphan reaper. */
   async listSandboxes(): Promise<SandboxDescriptor[] | undefined> {
     if (!this.client.listSandboxes) return undefined;
     return this.client.listSandboxes();

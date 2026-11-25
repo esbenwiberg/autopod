@@ -192,6 +192,8 @@ interface SandboxResponse {
 }
 
 interface SandboxListResponse {
+  nextLink?: string;
+  continuationToken?: string;
   value?: SandboxResponse[];
   items?: SandboxResponse[];
   sandboxes?: SandboxResponse[];
@@ -384,17 +386,25 @@ export class AzureSandboxApiClient implements SandboxApiClient {
    * Labels are returned verbatim; callers must gate on `managedBy` themselves,
    * because a sandbox group can legitimately hold objects autopod does not own.
    */
-  async listSandboxes(): Promise<SandboxDescriptor[]> {
+  async listSandboxes(options?: { requireComplete: boolean }): Promise<SandboxDescriptor[]> {
     const response = await this.requestData<SandboxListResponse | SandboxResponse[]>(
       'GET',
       `${this.groupPath()}/sandboxes`,
-      { okStatuses: [200, 404] },
+      { okStatuses: options?.requireComplete ? [200] : [200, 404] },
     );
     const items = Array.isArray(response)
       ? response
-      : (response.value ?? response.items ?? response.sandboxes ?? []);
+      : (response.value ?? response.items ?? response.sandboxes);
+    if (
+      options?.requireComplete &&
+      (!Array.isArray(items) ||
+        (!Array.isArray(response) && (response.nextLink || response.continuationToken)))
+    )
+      throw new Error('Complete sandbox inventory is unavailable');
     const sandboxes: SandboxDescriptor[] = [];
-    for (const item of items) {
+    for (const item of items ?? []) {
+      if (options?.requireComplete && (typeof item?.id !== 'string' || !item.id))
+        throw new Error('Sandbox inventory contains an unidentified resource');
       // An entry without an id is unaddressable — we could neither delete nor
       // attribute it, so drop it rather than surface a half-formed record.
       if (typeof item?.id !== 'string' || item.id.length === 0) {

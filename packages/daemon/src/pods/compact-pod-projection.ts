@@ -27,6 +27,7 @@ export const COMPACT_JSON_FIELDS = [
 // contracts, spec files and validation evidence are not selected or parsed at all.
 export const COMPACT_POD_COLUMNS = [
   'completion_policy',
+  'failure_closed_at',
   'id',
   'profile_name',
   'status',

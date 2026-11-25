@@ -59,6 +59,8 @@ public struct SessionCardFinal: View {
     @Environment(\.desktopRepositories) private var repositories
     @Environment(\.desktopRepositoryFilter) private var filterRepository
     @Environment(\.desktopPodSelection) private var selectPod
+    @Environment(\.desktopReviewFindings) private var reviewFindings
+    private var openFindings: ((String) -> Void)? { reviewFindings ?? selectPod }
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
 
@@ -133,7 +135,7 @@ public struct SessionCardFinal: View {
                         ? Color.accentColor.opacity(0.9)
                         : isHovered
                             ? Color.accentColor.opacity(0.4)
-                            : (pod.status.needsAttention || pod.status == .complete)
+                            : (pod.needsAttention || pod.status == .complete)
                                 ? pod.status.color.opacity(0.35)
                                 : Color.white.opacity(0.15),
                     lineWidth: isSelected ? 2 : 1.5
@@ -213,6 +215,9 @@ public struct SessionCardFinal: View {
 
     @ViewBuilder
     private var cardMenuActions: some View {
+            if pod.status == .researchReady, let openFindings {
+                Button("Review findings", systemImage: "doc.text") { openFindings(pod.id) }
+            }
             if let onSpawnFollowUp, !pod.isTerminal {
                 Button {
                     onSpawnFollowUp(pod)
@@ -233,7 +238,7 @@ public struct SessionCardFinal: View {
                     Task { await actions.unarchive(pod.id) }
                 }
             }
-            if !pod.usesRetainedDockerControls && pod.status != .killed && pod.status != .killing {
+            if !pod.usesRetainedDockerControls && !pod.isInCompletedFleet && pod.status != .killing && pod.status != .researchReady {
                 Button(role: .destructive) {
                     Task { await actions.kill(pod.id) }
                 } label: {
@@ -242,7 +247,7 @@ public struct SessionCardFinal: View {
                 .disabled(pendingControl != nil)
                 .accessibilityIdentifier("pod-control-kill-\(pod.id)")
             }
-            if !pod.usesRetainedDockerControls {
+            if !pod.usesRetainedDockerControls && pod.status != .researchReady {
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
@@ -258,7 +263,7 @@ public struct SessionCardFinal: View {
             // Accent stripe
             pod.status.color
                 .frame(height: 2)
-                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
+                .opacity(isSelected ? 0.8 : (pod.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
 
             compactContent
                 .padding(12)
@@ -317,6 +322,14 @@ public struct SessionCardFinal: View {
             }
             if let fixLifecycle = pod.prFixLifecycleLabel {
                 Text(fixLifecycle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).help(fixLifecycle)
+            }
+            if pod.status == .researchReady, let openFindings {
+                Button("Review findings", systemImage: "doc.text") { openFindings(pod.id) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("review-findings-\(pod.id)")
+            } else if pod.isClosedFailure {
+                Text("Closed as failed").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             VStack(spacing: 6) {
@@ -499,8 +512,16 @@ public struct SessionCardFinal: View {
     private var workerCompactSummary: some View {
         switch pod.status {
         case .researchReady:
-            Label("Research ready — accept findings", systemImage: "doc.text")
-                .font(.caption).foregroundStyle(.orange)
+            if let openFindings {
+                Button("Review findings", systemImage: "doc.text") { openFindings(pod.id) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            } else {
+                Label("Research ready — review findings", systemImage: "doc.text")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        case .failed where pod.isClosedFailure:
+            Text("Closed as failed").font(.caption).foregroundStyle(.secondary)
         case .running:
             if let phase = pod.phase {
                 HStack(spacing: 6) {

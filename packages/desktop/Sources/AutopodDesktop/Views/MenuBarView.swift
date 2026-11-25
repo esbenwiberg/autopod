@@ -12,7 +12,7 @@ public struct MenuBarView: View {
   }
 
   private var attentionSessions: [Pod] {
-    pods.filter { $0.status.needsAttention }
+    pods.filter { $0.needsAttention }
   }
 
   private var runningSessions: [Pod] {

@@ -86,6 +86,19 @@ private func presentationPod(_ id: String, status: PodStatus = .complete,
     #expect(pod.desktopRepositoryPlaceholder == "Repository unavailable")
 }
 
+@MainActor @Test func closedFailureIsFinishedButStillFailed() {
+    let open = presentationPod("open-failure", status: .failed)
+    var closed = presentationPod("closed-failure", status: .failed)
+    closed.failureClosedAt = "2026-01-01T00:00:00Z"
+    let research = presentationPod("research", status: .researchReady)
+    let pods = [open, closed, research]
+    #expect(MainView.filterPods(pods, for: .attention).map(\.id) == ["open-failure", "research"])
+    #expect(MainView.filterPods(pods, for: .active).map(\.id) == ["open-failure", "research"])
+    #expect(MainView.filterPods(pods, for: .completed).map(\.id) == ["closed-failure"])
+    #expect(DesktopHistoryFilter(outcome: "failed").matches(closed, repository: nil, now: Date()))
+    #expect(closed.status == .failed)
+}
+
 @Test func researchReadyRemainsInAttentionWithoutMergeStages() {
     #expect(PodStatus(rawValue: "research_ready") == .researchReady)
     #expect(PodStatus.researchReady.needsAttention)

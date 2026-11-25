@@ -197,6 +197,7 @@ function compactPod(
     fleetArchivedAt: pod.fleetArchivedAt,
     retainedDockerCustody: pod.retainedDockerCustody,
     completionPolicy: pod.completionPolicy,
+    failureClosedAt: pod.failureClosedAt,
     recordDiagnostics: pod.recordDiagnostics,
     finalization: pod.finalization,
     title,
@@ -1758,6 +1759,23 @@ export function podRoutes(
       .strict()
       .parse(request.body);
     return podManager.acceptFindings(podId, body, humanActor(request));
+  });
+
+  app.post('/pods/:podId/close-failure', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const user = request.user;
+    if (
+      !user?.oid?.trim() ||
+      (user.operatorPrincipal !== 'delegated-user' && user.operatorPrincipal !== 'local-dev')
+    )
+      throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
+    const { podId } = request.params as { podId: string };
+    const { expectedUpdatedAt } = z
+      .strictObject({
+        expectedUpdatedAt: z.string().min(1).max(64),
+      })
+      .parse(request.body);
+    return podManager.closeFailure(podId, expectedUpdatedAt, humanActor(request));
   });
 
   // A separate path is intentional: older daemons must 404 rather than ignore

@@ -1,4 +1,20 @@
-# Previously archived pods
+# Close a failed pod
+
+In the desktop pod **Overview**, choose **Close as failed** after reviewing the
+failure. The pod leaves **Needs attention** and **Active** and appears in
+**Completed** with its original **Failed** outcome. It remains in history. This
+does not stop execution, delete anything, free storage, waive validation,
+publish, or release dependent pods. An explicitly started retry can still
+produce a new failure that needs attention.
+
+The daemon verifies that the current failed run is idle and that its Docker or
+sandbox execution resources are stopped or absent. Running or unknown resources,
+unresolved operations and specialized recovery paths block closeout. A sandbox
+without an exact identity cannot be assumed absent. Open **Recovery** to inspect
+those cases; don't use Kill or Force Complete just to clear the list. Keep the
+original resources until the appropriate recovery or cleanup is confirmed.
+
+## Previously archived pods
 
 Creating new fleet archives, including the handled-elsewhere disposition, is
 retired. Hiding a pod was never termination or resource cleanup: unknown

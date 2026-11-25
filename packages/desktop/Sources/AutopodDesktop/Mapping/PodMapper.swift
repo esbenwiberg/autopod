@@ -181,6 +181,8 @@ public enum PodMapper {
     result.retainedDockerCustody = response.retainedDockerCustody
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
+    result.failureClosedAt = response.failureClosedAt
+    result.failureRevision = response.updatedAt
     return result
   }
 
@@ -612,6 +614,8 @@ public enum PodMapper {
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
     result.researchFindings = response.researchFindings
+    result.failureClosedAt = response.failureClosedAt
+    result.failureRevision = response.updatedAt
     result.queueLength = response.queueLength ?? 0
     result.recentQueueMessages = (response.recentQueueMessages ?? []).map { msg in
       PodQueueMessage(

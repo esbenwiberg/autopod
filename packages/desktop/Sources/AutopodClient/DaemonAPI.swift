@@ -506,6 +506,13 @@ public actor DaemonAPI {
     let _: ResearchFindingsResponse = try await request("POST", "/pods/\(id)/accept-findings", body: try encode(AcceptFindingsRequest(findings)))
   }
 
+  public func closeFailure(_ id: String, expectedUpdatedAt: String) async throws {
+    struct Receipt: Decodable { let failureClosedAt: String }
+    let _: Receipt = try await request(
+      "POST", "/pods/\(id)/close-failure", body: try encode(["expectedUpdatedAt": expectedUpdatedAt])
+    )
+  }
+
   public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
     let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
     let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {

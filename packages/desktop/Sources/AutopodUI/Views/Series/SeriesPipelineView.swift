@@ -298,7 +298,7 @@ public struct SeriesPipelineView: View {
         return HStack(spacing: 16) {
             if redesign {
                 footerChip("\(pods.filter { $0.status == .complete }.count) complete", color: DesktopTheme.success)
-                footerChip("\(pods.filter { $0.status.needsAttention }.count) need attention", color: .orange)
+                footerChip("\(pods.filter { $0.needsAttention }.count) need attention", color: .orange)
                 footerChip("\(counts.queued) queued", color: .secondary)
             } else {
             if counts.researchReady > 0 { footerChip("\(counts.researchReady) research ready", color: .orange) }
@@ -546,7 +546,7 @@ private struct SeriesSummaryView: View {
 
     private var statusSummary: String {
         let running = pods.filter {
-            !deliveredStatuses.contains($0.status) && ($0.status.isActive || $0.status.needsAttention)
+            !deliveredStatuses.contains($0.status) && ($0.status.isActive || $0.needsAttention)
         }.count
         let queued = pods.filter { $0.status == .queued || $0.status == .paused }.count
         let failed = pods.filter { $0.status == .failed || $0.status == .killed }.count

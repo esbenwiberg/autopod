@@ -69,6 +69,7 @@ import {
   createDeliveryPollingState,
   createDeliveryProvider,
 } from './delivery-state.js';
+import { createFailureCloseout } from './failure-closeout.js';
 import {
   buildActionableFailureSummary,
   buildPrFixTask,
@@ -2006,8 +2007,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         deps.launchConfiguration?.read(id)?.intent === 'goal' ||
         Boolean(deps.launchConfiguration?.goals?.get(id)),
     });
+  const closeFailure = createFailureCloseout({
+    pods: podRepo,
+    eventBus,
+    manager: (target) => containerManagerFactory.get(target),
+    isGoal: (id) => deps.launchConfiguration?.read(id)?.intent === 'goal',
+    isIdle: (id) =>
+      !controlOperations.isActive(id, 'closeFailure') &&
+      !activeAgentRuns.has(id) &&
+      !validationAbortControllers.has(id) &&
+      !validationResumeRuns.has(id) &&
+      !artifactResumeRuns.has(id) &&
+      !artifactCompletionRuns.has(id) &&
+      !attemptExtensionRuns.has(id) &&
+      !mergePolling.isActive(id) &&
+      !checkpointRecovery?.isActive(id) &&
+      !stalledWorkerRecovery?.isActive(id) &&
+      !retainedFinalization?.isActive(id),
+  });
   return controlOperations.wrap(
     createPodManagerFacade({
+      closeFailure,
       retainedCleanup,
       recoveryFork,
       stalledWorkerRecovery,

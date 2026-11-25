@@ -275,6 +275,8 @@ export interface Pod {
   /** Frozen workflow projection; absent on historical launches. */
   completionPolicy?: 'accept-findings' | null;
   researchFindings?: ResearchFindings | null;
+  /** Human closeout of the current failure; independent of execution status. */
+  failureClosedAt?: string | null;
   /** Present for composable launches; a missing/corrupt snapshot must never fall back to a live profile. */
   launchConfigDigest?: string | null;
   /** Durable worker settlement; this never grants validation or delivery authority. */
@@ -773,6 +775,7 @@ export interface CompactPod {
   fleetArchivedAt?: string | null;
   retainedDockerCustody?: boolean;
   completionPolicy?: Pod['completionPolicy'];
+  failureClosedAt?: string | null;
   /** Absent on older daemons; present with null progress means no reported milestone. */
   display?: PodFleetDisplay;
   finalization?: Pod['finalization'];
