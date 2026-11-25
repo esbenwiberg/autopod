@@ -9,15 +9,21 @@ const NEEDS_ME_STATUSES: ReadonlySet<PodStatus> = new Set([
   'failed',
 ]);
 
-export function isTerminal(pod: Pick<Pod, 'status'>): boolean {
-  return TERMINAL_STATUSES.has(pod.status);
+type FleetOutcome = Pick<Pod, 'status' | 'failureClosedAt'>;
+
+function isClosedFailure(pod: FleetOutcome): boolean {
+  return pod.status === 'failed' && Boolean(pod.failureClosedAt);
 }
 
-export function needsMe(pod: Pick<Pod, 'status'>): boolean {
-  return NEEDS_ME_STATUSES.has(pod.status);
+export function isTerminal(pod: FleetOutcome): boolean {
+  return TERMINAL_STATUSES.has(pod.status) || isClosedFailure(pod);
 }
 
-export function isActive(pod: Pick<Pod, 'status'>): boolean {
+export function needsMe(pod: FleetOutcome): boolean {
+  return NEEDS_ME_STATUSES.has(pod.status) && !isClosedFailure(pod);
+}
+
+export function isActive(pod: FleetOutcome): boolean {
   return !isTerminal(pod);
 }
 

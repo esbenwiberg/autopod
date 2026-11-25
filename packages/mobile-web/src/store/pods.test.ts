@@ -53,6 +53,35 @@ describe('usePodsStore.applyEvent', () => {
     expect(usePodsStore.getState().pods).toBe(before);
   });
 
+  it('projects closeout only onto the matching failure and clears it on a retry', () => {
+    const timestamp = '2026-02-02T00:00:00Z';
+    usePodsStore.setState({
+      pods: [
+        makePod('a', 'failed'),
+        makePod('newer', 'failed', { updatedAt: '2026-03-03T00:00:00Z' }),
+      ],
+    });
+    const apply = usePodsStore.getState().applyEvent;
+    for (const podId of ['a', 'newer'])
+      apply({ type: 'pod.failure_closed', timestamp, podId, userId: 'operator' });
+    expect(usePodsStore.getState().pods[0]).toMatchObject({
+      status: 'failed',
+      failureClosedAt: timestamp,
+    });
+    expect(usePodsStore.getState().pods[1]?.failureClosedAt).toBeUndefined();
+    apply({
+      type: 'pod.status_changed',
+      timestamp,
+      podId: 'a',
+      previousStatus: 'failed',
+      newStatus: 'running',
+    });
+    expect(usePodsStore.getState().pods[0]).toMatchObject({
+      status: 'running',
+      failureClosedAt: null,
+    });
+  });
+
   it('pod.completed patches status + completedAt', () => {
     usePodsStore.setState({ pods: [makePod('a', 'merging')] });
     usePodsStore.getState().applyEvent({

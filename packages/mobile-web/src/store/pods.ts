@@ -102,7 +102,23 @@ export const usePodsStore = create<PodsState>((set, get) => ({
             .then((p) => get().upsertPod(p))
             .catch(() => {});
         }
-        set({ pods: patchPod(get().pods, event.podId, { status: event.newStatus }) });
+        set({
+          pods: patchPod(get().pods, event.podId, {
+            status: event.newStatus,
+            failureClosedAt: null,
+          }),
+        });
+        return;
+      case 'pod.failure_closed':
+        set(({ pods }) => ({
+          pods: pods.map((pod) =>
+            pod.id === event.podId &&
+            pod.status === 'failed' &&
+            Date.parse(pod.updatedAt) <= Date.parse(event.timestamp)
+              ? { ...pod, failureClosedAt: event.timestamp }
+              : pod,
+          ),
+        }));
         return;
       case 'pod.completed':
         set({

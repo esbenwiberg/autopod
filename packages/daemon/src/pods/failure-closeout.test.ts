@@ -156,6 +156,12 @@ describe('failure closeout', () => {
     });
   });
 
+  it('reopens attention if a different execution resource is attached', async () => {
+    await close(id, pods.getOrThrow(id).updatedAt, actor);
+    pods.update(id, { containerId: 'c'.repeat(64) });
+    expect(pods.getOrThrow(id)).toMatchObject({ status: 'failed', failureClosedAt: null });
+  });
+
   it('requires a delegated human and exposes the unchanged failed outcome in compact reads', async () => {
     const app = Fastify();
     const manager = {
