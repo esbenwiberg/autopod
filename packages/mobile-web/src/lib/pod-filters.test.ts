@@ -10,6 +10,7 @@ function pod(status: PodStatus, overrides: Partial<Pod> = {}): Pod {
 const ALL_STATUSES: PodStatus[] = [
   'queued',
   'provisioning',
+  'research_ready',
   'running',
   'awaiting_input',
   'validating',
@@ -34,10 +35,23 @@ describe('isTerminal', () => {
 });
 
 describe('needsMe', () => {
-  it('flags awaiting_input + review_required + failed', () => {
+  it('flags pending findings, input, review, and failures', () => {
     const flagged = ALL_STATUSES.filter((s) => needsMe(pod(s)));
-    expect(flagged.sort()).toEqual(['awaiting_input', 'failed', 'review_required']);
+    expect(flagged.sort()).toEqual([
+      'awaiting_input',
+      'failed',
+      'research_ready',
+      'review_required',
+    ]);
   });
+});
+
+it('keeps closed failures out of both attention and active without hiding new failures', () => {
+  const closed = pod('failed', { failureClosedAt: '2026-01-01T00:00:00Z' });
+  expect(needsMe(closed)).toBe(false);
+  expect(isActive(closed)).toBe(false);
+  expect(needsMe(pod('failed'))).toBe(true);
+  expect(isActive(pod('failed'))).toBe(true);
 });
 
 describe('isActive', () => {

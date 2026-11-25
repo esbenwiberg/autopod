@@ -801,6 +801,33 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus(id)).toBe('running');
     });
 
+    it('requires a complete sandbox inventory and refuses live or unknown resources', async () => {
+      class ListingClient extends FakeSandboxApiClient {
+        listSandboxes = vi.fn().mockResolvedValue([
+          { id: 'tracked', labels: {}, state: 'Stopped' },
+          {
+            id: 'unbound',
+            labels: { managedBy: 'autopod', podId: 'failed-pod' },
+            state: 'Running',
+          },
+        ]);
+      }
+      const client = new ListingClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      await expect(mgr.isPodExecutionStopped('failed-pod', 'tracked')).resolves.toBe(false);
+      expect(client.listSandboxes).toHaveBeenCalledWith({ requireComplete: true });
+      client.listSandboxes.mockResolvedValueOnce([{ id: 'tracked', labels: {}, state: 'Unknown' }]);
+      await expect(mgr.isPodExecutionStopped('failed-pod', 'tracked')).resolves.toBe(false);
+      client.listSandboxes.mockResolvedValueOnce([
+        { id: 'tracked', labels: {}, state: 'Suspended' },
+      ]);
+      await expect(mgr.isPodExecutionStopped('failed-pod', 'tracked')).resolves.toBe(true);
+      client.listSandboxes.mockResolvedValueOnce([]);
+      await expect(mgr.isPodExecutionStopped('failed-pod', 'tracked')).resolves.toBe(true);
+      client.listSandboxes.mockResolvedValueOnce([]);
+      await expect(mgr.isPodExecutionStopped('failed-pod', null)).resolves.toBe(false);
+    });
+
     it('listSandboxes passes the group listing through', async () => {
       class ListingClient extends FakeSandboxApiClient {
         async listSandboxes(): Promise<SandboxDescriptor[]> {

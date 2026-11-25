@@ -21,6 +21,6 @@ struct DesktopHistoryFilter {
             pod.profileName, pod.errorSummary ?? ""].joined(separator: " ").localizedStandardContains(needle)
     }
     static func needsAttention(_ pod: Pod) -> Bool {
-        [.failed, .killed, .reviewRequired].contains(pod.status)
+        !pod.isClosedFailure && [.failed, .killed, .reviewRequired].contains(pod.status)
     }
 }

@@ -74,7 +74,7 @@ struct PodActivityPanel: View {
                         }
                     }
                     ActivityFeedList(events: events, maxCount: 10)
-                    if pod.status.isActive || pod.status.needsAttention {
+                    if pod.status.isActive || pod.needsAttention {
                         actionButtons
                     }
                 }

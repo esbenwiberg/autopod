@@ -232,6 +232,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')
       ).operation(podId, requestId);
     },
+    closeFailure(podId: string, expectedUpdatedAt: string, actor: OperatorActor) {
+      return captured.closeFailure(podId, expectedUpdatedAt, actor);
+    },
     inspectRetainedCleanup(podId: string) {
       return (captured.retainedCleanup ?? checkpointError('Retained cleanup unavailable')).inspect(
         podId,

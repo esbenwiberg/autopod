@@ -39,6 +39,7 @@ export type ValidationPhase =
 export type SystemEvent =
   | PodCreatedEvent
   | PodStatusChangedEvent
+  | { type: 'pod.failure_closed'; timestamp: string; podId: string; userId: string }
   | AgentActivityEvent
   | ValidationStartedEvent
   | ValidationCompletedEvent

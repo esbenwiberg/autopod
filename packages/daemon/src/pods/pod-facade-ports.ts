@@ -53,6 +53,7 @@ export interface PodFacadeOwners {
     typeof import('./retained-finalization.js').createRetainedFinalization
   >;
   sandboxRecovery?: ReturnType<typeof import('./sandbox-recovery.js').createSandboxRecovery>;
+  closeFailure: ReturnType<typeof import('./failure-closeout.js').createFailureCloseout>;
   acceptFindings: ReturnType<typeof import('./research-findings.js').createFindingsAcceptance>;
   validationExecutionRecovery: ReturnType<typeof createValidationExecutionRecovery>;
   checkpointRecovery?: ReturnType<

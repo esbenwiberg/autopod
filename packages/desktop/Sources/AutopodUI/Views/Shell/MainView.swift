@@ -480,7 +480,7 @@ public struct MainView: View {
     }
 
     private static func recentBrowsePods(_ pods: [Pod], limit: Int) -> [Pod] {
-        let actionable = pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        let actionable = pods.filter { ($0.status.isActive || $0.needsAttention) && !$0.isWorkspace }
         let actionableIds = Set(actionable.map(\.id))
         let recentLimit = max(0, limit - actionable.count)
         let recent = pods
@@ -511,11 +511,11 @@ public struct MainView: View {
     /// Extracted as a static helper so unit tests can call it without constructing a full view.
     static func filterPods(_ pods: [Pod], for selection: SidebarItem) -> [Pod] {
         switch selection {
-        case .attention:             pods.filter { $0.status.needsAttention }
-        case .active:                pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        case .attention:             pods.filter { $0.needsAttention }
+        case .active:                pods.filter { ($0.status.isActive || $0.needsAttention) && !$0.isWorkspace }
         case .running:               pods.filter { $0.status.isActive && !$0.isWorkspace }
         case .workspaces:            pods.filter { $0.isWorkspace }
-        case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
+        case .completed:             pods.filter { $0.isInCompletedFleet && !$0.isWorkspace }
         case .all:                   pods
         case .managedPods, .village, .profilesWorkspace, .settingsWorkspace: []
         case .analytics:             []
@@ -700,6 +700,10 @@ public struct MainView: View {
             }
         })
         .environment(\.desktopPodSelection, selectFleetPod)
+        .environment(\.desktopReviewFindings, { id in
+            selectFleetPod(id)
+            detailNavigation.request(.overview)
+        })
         .onChange(of: sidebarSelection) { _, selection in
             if redesign, case .series(let id) = selection {
                 selectedDesktopSeriesID = id

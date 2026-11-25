@@ -7,6 +7,7 @@ export const HISTORY_JSON_FIELDS = [
 ] as const;
 export const HISTORY_POD_COLUMNS = [
   'completion_policy',
+  'failure_closed_at',
   'id',
   'profile_name',
   'status',

@@ -43,6 +43,7 @@ public struct PodActions: Sendable {
   /// Stable connection ownership used to reject responses from a prior daemon selection.
   public var parentFamilyConnectionID: UUID? = nil
   public var parentBundle: ParentBundleActions?
+  public var closeFailure: (@MainActor @Sendable (String, String) async throws -> Void)?
   public var acceptFindings: @MainActor @Sendable (String, ResearchFindingsResponse) async throws -> Void = { _, _ in }
   public var approvalPending: @MainActor @Sendable (String) -> Bool = { _ in false }
   public var repair: PodRepairActions = .unavailable

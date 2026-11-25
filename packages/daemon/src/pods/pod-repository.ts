@@ -26,6 +26,7 @@ import type {
   ValidationWaiver,
 } from '@autopod/shared';
 import {
+  AutopodError,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   outputModeFromPodOptions,
   PodNotFoundError,
@@ -226,6 +227,7 @@ export interface PodFilters {
 
 export interface PodUpdates {
   researchFindings?: Pod['researchFindings'];
+  failureCloseout?: { at: string; userId: string };
   status?: PodStatus;
   /**
    * Update the pod's task description. Used by the single fix-pod path when
@@ -342,6 +344,7 @@ import {
   hasRetainedCleanupSchema,
   type RetainedCleanupRepository,
 } from './retained-cleanup-repository.js';
+import { createReworkRequestRepository } from './rework-request-repository.js';
 import {
   createSavedWorkDraftRepository,
   type SavedWorkDraftRepository,
@@ -415,6 +418,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   listNonTerminal(): Pod[];
   /** Read-only custody/settlement checks for an explicitly distinct human rerun. */
   assertRerunSourceAvailable(podId: string): void;
+  assertFailureCloseoutSettled(podId: string): void;
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
   getStats(filters?: { profileName?: string }): PodStats;
   getPodsDependingOn(podId: string): Pod[];
@@ -533,6 +537,7 @@ function decodeSessionRow(row: Record<string, unknown>): Pod {
     id: row.id as string,
     profileName: row.profile_name as string,
     completionPolicy: (row.completion_policy as Pod['completionPolicy']) ?? null,
+    failureClosedAt: (row.failure_closed_at as string | null) ?? null,
     researchFindings: row.research_findings ? JSON.parse(row.research_findings as string) : null,
     launchConfigDigest: (row.launch_config_digest as string | null | undefined) ?? null,
     task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
@@ -1401,6 +1406,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('linked_pod_id = @linkedPodId');
         params.linkedPodId = changes.linkedPodId;
       }
+      if (changes.failureCloseout !== undefined) {
+        setClauses.push(
+          'failure_closed_at = @failureClosedAt',
+          'failure_closed_by = @failureClosedBy',
+        );
+        params.failureClosedAt = changes.failureCloseout.at;
+        params.failureClosedBy = changes.failureCloseout.userId;
+      }
       if (changes.researchFindings !== undefined) {
         setClauses.push('research_findings = @researchFindings');
         params.researchFindings = changes.researchFindings
@@ -1807,6 +1820,28 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .prepare("SELECT id FROM pods WHERE status NOT IN ('complete', 'killed')")
         .all() as { id: string }[];
       return rows.map((r) => r.id);
+    },
+
+    assertFailureCloseoutSettled(podId: string): void {
+      createReworkRequestRepository(db).assertIdle(podId);
+      if (
+        db
+          .prepare(`SELECT 1 FROM provider_attempts WHERE pod_id=@podId AND ended_at IS NULL
+          UNION ALL SELECT 1 FROM task_retry_attempts WHERE pod_id=@podId AND ended_at IS NULL
+          UNION ALL SELECT 1 FROM isolated_reviewer_runs WHERE pod_id=@podId
+            AND (state IN ('preparing','running','uncertain') OR cleanup<>'clean')
+          UNION ALL SELECT 1 FROM podsitter_action_audit WHERE pod_id=@podId AND dispatch_state='dispatching'
+          UNION ALL SELECT 1 FROM retained_allocation_attempts a
+            WHERE a.task_id=(SELECT task_id FROM task_executions WHERE pod_id=@podId)
+              AND a.role='container' AND NOT EXISTS (
+                SELECT 1 FROM retained_allocation_facts f WHERE f.attempt_id=a.id AND f.kind='owned')`)
+          .get({ podId })
+      )
+        throw new AutopodError(
+          'An execution or operation has no settled outcome. Inspect Recovery before closing the failure.',
+          'FAILURE_CLOSEOUT_BLOCKED',
+          409,
+        );
     },
 
     assertRerunSourceAvailable(podId: string): void {

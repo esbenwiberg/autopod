@@ -52,6 +52,7 @@ export function createPollingCoordinator(onError: (error: unknown, key: string) 
       registrations.set(key, owner);
       tick(owner);
     },
+    isActive: (key: string) => registrations.has(key) || running.has(key),
     stop: (key: string) => stop(key),
   };
 }

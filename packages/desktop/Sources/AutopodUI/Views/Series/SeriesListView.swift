@@ -51,7 +51,7 @@ public struct SeriesListView: View {
             guard let first = group.first, let sid = first.seriesId else { return nil }
             let name = first.seriesName ?? sid
             let isActive = group.contains { !terminalStatuses.contains($0.status) }
-            let running = group.filter { $0.status.isActive || $0.status.needsAttention }.count
+            let running = group.filter { $0.status.isActive || $0.needsAttention }.count
             let queued = group.filter { $0.status == .queued || $0.status == .paused }.count
             let completed = group.filter { terminalStatuses.contains($0.status) }.count
             let failed = group.filter { $0.status == .failed || $0.status == .killed }.count

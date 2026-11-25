@@ -102,7 +102,10 @@ export function createControlOperationRegistry(
   }
   return {
     wrap,
-    isActive(podId: string, exceptCurrent?: 'authorizeValidationRecoveryBudget'): boolean {
+    isActive(
+      podId: string,
+      exceptCurrent?: 'authorizeValidationRecoveryBudget' | 'closeFailure',
+    ): boolean {
       const current = invocation.getStore();
       return [...(active.get(podId) ?? [])].some(
         (token) =>

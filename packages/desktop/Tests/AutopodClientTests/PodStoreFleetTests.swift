@@ -115,6 +115,45 @@ func dependencyMetadataEnrichesEqualVersionsButCannotRegressNewerRecords(hydrate
 }
 
 @MainActor
+@Test func closedFailureRefreshesHydratedFleetWithoutChangingOutcome() async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    let closed = await mode.isNewer
+    let stamp = closed ? "2026-07-01T00:20:00Z" : "2026-07-01T00:10:00Z"
+    if request.url?.path == "/pods/failed-pod" {
+      var body = try #require(JSONSerialization.jsonObject(with: Data(fullPod(id: "failed-pod").utf8)) as? [String: Any])
+      body["status"] = "failed"
+      body["updatedAt"] = stamp
+      body["failureReason"] = "Build failed"
+      if closed { body["failureClosedAt"] = stamp }
+      return SelfResponse.json(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self), for: request)
+    }
+    var page = compactPage(id: "failed-pod", hasNext: false, status: "failed", updatedAt: stamp)
+    if closed {
+      page = page.replacingOccurrences(of: "\"title\":", with: "\"failureClosedAt\":\"\(stamp)\",\"title\":")
+    }
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  store.selectedSessionId = "failed-pod"
+  await store.hydrateSessionIfNeeded("failed-pod")
+  #expect(store.attentionSessions.count == 1)
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.attentionSessions.isEmpty)
+  #expect(store.pods.first?.status == .failed)
+  #expect(store.pods.first?.isClosedFailure == true)
+  #expect(store.pods.first?.failureRevision == "2026-07-01T00:20:00Z")
+  #expect(store.pods.first?.errorSummary == "Build failed")
+}
+
+@MainActor
 @Test func findingsReceiptSurvivesEqualCompactRefreshAndRehydratesAfterAcceptanceEvent() async throws {
   let mode = FleetMode()
   let configuration = URLSessionConfiguration.ephemeral

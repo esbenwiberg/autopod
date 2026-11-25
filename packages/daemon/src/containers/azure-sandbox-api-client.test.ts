@@ -3218,6 +3218,20 @@ describe('listSandboxes', () => {
     expect(await client.listSandboxes()).toEqual([{ id: 'sandbox-a', labels: {} }]);
   });
 
+  it('refuses partial sandbox listings used as evidence for failure closeout', async () => {
+    const { client } = makeClient([
+      { status: 200, body: { value: [], nextLink: 'page-two' } },
+      { status: 200, body: {} },
+      { status: 200, body: [{ state: 'Running' }] },
+      { status: 200, body: [] },
+    ]);
+    const options = { requireComplete: true };
+    await expect(client.listSandboxes(options)).rejects.toThrow('Complete sandbox inventory');
+    await expect(client.listSandboxes(options)).rejects.toThrow('Complete sandbox inventory');
+    await expect(client.listSandboxes(options)).rejects.toThrow('unidentified resource');
+    await expect(client.listSandboxes(options)).resolves.toEqual([]);
+  });
+
   it('returns an empty list for a missing group rather than throwing', async () => {
     const { client } = makeClient([{ status: 404 }]);
     expect(await client.listSandboxes()).toEqual([]);
