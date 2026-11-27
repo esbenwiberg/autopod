@@ -59,7 +59,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
     guard();
     return before;
   }
-  async function proof(targets: Target[], guard: () => void): Promise<Set<string>> {
+  async function proof(
+    targets: Target[],
+    guard: () => void,
+    allowRunning = false,
+  ): Promise<Set<string>> {
     const selected = targets.filter(dockerTarget);
     const ns = selected[0]!.namespace;
     const socket = await engine(ns, guard);
@@ -101,7 +105,8 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       if (
         containers.some(
           (t) =>
-            t.attemptId === foreignLabels[ALLOCATION_LABEL] ||
+            (!t.observedPodId && t.attemptId === foreignLabels[ALLOCATION_LABEL]) ||
+            (t.observedPodId && foreign.Config?.Env?.includes('POD_ID=' + t.observedPodId)) ||
             (foreignLabels['com.autopod.pod-id'] &&
               t.name === 'autopod-' + foreignLabels['com.autopod.pod-id']),
         )
@@ -174,7 +179,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
         if (
           live.Id !== t.id ||
           live.Name !== '/' + t.name ||
-          live.Config?.Labels?.[ALLOCATION_LABEL] !== t.attemptId ||
+          (t.observedPodId
+            ? !live.Config?.Env?.includes('POD_ID=' + t.observedPodId) ||
+              (live.Config.Labels?.['com.autopod.pod-id'] !== undefined &&
+                live.Config.Labels['com.autopod.pod-id'] !== t.observedPodId)
+            : live.Config?.Labels?.[ALLOCATION_LABEL] !== t.attemptId) ||
           !live.NetworkSettings?.Networks ||
           !live.Mounts ||
           !live.HostConfig
@@ -186,11 +195,12 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
           );
         const st = live.State;
         if (
-          !st ||
-          st.Running !== false ||
-          st.Paused !== false ||
-          st.Restarting !== false ||
-          !['exited', 'created'].includes(st.Status)
+          !allowRunning &&
+          (!st ||
+            st.Running !== false ||
+            st.Paused !== false ||
+            st.Restarting !== false ||
+            !['exited', 'created'].includes(st.Status))
         )
           block(
             'EXECUTION_NOT_STOPPED',
@@ -278,7 +288,10 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
           live.Name !== t.name ||
           live.Scope !== 'local' ||
           live.Driver !== 'bridge' ||
-          live.Labels?.[ALLOCATION_LABEL] !== t.attemptId ||
+          (t.observedPodId
+            ? live.Labels?.['com.autopod.pod-id'] !== t.observedPodId ||
+              live.Labels?.['com.autopod.pod-network'] !== 'true'
+            : live.Labels?.[ALLOCATION_LABEL] !== t.attemptId) ||
           live.Ingress
         )
           block(
@@ -311,6 +324,71 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       { label: 'retained cleanup exact removal', timeoutMs: 10_000 },
     );
   }
-  return { proof, remove };
+  async function discover(podId: string, id: string, sourceMount: string, guard: () => void) {
+    if (!/^[a-f0-9]{64}$/.test(id))
+      block('UNSUPPORTED_HISTORY', 'A full recorded main container ID is required.');
+    const socket = await endpoint(guard);
+    const info = (await observe(docker.info())) as { ID?: string };
+    guard();
+    if (!info.ID || (await endpoint(guard)) !== socket)
+      block('OBSERVATION_UNAVAILABLE', 'Local Engine identity is unavailable.');
+    const live = await inspect(docker.getContainer(id).inspect());
+    guard();
+    if (!live || live.Id !== id || !live.Name || !live.Config?.Env?.includes('POD_ID=' + podId))
+      block(
+        'UNSUPPORTED_HISTORY',
+        'The exact present container lacks corroborating managed pod identity. An absent legacy container cannot be adopted.',
+      );
+    const networks = Object.entries(live.NetworkSettings?.Networks ?? {});
+    if (networks.length !== 1 || !/^[a-f0-9]{64}$/.test(networks[0]![1].NetworkID))
+      block('UNSUPPORTED_TOPOLOGY', 'One exact owned local bridge is required.');
+    const [name, network] = networks[0]!;
+    return [
+      {
+        kind: 'docker_container',
+        role: 'guest_execution',
+        id,
+        namespace: info.ID,
+        name: live.Name.slice(1),
+        attemptId: '',
+        bridgeId: network.NetworkID,
+        sourceMount,
+        observedPodId: podId,
+      },
+      {
+        kind: 'docker_bridge',
+        role: 'owned_bridge',
+        id: network.NetworkID,
+        namespace: info.ID,
+        name,
+        attemptId: '',
+        observedPodId: podId,
+      },
+    ] satisfies Target[];
+  }
+  async function stopped(targets: Target[], guard: () => void) {
+    await proof(targets, guard, true);
+    const t = targets.find((t) => t.kind === 'docker_container')!;
+    const live = await inspect(docker.getContainer(t.id).inspect());
+    guard();
+    return (
+      !live ||
+      (live.State?.Running === false &&
+        live.State.Paused === false &&
+        live.State.Restarting === false &&
+        ['exited', 'created'].includes(live.State.Status))
+    );
+  }
+  async function stop(targets: Target[], guard: () => void) {
+    await proof(targets, guard, true);
+    const t = targets.find((t) => t.kind === 'docker_container')!;
+    await engine(t.namespace, guard);
+    guard();
+    await boundedDockerCall(docker.getContainer(t.id).stop({ t: 10 }), {
+      label: 'validation-held exact stop',
+      timeoutMs: 15_000,
+    });
+  }
+  return { proof, remove, discover, stopped, stop };
 }
 export type RetainedCleanupDocker = ReturnType<typeof createRetainedCleanupDocker>;

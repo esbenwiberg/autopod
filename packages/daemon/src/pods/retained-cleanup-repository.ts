@@ -60,6 +60,15 @@ export function assertRetainedCleanupBridgeAvailable(db: Database.Database, name
   if (!hasRetainedCleanupSchema(db)) return;
   if (
     db
+      .prepare(`SELECT 1 FROM retained_finalizations f, json_each(f.delivery_evidence,'$.targets') t
+    WHERE json_extract(f.delivery_evidence,'$.kind')='validation-held-docker'
+      AND json_extract(t.value,'$.kind')='docker_bridge'
+      AND (json_extract(t.value,'$.id')=? OR json_extract(t.value,'$.name')=?)`)
+      .get(name, name)
+  )
+    cleanupConflict('Validation-held Stop retains this exact bridge.');
+  if (
+    db
       .prepare(`SELECT 1 FROM retained_cleanup_targets t JOIN retained_cleanup_held h ON h.id=t.request_id
     JOIN json_each(h.binding,'$.targets') j ON j.key=t.ordinal
     WHERE t.kind='docker_bridge' AND (t.identity=? OR json_extract(j.value,'$.name')=?)`)
@@ -106,8 +115,7 @@ export async function withCleanupAllocationFence<T>(
   }
 }
 
-export type Target = Omit<RetainedCleanupResource, 'kind'> &
-  (
+export type Target = Omit<RetainedCleanupResource, 'kind'> & { observedPodId?: string } & (
     | {
         kind: 'docker_container';
         attemptId: string;
@@ -243,6 +251,21 @@ export function createRetainedCleanupRepository(db: Database.Database) {
           UNION ALL SELECT 1 FROM saved_work_draft_pr_operations WHERE pod_id=?`)
           .get(podId, podId, podId, podId, podId, podId, podId, podId, podId, podId, podId),
       };
+    },
+    heldHistory(podId: string) {
+      const members = db
+        .prepare(`SELECT * FROM task_executions WHERE task_id=
+        (SELECT task_id FROM task_executions WHERE pod_id=?)`)
+        .all(podId);
+      const dispatches = db
+        .prepare('SELECT binding FROM validation_dispatches WHERE pod_id=? ORDER BY rowid')
+        .all(podId) as { binding: string }[];
+      const extra = db
+        .prepare(`SELECT 1 FROM approval_source_rewrites WHERE pod_id=?
+        UNION ALL SELECT 1 FROM retained_checkpoint_recoveries WHERE pod_id=?
+        UNION ALL SELECT 1 FROM artifact_checks_recoveries WHERE pod_id=?`)
+        .all(podId, podId, podId);
+      return { members, dispatches, extra };
     },
     assertForeignClaims(podId: string, containers: string[], locations: string[]) {
       const ids = JSON.stringify(containers);

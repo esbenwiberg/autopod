@@ -30,6 +30,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   let stalled: StalledWorkerRecoveryModel
   let finalization: RetainedFinalizationModel
   let cleanup: RetainedCleanupModel
+  let heldDocker: ValidationHeldDockerModel
   let sandbox: SandboxRecoveryModel
   let files: FileRecoveryModel
   let fork: RecoveryForkModel
@@ -49,6 +50,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     stalled = StalledWorkerRecoveryModel(podId: podId, actions: actions.stalledWorkerRecovery)
     finalization = RetainedFinalizationModel(podId: podId, actions: actions.retainedFinalization)
     cleanup = RetainedCleanupModel(podId: podId, actions: actions.retainedCleanup)
+    heldDocker = ValidationHeldDockerModel(podId: podId, actions: actions.validationHeldDocker)
     sandbox = SandboxRecoveryModel(podId: podId, actions: actions.sandboxRecovery)
     files = FileRecoveryModel(podId: podId, actions: actions.fileRecovery)
     fork = RecoveryForkModel(podId: podId, actions: actions.recoveryFork)
@@ -72,7 +74,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
   }
 
-  var busy: Bool { refreshing || retainedChecks.busy || memoryChecks.busy || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy || cleanup.busy }
+  var busy: Bool { refreshing || heldDocker.busy || retainedChecks.busy || memoryChecks.busy || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy || cleanup.busy }
 
   var pendingRoute: RecoveryRoute? {
     if cleanup.needsObservation { return .freeStorage }

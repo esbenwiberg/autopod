@@ -1560,6 +1560,27 @@ public actor DaemonAPI {
     return result
   }
 
+  public func inspectValidationHeldDocker(_ id: String, key: String? = nil) async throws -> ValidationHeldDockerView {
+    if let key, !RetainedCleanupRequest.validId(key) { throw RetainedCleanupError.invalidReply }
+    let path = try cleanupPath(id).replacingOccurrences(of: "/retained-cleanup", with: "/validation-held-docker")
+    let (result, _): (ValidationHeldDockerView, Int) = try await retainedCleanupRequest("GET", path + (key.map { "/\($0)" } ?? ""))
+    try result.validate(podId: id, key: key)
+    return result
+  }
+
+  public func stopValidationHeldDocker(_ id: String, input: RetainedFinalizationRequest,
+    isCurrent: (@Sendable () async -> Bool)? = nil) async throws -> ValidationHeldDockerView {
+    guard input.mode == .stopRetain, RetainedCleanupRequest.validId(input.requestKey),
+      (10...4000).contains(input.reason.utf16.count) else { throw RetainedCleanupError.invalidReply }
+    let path = try cleanupPath(id).replacingOccurrences(of: "/retained-cleanup", with: "/validation-held-docker")
+    let (result, _): (ValidationHeldDockerView, Int) = try await retainedCleanupRequest("POST", path,
+      body: encode(input), isCurrent: isCurrent)
+    try result.validate(podId: id, key: input.requestKey)
+    guard result.binding == input.expectedBinding, result.generation == input.expectedGeneration
+      else { throw RetainedCleanupError.invalidReply }
+    return result
+  }
+
   public func observeRetainedCleanup(_ id: String, requestId: String) async throws -> RetainedCleanupReceipt {
     guard RetainedCleanupRequest.validId(requestId) else { throw DaemonError.badRequest("Invalid cleanup request ID") }
     let (result, _): (RetainedCleanupReceipt, Int) = try await retainedCleanupRequest("GET", "\(cleanupPath(id))/\(requestId)")

@@ -43,6 +43,9 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  validationHeldDocker?: ReturnType<
+    typeof import('./validation-held-docker-control.js').createValidationHeldDockerControl
+  >;
   savedWorkDraft?: ReturnType<typeof import('./saved-work-draft-pr.js').createSavedWorkDraftPr>;
   artifactChecksRecovery?: ReturnType<
     typeof import('./artifact-checks-recovery.js').createArtifactChecksRecovery

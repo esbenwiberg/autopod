@@ -13,6 +13,7 @@ import { createRetainedFinalization } from './retained-finalization.js';
 import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
 import { scanSavedWorkPublication } from './saved-work-publication-scan.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
+import { createValidationHeldDockerControl } from './validation-held-docker-control.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationMutationSettled,
@@ -1988,11 +1989,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
         })
       : undefined;
+  const validationHeldDocker = createValidationHeldDockerControl({
+    pods: podRepo,
+    docker: deps.retainedCleanupDocker,
+    isIdle: (id) =>
+      !controlOperations.isActive(id) &&
+      !activeAgentRuns.has(id) &&
+      !validationAbortControllers.has(id) &&
+      !validationResumeRuns.has(id) &&
+      !artifactResumeRuns.has(id) &&
+      !artifactCompletionRuns.has(id) &&
+      !attemptExtensionRuns.has(id) &&
+      !checkpointRecovery?.isActive(id) &&
+      !stalledWorkerRecovery?.isActive(id) &&
+      !retainedFinalization?.isActive(id) &&
+      !mergePolling.isActive(id),
+    isGoal: (id) =>
+      deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+      Boolean(deps.launchConfiguration?.goals?.get(id)),
+  });
   const retainedCleanup =
     podRepo.retainedCleanup &&
     createRetainedCleanup({
       pods: podRepo,
       docker: deps.retainedCleanupDocker,
+      heldSelection: validationHeldDocker.cleanupSelection,
       isIdle: (id) =>
         !controlOperations.isActive(id) &&
         !activeAgentRuns.has(id) &&
@@ -2030,6 +2051,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createPodManagerFacade({
       closeFailure,
       retainedCleanup,
+      validationHeldDocker,
       recoveryFork,
       stalledWorkerRecovery,
       sandboxRecovery,

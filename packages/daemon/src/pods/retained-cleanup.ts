@@ -36,6 +36,13 @@ export function createRetainedCleanup(deps: {
   host?: RetainedCleanupHost;
   isIdle(podId: string): boolean;
   isGoal(podId: string): boolean;
+  heldSelection?(podId: string): {
+    targets: Target[];
+    state: string;
+    taskId: string;
+    generation: number;
+    sessionId: string;
+  } | null;
 }) {
   const { pods, docker } = deps;
   const store = pods.retainedCleanup!;
@@ -52,6 +59,8 @@ export function createRetainedCleanup(deps: {
   } as const;
 
   function durable(podId: string) {
+    const held = deps.heldSelection?.(podId);
+    if (held) return held;
     const pod = pods.getOrThrow(podId);
     const { membership, lineage, incompatible, unsettled } = store.context(podId);
     const {

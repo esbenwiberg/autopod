@@ -322,9 +322,11 @@ export function createRetainedFinalizationRepository(db: Database.Database) {
         state: 'finalized',
         finalizedAt: new Date().toISOString(),
         message:
-          row.receipt.request.mode === 'stop-retain'
-            ? 'Cancelled; all source, resources and evidence retained. No success claimed.'
-            : 'Provider-proven external delivery recorded; old validation results unchanged and all resources retained.',
+          (evidence as { kind?: string } | null)?.kind === 'validation-held-docker'
+            ? 'Execution stopped; files, reports, card and validation hold retained. Historical execution remains unverified.'
+            : row.receipt.request.mode === 'stop-retain'
+              ? 'Cancelled; all source, resources and evidence retained. No success claimed.'
+              : 'Provider-proven external delivery recorded; old validation results unchanged and all resources retained.',
       };
       db.prepare(
         'UPDATE retained_finalizations SET receipt=?,delivery_evidence=? WHERE pod_id=?',

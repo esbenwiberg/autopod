@@ -183,6 +183,14 @@ function pinned(entry: PhysicalIdentity, type: 'directory' | 'file') {
   if (type === 'directory') trusted(entry.path);
 }
 
+/** Present-day identity qualification only; no deletion scan or mount readiness. */
+export function qualifyRetainedGit(g: Extract<Target, { kind: 'host_worktree' }>['git']) {
+  pinned(g.commonStore, 'directory');
+  pinned(g.registration, 'directory');
+  pinned(g.worktree, 'directory');
+  pinned(g.gitlink, 'file');
+}
+
 const parseList = (output: string) =>
   output
     .split('\0\0')

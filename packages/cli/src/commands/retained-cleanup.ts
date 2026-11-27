@@ -38,7 +38,7 @@ type Options = {
   json?: boolean;
 };
 
-async function saveRequest(path: string, journal: z.infer<typeof journalSchema>) {
+export async function saveRetainedRequest(path: string, journal: unknown) {
   const directory = dirname(path);
   const temp = await mkdtemp(join(directory, '.ap-cleanup-'));
   try {
@@ -137,7 +137,7 @@ export function registerRetainedCleanupCommand(program: Command, getClient: () =
           reason: opts.reason,
           acknowledgeDataLoss: opts.acknowledgeDataLoss,
         });
-        await saveRequest(path, { version: 1, daemon, podId, request: expected });
+        await saveRetainedRequest(path, { version: 1, daemon, podId, request: expected });
       } else if (opts.observe || opts.reconcile) {
         if (opts.requestFile && path && opts.requestId === undefined) {
           const raw: unknown = JSON.parse(await readFile(path, 'utf8'));
