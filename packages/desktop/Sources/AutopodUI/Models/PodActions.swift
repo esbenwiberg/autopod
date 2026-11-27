@@ -53,6 +53,7 @@ public struct PodActions: Sendable {
   public var retainedCleanup: RetainedCleanupActions = .unavailable
   public var repairContinuation: RepairContinuationActions = .unavailable
   public var memoryChecks: MemoryChecksActions = .unavailable
+  public var retainedChecks: RetainedChecksActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable
   public var fileRecovery: FileRecoveryActions = .unavailable
   public var recoveryFork: RecoveryForkActions = .unavailable

@@ -35,6 +35,7 @@ describe('human-only retained checkpoint selection', () => {
       getSession: (id) => f.ctx.podRepo.getOrThrow(id),
       getCheckpointRecoverySelection: f.recovery.selection,
       inspectRetainedContinuation: (...args) => f.recovery.inspect(...args),
+      previewRetainedChecks: f.recovery.previewRetainedChecks,
       recoverInfrastructure: f.recovery.recoverInfrastructure,
       reconcileInfrastructure: f.recovery.reconcileInfrastructure,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
@@ -89,6 +90,125 @@ describe('human-only retained checkpoint selection', () => {
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.recovery.list(f.podId)).toEqual([]);
   });
+  const checksPreview = () => `/pods/${f.podId}/retained-continuation/checks-preview-v1`;
+  function useLocalDocker() {
+    const containerId = 'c'.repeat(64);
+    f.ctx.podRepo.update(f.podId, { containerId: null });
+    f.ctx.podRepo.update(f.podId, { executionTarget: 'local', containerId });
+    f.cm.getResourceKey.mockResolvedValue(JSON.stringify(['docker', 'test-engine', containerId]));
+    return containerId;
+  }
+
+  it('previews stopped Docker and the exact saved source without claiming or executing it', async () => {
+    const containerId = useLocalDocker();
+    const url = checksPreview();
+    for (const authorization of [undefined, 'Bearer pod-token']) {
+      expect(
+        (await app.inject({ url, headers: authorization ? { authorization } : {} })).statusCode,
+      ).toBe(401);
+    }
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    f.ctx.db.pragma('query_only = ON');
+    const response = await app.inject({ url, headers });
+    f.ctx.db.pragma('query_only = OFF');
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      version: 1,
+      podId: f.podId,
+      branch: f.pod().branch,
+      checkpointHead: f.input.checkpointHead,
+      checkpointTree: f.prepared.tree,
+      expectedGeneration: f.input.expectedGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+    });
+    expect(f.cm.getStatus).toHaveBeenNthCalledWith(1, containerId);
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    expect(f.recovery.list(f.podId)).toEqual([]);
+  });
+
+  it.each([
+    'running',
+    'unknown',
+  ] as const)('does not inspect or execute source when the original resource is %s', async (state) => {
+    useLocalDocker();
+    vi.mocked(f.cm.getStatus).mockResolvedValue(state);
+    const response = await app.inject({ url: checksPreview(), headers });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().message).toContain('not confirmed stopped');
+    expect(f.worktrees.inspectSourceAdoption).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
+
+  it('refuses stale and dirty checkout observations', async () => {
+    useLocalDocker();
+    const url = checksPreview();
+    const observe = f.worktrees.inspectSourceAdoption.getMockImplementation();
+    if (!observe) throw new Error('Missing source observation fixture');
+    f.worktrees.inspectSourceAdoption
+      .mockImplementationOnce(async (cwd, branch) => ({
+        ...(await observe(cwd, branch)),
+        worktreeClean: false,
+      }))
+      .mockImplementationOnce(async (cwd, branch) => {
+        f.ctx.podRepo.update(f.podId, { status: 'failed' });
+        return observe(cwd, branch);
+      });
+    const dirty = await app.inject({ url, headers });
+    expect(dirty.statusCode).toBe(409);
+    expect(dirty.json().message).toContain('Clean retained host Git commit');
+    const stale = await app.inject({ url, headers });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error).toBe('STALE_CHECKPOINT_RECOVERY');
+    expect(f.recovery.list(f.podId)).toEqual([]);
+  });
+
+  it('uses the existing checks-only admission after preview and keeps automatic delivery disabled', async () => {
+    useLocalDocker();
+    f.ctx.podRepo.update(f.podId, { autoApprove: true });
+    f.worktrees.selectRetainedContinuationSource = vi.fn(async () => ({
+      head: f.prepared.head,
+      tree: f.prepared.tree,
+      baseCommitSha: '1'.repeat(40),
+    }));
+    const inspection = await app.inject({ url: checksPreview(), headers });
+    expect(inspection.statusCode).toBe(200);
+    const { expectedGeneration, expectedResultHash, checkpointHead } = inspection.json();
+    const input = {
+      id: f.input.id,
+      reason: f.input.reason,
+      expectedGeneration,
+      expectedResultHash,
+      checkpointHead,
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: `/pods/${f.podId}/retained-continuation`,
+      headers,
+      payload: input,
+    });
+    expect(response.statusCode).toBe(202);
+    await f.recovery.wait(f.input.id);
+    expect(f.recovery.list(f.podId)).toMatchObject([
+      {
+        id: input.id,
+        originalEvidence: { result: f.result },
+        binding: {
+          head: checkpointHead,
+          continuation: { prepareOnly: false, reviewPolicy: 'independent-v1' },
+        },
+        activated: { generation: expectedGeneration + 1 },
+      },
+    ]);
+    expect(f.pod()).toMatchObject({ autoApprove: false, skipAgent: true, prUrl: null });
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+
   it('explains dirty-source rework without admitting an infrastructure operation', async () => {
     f.ctx.podRepo.update(f.podId, {
       status: 'review_required',

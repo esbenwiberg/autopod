@@ -6,6 +6,7 @@ struct TaskRetryCard: View {
   let status: String
   let actions: PodActions
   var stage: String = "validation"
+  var showsExecutionActions = true
   @State private var state: TaskRetryState?
   @State private var reason = ""
   @State private var pending: TaskRetryAuthorizationRequest?
@@ -77,21 +78,23 @@ struct TaskRetryCard: View {
               ) { Task { await record() } }
               .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
               }
-              Button(stage == "codex_interruption" ? "Resume task" : stage == "validation" ? "Resume validation" : stage == "worker" ? "Rework worker" : "Resume sandbox startup") {
-                Task {
-                  busy = true
-                  error = ""
-                  message = ""
-                  defer { busy = false }
-                  do {
-                    if stage == "worker" { try await actions.reworkRetry(podId) }
-                    else { try await actions.resumeRetry(podId) }
-                    await refresh()
-                    message =
-                      "\(stage == "worker" ? "Rework" : "Resume") requested. Refresh to inspect admission and execution outcome."
-                  } catch { self.error = error.localizedDescription }
-                }
-              }.disabled(busy)
+              if showsExecutionActions {
+                Button(stage == "codex_interruption" ? "Resume task" : stage == "validation" ? "Resume validation" : stage == "worker" ? "Rework worker" : "Resume sandbox startup") {
+                  Task {
+                    busy = true
+                    error = ""
+                    message = ""
+                    defer { busy = false }
+                    do {
+                      if stage == "worker" { try await actions.reworkRetry(podId) }
+                      else { try await actions.resumeRetry(podId) }
+                      await refresh()
+                      message =
+                        "\(stage == "worker" ? "Rework" : "Resume") requested. Refresh to inspect admission and execution outcome."
+                    } catch { self.error = error.localizedDescription }
+                  }
+                }.disabled(busy)
+              }
             }
           }
           Button("Refresh retry accounting") { Task { await refresh() } }.disabled(busy)

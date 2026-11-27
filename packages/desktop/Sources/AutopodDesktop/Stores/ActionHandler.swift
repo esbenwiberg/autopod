@@ -429,6 +429,20 @@ public final class ActionHandler {
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.perform { try await self.api.submitMemoryChecks(id, input: input) }
       })
+    result.retainedChecks = RetainedChecksActions(scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("retained-checks", isDirectory: true),
+      isCurrent: { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false },
+      preview: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.previewRetainedChecks(id) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.runRetainedChecks(id, decision: input) }
+      }, observe: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.observeRetainedChecks(id, decision: input) }
+      })
     result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getTaskExecution(id) }

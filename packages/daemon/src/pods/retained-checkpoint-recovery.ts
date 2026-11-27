@@ -737,6 +737,76 @@ export function createRetainedCheckpointRecovery(deps: {
             ],
     };
   }
+  /** Observe the exact stopped Docker resource and clean host source without claiming it. */
+  async function previewRetainedChecks(podId: string) {
+    const pod = deps.podRepo.getOrThrow(podId);
+    if (
+      pod.executionTarget !== 'local' ||
+      !['failed', 'review_required'].includes(pod.status) ||
+      pod.lastValidationResult?.overall !== 'fail' ||
+      !pod.containerId ||
+      !pod.worktreePath
+    )
+      checkpointError('Fresh checks require a retained Docker task with a current failed result');
+    const { containerId, worktreePath, branch } = pod;
+    const expectedResultHash = checkpointHash(pod.lastValidationResult);
+    const anchor = configuration(pod);
+    const assertCurrent = () => {
+      const current = deps.podRepo.getOrThrow(podId);
+      if (
+        current.lifecycleGeneration !== pod.lifecycleGeneration ||
+        current.status !== pod.status ||
+        current.branch !== branch ||
+        current.containerId !== containerId ||
+        current.worktreePath !== worktreePath ||
+        configuration(current) !== anchor ||
+        !current.lastValidationResult ||
+        checkpointHash(current.lastValidationResult) !== expectedResultHash
+      )
+        checkpointError('Pod changed; inspect saved source again', 'STALE_CHECKPOINT_RECOVERY');
+      repo.assertAvailable(podId);
+      policy(current, true, undefined, true);
+    };
+    assertCurrent();
+    const cm = deps.getContainerManager('local');
+    if (!cm.getResourceKey || !deps.worktreeManager.inspectSourceAdoption)
+      checkpointError('Exact Docker identity and clean host source inspection are required');
+    const key = await cm.getResourceKey(containerId);
+    if (!isDockerValidationResourceKey(key, containerId))
+      checkpointError('Exact original Docker resource is unavailable');
+    assertCurrent();
+    if ((await cm.getStatus(containerId)) !== 'stopped')
+      checkpointError('Original Docker resource is not confirmed stopped; no stop was requested');
+    assertCurrent();
+    const source = await deps.worktreeManager.inspectSourceAdoption(worktreePath, branch);
+    if (
+      !source.worktreeClean ||
+      source.branch !== branch ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(source.commitSha) ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(source.treeSha)
+    )
+      checkpointError('Clean retained host Git commit is unavailable');
+    assertCurrent();
+    if (
+      (await cm.getResourceKey(containerId)) !== key ||
+      (await cm.getStatus(containerId)) !== 'stopped'
+    )
+      checkpointError(
+        'Original Docker resource changed during inspection',
+        'STALE_CHECKPOINT_RECOVERY',
+      );
+    assertCurrent();
+    return {
+      version: 1 as const,
+      podId,
+      branch,
+      checkpointHead: source.commitSha,
+      checkpointTree: source.treeSha,
+      expectedGeneration: pod.lifecycleGeneration,
+      expectedResultHash,
+    };
+  }
+
   async function quiesce(id: string): Promise<boolean> {
     let record = repo.get(id) ?? checkpointError('Recovery unavailable');
     const selected = record.binding.continuation?.infrastructure;
@@ -2275,6 +2345,7 @@ export function createRetainedCheckpointRecovery(deps: {
     prepareRewriteRepair,
     checkRewriteRepair,
     continueRetained,
+    previewRetainedChecks,
     recoverInfrastructure,
     reconcileInfrastructure,
     replyToRepair,

@@ -133,6 +133,8 @@ struct RecoveryHubSheet: View {
     switch route {
     case .memoryChecks:
       MemoryChecksRecoveryView(model: model.memoryChecks, actions: actions.memoryChecks)
+    case .retainedChecks:
+      RetainedChecksRecoveryView(pod: pod, actions: actions, model: model.retainedChecks, openValidation: openValidation)
     case .overview: overview
     case .continueWork: continueWork
     case .recoverFiles:
@@ -304,6 +306,9 @@ struct RecoveryHubSheet: View {
             ? "Prepare a saved-work handoff without execution, or separately review a fresh start. Keep the original and share task limits."
             : "Fresh-pod recovery is unavailable on this connection. Open to inspect the missing prerequisites; no launch is enabled.", icon: "arrow.triangle.branch", destination: .freshPod)
           option("Retry checks or fix validation", detail: "Review the failed checks and current retry permission first.", icon: "checkmark.circle", destination: .checks)
+          if actions.retainedChecks.available && ([.failed, .reviewRequired].contains(pod.status) || model.retainedChecks.pending != nil) {
+            option("Run fresh checks on saved work", detail: "Check an exact saved Git commit in a separate container. No coding or delivery.", icon: "checkmark.seal", destination: .retainedChecks)
+          }
           if actions.repairContinuation.available && [.failed, .reviewRequired, .validated].contains(pod.status) {
             option("Use a replacement environment", detail: "Review saved source and software changes. Coding starts only if the actual replacement qualifies.", icon: "wrench.and.screwdriver", destination: .repair)
           }

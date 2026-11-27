@@ -655,6 +655,45 @@ public actor DaemonAPI {
     return response.operation
   }
 
+  public func previewRetainedChecks(_ id: String) async throws -> RetainedChecksPreview {
+    do {
+      let preview: RetainedChecksPreview = try await request("GET", "/pods/\(id)/retained-continuation/checks-preview-v1")
+      try preview.validate(podId: id)
+      return preview
+    } catch DaemonError.notFound(_) {
+      throw DaemonError.badRequest("Fresh checks on saved work requires a compatible daemon. No recovery was requested.")
+    }
+  }
+
+  public func runRetainedChecks(_ id: String, decision: RetainedChecksDecision) async throws -> RetainedChecksOperation {
+    try decision.validate(podId: id)
+    struct Input: Encodable {
+      let id: String
+      let expectedGeneration: Int
+      let expectedResultHash: String
+      let checkpointHead: String
+      let reason: String
+    }
+    struct Response: Decodable { let operation: RetainedChecksOperation }
+    let selected = decision.preview
+    let input = Input(id: decision.id, expectedGeneration: selected.expectedGeneration,
+      expectedResultHash: selected.expectedResultHash, checkpointHead: selected.checkpointHead, reason: decision.reason)
+    let value: Response = try await request("POST", "/pods/\(id)/retained-continuation", body: encode(input))
+    try value.operation.validate(podId: id, decision: decision)
+    return value.operation
+  }
+
+  public func observeRetainedChecks(_ id: String, decision: RetainedChecksDecision) async throws -> RetainedChecksOperation {
+    try decision.validate(podId: id)
+    struct Response: Decodable { let operations: [RetainedChecksOperation] }
+    let value: Response = try await request("GET", "/pods/\(id)/checkpoint-recovery")
+    guard let operation = value.operations.first(where: { $0.id == decision.id }) else {
+      throw DaemonError.badRequest("Saved request not observed. This does not permit a second submission.")
+    }
+    try operation.validate(podId: id, decision: decision)
+    return operation
+  }
+
   public func inspectStalledWorkerRecovery(_ id: String) async throws -> StalledWorkerRecoveryView {
     try await request("GET", "/pods/\(id)/stalled-worker-recovery")
   }
