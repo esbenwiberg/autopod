@@ -86,6 +86,7 @@ export function sandboxGoalSupervisor(
   cwd?: string,
   environment?: Record<string, string>,
   stdin = false,
+  buffered?: { maxOutputBytes: number; deadlineMs: number },
 ): string {
   const spec = Buffer.from(
     JSON.stringify({
@@ -95,11 +96,15 @@ export function sandboxGoalSupervisor(
       cwd,
       environment,
       stdin,
+      buffered,
     }),
   ).toString('base64');
   return `#!/usr/bin/python3 -I
-import base64,binascii,ctypes,fcntl,hashlib,json,os,pathlib,signal,subprocess,sys,time
+import base64,binascii,ctypes,fcntl,hashlib,json,os,pathlib,signal,subprocess,sys,time,threading
 spec=json.loads(base64.b64decode('${spec}'))
+if '--detach' in sys.argv:
+    subprocess.Popen([sys.executable,'-I',__file__],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    sys.exit(0)
 root=pathlib.Path(spec['root'])
 if os.geteuid()!=0 or root.is_symlink() or root.stat().st_uid!=0 or root.stat().st_mode & 0o077:
     raise RuntimeError('private-supervisor-required')
@@ -162,10 +167,29 @@ def stop(*_):
     (root/'stop').touch(mode=0o600)
 signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
 env={**os.environ,**(spec.get('environment') or {}),'HOME':'/home/autopod','USER':'autopod','LOGNAME':'autopod'}
+buffered=spec.get('buffered')
+output={};readers=[]
+def capture(name,stream):
+    limit=buffered['maxOutputBytes']//4
+    head=b'';tail=b'';size=0
+    while True:
+        chunk=stream.read(8192)
+        if not chunk:break
+        size+=len(chunk)
+        head=(head+chunk)[:limit];tail=(tail+chunk)[-limit:]
+    data=head if size<=limit else head+tail[-min(limit,size-limit):]
+    # Bound decoded UTF-8 too, including replacement of invalid command bytes.
+    data=data.decode('utf8',errors='replace').encode('utf8')[:limit*2].decode('utf8',errors='ignore').encode('utf8')
+    output[name]=base64.b64encode(data).decode('ascii')
 try:
-    child=subprocess.Popen(spec['command'],cwd=spec.get('cwd') or '/',env=env,preexec_fn=isolate,stdin=subprocess.PIPE if spec['stdin'] else None)
+    child=subprocess.Popen(spec['command'],cwd=spec.get('cwd') or '/',env=env,preexec_fn=isolate,stdin=subprocess.PIPE if spec['stdin'] else None,stdout=subprocess.PIPE if buffered else None,stderr=subprocess.PIPE if buffered else None)
 except Exception:
     publish({'observedExit':True,'exitCode':127});raise
+if buffered:
+    for name,stream in [('stdout',child.stdout),('stderr',child.stderr)]:
+        reader=threading.Thread(target=capture,args=(name,stream),daemon=True);reader.start();readers.append(reader)
+deadline=time.monotonic()+max(0,buffered['deadlineMs']/1000-time.time()) if buffered else None
+timed_out=False
 pending=bytearray();input_index=1;input_open=bool(child.stdin)
 if input_open:os.set_blocking(child.stdin.fileno(),False)
 def pump_input():
@@ -188,6 +212,8 @@ def pump_input():
         except BrokenPipeError:
             input_open=False;pending.clear();child.stdin.close()
 while child.poll() is None:
+    if deadline is not None and time.monotonic()>=deadline:
+        timed_out=True;stop()
     if (root/'stop').exists():
         signal_owned(signal.SIGTERM)
         try:child.wait(timeout=1)
@@ -200,7 +226,9 @@ while descendants() and time.monotonic()<deadline:
     signal_owned(signal.SIGKILL);reap();time.sleep(0.05)
 reap()
 if descendants():raise RuntimeError('termination-unconfirmed')
-publish({'observedExit':True,'exitCode':child.returncode})
+for reader in readers:reader.join(timeout=1)
+if any(reader.is_alive() for reader in readers):raise RuntimeError('output-unconfirmed')
+publish({'observedExit':True,'exitCode':child.returncode,**({'output':output,'timedOut':timed_out} if buffered else {})})
 sys.exit(child.returncode if child.returncode>=0 else 128-child.returncode)
 `;
 }

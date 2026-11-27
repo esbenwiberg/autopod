@@ -534,7 +534,9 @@ export async function prepareLaunchRepository(
   let result: Awaited<ReturnType<ContainerManager['execInContainer']>>;
   const commandStarted = Date.now();
   try {
-    result = await containerManager.execInContainer(
+    const execute = containerManager.execObserved ?? containerManager.execInContainer;
+    result = await execute.call(
+      containerManager,
       containerId,
       wrapValidationExecCommand(instrumentPrepareCommand(stages, timingPath), env, literals),
       {

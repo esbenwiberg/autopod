@@ -131,6 +131,13 @@ export class RoutingContainerManager implements ContainerManager {
     return this.delegate(containerId).execStreaming(containerId, command, options);
   }
 
+  execObserved(containerId: string, command: string[], options: ExecOptions) {
+    const manager = this.delegate(containerId);
+    return manager.execObserved
+      ? manager.execObserved(containerId, command, options)
+      : manager.execInContainer(containerId, command, options);
+  }
+
   terminateRecordedExec(identity: NativeGoalProcessIdentity): Promise<number> {
     const manager = this.delegate(identity.containerId);
     if (!manager.terminateRecordedExec)

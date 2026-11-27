@@ -7,6 +7,9 @@ import type { RepositoryPreparationEvidence } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
+import { RoutingContainerManager } from '../containers/routing-container-manager.js';
+import type { SandboxApiClient } from '../containers/sandbox-api-client.js';
+import { runSandboxObservedExec } from '../containers/sandbox-observed-exec.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createMockContainerManager, createTestDb } from '../test-utils/mock-helpers.js';
 import { CACHE_SIGNAL_SCRIPT } from './preparation-timing.js';
@@ -21,6 +24,7 @@ import {
 const exec = promisify(execFile);
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 const source = { head: 'a'.repeat(40), fingerprint: 'b'.repeat(64) };
@@ -55,6 +59,105 @@ async function fixture(command = 'pnpm install --frozen-lockfile') {
 }
 
 describe('repository preparation', () => {
+  it.each([
+    'success',
+    'nonzero',
+    'lost',
+    'mismatch',
+    'timeout',
+    'cancelled',
+    'lost-start',
+  ] as const)('observes one long Sandbox preparation through bounded RPCs: %s', async (scenario) => {
+    const f = await fixture('sleep 35 && echo prepared');
+    vi.useFakeTimers();
+    const started = Date.now();
+    let launches = 0;
+    let stopped = false;
+    let root = '';
+    const requests = vi.fn<SandboxApiClient['exec']>(async (id, argv, options) => {
+      expect(id).toBe('candidate');
+      expect(options?.timeoutMs).toBeGreaterThan(0);
+      expect(options?.timeoutMs).toBeLessThanOrEqual(5000);
+      expect(options?.maxOutputBytes).toBe(100000);
+      expect(options?.singleAttempt).toBe(true);
+      options?.beforeSend?.();
+      if (argv.at(-1) === '--detach') {
+        launches++;
+        if (scenario === 'lost-start') throw new Error('Lost launch response');
+      } else if (argv[3]?.includes('os.mkdir')) {
+        root = argv[4] ?? '';
+      } else if (argv[3]?.includes('.touch(')) {
+        stopped = true;
+      } else if (argv[3]?.includes('read_text')) {
+        expect(argv.at(-1)).toBe(`${root}/state.json`);
+        const terminal = stopped || (scenario !== 'timeout' && Date.now() - started >= 35000);
+        if (scenario === 'lost' && terminal) throw new Error('Lost terminal observation');
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: JSON.stringify({
+            execId:
+              scenario === 'mismatch' && terminal
+                ? 'other-execution'
+                : root.slice('/run/autopod-goal-exec-'.length),
+            observedExit: terminal,
+            ...(terminal
+              ? {
+                  exitCode: stopped ? 143 : scenario === 'nonzero' ? 7 : 0,
+                  output: { stdout: Buffer.from('prepared').toString('base64'), stderr: '' },
+                  timedOut: false,
+                }
+              : {}),
+          }),
+        };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const client = { supportsBoundedExec: true, exec: requests } as unknown as SandboxApiClient;
+    const sandbox = { ...f.cm, execObserved: runSandboxObservedExec.bind(null, client) };
+    const cm = new RoutingContainerManager({
+      local: f.cm,
+      sandbox,
+      resolveTarget: () => 'sandbox',
+    });
+    const record = vi.fn();
+    const outcome = prepareLaunchRepository(
+      f.config,
+      cm,
+      'candidate',
+      {},
+      {
+        record,
+        assertCurrent() {
+          if (scenario === 'cancelled' && Date.now() - started >= 1000)
+            throw new Error('Ownership revoked');
+        },
+      },
+    ).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(126000);
+    const result = await outcome;
+    expect(launches).toBe(1);
+    if (scenario === 'success') {
+      expect(result).toMatchObject({
+        status: 'passed',
+        exitCode: 0,
+        source,
+        timing: { commandMs: 35000 },
+      });
+      expect(stopped).toBe(false);
+    } else {
+      expect(result).toBeInstanceOf(Error);
+      expect(stopped).toBe(scenario !== 'nonzero');
+      if (scenario !== 'cancelled')
+        expect(record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: scenario === 'nonzero' ? 'failed' : 'unverified',
+            exitCode: scenario === 'nonzero' ? 7 : null,
+          }),
+        );
+    }
+  });
+
   it('binds success to source and hashes commands without exposing env', async () => {
     const f = await fixture();
     const env = { PUBLIC_VALUE: 'visible', PRIVATE_VALUE: 'private-fixture' };
