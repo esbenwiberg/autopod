@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, type PartialResearchReport, type Pod } from '@autopod/shared';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
+import { readArtifactSnapshotFile } from './artifact-snapshot-receipt.js';
 
 const execFileAsync = promisify(execFile);
 const GIT_OID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -85,6 +86,24 @@ export async function capturePartialResearchReport(
           : code === 'ELOOP'
             ? `${REPORT_PATH} must not be a symbolic link.`
             : `${REPORT_PATH} could not be read from the preserved workspace.`,
+    };
+  }
+}
+
+/** Capture only bytes that participated in verifying the exact artifact receipt. */
+export async function captureArtifactPartialResearchReport(
+  artifactRoot: string,
+  snapshot: string,
+  generation: number,
+  cycle: number,
+): Promise<PartialResearchCapture> {
+  try {
+    return sealReport(
+      await readArtifactSnapshotFile(snapshot, artifactRoot, generation, cycle, REPORT_PATH),
+    );
+  } catch {
+    return {
+      unavailableReason: `${REPORT_PATH} was absent or could not be verified against the preserved artifact receipt.`,
     };
   }
 }

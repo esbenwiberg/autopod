@@ -790,6 +790,30 @@ human_review: []
     expect(md).not.toContain('PI_PACKAGE_ROOT');
   });
 
+  it.each([
+    'artifact',
+    'none',
+  ] as const)('gives private %s research a closeout contract without code delivery instructions', (outputMode) => {
+    const md = generateSystemInstructions(
+      makeProfile({ outputMode, buildEnv: { PRIVATE: 'sentinel-build-value' } }),
+      makeSession({
+        completionPolicy: 'accept-findings',
+        task: 'Run the probe once and save private findings only. No code changes or PR.',
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('report_task_summary` even if a probe fails');
+    expect(md).toContain('Final chat text and a report file do not replace the stored summary');
+    expect(md).toContain('Leave the report uncommitted');
+    expect(md).toContain('A bare agent shell may not inherit the scoped environment');
+    expect(md).toContain('Human acceptance acknowledges receipt');
+    expect(md).not.toContain('Before calling `report_task_summary`, commit');
+    expect(md).not.toContain('git add -A');
+    expect(md).not.toContain('**Run `pre_submit_review`');
+    expect(md).not.toContain('**Independent daemon acceptance**');
+    expect(md).not.toContain('sentinel-build-value');
+  });
+
   it('mentions buildWorkDir when set so the agent runs commands in the right place', () => {
     const md = generateSystemInstructions(
       makeProfile({ buildCommand: 'npm run build', buildWorkDir: 'apps/web' }),

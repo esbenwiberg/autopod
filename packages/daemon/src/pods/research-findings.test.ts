@@ -409,6 +409,83 @@ describe('research findings contract', () => {
     expect(f.pod().status).toBe('research_ready');
     expect(service.completed).not.toHaveBeenCalled();
   });
+  it('makes an exact preserved report readable as incomplete when the worker omitted its summary', async () => {
+    f.podRepo.update('prepare', {
+      taskSummary: null,
+      options: { agentMode: 'auto', output: 'artifact', validate: false },
+    });
+    const service = finalizer(false);
+    vi.mocked(service.cm.extractDirectoryFromContainer).mockImplementation(
+      async (_id, _source, destination) => {
+        await writeFile(path.join(destination, 'research-output.md'), 'Browser probe failed');
+      },
+    );
+    await service.finalizeArtifactPod(f.pod());
+    const pod = f.pod();
+    expect(pod.status).toBe('failed');
+    expect(pod.failureReason).toContain('without a stored report_task_summary');
+    expect(pod.failureReason).toContain('ap files prepare --partial');
+    expect(pod.researchFindings).toBeNull();
+    expect(pod.taskSummary).toBeNull();
+    expect(pod.containerId).not.toBeNull();
+    expect(service.cleanup).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+
+    // The endpoint reads the sealed capture, not a mutable snapshot or container.
+    await writeFile(path.join(pod.artifactsPath ?? '', 'research-output.md'), 'changed');
+    const app = Fastify();
+    filesRoutes(
+      app,
+      { getSession: () => f.pod() } as unknown as PodManager,
+      undefined,
+      f.podRepo.completionJournal,
+    );
+    try {
+      const response = await app.inject('/pods/prepare/files/partial-research');
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        content: 'Browser probe failed',
+        status: 'incomplete_unreviewed',
+        provenance: {
+          podId: 'prepare',
+          generation: pod.lifecycleGeneration,
+          cycle: pod.finalization?.cycle,
+        },
+      });
+      const ordinary = await app.inject('/pods/prepare/files?path=research-output.md');
+      expect(ordinary.statusCode).not.toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not capture an unverified report from a tampered snapshot', async () => {
+    f.podRepo.update('prepare', {
+      taskSummary: null,
+      options: { agentMode: 'auto', output: 'artifact', validate: false },
+    });
+    const service = finalizer(false);
+    vi.mocked(service.cm.extractDirectoryFromContainer).mockImplementation(
+      async (_id, _source, destination) => {
+        await writeFile(path.join(destination, 'research-output.md'), 'Original');
+      },
+    );
+    const snapshot = await service.preserveArtifacts(f.pod());
+    await writeFile(path.join(snapshot, 'research-output.md'), 'Modified');
+    await service.finalizeArtifactPod(f.pod());
+    const pod = f.pod();
+    expect(pod.status).toBe('failed');
+    expect(pod.researchFindings).toBeNull();
+    expect(service.cleanup).not.toHaveBeenCalled();
+    expect(
+      f.podRepo.completionJournal?.getPartialResearch(
+        pod.id,
+        pod.lifecycleGeneration,
+        pod.finalization?.cycle ?? 0,
+      ),
+    ).toBeNull();
+  });
+
   it('retains resources when preservation fails and identifies settled none-output recovery', async () => {
     const service = finalizer();
     vi.mocked(service.cm.extractDirectoryFromContainer).mockRejectedValue(

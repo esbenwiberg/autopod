@@ -10,7 +10,11 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
-import type { PodRepository } from './pod-repository.js';
+import {
+  captureArtifactPartialResearchReport,
+  isPartialResearchPod,
+} from './partial-research-report.js';
+import type { PodRepository, PodUpdates } from './pod-repository.js';
 import { retainFindings } from './research-findings.js';
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +37,11 @@ interface ArtifactFinalizerDependencies {
   killSidecarsForPod(podId: string, strict: boolean, assertCurrent: () => void): Promise<void>;
   destroyPodNetwork(podId: string, strict: boolean): Promise<void>;
   assertExecutionTerminationVerified(podId: string): void;
-  transition(pod: Pod, to: 'failed' | 'complete' | 'research_ready'): Pod;
+  transition(
+    pod: Pod,
+    to: 'failed' | 'complete' | 'research_ready',
+    updates?: Partial<PodUpdates>,
+  ): Pod;
   logger: Pick<Logger, 'error' | 'warn' | 'info'>;
   emitActivityStatus(podId: string, message: string): void;
   emitActivityError(podId: string, message: string, fatal: boolean): void;
@@ -186,7 +194,41 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
       }
     }
 
-    const findings = findingsOnly ? await retainFindings(podRepo.getOrThrow(podId)) : null;
+    let current = podRepo.getOrThrow(podId);
+    const settlement = current.finalization;
+    if (
+      findingsOnly &&
+      current.launchConfigDigest &&
+      settlement?.agentSettledAt &&
+      settlement.generation === pod.lifecycleGeneration &&
+      !current.taskSummary?.actualSummary.trim()
+    ) {
+      const capture = isPartialResearchPod(current)
+        ? await captureArtifactPartialResearchReport(
+            path.join(dataDir, 'artifacts', podId),
+            artifactsPath,
+            pod.lifecycleGeneration,
+            settlement.cycle,
+          )
+        : undefined;
+      if (!ownsArtifactFinalization(pod)) return;
+      deps.assertExecutionTerminationVerified(podId);
+      current = podRepo.getOrThrow(podId);
+      if (current.artifactsPath !== artifactsPath) return;
+      if (!current.taskSummary?.actualSummary.trim()) {
+        const failureReason =
+          'Research worker finished without a stored report_task_summary. Findings cannot be accepted. Original resources retained.' +
+          (capture?.content ? ` Read the incomplete report with ap files ${podId} --partial.` : '');
+        atomicPodChange(podRepo, () => {
+          if (capture)
+            podRepo.completionJournal?.recordPartialResearch(current, settlement.cycle, capture);
+          transition(current, 'failed', { failureReason });
+        });
+        emitActivityError(podId, failureReason, true);
+        return;
+      }
+    }
+    const findings = findingsOnly ? await retainFindings(current) : null;
 
     // Release only after receipt verification and task-wide termination checks.
     if (!ownsArtifactFinalization(pod)) return;
