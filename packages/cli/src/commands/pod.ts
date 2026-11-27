@@ -1395,7 +1395,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     client: AutopodClient,
     id: string,
     intent: 'kill' | 'delete',
-    requestKey = randomUUID(),
+    requestKey: string = randomUUID(),
   ): Promise<void> {
     const pod = await client.getSession(id);
     if (pod.id !== id) throw new Error('Use the exact full pod ID.');
