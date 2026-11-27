@@ -461,6 +461,16 @@ function expectedPrefix(kind: Parking) {
 }
 
 describe('createValidationInfrastructure parking contracts', () => {
+  it('gives actionable authorization guidance for nonretryable settled failure', async () => {
+    const f = fixture();
+    f.r.infrastructureFailure!.retryable = false;
+    await f.run('validation');
+    expect(f.activity.mock.calls[0]?.[1]).toContain('plain Resume is blocked');
+    expect(f.activity.mock.calls[0]?.[1]).toContain(
+      'ap retry-state worker --stage validation --json',
+    );
+    expect(f.activity.mock.calls[0]?.[1]).toContain('ap authorize-retry worker');
+  });
   it('constructs without collaborator calls or writes', () => {
     const f = fixture();
     f.make();
@@ -500,7 +510,10 @@ describe('createValidationInfrastructure parking contracts', () => {
       expect(f.activity).toHaveBeenCalledExactlyOnceWith('worker', f.blocked.message);
     if (kind === 'validation')
       expect(f.activity.mock.calls).toEqual([
-        ['worker', 'Validation infrastructure failure during test — parked for explicit Resume'],
+        [
+          'worker',
+          'Validation infrastructure failure during test — parked for explicit Resume within the retry budget',
+        ],
         ['worker', 'Stopping post-validation container…'],
       ]);
     if (kind === 'review')

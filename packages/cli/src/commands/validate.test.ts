@@ -57,6 +57,15 @@ describe('ap diff', () => {
 
   const args = (json: boolean) => ['diff', '12345678', ...(json ? ['--json'] : [])];
 
+  it('routes validate to checks only without requesting forced Rework', async () => {
+    vi.spyOn(client, 'revalidatePod').mockResolvedValue(undefined);
+    vi.spyOn(client, 'triggerValidation').mockResolvedValue(undefined);
+    await program.parseAsync(['validate', 'top-nightingale'], { from: 'user' });
+    expect(client.revalidatePod).toHaveBeenCalledExactlyOnceWith('top-nightingale');
+    expect(client.triggerValidation).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('ap status top-nightingale'));
+  });
+
   it('prints canonical patches when task review was skipped, without printing preview files', async () => {
     await program.parseAsync(args(false), { from: 'user' });
     expect(client.getPodDiff).toHaveBeenCalledExactlyOnceWith('12345678');
@@ -138,6 +147,24 @@ describe('ap diff', () => {
 });
 
 describe('built ap diff', () => {
+  it('sends validate only to the checks endpoint', async () => {
+    const fixture = await createCliFixture({
+      respond: (reply) => {
+        reply.setHeader('content-type', 'application/json');
+        reply.end('{}');
+      },
+    });
+    try {
+      const result = await fixture.start(['validate', 'top-nightingale']).result;
+      expect(result.code).toBe(0);
+      expect(fixture.requests.map(({ method, url }) => ({ method, url }))).toEqual([
+        { method: 'POST', url: '/pods/top-nightingale/revalidate' },
+      ]);
+      expect(result.stdout).toContain('ap status top-nightingale');
+    } finally {
+      await fixture.dispose();
+    }
+  });
   it.each([
     false,
     true,

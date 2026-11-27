@@ -106,18 +106,18 @@ export function createValidationInfrastructure(deps: ValidationInfrastructureDep
     result: ValidationResult,
   ): Promise<void> {
     const label = validationInfrastructureFailureLabel(result);
-    emitActivityStatus(
-      pod.id,
-      requiresValidationSettlement({ ...pod, lastValidationResult: result })
-        ? `${label} — termination proof required; inspect ap reconcile-validation ${pod.id} --json before retry or repair`
-        : result.infrastructureFailure?.code === 'PROCESS_MEMORY_EXHAUSTED'
-          ? `${label} — inspect retained checks recovery; effective command memory improvement and retry permission are required`
-          : `${label} — parked for explicit Resume`,
-    );
+    const recoveryGuidance = requiresValidationSettlement({ ...pod, lastValidationResult: result })
+      ? `termination proof required; inspect ap reconcile-validation ${pod.id} --json before retry or repair`
+      : result.infrastructureFailure?.code === 'PROCESS_MEMORY_EXHAUSTED'
+        ? 'inspect retained checks recovery; effective command memory improvement and retry permission are required'
+        : result.infrastructureFailure?.retryable
+          ? 'parked for explicit Resume within the retry budget'
+          : `plain Resume is blocked for unchanged nonretryable inputs; inspect ap retry-state ${pod.id} --stage validation --json, change relevant conditions or use ap authorize-retry ${pod.id} --stage validation --reason <reason> --request-key <key> before Resume`;
+    emitActivityStatus(pod.id, `${label} — ${recoveryGuidance}`);
     if (pod.failureReason) transition(pod, 'review_required');
     else
       transition(pod, 'review_required', {
-        failureReason: `${label}: ${result.infrastructureFailure?.message ?? 'Execution unavailable'}. Responsible system: Autopod validation. Checks remain incomplete; inspect execution evidence before supported recovery.`,
+        failureReason: `${label}: ${result.infrastructureFailure?.message ?? 'Execution unavailable'}. Responsible system: Autopod validation. Checks remain incomplete; ${recoveryGuidance}.`,
       });
     podRepo.update(pod.id, {
       validationAttempts: Math.max(0, pod.validationAttempts - 1),
