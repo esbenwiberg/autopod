@@ -287,6 +287,8 @@ export interface ContainerManager {
     command: string[],
     options?: ExecOptions,
   ): Promise<ExecResult>;
+  /** Long commands supervised once and observed through bounded requests, when supported. */
+  execObserved?(containerId: string, command: string[], options: ExecOptions): Promise<ExecResult>;
   execStreaming(
     containerId: string,
     command: string[],

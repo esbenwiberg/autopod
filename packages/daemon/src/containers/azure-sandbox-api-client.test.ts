@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AutopodError } from '@autopod/shared';
@@ -21,8 +21,104 @@ import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-c
 import { RoutingContainerManager } from './routing-container-manager.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 import { SandboxContainerManager } from './sandbox-container-manager.js';
+import {
+  sandboxGoalExit,
+  sandboxGoalProcess,
+  sandboxGoalSupervisor,
+} from './sandbox-goal-process.js';
 
 const logger = pino({ level: 'silent' });
+
+it('observes a long preparation through the real bounded Azure exec transport without replay', async () => {
+  vi.useFakeTimers();
+  const started = Date.now();
+  let launches = 0;
+  let execId = '';
+  const { client } = makeClient([], {
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { command: string };
+      const match = /autopod-goal-exec-([a-f0-9-]{36})/.exec(body.command);
+      if (match?.[1]) {
+        if (execId) expect(match[1]).toBe(execId);
+        execId = match[1];
+      }
+      let stdout = '';
+      if (body.command.includes('--detach') && !body.command.includes('os.mkdir')) launches++;
+      if (body.command.includes('read_text')) {
+        const terminal = Date.now() - started >= 35000;
+        stdout = JSON.stringify({
+          execId,
+          observedExit: terminal,
+          ...(terminal
+            ? {
+                exitCode: 0,
+                timedOut: false,
+                output: {
+                  stdout: Buffer.from('prepared').toString('base64'),
+                  stderr: '',
+                },
+              }
+            : {}),
+        });
+      }
+      return new Response(JSON.stringify({ stdout, stderr: '', exitCode: 0 }), { status: 200 });
+    },
+  });
+  try {
+    const manager = new SandboxContainerManager(client, logger);
+    const outcome = manager.execObserved('candidate', ['sh', '-c', 'sleep 35; echo prepared'], {
+      timeout: 120000,
+      maxOutputBytes: 65536,
+      requireObservedExit: true,
+    });
+    await vi.advanceTimersByTimeAsync(36000);
+    expect(await outcome).toEqual({ exitCode: 0, stdout: 'prepared', stderr: '' });
+    expect(launches).toBe(1);
+    expect(execId).toHaveLength(36);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+describe.skipIf(process.platform !== 'linux')('bounded preparation supervisor', () => {
+  it.each([0, 7])('captures bounded output and the actual child exit %s', (exitCode) => {
+    const root = mkdtempSync(join(tmpdir(), 'prep-supervisor-'));
+    const identity = sandboxGoalProcess('fixture', '11111111-1111-4111-8111-111111111111');
+    try {
+      // Exercise the real supervisor as the test user. Only the privilege boundary
+      // is substituted; launch, output draining, reaping and receipts run unchanged.
+      const script = sandboxGoalSupervisor(
+        identity,
+        [
+          'python3',
+          '-c',
+          `import sys;print('x'*100000);print('final diagnostic',file=sys.stderr);sys.exit(${exitCode})`,
+        ],
+        root,
+        {},
+        false,
+        { maxOutputBytes: 65536, deadlineMs: Date.now() + 5000 },
+      )
+        .replace("root=pathlib.Path(spec['root'])", `root=pathlib.Path(${JSON.stringify(root)})`)
+        .replace('os.geteuid()!=0 or ', '')
+        .replace('root.stat().st_uid!=0', 'root.stat().st_uid!=os.getuid()')
+        .replace('os.setgroups([]);os.setgid(1000);os.setuid(1000)', 'pass');
+      const run = spawnSync('python3', ['-I', '-c', script], { timeout: 10000, encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(exitCode);
+      const raw = readFileSync(join(root, 'state.json'), 'utf8');
+      expect(sandboxGoalExit(identity, raw)).toBe(exitCode);
+      const receipt = JSON.parse(raw);
+      const stdout = Buffer.from(receipt.output.stdout, 'base64');
+      const stderr = Buffer.from(receipt.output.stderr, 'base64');
+      expect(stdout.length + stderr.length).toBeLessThanOrEqual(65536);
+      expect(stdout.length).toBe(32768);
+      expect(stderr.toString()).toBe('final diagnostic\n');
+      expect(receipt.timedOut).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
 
 describe('source resource release custody', () => {

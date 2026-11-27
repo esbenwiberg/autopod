@@ -76,6 +76,7 @@ import {
   type SandboxRegistryCredentials,
   type SandboxResourceTier,
 } from './sandbox-api-client.js';
+import { runSandboxObservedExec } from './sandbox-observed-exec.js';
 import {
   DEFAULT_SANDBOX_TIER,
   resolveSandboxTier,
@@ -849,6 +850,19 @@ for root in sys.argv[1:]:
         : { ...native, maxOutputBytes: options.maxOutputBytes },
     );
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+  }
+
+  async execObserved(
+    containerId: string,
+    command: string[],
+    options: ExecOptions,
+  ): Promise<ExecResult> {
+    const assertCurrent = () => {
+      options.assertCurrent?.();
+      if (this.managedDatabase)
+        assertFinalizationResourceAvailable(this.managedDatabase, containerId);
+    };
+    return runSandboxObservedExec(this.client, containerId, command, { ...options, assertCurrent });
   }
 
   async execStreaming(
