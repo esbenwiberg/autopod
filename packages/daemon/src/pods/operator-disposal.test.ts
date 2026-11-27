@@ -4,6 +4,7 @@ import path from 'node:path';
 import type Dockerode from 'dockerode';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRetainedCleanupDocker } from '../containers/retained-cleanup-docker.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { fixtureGit } from '../test-utils/retained-cleanup-fixture.js';
 import { createRetainedCleanupHost } from '../worktrees/retained-cleanup-host.js';
@@ -217,7 +218,13 @@ describe('exact operator disposal', () => {
     const s = f.service();
     s.submit(f.podId, f.request(), actor);
     expect((await s.observe(f.podId, 'kill')).state).toBe('cleanup_pending');
-    const restart = f.service(createPodRepository(f.db));
+    const file = path.join(path.dirname(f.worktree), 'restart.db');
+    await f.db.backup(file);
+    const reopened = openTestDiskDatabase(file);
+    closes.push(() => {
+      if (reopened.open) reopened.close();
+    });
+    const restart = f.service(createPodRepository(reopened));
     restart.submit(f.podId, f.request(), actor);
     expect((await restart.observe(f.podId, 'kill')).state).toBe('cleanup_pending');
     expect(f.stops()).toBe(1);
@@ -242,6 +249,12 @@ describe('exact operator disposal', () => {
     f.db
       .prepare("UPDATE pods SET status='review_required',last_validation_result=? WHERE id=?")
       .run(JSON.stringify(result), podId);
+    // Validation-only retry stays on the same task/generation and reuses the checkout,
+    // but its current worker container differs from the original coding worker below.
+    f.db
+      .prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome)
+      SELECT 'validation-only-retry',task_id,pod_id,execution_id,1,'validation','{}','fixture-binding','2026-01-02','2026-01-02','2026-01-02','2026-01-03','unknown' FROM task_executions WHERE pod_id=?`)
+      .run(podId);
     f.db
       .prepare(
         'INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at,ended_at) VALUES (?,?,1,1,?,?,?)',
@@ -274,6 +287,48 @@ describe('exact operator disposal', () => {
     s.submit(f.podId, f.request('delete'), actor);
     expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
     expect(f.stops()).toBe(0);
+  });
+  it('never replays an uncertain Kill stop when explicitly upgrading to Delete', async () => {
+    const f = await fixture();
+    f.loseStop();
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    await s.observe(f.podId, 'kill');
+    s.submit(f.podId, f.request('delete'), actor);
+    expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(1);
+    expect(f.removes()).toBe(0);
+  });
+  it('fences a previously admitted validation retry before its next start', async () => {
+    const f = await fixture();
+    const admission = f.pods.taskRetries!.admit(
+      f.podId,
+      1,
+      {
+        source: 'a'.repeat(64),
+        contract: 'b'.repeat(64),
+        commands: 'c'.repeat(64),
+        environment: null,
+        implementation: null,
+      },
+      'd'.repeat(64),
+      [],
+    );
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    await s.observe(f.podId, 'kill');
+    expect(() => f.pods.taskRetries!.start(admission.id)).toThrow(/disposal/);
+  });
+  it('accepts an archived record independently of visibility and keeps both histories', async () => {
+    const f = await fixture();
+    f.db.prepare("UPDATE pods SET status='failed' WHERE id=?").run(f.podId);
+    f.pods.fleetArchives!.archive(f.podId, actor.userId, 'Archived fixture before disposal');
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    await s.observe(f.podId, 'kill');
+    expect(f.pods.getOrThrow(f.podId).fleetArchivedAt).toBeTruthy();
+    expect(f.pods.getOrThrow(f.podId).operatorDisposal?.intent).toBe('kill');
+    expect(() => f.pods.delete(f.podId)).toThrow(/disposal/);
   });
   it('refuses effects on foreign live identity while retaining intent', async () => {
     const f = await fixture();

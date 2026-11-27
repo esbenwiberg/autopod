@@ -627,7 +627,12 @@ public final class ActionHandler {
   public func requestDisposal(_ podId: String, intent: String) async {
     do {
       try requireCurrent()
-      let pod = try await api.getPod(podId)
+      let pod = try await perform { try await api.getPod(podId) }
+      if let existing = pod.operatorDisposal, existing.intent == intent || existing.intent == "delete" {
+        await podStore.refreshSession(podId)
+        lastError = "\(existing.intent.capitalized) already accepted for \(podId): \(existing.state). Read History/Recovery. Request \(existing.requestKey)."
+        return
+      }
       guard let generation = pod.lifecycleGeneration else {
         lastError = "Daemon does not provide exact disposal generation. Upgrade daemon; no action sent."
         return
@@ -635,7 +640,8 @@ public final class ActionHandler {
       let binding = "\(podId):\(pod.lifecycleGeneration ?? 0):\(intent)"
       let key = disposalKeys[binding] ?? UUID().uuidString
       disposalKeys[binding] = key
-      let receipt = try await api.requestOperatorDisposal(podId, generation: generation, intent: intent, requestKey: key)
+      let receipt = try await perform { try await api.requestOperatorDisposal(podId, generation: generation, intent: intent, requestKey: key) }
+      podStore.recordOperatorDisposal(receipt)
       await podStore.refreshSession(podId)
       if receipt.state == "cleanup_pending" {
         lastError = "\(intent.capitalized) accepted for \(podId). Cleanup pending; physical completion is unconfirmed. Read History/Recovery. Request \(key)."

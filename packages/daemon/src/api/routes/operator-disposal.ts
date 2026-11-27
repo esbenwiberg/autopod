@@ -38,6 +38,12 @@ export function operatorDisposalRoutes(
     return { receipt: pods?.operatorDisposals?.receipt(id) ?? null };
   });
   // Explicit observation may reconcile saved dispatches, but never replays uncertain effects.
+  app.get('/pods/:podId/operator-disposal/:key', async (req, reply) => {
+    actor(req);
+    reply.header('Cache-Control', 'no-store');
+    const p = params.extend({ key: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/) }).parse(req.params);
+    return { receipt: pods?.operatorDisposals?.receipt(p.podId, p.key) ?? null };
+  });
   app.post('/pods/:podId/operator-disposal/:key/observe', async (req, reply) => {
     actor(req);
     reply.header('Cache-Control', 'no-store');

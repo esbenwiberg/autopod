@@ -290,7 +290,7 @@ public final class EventStream {
         Task { await podStore.loadDiff(podId) }
       }
 
-    case .failureClosed(let podId):
+    case .failureClosed(let podId), .disposalChanged(let podId):
       Task { await podStore.refreshSession(podId) }
 
     case .agentActivity(let podId, var agentEvent):

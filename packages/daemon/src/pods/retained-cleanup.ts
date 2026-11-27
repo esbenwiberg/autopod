@@ -59,6 +59,7 @@ export function createRetainedCleanup(deps: {
   } as const;
 
   function durable(podId: string) {
+    pods.operatorDisposals?.assertAvailable(podId);
     const held = deps.heldSelection?.(podId);
     if (held) return held;
     const pod = pods.getOrThrow(podId);

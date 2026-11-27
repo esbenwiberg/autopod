@@ -13,6 +13,7 @@ import {
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
+import { assertNoOperatorDisposal } from './operator-disposal-repository.js';
 import {
   createRetainedCheckpointRepository,
   rewriteRepairRetryBinding,
@@ -489,6 +490,7 @@ export function createTaskRetryLedger(
         .get(id, stage) as Record<string, unknown> | undefined;
       if (!row || row.started_at || row.ended_at)
         throw new TaskRetryBlockedError('Retry admission has already started or settled');
+      assertNoOperatorDisposal(db, row.pod_id as string);
       const member = membership(row.pod_id as string);
       assertNoPendingDecision(row.pod_id as string);
       if (member.executionId !== row.execution_id || member.generation !== row.generation)

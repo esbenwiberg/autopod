@@ -16,9 +16,11 @@ export function assertNoOperatorDisposal(db: Database.Database, podId: string): 
   if (
     db
       .prepare(
-        `SELECT 1 FROM operator_disposal_intents WHERE pod_id=? OR task_id=(SELECT task_id FROM task_executions WHERE pod_id=?)`,
+        `SELECT 1 FROM operator_disposal_intents WHERE pod_id=? OR task_id=(SELECT task_id FROM task_executions WHERE pod_id=?)
+        OR pod_id IN (SELECT value FROM pods p,json_each(p.depends_on_pod_ids) WHERE p.id=?)
+        OR pod_id=(SELECT depends_on_pod_id FROM pods WHERE id=?)`,
       )
-      .get(podId, podId)
+      .get(podId, podId, podId, podId)
   )
     conflict(
       'Operator disposal fences this task. Read its History/Recovery receipt; no retry, start, publication or dependent release is authorized.',
@@ -76,6 +78,24 @@ export function createOperatorDisposalRepository(db: Database.Database) {
   return {
     receipt,
     event,
+    admitEffect(id: string, key: string, kind: string, evidence: unknown): boolean {
+      return db
+        .transaction(() => {
+          const intent = row(id, key);
+          if (!intent) throw new PodNotFoundError(id);
+          if (
+            db
+              .prepare(`SELECT 1 FROM operator_disposal_events e JOIN operator_disposal_intents i
+          ON i.pod_id=e.pod_id AND i.request_key=e.request_key
+          WHERE e.pod_id=? AND i.generation=? AND e.kind=?`)
+              .get(id, intent.generation, kind)
+          )
+            return false;
+          event(id, key, kind, evidence);
+          return true;
+        })
+        .immediate();
+    },
     targets(id: string, key: string): import('./retained-cleanup-repository.js').Target[] | null {
       const e = db
         .prepare(
@@ -99,8 +119,14 @@ export function createOperatorDisposalRepository(db: Database.Database) {
     assertAvailable(id: string) {
       assertNoOperatorDisposal(db, id);
     },
-    accept: db.transaction(
-      (id: string, input: OperatorDisposalRequest, actor: { type: 'human'; userId: string }) => {
+    accept(
+      id: string,
+      input: OperatorDisposalRequest,
+      actor: { type: 'human'; userId: string },
+    ): OperatorDisposalReceipt {
+      if (db.inTransaction)
+        conflict('Disposal acceptance must commit independently before effects.');
+      return db.transaction(() => {
         const request = operatorDisposalRequestSchema.parse(input);
         if (!actor.userId.trim() || actor.type !== 'human')
           throw new AutopodError('Authenticated human required', 'UNAUTHORIZED', 401);
@@ -133,16 +159,21 @@ export function createOperatorDisposalRepository(db: Database.Database) {
           task?.task_id ?? null,
           JSON.stringify(request),
           JSON.stringify(actor),
-          JSON.stringify(pod),
+          JSON.stringify({
+            id,
+            lifecycle_generation: pod.lifecycle_generation,
+            status: pod.status,
+            container_id: pod.container_id,
+            worktree_path: pod.worktree_path,
+            branch: pod.branch,
+            execution_target: pod.execution_target,
+            scope: 'exact-pod-unpublished-resources',
+          }),
           new Date().toISOString(),
         );
         return receipt(id, request.requestKey)!;
-      },
-    ) as (
-      id: string,
-      input: OperatorDisposalRequest,
-      actor: { type: 'human'; userId: string },
-    ) => OperatorDisposalReceipt,
+      })();
+    },
   };
 }
 export type OperatorDisposalRepository = ReturnType<typeof createOperatorDisposalRepository>;

@@ -388,9 +388,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       },
     ] satisfies Target[];
   }
-  async function stopped(targets: Target[], guard: () => void) {
+  async function stopped(targets: Target[], guard: () => void, containerId?: string) {
     await proof(targets, guard, true);
-    const t = targets.find((t) => t.kind === 'docker_container')!;
+    const t = targets.find(
+      (t) => t.kind === 'docker_container' && (!containerId || t.id === containerId),
+    )!;
     const live = await inspect(docker.getContainer(t.id).inspect());
     guard();
     return (
@@ -401,9 +403,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
         ['exited', 'created'].includes(live.State.Status))
     );
   }
-  async function stop(targets: Target[], guard: () => void) {
+  async function stop(targets: Target[], guard: () => void, containerId?: string) {
     await proof(targets, guard, true);
-    const t = targets.find((t) => t.kind === 'docker_container')!;
+    const t = targets.find(
+      (t) => t.kind === 'docker_container' && (!containerId || t.id === containerId),
+    )!;
     await engine(t.namespace, guard);
     guard();
     await boundedDockerCall(docker.getContainer(t.id).stop({ t: 10 }), {

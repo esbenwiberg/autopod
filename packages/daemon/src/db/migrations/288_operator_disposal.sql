@@ -1,3 +1,4 @@
+-- @execute-whole
 -- Acceptance is separate from physical completion and historical pod status.
 CREATE TABLE operator_disposal_intents (
   pod_id TEXT NOT NULL,
@@ -19,3 +20,11 @@ CREATE TABLE operator_disposal_events (
   recorded_at TEXT NOT NULL,
   FOREIGN KEY (pod_id, request_key) REFERENCES operator_disposal_intents(pod_id, request_key)
 );
+CREATE TRIGGER operator_disposal_intent_no_update BEFORE UPDATE ON operator_disposal_intents
+BEGIN SELECT RAISE(ABORT, 'operator disposal intent is immutable'); END;
+CREATE TRIGGER operator_disposal_intent_no_delete BEFORE DELETE ON operator_disposal_intents
+BEGIN SELECT RAISE(ABORT, 'operator disposal history is retained'); END;
+CREATE TRIGGER operator_disposal_event_no_update BEFORE UPDATE ON operator_disposal_events
+BEGIN SELECT RAISE(ABORT, 'operator disposal evidence is immutable'); END;
+CREATE TRIGGER operator_disposal_event_no_delete BEFORE DELETE ON operator_disposal_events
+BEGIN SELECT RAISE(ABORT, 'operator disposal evidence is retained'); END;

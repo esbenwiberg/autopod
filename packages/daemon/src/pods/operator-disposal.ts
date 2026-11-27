@@ -11,14 +11,16 @@ import {
   qualifyRetainedGit,
   type RetainedCleanupHost,
 } from '../worktrees/retained-cleanup-host.js';
+import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
-import type { Target } from './retained-cleanup-repository.js';
+import { overlaps, type Target } from './retained-cleanup-repository.js';
 
 /** Intent admission never depends on physical cleanup eligibility. No PodStatus is rewritten. */
 export function createOperatorDisposal(deps: {
   pods: PodRepository;
   docker?: RetainedCleanupDocker;
   host?: RetainedCleanupHost;
+  eventBus?: EventBus;
 }) {
   const { pods, docker } = deps;
   const store = pods.operatorDisposals!;
@@ -147,6 +149,14 @@ export function createOperatorDisposal(deps: {
       }
       const exact = () => {
         guard();
+        if (JSON.stringify(pods.retainedCleanup!.heldHistory(id)) !== JSON.stringify(history))
+          pending('Historical allocation or execution inventory changed during cleanup.');
+        if (
+          [...ids].some(
+            (cid) => !targets.some((t) => t.kind === 'docker_container' && t.id === cid),
+          )
+        )
+          pending('Saved cleanup targets do not cover every predecessor.');
         pods.retainedCleanup!.assertForeignClaims(id, [...ids], [p.worktreePath!]);
         for (const cid of ids) {
           pods.validationExecutions!.assertResourceUnshared(id, cid);
@@ -156,6 +166,11 @@ export function createOperatorDisposal(deps: {
           const e = a.evidence && JSON.parse(a.evidence);
           if (e && targets.some((t) => t.namespace === e.engineId && t.id === e.id))
             pending('Foreign allocation claims an exact target.');
+          if (
+            ['original-worktree', 'prepared-source'].includes(a.role) &&
+            overlaps(a.locator, p.worktreePath!)
+          )
+            pending('Foreign allocation claims this checkout.');
         }
         pods.retainedCleanup!.assertAllocationTransportsSettled(
           targets.filter((t) => t.kind === 'docker_bridge').map((t) => t.name),
@@ -163,23 +178,24 @@ export function createOperatorDisposal(deps: {
         );
         // External effects already admitted remain in their original ledgers; never replay them.
         for (const cid of ids) pods.externalDeliveries?.assertReleasable(cid);
+        if (p.prUrl) pods.mergeJournal?.assertPublicationAllowed?.(p.prUrl);
       };
       exact();
       await host.proof(targets, exact, true);
       await docker.proof(targets, exact, true);
       for (const t of targets.filter((t) => t.kind === 'docker_container')) {
-        const selection = targets.filter((q) => q.kind !== 'docker_container' || q.id === t.id);
-        if (!(await docker.stopped(selection, exact))) {
-          if (store.hasEvent(id, key, 'stop:' + t.id))
-            pending('A stop was dispatched but independent closure is still unknown; no replay.');
+        if (!(await docker.stopped(targets, exact, t.id))) {
           exact();
-          store.event(id, key, 'stop:' + t.id, { target: t });
+          if (!store.admitEffect(id, key, 'stop:' + t.id, { target: t }))
+            pending(
+              'A stop was dispatched but independent closure is still unknown; no replay, including after a Delete upgrade.',
+            );
           try {
-            await docker.stop(selection, exact);
+            await docker.stop(targets, exact, t.id);
           } catch {
             /* Observe independently even after a lost reply. */
           }
-          if (!(await docker.stopped(selection, exact)))
+          if (!(await docker.stopped(targets, exact, t.id)))
             pending('Execution stop is not independently confirmed.');
         }
       }
@@ -202,9 +218,7 @@ export function createOperatorDisposal(deps: {
           if (absent.has(t.id)) continue;
           const dispatch = () => {
             exact();
-            if (store.hasEvent(id, key, 'remove:' + t.id)) return false;
-            store.event(id, key, 'remove:' + t.id, { target: t });
-            return true;
+            return store.admitEffect(id, key, 'remove:' + t.id, { target: t });
           };
           try {
             if (t.kind === 'docker_container' || t.kind === 'docker_bridge')
@@ -229,6 +243,11 @@ export function createOperatorDisposal(deps: {
             : 'Exact ownership or physical closure observation failed; retained diagnostics require inspection.',
       });
     }
+    deps.eventBus?.emit({
+      type: 'pod.disposal_changed',
+      podId: id,
+      timestamp: new Date().toISOString(),
+    });
     return store.receipt(id, key)!;
   }
   function observe(id: string, key: string) {
@@ -241,7 +260,14 @@ export function createOperatorDisposal(deps: {
   }
   return {
     submit(id: string, request: OperatorDisposalRequest, actor: OperatorActor) {
+      if (actor.type !== 'human')
+        throw new AutopodError('Authenticated operator required', 'UNAUTHORIZED', 401);
       store.accept(id, request, { type: 'human', userId: actor.userId });
+      deps.eventBus?.emit({
+        type: 'pod.disposal_changed',
+        podId: id,
+        timestamp: new Date().toISOString(),
+      });
       // Return acceptance immediately. Physical effects run only after durable intent.
       void observe(id, request.requestKey);
       return store.receipt(id, request.requestKey)!;

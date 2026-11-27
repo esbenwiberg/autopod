@@ -1387,9 +1387,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     });
 
   // ap kill
-  async function killAction(id: string): Promise<void> {
+  async function killAction(id: string, opts?: { requestKey?: string }): Promise<void> {
     const client = getClient();
-    await disposalAction(client, id, 'kill');
+    await disposalAction(client, id, 'kill', opts?.requestKey);
   }
   async function disposalAction(
     client: AutopodClient,
@@ -1440,27 +1440,20 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .command('kill [id]')
     .description('Request stop for any exact pod; preserve files, observe cleanup separately')
     .option('--all-failed', 'Kill all failed pods')
-    .action(async (id: string | undefined, opts: { allFailed?: boolean }) => {
-      const client = getClient();
-
+    .option('--request-key <key>', 'Idempotency key; retain it across lost replies')
+    .action(async (id: string | undefined, opts: { allFailed?: boolean; requestKey?: string }) => {
       if (opts.allFailed) {
-        const result = await withSpinner('Killing failed pods...', () => client.killAllFailed());
-        if (result.killed.length === 0) {
-          console.log(chalk.dim('No failed pods to kill.'));
-        } else {
-          console.log(
-            chalk.red(`Killed ${result.killed.length} pod(s): ${result.killed.join(', ')}`),
-          );
-        }
-        return;
+        throw new Error(
+          'Operator disposal requires an exact full pod ID. Scope-wide Kill is unavailable.',
+        );
       }
 
       if (!id) {
-        console.error(chalk.red('Provide a pod ID or use --all-failed'));
+        console.error(chalk.red('Provide an exact full pod ID'));
         process.exit(1);
       }
 
-      await killAction(id);
+      await killAction(id, opts);
     });
 
   // ap update-from-base

@@ -141,6 +141,7 @@ public enum SystemEvent: Sendable {
   case sessionCreated(SessionSummaryResponse)
   case statusChanged(podId: String, from: String, to: String)
   case failureClosed(podId: String)
+  case disposalChanged(podId: String)
   case agentActivity(podId: String, event: AgentEventResponse)
   case validationStarted(podId: String, attempt: Int)
   case validationCompleted(podId: String, result: ValidationResponse)
@@ -174,6 +175,9 @@ public enum SystemEvent: Sendable {
     case "pod.failure_closed":
       guard let id = raw.podId else { return nil }
       return .failureClosed(podId: id)
+    case "pod.disposal_changed":
+      guard let id = raw.podId else { return nil }
+      return .disposalChanged(podId: id)
 
     case "pod.agent_activity":
       guard let id = raw.podId, let event = raw.event else { return nil }

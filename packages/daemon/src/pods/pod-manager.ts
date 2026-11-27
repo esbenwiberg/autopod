@@ -2054,6 +2054,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       operatorDisposal: createOperatorDisposal({
         pods: podRepo,
         docker: deps.retainedCleanupDocker,
+        eventBus,
       }),
       closeFailure,
       retainedCleanup,
