@@ -321,17 +321,19 @@ describe('exact operator disposal', () => {
   });
   it('stops exact owned execution without branch/worktree evidence and keeps discard pending', async () => {
     const f = await fixture();
+    f.addPredecessor();
     f.db.prepare("UPDATE pods SET worktree_path=NULL,branch='' WHERE id=?").run(f.podId);
     const s = f.service();
     s.submit(f.podId, f.request('delete'), actor);
     const r = await s.observe(f.podId, 'delete');
     expect(r.state).toBe('cleanup_pending');
-    expect(f.stops()).toBe(1);
+    expect(f.stops()).toBe(2);
     expect(f.removes()).toBe(0);
     expect(r.resources?.some((t) => t.observedStopped)).toBe(true);
   });
   it('stops owned execution during an unconfirmed publication without replaying or discarding it', async () => {
     const f = await fixture();
+    f.addPredecessor();
     f.db
       .prepare(`INSERT INTO source_publication_intents(id,identity,pod_id,task_id,generation,source_identity,admitted_at)
       SELECT 'publication','publication-identity',pod_id,task_id,1,'{}','2026-01-01' FROM task_executions WHERE pod_id=?`)
@@ -340,7 +342,7 @@ describe('exact operator disposal', () => {
     s.submit(f.podId, f.request('delete'), actor);
     const r = await s.observe(f.podId, 'delete');
     expect(r.state).toBe('cleanup_pending');
-    expect(f.stops()).toBe(1);
+    expect(f.stops()).toBe(2);
     expect(f.removes()).toBe(0);
     expect(f.db.prepare('SELECT 1 FROM source_publication_receipts').get()).toBeUndefined();
     expect(r.diagnostics.join(' ')).toMatch(/publication/);

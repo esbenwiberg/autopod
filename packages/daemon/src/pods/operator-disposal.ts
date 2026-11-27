@@ -60,22 +60,57 @@ export function createOperatorDisposal(deps: {
       const context = pods.retainedCleanup.context(id);
       // Stop independently of publication, source preservation and discard eligibility.
       // Missing evidence for other resources leaves the overall receipt pending.
-      if (p.containerId) {
+      const stopIds = new Set<string>(p.containerId ? [p.containerId] : []);
+      for (const cid of pods.retainedFinalizations.historicalClaims(id).resources) stopIds.add(cid);
+      for (const worker of history.workers) {
+        try {
+          const b = JSON.parse(worker.binding);
+          if (b.resource?.executionTarget === 'local' && typeof b.resource.containerId === 'string')
+            stopIds.add(b.resource.containerId);
+        } catch {
+          /* Malformed evidence cannot authorize an effect; full closure remains pending below. */
+        }
+      }
+      for (const dispatch of history.dispatches) {
+        try {
+          const b = JSON.parse(dispatch.binding);
+          if (b.executionTarget === 'local' && typeof b.containerId === 'string')
+            stopIds.add(b.containerId);
+        } catch {
+          /* Full inventory qualification below still fails closed. */
+        }
+      }
+      let unconfirmedStop = false;
+      for (const cid of stopIds) {
         const stopGuard = () => {
           guard();
-          store.assertStopUnshared(id, p.containerId!);
-          pods.validationExecutions!.assertResourceUnshared(id, p.containerId!);
-          pods.rewriteAbandonments!.assertUnshared(id, p.containerId!, []);
-          pods.retainedCleanup!.assertForeignClaims(id, [p.containerId!], []);
+          store.assertStopUnshared(id, cid);
+          pods.validationExecutions!.assertResourceUnshared(id, cid);
+          pods.rewriteAbandonments!.assertUnshared(id, cid, []);
+          pods.retainedCleanup!.assertForeignClaims(id, [cid], []);
         };
-        const observed = await docker.stopOwned(id, p.containerId, stopGuard, (target) =>
-          store.admitEffect(id, key, 'stop:' + target.id, { target }),
-        );
-        stopGuard();
-        if (!observed.stopped)
-          pending('Exact stop is unconfirmed; any prior dispatch is not replayed.');
-        store.event(id, key, 'stopped:' + observed.id, { target: observed });
+        try {
+          const observed = await docker.stopOwned(id, cid, stopGuard, (target) =>
+            store.admitEffect(id, key, 'stop:' + target.id, { target }),
+          );
+          stopGuard();
+          if (!observed.stopped)
+            pending('Exact stop is unconfirmed; any prior dispatch is not replayed.');
+          store.event(id, key, 'stopped:' + observed.id, { target: observed });
+        } catch {
+          unconfirmedStop = true;
+          store.event(id, key, 'diagnostic', {
+            message:
+              'Owned execution ' +
+              cid +
+              ' lacks independently verified stop closure. No uncertain effect is replayed.',
+          });
+        }
       }
+      if (unconfirmedStop)
+        pending(
+          'One or more recorded predecessor/current executions lack stop closure; independently verified stops are retained, overall cleanup is pending.',
+        );
       if (
         history.extra.length ||
         context.incompatible ||
