@@ -41,7 +41,7 @@ it.skipIf(!process.env.AUTOPOD_PREPARATION_SANDBOX_FIXTURE)(
         { exitCode: 7, stdout: '', stderr: 'failed' },
       );
       await expect(
-        manager.execObserved(id, command('sleep 120'), { ...options, timeout: 1000 }),
+        manager.execObserved(id, command('sleep 120'), { ...options, timeout: 30000 }),
       ).rejects.toMatchObject({ execution: { cause: 'timeout', cleanup: 'confirmed' } });
       const count = await manager.execInContainer(id, ['sh', '-c', `wc -l < '${marker}'`], {
         timeout: 5000,

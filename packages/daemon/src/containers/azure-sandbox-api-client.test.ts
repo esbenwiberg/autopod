@@ -81,7 +81,7 @@ it('observes a long preparation through the real bounded Azure exec transport wi
 });
 
 describe.skipIf(process.platform !== 'linux')('bounded preparation supervisor', () => {
-  it.each([0, 7])('captures bounded output and the actual child exit %s', (exitCode) => {
+  it.each([0, 7, 143])('captures bounded output and the actual child exit %s', (exitCode) => {
     const root = mkdtempSync(join(tmpdir(), 'prep-supervisor-'));
     const identity = sandboxGoalProcess('fixture', '11111111-1111-4111-8111-111111111111');
     try {
@@ -92,12 +92,14 @@ describe.skipIf(process.platform !== 'linux')('bounded preparation supervisor', 
         [
           'python3',
           '-c',
-          `import sys;print('x'*100000);print('final diagnostic',file=sys.stderr);sys.exit(${exitCode})`,
+          exitCode === 143
+            ? 'import time;time.sleep(120)'
+            : `import sys;print('x'*100000);print('final diagnostic',file=sys.stderr);sys.exit(${exitCode})`,
         ],
         root,
         {},
         false,
-        { maxOutputBytes: 65536, deadlineMs: Date.now() + 5000 },
+        { maxOutputBytes: 65536, deadlineMs: Date.now() + (exitCode === 143 ? 100 : 5000) },
       )
         .replace("root=pathlib.Path(spec['root'])", `root=pathlib.Path(${JSON.stringify(root)})`)
         .replace('os.geteuid()!=0 or ', '')
@@ -111,9 +113,9 @@ describe.skipIf(process.platform !== 'linux')('bounded preparation supervisor', 
       const stdout = Buffer.from(receipt.output.stdout, 'base64');
       const stderr = Buffer.from(receipt.output.stderr, 'base64');
       expect(stdout.length + stderr.length).toBeLessThanOrEqual(65536);
-      expect(stdout.length).toBe(32768);
-      expect(stderr.toString()).toBe('final diagnostic\n');
-      expect(receipt.timedOut).toBe(false);
+      expect(stdout.length).toBe(exitCode === 143 ? 0 : 32768);
+      expect(stderr.toString()).toBe(exitCode === 143 ? '' : 'final diagnostic\n');
+      expect(receipt.timedOut).toBe(exitCode === 143);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
