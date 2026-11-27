@@ -1257,8 +1257,24 @@ export class DockerContainerManager implements ContainerManager {
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
       : undefined;
 
+    const pidPath = options?.superviseDockerTest
+      ? `/tmp/.autopod-validation-test-${randomUUID()}.pid`
+      : undefined;
     const execCreateOptions: Dockerode.ExecCreateOptions = {
-      Cmd: command,
+      Cmd: pidPath
+        ? [
+            'setsid',
+            '-w',
+            'sh',
+            '-c',
+            'umask 077; IFS= read -r stat < "/proc/$$/stat" || exit 125; ' +
+              `rest=\${stat##*) }; start=$(set -- $rest; printf "%s" "\${20}"); ` +
+              'printf "%s %s\\n" "$$" "$start" > "$1" || exit 125; shift; exec "$@"',
+            'autopod-validation-test',
+            pidPath,
+            ...command,
+          ]
+        : command,
       AttachStdout: true,
       AttachStderr: true,
       ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
@@ -1275,25 +1291,87 @@ export class DockerContainerManager implements ContainerManager {
     });
     options?.assertCurrent?.();
     this.assertNotRetained(containerId);
-    const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
-      label: 'exec.start (execInContainer)',
-      timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
-      logger: this.logger,
-      containerId,
-    });
+    let stream: NodeJS.ReadableStream;
+    try {
+      stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+        label: 'exec.start (execInContainer)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
+        logger: this.logger,
+        containerId,
+      });
+    } catch (error) {
+      if (!pidPath) throw error;
+      throw unverifiedExecExit(error);
+    }
 
-    const { stdout, stderr } = await collectDemuxedOutput(
-      stream,
-      this.docker,
-      options?.timeout,
-      options?.maxOutputBytes,
-    );
+    let output: Awaited<ReturnType<typeof collectDemuxedOutput>>;
+    try {
+      output = await collectDemuxedOutput(
+        stream,
+        this.docker,
+        options?.timeout,
+        options?.maxOutputBytes,
+      );
+    } catch (err) {
+      if (!pidPath) throw err;
+      if (!(err instanceof ExecInterruptedError) || err.execution?.cause !== 'timeout')
+        throw unverifiedExecExit(err);
+      const timeout = err.execution;
+      let cleanup: NonNullable<ExecInterruptedError['execution']>['cleanup'] = 'unverified';
+      let observedExitCode: number | undefined;
+      try {
+        options?.assertCurrent?.();
+        const inspect = async () => {
+          const result = await boundedDockerCall(exec.inspect(), {
+            label: 'exec.inspect (validation timeout)',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+            logger: this.logger,
+            containerId,
+          });
+          if (result.ContainerID !== containerId || result.ID !== exec.id)
+            throw new Error('Validation exec ownership could not be verified');
+          return result;
+        };
+        if (!/^[a-f0-9]{64}$/.test(containerId) || !/^[a-f0-9]{64}$/.test(exec.id))
+          throw new Error('Exact Docker validation exec identity unavailable');
+        const before = await inspect();
+        if (before.Running === true) {
+          const terminated = await this.execInContainer(
+            containerId,
+            ['sh', '-c', terminateStreamingProcessGroupScript(pidPath, true)],
+            {
+              assertCurrent: options?.assertCurrent,
+              timeout: STREAMING_TERMINATION_TIMEOUT_MS,
+              requireObservedExit: true,
+              ...(options?.user ? { user: options.user } : {}),
+            },
+          );
+          if (terminated.exitCode !== 0) cleanup = 'failed';
+          const after = await this.observeBufferedExecEnd(exec, containerId, true);
+          // Record positive command-exit evidence, but a /proc sweep cannot
+          // prove an already-detached orphan was not writing this checkout.
+          if (after.observed) observedExitCode = after.exitCode;
+        } else if (before.Running === false && isObservedExitCode(before.ExitCode)) {
+          // A stopped leader alone gives no proof about its descendants.
+          observedExitCode = before.ExitCode;
+        }
+      } catch (cleanupError) {
+        this.logger.warn(
+          { err: cleanupError, containerId, execId: exec.id },
+          'Could not verify Docker validation timeout cleanup',
+        );
+      }
+      throw Object.assign(new ExecInterruptedError({ ...timeout, cleanup, observedExitCode }), {
+        partialOutput: (err as { partialOutput?: string }).partialOutput ?? '',
+      });
+    }
+    const { stdout, stderr } = output;
 
     let end: BufferedExecEnd;
     try {
-      end = await this.observeBufferedExecEnd(exec, containerId);
+      end = await this.observeBufferedExecEnd(exec, containerId, Boolean(pidPath));
     } catch (err: unknown) {
-      if (!options?.requireObservedExit) throw err;
+      if (!options?.requireObservedExit && !pidPath) throw err;
       throw new AutopodError(
         `Buffered Docker exec ${exec.id} termination could not be observed: ${err instanceof Error ? err.message : String(err)}`,
         'EXEC_EXIT_UNVERIFIED',
@@ -1309,7 +1387,7 @@ export class DockerContainerManager implements ContainerManager {
       // Never manufacture that success while the exit is unobserved; strict
       // callers get the raw end status instead of a synthetic failure.
       const status = JSON.stringify(end.evidence);
-      if (options?.requireObservedExit)
+      if (options?.requireObservedExit || pidPath)
         throw new AutopodError(
           `Buffered Docker exec ${exec.id} has no observed stopped exit: ${status}`,
           'EXEC_EXIT_UNVERIFIED',
@@ -1337,6 +1415,7 @@ export class DockerContainerManager implements ContainerManager {
   private async observeBufferedExecEnd(
     exec: Dockerode.Exec,
     containerId: string,
+    exact = false,
   ): Promise<BufferedExecEnd> {
     let lastInspection: BufferedExecEndEvidence['lastInspection'] = null;
     for (let attempt = 1; ; attempt++) {
@@ -1361,6 +1440,8 @@ export class DockerContainerManager implements ContainerManager {
           },
         };
       }
+      if (exact && (inspection.ContainerID !== containerId || inspection.ID !== exec.id))
+        throw unverifiedExecExit();
       if (inspection.Running === false && isObservedExitCode(inspection.ExitCode))
         return { observed: true, exitCode: inspection.ExitCode };
       lastInspection = {
@@ -1787,12 +1868,19 @@ type BufferedExecEnd =
  * recorded with its kernel start time, so a recycled PID is never signalled or
  * mistaken for a survivor. Exit 0 only when no non-zombie member remains.
  */
-export function terminateStreamingProcessGroupScript(pidPath: string): string {
+export function terminateStreamingProcessGroupScript(pidPath: string, strict = false): string {
   return [
     `pid_file=${pidPath}`,
     '[ -s "$pid_file" ] || exit 1',
-    'pid=$(cat "$pid_file")',
-    'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    ...(strict
+      ? [
+          'read -r pid birth < "$pid_file" || exit 1',
+          'case "$pid:$birth" in *[!0-9:]*|:*) exit 1;; esac',
+          '[ "$pid" -gt 1 ] && [ -n "$birth" ] || exit 1',
+          `owned_leader() { { IFS= read -r leader < "/proc/$pid/stat"; } 2>/dev/null || return 1; rest=\${leader##*) }; set -- $rest; [ "$1" != Z ] && [ "$3" = "$pid" ] && [ "$4" = "$pid" ] && [ "\${20}" = "$birth" ]; }`,
+          'owned_leader || exit 1',
+        ]
+      : ['pid=$(cat "$pid_file")', 'case "$pid" in *[!0-9]*|"") exit 1;; esac']),
     '[ -d /proc/1 ] || exit 1',
     'self=$$',
     'tree=" "',
@@ -1801,14 +1889,14 @@ export function terminateStreamingProcessGroupScript(pidPath: string): string {
     // A recorded member is live when the same process (PID and start time) is not a zombie.
     'member_live() { started=$2; stat=; { IFS= read -r stat < "/proc/$1/stat"; } 2>/dev/null || return 1; rest=${stat##*) }; set -- $rest; [ "$1" != "Z" ] && [ "${20}" = "$started" ]; }',
     'tree_alive() { for entry in $tree; do member_live "${entry%%:*}" "${entry#*:}" && return 0; done; return 1; }',
-    'signal_tree() { kill -"$1" -"$pid" 2>/dev/null || true; for entry in $tree; do member_live "${entry%%:*}" "${entry#*:}" && kill -"$1" "${entry%%:*}" 2>/dev/null; done; return 0; }',
+    `signal_tree() { ${strict ? '' : 'kill -"$1" -"$pid" 2>/dev/null || true; '}for entry in $tree; do member_live "\${entry%%:*}" "\${entry#*:}" && kill -"$1" "\${entry%%:*}" 2>/dev/null; done; return 0; }`,
     'collect',
-    'kill -TERM -"$pid" 2>/dev/null || true',
+    ...(strict ? ['owned_leader || exit 1'] : ['kill -TERM -"$pid" 2>/dev/null || true']),
     'signal_tree TERM',
     'i=0',
     'while collect && tree_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
     'collect',
-    'kill -KILL -"$pid" 2>/dev/null || true',
+    ...(strict ? [] : ['kill -KILL -"$pid" 2>/dev/null || true']),
     'signal_tree KILL',
     'i=0',
     'while collect && tree_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',

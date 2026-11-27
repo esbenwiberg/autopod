@@ -1890,7 +1890,13 @@ async function runTests(
       ),
       {
         cwd: testCwd,
-        assertCurrent: config.assertTestMemoryOwnership,
+        assertCurrent: config.assertDockerTestCurrent
+          ? () => {
+              config.assertDockerTestCurrent?.();
+              config.assertTestMemoryOwnership?.();
+            }
+          : config.assertTestMemoryOwnership,
+        ...(config.executionTarget === 'local' ? { superviseDockerTest: true } : {}),
         ...(config.requiredTestMemory ? { requireObservedExit: true } : {}),
         timeout: config.outerTestTimeout ?? config.testTimeout ?? 600_000,
         ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),

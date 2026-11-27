@@ -32,7 +32,7 @@ export async function captureDockerValidationResourceScope(
   const key = await manager.getResourceKey?.(containerId);
   if (!isDockerValidationResourceKey(key, containerId))
     throw new AutopodError(
-      'Fresh Docker rewrite checks require an observed exact Docker engine/container identity before execution.',
+      'Docker checks require an observed exact Docker engine/container identity before execution.',
       'VALIDATION_RESOURCE_IDENTITY_UNAVAILABLE',
       409,
     );

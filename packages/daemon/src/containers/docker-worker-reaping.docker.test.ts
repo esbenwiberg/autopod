@@ -82,6 +82,48 @@ function zombies() {
       const result = await manager.execInContainer(id, ['node', '-e', probe], { timeout: 60_000 });
       expect(result.exitCode, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({ zombies: 0, exitCode: 0, error: null });
+
+      // Run a real validation-style timed exec after starting an unrelated
+      // process. The timeout must reap the test tree without stopping the pod
+      // or treating the suite as passed.
+      const marker = '/tmp/docker-validation-fixture';
+      expect(
+        await manager.execInContainer(id, ['sh', '-c', 'echo assertion; exit 7'], {
+          superviseDockerTest: true,
+          timeout: 5_000,
+        }),
+      ).toEqual({ exitCode: 7, stdout: 'assertion\n', stderr: '' });
+      await manager.execInContainer(id, [
+        'sh',
+        '-c',
+        `sleep 60 </dev/null >/dev/null 2>&1 & echo $! > ${marker}-other`,
+      ]);
+      await expect(
+        manager.execInContainer(
+          id,
+          [
+            'sh',
+            '-c',
+            `trap '' TERM; sleep 60 & echo $! > ${marker}-child; echo test-output; wait`,
+          ],
+          { superviseDockerTest: true, timeout: 1_500 },
+        ),
+      ).rejects.toMatchObject({
+        code: 'EXEC_INTERRUPTED',
+        execution: {
+          cause: 'timeout',
+          cleanup: 'unverified',
+          // setsid -w may report the raw signal or its shell encoding.
+          observedExitCode: expect.toSatisfy((code: number) => code === 9 || code === 137),
+        },
+        partialOutput: expect.stringContaining('test-output'),
+      });
+      const children = await manager.execInContainer(id, [
+        'sh',
+        '-c',
+        `! kill -0 "$(cat ${marker}-child)" && kill -0 "$(cat ${marker}-other)"`,
+      ]);
+      expect(children.exitCode, children.stderr).toBe(0);
     } finally {
       const results = await Promise.allSettled(
         created.map((container) => container.remove({ force: true, v: true })),

@@ -1305,6 +1305,88 @@ describe('DockerContainerManager', () => {
       expect(container.stop).not.toHaveBeenCalled();
     });
 
+    it.each([
+      'reaped owned tree',
+      'foreign exec',
+      'failed cleanup',
+      'already stopped',
+      'still running',
+    ] as const)('preserves Docker validation timeout evidence: %s', async (scenario) => {
+      const id = 'a'.repeat(64);
+      const execId = 'b'.repeat(64);
+      const stream = Object.assign(new PassThrough(), { _mockStdout: 'fixture failure' });
+      const inspect = vi
+        .fn()
+        .mockResolvedValue({
+          ID: execId,
+          ContainerID: id,
+          Running: false,
+          ExitCode: 143,
+        })
+        .mockResolvedValueOnce({
+          ID: scenario === 'foreign exec' ? 'c'.repeat(64) : execId,
+          ContainerID: id,
+          Running: scenario !== 'already stopped',
+          ExitCode: scenario === 'already stopped' ? 7 : null,
+        });
+      if (scenario === 'still running')
+        inspect.mockResolvedValue({
+          ID: execId,
+          ContainerID: id,
+          Running: true,
+          ExitCode: null,
+        });
+      const exec = { id: execId, start: vi.fn().mockResolvedValue(stream), inspect };
+      container.exec
+        .mockResolvedValueOnce(exec)
+        .mockImplementationOnce(
+          async () => createMockExec(scenario === 'failed cleanup' ? 1 : 0).exec,
+        );
+      const run = manager.execInContainer(id, ['npm', 'run', 'verify'], {
+        superviseDockerTest: true,
+        timeout: 10,
+      });
+      const observed =
+        scenario === 'already stopped'
+          ? 7
+          : scenario === 'reaped owned tree' || scenario === 'failed cleanup'
+            ? 143
+            : undefined;
+      await expect(run).rejects.toMatchObject({
+        code: observed === undefined ? 'EXEC_EXIT_UNVERIFIED' : 'EXEC_INTERRUPTED',
+        execution: {
+          cause: 'timeout',
+          timeoutMs: 10,
+          cleanup: scenario === 'failed cleanup' ? 'failed' : 'unverified',
+          observedExitCode: observed,
+        },
+        partialOutput: 'fixture failure',
+      });
+      expect(container.exec.mock.calls[0]?.[0].Cmd).toEqual([
+        'setsid',
+        '-w',
+        'sh',
+        '-c',
+        expect.stringContaining('/proc/$$/stat'),
+        'autopod-validation-test',
+        expect.stringMatching(/autopod-validation-test-/),
+        'npm',
+        'run',
+        'verify',
+      ]);
+      if (scenario === 'foreign exec' || scenario === 'already stopped') {
+        expect(container.exec).toHaveBeenCalledOnce();
+      } else {
+        expect(container.exec).toHaveBeenCalledTimes(2);
+        expect(container.exec.mock.calls[1]?.[0].Cmd).toEqual([
+          'sh',
+          '-c',
+          expect.stringContaining('owned_leader || exit 1'),
+        ]);
+      }
+      expect(container.stop).not.toHaveBeenCalled();
+    });
+
     it('bounds combined buffered output without claiming remote termination', async () => {
       const muxStream = createMockMuxStream('hello', 'world');
       const mockExec = { start: vi.fn().mockResolvedValue(muxStream), inspect: vi.fn() };

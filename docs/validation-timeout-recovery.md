@@ -34,6 +34,22 @@ and card summaries distinguish unknown execution outcomes, infrastructure failur
 review findings and actual exhausted attempt limits; a generic `review_required`
 status alone is not evidence that the attempt budget was exhausted.
 
+## Docker test timeout handling
+
+Ordinary Docker validations record the exact Engine and full container ID with
+their immutable dispatch before checks, using the same ledger as Docker rewrite
+checks. Missing/changed identity on the Docker adapter blocks execution; this
+does not backfill historical results.
+
+The Docker test phase uses a dedicated session. On timeout the adapter retains
+partial output and attempts bounded TERM/KILL cleanup of the observed tree only
+after matching the exact Docker exec/container and the in-container leader's
+kernel birth time and session. It records an exit code only if Docker reports
+one for that exact exec. An observed exit (or no remaining tracked processes)
+does not prove there are no detached orphans or that the checkout is immutable,
+so Docker timeouts still block in-place automatic retry and further workspace
+mutation. Other buffered Docker operations keep their existing behavior.
+
 ## Recovery boundary
 
 Ordinary legacy validation execs do not have the durable, root-owned supervisor

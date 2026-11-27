@@ -319,12 +319,18 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             !containerId)
         )
           throw new TaskRetryBlockedError('Docker rewrite checks source selection changed');
+        // Real local Docker adapters expose resource identity. Require immutable
+        // dispatch evidence for ordinary checks too, not just approval rewrites.
+        const bindDocker =
+          dockerRewrite || (dispatchPod.executionTarget === 'local' && Boolean(cm.getResourceKey));
+        if (bindDocker && (!containerId || !dispatchPod.worktreePath || !retryLedger || !identity))
+          throw new TaskRetryBlockedError('Docker checks require an exact resource and admission');
         const resourceScope =
-          dockerRewrite && containerId
+          bindDocker && containerId
             ? await captureDockerValidationResourceScope(cm, containerId)
             : undefined;
         ownership.assertCurrent();
-        if (dockerRewrite && validationController.signal.aborted)
+        if (bindDocker && validationController.signal.aborted)
           throw new TaskRetryBlockedError('Validation cancelled before admission');
         const admission =
           retryLedger && identity
@@ -332,10 +338,8 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 ...infrastructureBackoffs,
               ])
             : null;
-        if (dockerRewrite && !admission)
-          throw new TaskRetryBlockedError(
-            'Docker rewrite checks require a durable validation admission',
-          );
+        if (bindDocker && !admission)
+          throw new TaskRetryBlockedError('Docker checks require a durable validation admission');
         let dispatchId: string | null | undefined = null;
         if (admission && retryLedger) {
           try {
@@ -349,7 +353,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             if (validationController.signal.aborted)
               throw new TaskRetryBlockedError('Validation admission cancelled before execution');
             if (
-              dockerRewrite &&
+              bindDocker &&
               containerId &&
               (await captureDockerValidationResourceScope(cm, containerId)) !== resourceScope
             )
@@ -390,12 +394,10 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 ownership.assertCurrent(),
                 admission.id,
                 attempt,
-                dockerRewrite ? resourceScope : cm.executionResourceScope,
+                bindDocker ? resourceScope : cm.executionResourceScope,
               );
-              if (dockerRewrite && !dispatchId)
-                throw new TaskRetryBlockedError(
-                  'Exact Docker rewrite validation dispatch is unavailable',
-                );
+              if (bindDocker && !dispatchId)
+                throw new TaskRetryBlockedError('Exact Docker validation dispatch is unavailable');
               if (recoveryBudget) {
                 if (!dispatchId)
                   throw new TaskRetryBlockedError(
@@ -453,9 +455,26 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
               checkedSource,
               admission.id,
             );
+          if (
+            bindDocker &&
+            containerId &&
+            (await captureDockerValidationResourceScope(cm, containerId)) !== resourceScope
+          )
+            throw new TaskRetryBlockedError('Docker engine/resource changed before checks');
+          ownership.assertCurrent();
           engineStarted = true;
           result = await validationEngine.validate(
-            withReviewerLaunchPreflight(validationConfig, ownership),
+            withReviewerLaunchPreflight(
+              bindDocker
+                ? {
+                    ...validationConfig,
+                    assertDockerTestCurrent: () => {
+                      ownership.assertCurrent();
+                    },
+                  }
+                : validationConfig,
+              ownership,
+            ),
             (phase) => {
               if (ownership.isCurrent()) emitActivityStatus(podId, phase);
             },
