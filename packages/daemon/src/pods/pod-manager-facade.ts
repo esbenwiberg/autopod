@@ -370,6 +370,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
       ).continueRetained(podId, input, actor);
     },
+    previewRetainedChecks(podId: string) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
+      ).previewRetainedChecks(podId);
+    },
     checkRetainedCandidate(
       podId: string,
       recoveryId: string,

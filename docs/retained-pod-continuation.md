@@ -196,6 +196,26 @@ changed-conditions policy may admit a retry within the unchanged task budget.
 It does not grant an unchanged-input override or reset attempts; if that policy
 refuses admission, a separate explicit retry authorization is still required.
 
+## Run fresh checks in the desktop
+
+For a failed Docker validation, open **Recovery → Continue work → Run fresh
+checks on saved work**. This is not **Retry checks** on the original container
+or **Continue in a fresh pod** with a coding worker. It requires a compatible
+daemon that can observe the exact original Docker container stopped and a clean
+host Git commit on the recorded branch. Inspection never stops, starts or
+claims that container. If either observation is unavailable, the desktop
+explains the refusal instead of offering Resume as a fallback.
+
+Review the commit and retry permission, enter a reason, and explicitly select
+that commit. The desktop saves the request before posting and reopens it for
+observation after an uncertain response; it does not replay the POST. The
+daemon repeats source and resource checks at admission. Fresh checks use the
+frozen workflow and independent review in a replacement container, keep the
+original result and resources, and do not deliver on a pass. This first desktop
+path does not replace software, raise test timeouts, choose a remote commit, or
+accept a task without a current failed result. Those cases still use their
+separate owning protocols where supported.
+
 ## Select source for fresh checks
 
 Choose a stable recovery ID before submission. Supply the exact original result

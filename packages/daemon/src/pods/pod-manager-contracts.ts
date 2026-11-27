@@ -560,6 +560,9 @@ export interface PodManager {
   continueRetained: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['continueRetained'];
+  previewRetainedChecks: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['previewRetainedChecks'];
   checkRetainedCandidate: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['checkCandidate'];

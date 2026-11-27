@@ -22,7 +22,9 @@ export function checkpointRecoveryRoutes(
     | 'checkRewriteRepair'
     | 'getApprovalSourceRewrite'
   > &
-    Partial<Pick<PodManager, 'inspectRetainedContinuation' | 'getSession'>>,
+    Partial<
+      Pick<PodManager, 'inspectRetainedContinuation' | 'previewRetainedChecks' | 'getSession'>
+    >,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
   const buildOnlyKeys = z
@@ -142,6 +144,19 @@ export function checkpointRecoveryRoutes(
       .parse(request.query);
     reply.header('Cache-Control', 'no-store');
     return manager.previewRetainedExecution(podId, profileId, buildOnlyEnvironmentKeys);
+  });
+  app.get('/pods/:podId/retained-continuation/checks-preview-v1', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = params.parse(request.params);
+    reply.header('Cache-Control', 'no-store');
+    if (!manager.previewRetainedChecks)
+      throw new AutopodError(
+        'Retained checks inspection unavailable',
+        'CHECKPOINT_RECOVERY_BLOCKED',
+        409,
+      );
+    return manager.previewRetainedChecks(podId);
   });
   app.post('/pods/:podId/retained-continuation', async (request, reply) => {
     if (!request.user?.oid)
