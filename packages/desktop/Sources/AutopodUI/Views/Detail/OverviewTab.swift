@@ -85,6 +85,7 @@ struct OverviewTab: View {
                     }
                 }
                 overviewStatusStrip
+                OperatorDisposalControls(pod: pod, actions: actions)
 
                 if [.failed, .reviewRequired, .killed].contains(pod.status) {
                     OverviewFailureReason(detail: pod.currentFailureDetail)

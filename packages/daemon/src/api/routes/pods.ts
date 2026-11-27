@@ -60,6 +60,7 @@ import { approvalRewriteAbandonmentRoutes } from './approval-rewrite-abandonment
 import { artifactChecksRecoveryRoutes } from './artifact-checks-recovery.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
 import { operatorActionRoutes } from './operator-actions.js';
+import { operatorDisposalRoutes } from './operator-disposal.js';
 import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedCleanupRoutes } from './retained-cleanup.js';
@@ -196,6 +197,7 @@ function compactPod(
       ? undefined
       : pod.dependsOnPodIds,
     fleetArchivedAt: pod.fleetArchivedAt,
+    operatorDisposal: pod.operatorDisposal,
     retainedDockerCustody: pod.retainedDockerCustody,
     completionPolicy: pod.completionPolicy,
     failureClosedAt: pod.failureClosedAt,
@@ -864,6 +866,7 @@ export function podRoutes(
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
   retainedCleanupRoutes(app, podManager);
+  operatorDisposalRoutes(app, podManager, podRepo);
   validationHeldDockerRoutes(app, podManager);
   savedWorkDraftRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);

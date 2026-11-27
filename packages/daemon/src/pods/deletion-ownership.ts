@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertNoOperatorDisposal } from './operator-disposal-repository.js';
 import { assertRetainedCleanupAvailable } from './retained-cleanup-repository.js';
 import { assertSavedDraftAvailable } from './saved-work-draft-repository.js';
 import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
@@ -52,6 +53,7 @@ export function createDeletionOwnership(db: Database.Database): DeletionOwnershi
   };
   return {
     assertTaskAvailable(podId) {
+      assertNoOperatorDisposal(db, podId);
       assertNoValidationRecovery(db, podId);
       if (
         db

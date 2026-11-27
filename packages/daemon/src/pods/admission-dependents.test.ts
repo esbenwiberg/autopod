@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 
 describe('dependent admission and restart', () => {
+  it('does not release a dependent from a historical complete parent after disposal', () => {
+    const f = createAdmissionFixture();
+    const parent = f.insert('disposed-parent', { status: 'complete' });
+    f.insert('dependent', { dependsOnPodIds: [parent.id] });
+    f.podRepo.operatorDisposals!.accept(
+      parent.id,
+      { requestKey: 'kill', intent: 'kill', expectedGeneration: 1 },
+      { type: 'human', userId: 'operator' },
+    );
+    f.dependents.maybeTriggerDependents(parent);
+    f.dependents.rehydrateDependentSessions();
+    expect(f.enqueueSession).not.toHaveBeenCalled();
+  });
   it('retains dependents through research ready and restart until accepted completion', () => {
     const f = createAdmissionFixture();
     const parent = f.insert('research', { status: 'research_ready' });

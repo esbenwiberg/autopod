@@ -2,12 +2,12 @@ import SwiftUI
 
 /// Discovery from loaded fleet archive flags only, independent of the normal History filters.
 enum PreviouslyArchivedPods {
-    static let title = "Previously archived"
+    static let title = "History / Recovery"
 
     static func exactMatch(_ pods: [Pod], query: String) -> Pod? {
         let id = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
-        return pods.first { $0.id == id && $0.fleetArchivedAt != nil }
+        return pods.first { $0.id == id && ($0.fleetArchivedAt != nil || $0.operatorDisposal != nil) }
     }
 
     static func matches(_ pods: [Pod], query: String, repositories: [String: DesktopRepository] = [:]) -> [Pod] {
@@ -15,7 +15,7 @@ enum PreviouslyArchivedPods {
 
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return pods.filter { pod in
-            guard pod.fleetArchivedAt != nil else { return false }
+            guard pod.fleetArchivedAt != nil || pod.operatorDisposal != nil else { return false }
             return needle.isEmpty || [
                 pod.id, pod.desktopTitle, pod.task, pod.profileName, pod.profileLabel, repositories[pod.id]?.label ?? ""
             ].contains { $0.localizedStandardContains(needle) }
@@ -32,9 +32,9 @@ struct PreviouslyArchivedPodsView: View {
     var body: some View {
         let matches = PreviouslyArchivedPods.matches(pods, query: query, repositories: repositories)
         VStack(alignment: .leading, spacing: 12) {
-            Text("Archived pods may still hold resources. Archive status does not indicate resource release or current billing.")
+            Text("Disposal receipts remain cleanup pending until physical closure is confirmed. Archived records retain their separate visibility-only meaning.")
                 .font(.callout)
-            Text("Search loaded archived records from any date or repository. Open a pod to see its details and any available recovery options.")
+            Text("Search loaded disposal and archived records from any date or repository. Open a pod for retained history and cleanup diagnostics.")
                 .font(.caption).foregroundStyle(.secondary)
             TextField("Search archived pods by ID, task, or repository", text: $query)
                 .textFieldStyle(.roundedBorder)
@@ -59,7 +59,7 @@ struct PreviouslyArchivedPodsView: View {
                                 Text("\(pod.id) · \(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder)")
                                     .foregroundStyle(.secondary)
                                 HStack {
-                                    Text(pod.status.label).foregroundStyle(pod.status.color)
+                                    Text(pod.operatorDisposal.map { "\($0.intent.capitalized) · \($0.state)" } ?? pod.status.label).foregroundStyle(pod.status.color)
                                     Text("Started \(pod.startedAt, style: .date)").foregroundStyle(.secondary)
                                 }
                             }

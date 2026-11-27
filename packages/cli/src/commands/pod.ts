@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AgentActivityEvent,
   CompactPod,
@@ -1386,37 +1387,73 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     });
 
   // ap kill
-  async function killAction(id: string): Promise<void> {
+  async function killAction(id: string, opts?: { requestKey?: string }): Promise<void> {
     const client = getClient();
-    const resolvedId = await resolvePodId(client, id);
-    await withSpinner('Killing pod...', () => client.killSession(resolvedId));
-    console.log(chalk.red(`Pod ${resolvedId} killed.`));
+    await disposalAction(client, id, 'kill', opts?.requestKey);
+  }
+  async function disposalAction(
+    client: AutopodClient,
+    id: string,
+    intent: 'kill' | 'delete',
+    requestKey: string = randomUUID(),
+  ): Promise<void> {
+    const pod = await client.getSession(id);
+    if (pod.id !== id) throw new Error('Use the exact full pod ID.');
+    console.log(
+      `Request ${requestKey} for exact pod ${id}. If the reply is lost, read ap disposal ${id}; do not invent another request.`,
+    );
+    const receipt = await client.requestOperatorDisposal(id, {
+      requestKey,
+      expectedGeneration: pod.lifecycleGeneration,
+      intent,
+      ...(intent === 'delete' ? { acknowledgeDataLoss: true as const } : {}),
+    });
+    console.log(
+      `${intent === 'kill' ? 'Kill' : 'Delete'} accepted for ${id}: ${receipt.state}. Acceptance does not confirm physical completion. Read ap disposal ${id}.`,
+    );
   }
   program
-    .command('kill [id]')
-    .description('Kill a running pod')
-    .option('--all-failed', 'Kill all failed pods')
-    .action(async (id: string | undefined, opts: { allFailed?: boolean }) => {
+    .command('delete <id>')
+    .description('Request permanent discard for an exact pod; retains readable history')
+    .requiredOption(
+      '--acknowledge-data-loss',
+      'Permanently discard unpublished files and execution resources',
+    )
+    .option('--request-key <key>', 'Idempotency key; retain it across lost replies')
+    .action(async (id: string, opts: { requestKey?: string }) =>
+      disposalAction(getClient(), id, 'delete', opts.requestKey),
+    );
+  program
+    .command('disposal <id>')
+    .description('Read exact pod History/Recovery cleanup receipt; never retries effects')
+    .option('--observe', 'Reconcile independently observed closure against saved dispatches')
+    .action(async (id: string, opts: { observe?: boolean }) => {
       const client = getClient();
-
+      const { receipt } = await client.getOperatorDisposal(id);
+      const result =
+        receipt && opts.observe
+          ? await client.observeOperatorDisposal(id, receipt.requestKey)
+          : receipt;
+      console.log(JSON.stringify(result, null, 2));
+    });
+  program
+    .command('kill [id]')
+    .description('Request stop for any exact pod; preserve files, observe cleanup separately')
+    .option('--all-failed', 'Kill all failed pods')
+    .option('--request-key <key>', 'Idempotency key; retain it across lost replies')
+    .action(async (id: string | undefined, opts: { allFailed?: boolean; requestKey?: string }) => {
       if (opts.allFailed) {
-        const result = await withSpinner('Killing failed pods...', () => client.killAllFailed());
-        if (result.killed.length === 0) {
-          console.log(chalk.dim('No failed pods to kill.'));
-        } else {
-          console.log(
-            chalk.red(`Killed ${result.killed.length} pod(s): ${result.killed.join(', ')}`),
-          );
-        }
-        return;
+        throw new Error(
+          'Operator disposal requires an exact full pod ID. Scope-wide Kill is unavailable.',
+        );
       }
 
       if (!id) {
-        console.error(chalk.red('Provide a pod ID or use --all-failed'));
+        console.error(chalk.red('Provide an exact full pod ID'));
         process.exit(1);
       }
 
-      await killAction(id);
+      await killAction(id, opts);
     });
 
   // ap update-from-base

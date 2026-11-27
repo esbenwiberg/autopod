@@ -340,6 +340,10 @@ import {
 } from './external-delivery-repository.js';
 import { createMergeJournal, type MergeJournal } from './merge-journal.js';
 import {
+  createOperatorDisposalRepository,
+  type OperatorDisposalRepository,
+} from './operator-disposal-repository.js';
+import {
   createRetainedCleanupRepository,
   hasRetainedCleanupSchema,
   type RetainedCleanupRepository,
@@ -354,6 +358,7 @@ import { createTaskHistoryArchive } from './task-history-archive.js';
 import { createWorkspaceCheckpointRepository } from './workspace-checkpoint-repository.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
+  operatorDisposals?: OperatorDisposalRepository;
   savedWorkDrafts?: SavedWorkDraftRepository;
   savedWorkspaceCheckpoints?: ReturnType<typeof createWorkspaceCheckpointRepository>;
   artifactChecks?: import('./artifact-checks-recovery-repository.js').ArtifactChecksRecoveryRepository;
@@ -848,12 +853,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
     };
   };
   const fleetArchives = createFleetArchiveRepository(db);
+  const operatorDisposals = createOperatorDisposalRepository(db);
   const retainedDockerCustody = db.prepare(
     'SELECT 1 FROM retained_checkpoint_recoveries WHERE pod_id = ? LIMIT 1',
   );
   const withFleetArchive = (pod: Pod): Pod => ({
     ...readinessProjection(pod),
     fleetArchivedAt: fleetArchives.archivedAt(pod.id),
+    operatorDisposal: operatorDisposals.receipt(pod.id),
     retainedDockerCustody:
       pod.executionTarget === 'local' && Boolean(retainedDockerCustody.get(pod.id)),
   });
@@ -880,6 +887,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
         SELECT 1 FROM pod_fleet_archives archive
         WHERE archive.pod_id = ${table}.id AND archive.restored_at IS NULL)`);
     }
+    if (filters?.archive === 'exclude')
+      whereClauses.push(
+        `NOT EXISTS (SELECT 1 FROM operator_disposal_intents d WHERE d.pod_id=${table}.id)`,
+      );
     if (filters?.repositoryId !== undefined) {
       whereClauses.push(`EXISTS (SELECT 1 FROM retained_pod_launch_snapshots launch
         WHERE launch.pod_id = ${table}.id AND json_extract(launch.payload, '$.repository.id') = @repositoryId)`);
@@ -923,6 +934,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   }
 
   return {
+    operatorDisposals,
     ...createUnitOfWork(db),
     inputBundles,
     fleetArchives,
@@ -1863,6 +1875,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      operatorDisposals.assertAvailable(id);
       createSavedWorkDraftRepository(db).assertAvailable(id);
       createRecoveryForkRepository(db).assertOriginalAvailable(id);
       assertStalledRecoveryAvailable(db, id);

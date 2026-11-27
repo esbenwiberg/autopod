@@ -76,6 +76,7 @@ import {
   buildPrFixTask,
   createFixCyclePolicy,
 } from './fix-policy.js';
+import { createOperatorDisposal } from './operator-disposal.js';
 import { formatPreparationSummary } from './preparation-timing.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
@@ -1548,6 +1549,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.operatorDisposals?.assertAvailable(podId);
     podRepo.rewriteAbandonments?.assertAvailable(podId);
     podRepo.savedWorkDrafts?.assertAvailable(podId);
     podRepo.artifactChecks?.assertAvailable(podId);
@@ -2049,6 +2051,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   return controlOperations.wrap(
     createPodManagerFacade({
+      operatorDisposal: createOperatorDisposal({
+        pods: podRepo,
+        docker: deps.retainedCleanupDocker,
+        eventBus,
+      }),
       closeFailure,
       retainedCleanup,
       validationHeldDocker,

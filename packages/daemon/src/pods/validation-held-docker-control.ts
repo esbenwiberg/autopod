@@ -38,6 +38,7 @@ export function createValidationHeldDockerControl(deps: {
     message: 'Exact local Docker/Git ownership could not be observed.',
   } as const;
   function durable(podId: string) {
+    pods.operatorDisposals?.assertAvailable(podId);
     const p = pods.getOrThrow(podId);
     if (
       !docker ||

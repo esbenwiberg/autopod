@@ -907,11 +907,12 @@ public struct Pod: Identifiable, Sendable {
     // The original daemon string is used for the compare-and-set request.
     public var failureRevision: String? = nil
     public var isClosedFailure: Bool { status == .failed && failureClosedAt != nil }
-    public var needsAttention: Bool { status.needsAttention && !isClosedFailure }
+    public var needsAttention: Bool { status.needsAttention && !isClosedFailure && operatorDisposal == nil }
     public var isInCompletedFleet: Bool { status == .complete || status == .killed || isClosedFailure }
     public let id: String
     /// Visibility only. Does not certify termination or release retained resources.
     public var fleetArchivedAt: String? = nil
+    public var operatorDisposal: OperatorDisposalReceipt? = nil
     public var status: PodStatus
     public var pod: PodConfig
     public var hasWorktree: Bool

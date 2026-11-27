@@ -82,6 +82,16 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    submitOperatorDisposal(
+      podId: string,
+      request: import('@autopod/shared').OperatorDisposalRequest,
+      actor: OperatorActor,
+    ) {
+      return captured.operatorDisposal.submit(podId, request, actor);
+    },
+    observeOperatorDisposal(podId: string, key: string) {
+      return captured.operatorDisposal.observe(podId, key);
+    },
     async cancelSavedWorkDraftPreparation(
       podId: string,
       request: import('@autopod/shared').SavedWorkDraftPrepare,

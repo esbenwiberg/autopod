@@ -40,6 +40,7 @@ export type SystemEvent =
   | PodCreatedEvent
   | PodStatusChangedEvent
   | { type: 'pod.failure_closed'; timestamp: string; podId: string; userId: string }
+  | { type: 'pod.disposal_changed'; timestamp: string; podId: string }
   | AgentActivityEvent
   | ValidationStartedEvent
   | ValidationCompletedEvent

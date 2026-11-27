@@ -9,6 +9,7 @@ import {
   type RetainedCleanupResource,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertNoOperatorDisposal } from './operator-disposal-repository.js';
 import type { GitWorktreeIdentity, PhysicalIdentity } from './retained-allocation-inventory.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 import { createTaskHistoryArchive } from './task-history-archive.js';
@@ -102,6 +103,7 @@ export async function withCleanupAllocationFence<T>(
   claim: AllocationTransport,
   run: () => Promise<T>,
 ) {
+  assertNoOperatorDisposal(db, podId);
   assertRetainedCleanupAvailable(db, podId);
   if (claim.network) assertRetainedCleanupBridgeAvailable(db, claim.network);
   for (const source of claim.sources) assertRetainedCleanupPathAvailable(db, source);

@@ -388,9 +388,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       },
     ] satisfies Target[];
   }
-  async function stopped(targets: Target[], guard: () => void) {
+  async function stopped(targets: Target[], guard: () => void, containerId?: string) {
     await proof(targets, guard, true);
-    const t = targets.find((t) => t.kind === 'docker_container')!;
+    const t = targets.find(
+      (t) => t.kind === 'docker_container' && (!containerId || t.id === containerId),
+    )!;
     const live = await inspect(docker.getContainer(t.id).inspect());
     guard();
     return (
@@ -401,9 +403,11 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
         ['exited', 'created'].includes(live.State.Status))
     );
   }
-  async function stop(targets: Target[], guard: () => void) {
+  async function stop(targets: Target[], guard: () => void, containerId?: string) {
     await proof(targets, guard, true);
-    const t = targets.find((t) => t.kind === 'docker_container')!;
+    const t = targets.find(
+      (t) => t.kind === 'docker_container' && (!containerId || t.id === containerId),
+    )!;
     await engine(t.namespace, guard);
     guard();
     await boundedDockerCall(docker.getContainer(t.id).stop({ t: 10 }), {
@@ -411,6 +415,122 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       timeoutMs: 15_000,
     });
   }
-  return { proof, remove, discover, stopped, stop };
+  /** Stop-only custody does not require Git/file deletion eligibility. */
+  async function stopOwned(
+    podId: string,
+    id: string,
+    guard: () => void,
+    admit: (target: {
+      kind: 'docker_container';
+      id: string;
+      namespace: string;
+      name: string;
+    }) => boolean,
+    expectedNamespace?: string,
+  ) {
+    if (!/^[a-f0-9]{64}$/.test(id))
+      block('IDENTITY_CHANGED', 'A full recorded Docker ID is required.');
+    const socket = await endpoint(guard);
+    const info = (await observe(docker.info())) as { ID?: string };
+    guard();
+    if (!info.ID || (await endpoint(guard)) !== socket)
+      block('OBSERVATION_UNAVAILABLE', 'Local Docker Engine identity is unavailable.');
+    const namespace = info.ID!;
+    if (expectedNamespace && namespace !== expectedNamespace)
+      block('IDENTITY_CHANGED', 'The recorded stop target belongs to another Docker Engine.');
+    if (expectedNamespace) {
+      const prior = await inspect(docker.getContainer(id).inspect());
+      guard();
+      if (!prior) {
+        await engine(namespace, guard);
+        return {
+          kind: 'docker_container' as const,
+          id,
+          namespace,
+          name: '',
+          stopped: true,
+          absent: true,
+        };
+      }
+    }
+    async function owned() {
+      await engine(namespace, guard);
+      const live = await inspect(docker.getContainer(id).inspect());
+      guard();
+      if (
+        !live ||
+        live.Id !== id ||
+        !live.Name ||
+        !live.Config?.Env?.includes('POD_ID=' + podId) ||
+        (live.Config.Labels?.['com.autopod.pod-id'] !== undefined &&
+          live.Config.Labels['com.autopod.pod-id'] !== podId) ||
+        !live.HostConfig ||
+        !live.State
+      )
+        block(
+          'IDENTITY_CHANGED',
+          'The exact present execution lacks positive managed pod ownership.',
+        );
+      const hc = live!.HostConfig;
+      if (
+        hc.Privileged ||
+        hc.PidMode === 'host' ||
+        hc.IpcMode === 'host' ||
+        hc.PidMode?.startsWith('container:') ||
+        hc.IpcMode?.startsWith('container:') ||
+        hc.NetworkMode?.startsWith('container:') ||
+        (hc.VolumesFrom?.length ?? 0) ||
+        !['no', '', undefined].includes(hc.RestartPolicy?.Name)
+      )
+        block(
+          'UNSUPPORTED_TOPOLOGY',
+          'Execution uses shared namespaces or automatic restart; stop closure is unavailable.',
+        );
+      return live!;
+    }
+    const before = await owned();
+    const others = await observe(docker.listContainers({ all: true }));
+    guard();
+    for (const other of others) {
+      if (other.Id === id) continue;
+      const live = await inspect(docker.getContainer(other.Id).inspect());
+      guard();
+      if (!live || live.Id !== other.Id || !live.HostConfig)
+        block('OBSERVATION_UNAVAILABLE', 'Foreign namespace closure is unavailable.');
+      for (const mode of [
+        live!.HostConfig.NetworkMode,
+        live!.HostConfig.PidMode,
+        live!.HostConfig.IpcMode,
+        ...(live!.HostConfig.VolumesFrom ?? []).map((v: string) => 'container:' + v.split(':')[0]),
+      ]) {
+        if (!mode?.startsWith('container:')) continue;
+        const ref = mode.slice(10).replace(/^\//, '');
+        if (!ref || id.startsWith(ref) || before.Name === '/' + ref)
+          block('FOREIGN_ATTACHMENT', 'Another execution shares the selected namespace.');
+      }
+    }
+    const target = { kind: 'docker_container' as const, id, namespace, name: before.Name.slice(1) };
+    const isStopped = (live: Awaited<ReturnType<typeof owned>>) =>
+      live.State.Running === false &&
+      live.State.Paused === false &&
+      live.State.Restarting === false &&
+      ['created', 'exited'].includes(live.State.Status);
+    const current = await owned();
+    if (!isStopped(current)) {
+      guard();
+      if (!admit(target)) return { ...target, stopped: false };
+      try {
+        await boundedDockerCall(docker.getContainer(id).stop({ t: 10 }), {
+          label: 'operator exact stop',
+          timeoutMs: 15_000,
+        });
+      } catch {
+        /* Observe independently after a lost reply; no replay. */
+      }
+    }
+    const after = await owned();
+    return { ...target, stopped: isStopped(after) };
+  }
+  return { proof, remove, discover, stopped, stop, stopOwned };
 }
 export type RetainedCleanupDocker = ReturnType<typeof createRetainedCleanupDocker>;

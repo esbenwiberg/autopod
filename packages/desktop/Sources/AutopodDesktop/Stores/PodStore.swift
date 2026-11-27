@@ -40,12 +40,17 @@ public final class PodStore {
     pods.filter { $0.needsAttention }
   }
 
+  public func recordOperatorDisposal(_ receipt: OperatorDisposalReceipt) {
+    guard let index = pods.firstIndex(where: { $0.id == receipt.podId }) else { return }
+    pods[index].operatorDisposal = receipt
+  }
+
   public var runningSessions: [Pod] {
-    pods.filter { $0.status.isActive && !$0.isWorkspace }
+    pods.filter { $0.status.isActive && !$0.isWorkspace && $0.operatorDisposal == nil }
   }
 
   public var workspaceSessions: [Pod] {
-    pods.filter { $0.isWorkspace }
+    pods.filter { $0.isWorkspace && $0.operatorDisposal == nil }
   }
 
   public var completedSessions: [Pod] {
@@ -156,6 +161,10 @@ public final class PodStore {
   ) -> Pod {
     guard var current else { return incoming }
     current.fleetArchivedAt = incoming.fleetArchivedAt
+    if let receipt = incoming.operatorDisposal,
+       current.operatorDisposal == nil || receipt.acceptedAt >= current.operatorDisposal!.acceptedAt {
+      current.operatorDisposal = receipt
+    }
     // Once observed, immutable retained custody cannot be cleared by an older REST snapshot.
     if current.retainedDockerCustody != true { current.retainedDockerCustody = incoming.retainedDockerCustody }
     // Configuration availability can change without an execution updatedAt change.
@@ -173,6 +182,7 @@ public final class PodStore {
       return current
     }
     var merged = incoming
+    merged.operatorDisposal = current.operatorDisposal
     // Compact discovery has no full detail, even when it arrives through this path
     // after hydration was invalidated. Stale REST cannot revive an earlier reason.
     let compactCannotReplaceFull = incoming.failureDetail == nil
@@ -232,6 +242,10 @@ public final class PodStore {
     // Fleet visibility is independent of the execution's updatedAt timestamp.
     var hydrated = hydrated
     hydrated.fleetArchivedAt = incoming.fleetArchivedAt
+    if let receipt = incoming.operatorDisposal,
+       hydrated.operatorDisposal == nil || receipt.acceptedAt >= hydrated.operatorDisposal!.acceptedAt {
+      hydrated.operatorDisposal = receipt
+    }
     if hydrated.retainedDockerCustody != true { hydrated.retainedDockerCustody = incoming.retainedDockerCustody }
     hydrated.profileDisplay = incoming.profileDisplay ?? hydrated.profileDisplay
     hydrated.createdAt = hydrated.createdAt ?? incoming.createdAt

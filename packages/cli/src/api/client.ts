@@ -18,6 +18,8 @@ import type {
   IssueWatcherBindingPayload,
   LaunchRequest,
   ModelProvider,
+  OperatorDisposalReceipt,
+  OperatorDisposalRequest,
   PimDiscovery,
   Pod,
   PodCostBreakdownResponse,
@@ -950,6 +952,24 @@ export class AutopodClient {
 
   async nudgeSession(id: string, message: string): Promise<void> {
     await this.request<void>('POST', `/pods/${id}/nudge`, { message });
+  }
+
+  async requestOperatorDisposal(
+    id: string,
+    request: OperatorDisposalRequest,
+  ): Promise<OperatorDisposalReceipt> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/operator-disposal`, request);
+  }
+
+  async getOperatorDisposal(id: string): Promise<{ receipt: OperatorDisposalReceipt | null }> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/operator-disposal`);
+  }
+
+  async observeOperatorDisposal(id: string, key: string): Promise<OperatorDisposalReceipt> {
+    return this.request(
+      'POST',
+      `/pods/${encodeURIComponent(id)}/operator-disposal/${encodeURIComponent(key)}/observe`,
+    );
   }
 
   async killSession(id: string): Promise<void> {

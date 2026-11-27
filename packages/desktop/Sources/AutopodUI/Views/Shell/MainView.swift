@@ -439,7 +439,7 @@ public struct MainView: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard scope == .recent && trimmed.isEmpty else { return pods }
 
-        let fleet = pods.filter { $0.fleetArchivedAt == nil }
+        let fleet = pods.filter { $0.fleetArchivedAt == nil && $0.operatorDisposal == nil }
         var result = recentBrowsePods(fleet, limit: limit)
         if let selectedPodId,
            !result.contains(where: { $0.id == selectedPodId }),
@@ -475,7 +475,7 @@ public struct MainView: View {
                 selectedPodId: selectedPodId,
                 limit: limit
             )
-            : filterPods(scoped.filter { $0.fleetArchivedAt == nil }, for: selection)
+            : filterPods(scoped.filter { $0.fleetArchivedAt == nil && $0.operatorDisposal == nil }, for: selection)
         return sortPods(searchPods(base, query: query, profiles: profiles, repositoryIndex: repositoryIndex), by: sortOrder)
     }
 

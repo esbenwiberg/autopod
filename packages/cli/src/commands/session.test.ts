@@ -53,6 +53,7 @@ function createMockClient() {
     getTaskExecution: vi.fn().mockRejectedValue(new Error('Older daemon: accounting unavailable')),
     getSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
+      lifecycleGeneration: 1,
       profileName: 'test',
       task: 'do things',
       status: 'running',
@@ -82,6 +83,9 @@ function createMockClient() {
     approveSession: vi.fn().mockResolvedValue(undefined),
     rejectSession: vi.fn().mockResolvedValue(undefined),
     killSession: vi.fn().mockResolvedValue(undefined),
+    requestOperatorDisposal: vi
+      .fn()
+      .mockResolvedValue({ contract: 'operator-disposal-v1', state: 'cleanup_pending' }),
     getSessionLogs: vi.fn().mockResolvedValue('some log output'),
     approveAllValidated: vi.fn().mockResolvedValue({ approved: ['a', 'b'] }),
     killAllFailed: vi.fn().mockResolvedValue({ killed: ['c'] }),
@@ -546,9 +550,14 @@ describe('pod commands', () => {
     expect(mockClient.rejectSession).toHaveBeenCalledWith('abcd1234', 'needs work');
   });
 
-  it('registers kill command that calls killSession', async () => {
+  it('registers exact Kill intent without using the legacy physical completion contract', async () => {
     await program.parseAsync(['node', 'ap', 'kill', 'abcd1234']);
-    expect(mockClient.killSession).toHaveBeenCalledWith('abcd1234');
+    expect(mockClient.requestOperatorDisposal).toHaveBeenCalledWith('abcd1234', {
+      requestKey: expect.any(String),
+      expectedGeneration: 1,
+      intent: 'kill',
+    });
+    expect(mockClient.killSession).not.toHaveBeenCalled();
   });
 
   it('registers approve --all-validated', async () => {
@@ -586,8 +595,10 @@ describe('pod commands', () => {
     logSpy.mockRestore();
   });
 
-  it('registers kill --all-failed', async () => {
-    await program.parseAsync(['node', 'ap', 'kill', '--all-failed']);
-    expect(mockClient.killAllFailed).toHaveBeenCalled();
+  it('refuses scope-wide Kill and requires an exact subject', async () => {
+    await expect(program.parseAsync(['node', 'ap', 'kill', '--all-failed'])).rejects.toThrow(
+      /exact full pod ID/,
+    );
+    expect(mockClient.killAllFailed).not.toHaveBeenCalled();
   });
 });
