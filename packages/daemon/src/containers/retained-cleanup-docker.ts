@@ -501,7 +501,7 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
         live!.HostConfig.NetworkMode,
         live!.HostConfig.PidMode,
         live!.HostConfig.IpcMode,
-        ...(live!.HostConfig.VolumesFrom ?? []).map((v) => 'container:' + v.split(':')[0]),
+        ...(live!.HostConfig.VolumesFrom ?? []).map((v: string) => 'container:' + v.split(':')[0]),
       ]) {
         if (!mode?.startsWith('container:')) continue;
         const ref = mode.slice(10).replace(/^\//, '');
