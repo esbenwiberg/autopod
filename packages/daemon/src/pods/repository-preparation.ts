@@ -6,7 +6,11 @@ import {
   type RepositoryPreparationTiming,
 } from '@autopod/shared';
 import { redactSecretText } from '../actions/action-diagnostics.js';
-import { ExecInterruptedError, isObservedExitCode } from '../containers/exec-exit-evidence.js';
+import {
+  ExecInterruptedError,
+  type ExecInterruption,
+  isObservedExitCode,
+} from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { sanitizeProviderMessage } from '../runtimes/provider-error-classifier.js';
 import { boundOutput } from '../util/bounded-output.js';
@@ -26,6 +30,7 @@ export class RepositoryPreparationError extends AutopodError {
   constructor(
     detail: string,
     readonly terminationUnverified: boolean,
+    readonly execution?: ExecInterruption,
   ) {
     super(detail, 'REPOSITORY_PREPARATION_FAILED', 409);
   }
@@ -494,12 +499,17 @@ export async function prepareLaunchRepository(
     options.record?.(evidence);
     return evidence;
   };
-  const fail = (detail: string, terminationUnverified = false): never => {
+  const fail = (
+    detail: string,
+    terminationUnverified = false,
+    execution?: ExecInterruption,
+  ): never => {
     evidence.detail = detail;
     finish();
     throw new RepositoryPreparationError(
       `Repository preparation ${evidence.status}: ${detail}`,
       terminationUnverified,
+      execution,
     );
   };
   if (!setup || !command) return finish();
@@ -616,7 +626,12 @@ export async function prepareLaunchRepository(
         : 'exit unverified';
     return fail(
       `${category}; ${failureDetail(error instanceof Error ? error.message : 'transport unavailable', command, env, options.sensitiveValues ?? [], literals)}`,
-      true,
+      !(
+        error instanceof ExecInterruptedError &&
+        error.execution?.cleanup === 'confirmed' &&
+        isObservedExitCode(error.execution.observedExitCode)
+      ),
+      error instanceof ExecInterruptedError ? error.execution : undefined,
     );
   }
   evidence.exitCode = isObservedExitCode(result.exitCode) ? result.exitCode : null;

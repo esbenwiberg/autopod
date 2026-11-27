@@ -519,17 +519,26 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                   validateErr instanceof RepositoryPreparationError &&
                   validateErr.terminationUnverified
                 ? 'EXEC_EXIT_UNVERIFIED'
-                : (!engineStarted || engineSettled) &&
-                    validateErr instanceof AutopodError &&
-                    validateErr.code === 'REPOSITORY_PREPARATION_FAILED'
-                  ? validateErr.code
-                  : 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
+                : !engineStarted &&
+                    validateErr instanceof RepositoryPreparationError &&
+                    validateErr.execution
+                  ? 'EXEC_INTERRUPTED'
+                  : (!engineStarted || engineSettled) &&
+                      validateErr instanceof AutopodError &&
+                      validateErr.code === 'REPOSITORY_PREPARATION_FAILED'
+                    ? validateErr.code
+                    : 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
             message: sourceUnavailable
               ? validateErr.message
               : !engineStarted || engineSettled
                 ? 'Repository preparation did not qualify this validation candidate; inspect preparation provenance before retrying.'
                 : 'Validation engine threw without verified execution termination.',
             retryable: false,
+            ...(!engineStarted &&
+            validateErr instanceof RepositoryPreparationError &&
+            validateErr.execution
+              ? { execution: validateErr.execution }
+              : {}),
           };
         }
         if (dispatchId) result.executionDispatchId = dispatchId;

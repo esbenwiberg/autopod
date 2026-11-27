@@ -14,9 +14,9 @@ export function registerValidateCommands(program: Command, getClient: () => Auto
     .action(async (id: string) => {
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
-      await withSpinner('Triggering validation...', () => client.triggerValidation(resolvedId));
-      console.log(chalk.green('Validation triggered.'));
-      console.log(chalk.dim(`Check results: ap status ${resolvedId.slice(0, 8)}`));
+      await withSpinner('Running validation...', () => client.revalidatePod(resolvedId));
+      console.log(chalk.green('Validation request completed. Inspect results for check outcomes.'));
+      console.log(chalk.dim(`Check results: ap status ${resolvedId}`));
     });
 
   // ap open

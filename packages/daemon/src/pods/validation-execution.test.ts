@@ -25,6 +25,7 @@ import { createLocalValidationEngine } from '../validation/local-validation-engi
 import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { createNudgeRepository } from './nudge-repository.js';
 import { createPodRepository } from './pod-repository.js';
+import { RepositoryPreparationError } from './repository-preparation.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationExecution } from './validation-execution.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
@@ -303,6 +304,36 @@ function fixture(sandbox = false, exactDocker = false) {
 }
 
 describe('validation execution durable effects', () => {
+  it.each([
+    'confirmed',
+    'unverified',
+    'failed',
+  ] as const)('retains preparation cleanup %s in immutable validation outcomes', async (cleanup) => {
+    const f = fixture(true);
+    try {
+      const execution = { cause: 'timeout' as const, cleanup, observedExitCode: 0 };
+      f.dependencies.prepareValidationRepository = async () => {
+        throw new RepositoryPreparationError(
+          'Setup interrupted',
+          cleanup !== 'confirmed',
+          execution,
+        );
+      };
+      const result = await f.run();
+      expect(result.overall).toBe('fail');
+      expect(result.infrastructureFailure).toMatchObject({
+        code: cleanup === 'confirmed' ? 'EXEC_INTERRUPTED' : 'EXEC_EXIT_UNVERIFIED',
+        execution,
+        retryable: false,
+      });
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.repo.validationExecutions?.unsettled('worker') !== null).toBe(
+        cleanup !== 'confirmed',
+      );
+    } finally {
+      f.close();
+    }
+  });
   it.each([
     'pass',
     'infra',

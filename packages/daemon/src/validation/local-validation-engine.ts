@@ -2084,7 +2084,7 @@ function classifyValidationInfrastructureFailure(
       code: error.code,
       statusCode: error.statusCode,
       message: error.message,
-      retryable: false,
+      retryable: error.nonDispatch.causeCode === 'AZURE_SANDBOX_TRANSIENT_FORBIDDEN',
       nonDispatch: error.nonDispatch,
     };
   }

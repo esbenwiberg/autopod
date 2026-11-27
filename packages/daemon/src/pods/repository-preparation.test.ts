@@ -59,6 +59,39 @@ async function fixture(command = 'pnpm install --frozen-lockfile') {
 }
 
 describe('repository preparation', () => {
+  it('keeps confirmed cleanup without an observed exit unsettled', async () => {
+    const f = await fixture();
+    const execution = { cause: 'cancelled' as const, cleanup: 'confirmed' as const };
+    f.cm.execObserved = vi.fn().mockRejectedValue(new ExecInterruptedError(execution));
+    await expect(prepareLaunchRepository(f.config, f.cm, 'candidate', {})).rejects.toMatchObject({
+      terminationUnverified: true,
+      execution,
+    });
+  });
+  it.each([
+    'confirmed',
+    'unverified',
+    'failed',
+  ] as const)('preserves interrupted preparation cleanup %s without certifying success', async (cleanup) => {
+    const f = await fixture();
+    const execution = {
+      cause: 'timeout' as const,
+      cleanup,
+      observedExitCode: 0,
+      timeoutMs: 120000,
+    };
+    f.cm.execObserved = vi.fn().mockRejectedValue(new ExecInterruptedError(execution));
+    const record = vi.fn();
+    await expect(
+      prepareLaunchRepository(f.config, f.cm, 'candidate', {}, { record }),
+    ).rejects.toMatchObject({
+      terminationUnverified: cleanup !== 'confirmed',
+      execution,
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'unverified', exitCode: null }),
+    );
+  });
   it.each([
     'success',
     'nonzero',

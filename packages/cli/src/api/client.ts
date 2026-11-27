@@ -923,6 +923,10 @@ export class AutopodClient {
     await this.request<void>('POST', `/pods/${id}/validate`);
   }
 
+  async revalidatePod(id: string): Promise<void> {
+    await this.request('POST', `/pods/${id}/revalidate`);
+  }
+
   async publishSessionPr(id: string, reason: string): Promise<void> {
     // Never fall back to /approve: old daemons must refuse rather than merge.
     try {

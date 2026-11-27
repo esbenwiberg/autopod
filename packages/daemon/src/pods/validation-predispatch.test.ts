@@ -181,7 +181,14 @@ describe('validation pre-dispatch evidence through adapter, manager, engine and 
       ledger.recordOutcome(result, dispatch);
       ledger.recordResult(result, dispatch);
       repo.update(pod.id, { lastValidationResult: result });
-      retries.finish(admission.id, 'nonretryable', 1);
+      retries.finish(
+        admission.id,
+        result.infrastructureFailure?.retryable ? 'transient' : 'nonretryable',
+        1,
+      );
+      expect(retries.state(pod.id).latest?.outcome).toBe(
+        failure === 'empty-upload-403' ? 'transient' : 'nonretryable',
+      );
       expect(result.overall).toBe('fail');
       expect(db.prepare('SELECT * FROM validation_dispatches').all()).toEqual(binding);
       const outcome = db
@@ -201,7 +208,7 @@ describe('validation pre-dispatch evidence through adapter, manager, engine and 
       } else {
         expect(result.infrastructureFailure).toMatchObject({
           code: 'EXEC_NOT_DISPATCHED',
-          retryable: false,
+          retryable: failure === 'empty-upload-403',
           nonDispatch: { provider: 'azure-sandbox' },
         });
         expect(result.infrastructureFailure?.execution).toBeUndefined();
