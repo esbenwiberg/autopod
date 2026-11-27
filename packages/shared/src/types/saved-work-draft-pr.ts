@@ -37,6 +37,8 @@ export interface SavedWorkDraftConfirm {
 export interface SavedWorkDraftCancel {
   requestId: string;
   expectedBinding: string;
+  /** Explicitly stop pursuing an admitted, unresolved draft create. Not cancellation of the remote effect. */
+  retireUncertainReason?: string;
 }
 /** Durable revocation of one exact preparation request, including delayed arrivals. */
 export interface SavedWorkDraftPreparationCancellation extends SavedWorkDraftPrepare {
@@ -71,7 +73,9 @@ export interface SavedWorkDraftOperation {
     | 'pushed'
     | 'create-uncertain'
     | 'published'
-    | 'cancelled';
+    | 'cancelled'
+    | 'retired-uncertain';
+  retirement?: { reason: string; retiredAt: string; observedRemoteHead: string };
   message?: string;
   /** Latest publication security scan for this operation's exact prepared bytes. */
   publicationScan?: SavedWorkDraftPublicationScan;

@@ -28,6 +28,10 @@ import { adoSavedDraft, githubSavedDraft } from '../worktrees/saved-work-draft-p
 import { checkpointSavedSource } from '../worktrees/saved-work-source.js';
 import { createControlOperationRegistry } from './control-operation-registry.js';
 import { createSavedWorkDraftPr } from './saved-work-draft-pr.js';
+import {
+  assertSavedDraftPathAvailable,
+  assertSavedDraftResourceAvailable,
+} from './saved-work-draft-repository.js';
 
 // Each case drives independent real Git object stores and migrated SQLite ledgers.
 vi.setConfig({ testTimeout: INTEGRATION_TEST_TIMEOUT_MS });
@@ -801,6 +805,107 @@ exec "$REAL_GIT" "$@"
         .controller()
         .cancel(f.id, { requestId: op.requestId, expectedBinding: op.confirmationBinding }, actor),
     ).toThrow(/external effect/);
+  });
+
+  it('retires a settled uncertain create without rewriting history, releasing only its own lock', async () => {
+    const f = await fixture();
+    f.podRepo.update(f.id, { containerId: 'retained-original' });
+    const op = await f.prepare();
+    const c = f.controller();
+    f.provider.create = vi.fn(async (_t, _body, admit) => {
+      await admit();
+      throw new Error('lost create reply');
+    });
+    expect((await c.confirm(f.id, f.confirm(op), actor)).state).toBe('create-uncertain');
+    const request = {
+      requestId: op.requestId,
+      expectedBinding: op.confirmationBinding,
+      retireUncertainReason: 'The exact change was delivered manually; keep the saved branch.',
+    };
+    const before = f.podRepo.getOrThrow(f.id);
+    const ledger = f.podRepo.savedWorkDrafts;
+    expect(() => ledger?.assertAvailable(f.id)).toThrow(/owns this source/);
+    expect(() => assertSavedDraftResourceAvailable(f.db, 'retained-original')).toThrow(/retains/);
+    expect(() => assertSavedDraftPathAvailable(f.db, f.source)).toThrow(/retains/);
+    await expect(
+      c.retireUncertain(f.id, request, { type: 'human', userId: 'other' }),
+    ).rejects.toThrow(/actor-bound/);
+    await expect(
+      c.retireUncertain(f.id, { ...request, expectedBinding: 'b'.repeat(64) }, actor),
+    ).rejects.toThrow(/actor-bound/);
+    f.setIdle(false);
+    await expect(c.retireUncertain(f.id, request, actor)).rejects.toThrow(/active/);
+    f.setIdle(true);
+    f.setRemote('c'.repeat(40));
+    await expect(c.retireUncertain(f.id, request, actor)).rejects.toThrow(/exact saved commit/);
+    expect(() => ledger?.assertAvailable(f.id)).toThrow(/owns this source/);
+    f.setRemote(op.source.commit);
+    expect(await c.retireUncertain(f.id, request, actor)).toMatchObject({
+      state: 'retired-uncertain',
+      receipt: null,
+      retirement: { reason: request.retireUncertainReason, observedRemoteHead: op.source.commit },
+    });
+    const restarted = f.controller();
+    expect(await restarted.retireUncertain(f.id, request, actor)).toEqual(
+      ledger?.get(f.id, op.requestId),
+    );
+    expect((await restarted.observe(f.id, op.requestId, actor)).state).toBe('retired-uncertain');
+    expect((await restarted.confirm(f.id, f.confirm(op), actor)).state).toBe('retired-uncertain');
+    const preview = await restarted.inspect(f.id, actor);
+    await expect(
+      restarted.prepare(
+        f.id,
+        { requestId: 'replacement', expectedBinding: preview.binding, sourceId: op.source.id },
+        actor,
+      ),
+    ).rejects.toThrow(/exact saved source already has operation/);
+    expect(() => ledger?.assertAvailable(f.id)).not.toThrow();
+    expect(() => assertSavedDraftResourceAvailable(f.db, 'retained-original')).not.toThrow();
+    expect(() => assertSavedDraftPathAvailable(f.db, f.source)).not.toThrow();
+    expect(f.podRepo.getOrThrow(f.id)).toEqual(before);
+    expect(f.worktrees.pushBranch).toHaveBeenCalledTimes(1);
+    expect(f.provider.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses retirement during a live create and reconciles a later observed PR normally', async () => {
+    const f = await fixture();
+    const op = await f.prepare();
+    const c = f.controller();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    f.provider.create = vi.fn(async (t, body, admit) => {
+      await admit();
+      entered.resolve();
+      await release.promise;
+      f.setObserved({
+        url: 'https://github.com/org/repo/pull/91',
+        repository: t.repository,
+        branch: t.branch,
+        baseBranch: t.baseBranch,
+        head: t.head,
+        draft: true,
+        open: true,
+        merged: false,
+        body,
+      });
+      throw new Error('lost create reply');
+    });
+    const confirm = c.confirm(f.id, f.confirm(op), actor);
+    const request = {
+      requestId: op.requestId,
+      expectedBinding: op.confirmationBinding,
+      retireUncertainReason: 'The owner declines a duplicate PR.',
+    };
+    try {
+      await Promise.race([entered.promise, confirm]);
+      await expect(c.retireUncertain(f.id, request, actor)).rejects.toThrow(/still in progress/);
+    } finally {
+      release.resolve();
+      await confirm;
+    }
+    await expect(c.retireUncertain(f.id, request, actor)).rejects.toThrow(/provider returned a PR/);
+    expect((await c.observe(f.id, op.requestId, actor)).state).toBe('published');
+    expect(f.provider.create).toHaveBeenCalledTimes(1);
   });
 
   it('rejects occupied branch without create admission or any PR create', async () => {

@@ -38,7 +38,10 @@ export function savedWorkDraftRoutes(
   app.post('/pods/:podId/saved-work-draft/cancel', async (request, reply) => {
     const human = actor(request);
     const { podId } = params.parse(request.params);
-    const body = z.object(common).strict().parse(request.body);
+    const body = z
+      .object({ ...common, retireUncertainReason: z.string().trim().min(10).max(1000).optional() })
+      .strict()
+      .parse(request.body);
     reply.header('Cache-Control', 'no-store');
     return manager.cancelSavedWorkDraft(podId, body, human);
   });
@@ -73,6 +76,8 @@ export function savedWorkDraftRoutes(
       .parse(request.body);
     const op = await manager.confirmSavedWorkDraft(podId, body, human);
     reply.header('Cache-Control', 'no-store');
-    return reply.code(['published', 'cancelled'].includes(op.state) ? 200 : 202).send(op);
+    return reply
+      .code(['published', 'cancelled', 'retired-uncertain'].includes(op.state) ? 200 : 202)
+      .send(op);
   });
 }

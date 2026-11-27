@@ -15,6 +15,10 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
     .option('--confirm', 'Authorize exact prepared bytes as a draft only; original retained')
     .option('--cancel', 'Cancel only before external admission; keep all source and resources')
     .option(
+      '--retire-uncertain <reason>',
+      'Release an unresolved draft-create lock without replay or deleting anything',
+    )
+    .option(
       '--cancel-preparation',
       'Durably revoke an exact pending preparation, including delayed admission',
     )
@@ -34,18 +38,28 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
           confirm?: boolean;
           cancel?: boolean;
           cancelPreparation?: boolean;
+          retireUncertain?: string;
           observe?: boolean;
           requestId?: string;
           binding?: string;
           json?: boolean;
         },
       ) => {
+        const retiring = opts.retireUncertain !== undefined;
+        const reason = opts.retireUncertain?.trim() ?? '';
         if (
-          [opts.prepare, opts.confirm, opts.observe, opts.cancel, opts.cancelPreparation].filter(
-            Boolean,
-          ).length > 1
+          [
+            opts.prepare,
+            opts.confirm,
+            opts.observe,
+            opts.cancel,
+            opts.cancelPreparation,
+            retiring,
+          ].filter(Boolean).length > 1
         )
-          throw new Error('Prepare, confirm and observe are separate explicit actions.');
+          throw new Error('Choose one explicit action.');
+        if (retiring && (reason.length < 10 || reason.length > 1000))
+          throw new Error('--retire-uncertain requires a reason of 10–1000 characters.');
         if (
           opts.observe &&
           (!/^[a-zA-Z0-9-]{1,64}$/.test(opts.requestId ?? '') ||
@@ -58,6 +72,7 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
           !opts.confirm &&
           !opts.cancel &&
           !opts.cancelPreparation &&
+          !retiring &&
           !opts.observe &&
           [opts.source, opts.requestId, opts.binding].some((v) => v !== undefined)
         )
@@ -65,15 +80,15 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
             'Selection fields require --prepare or --confirm. Inspection is read-only.',
           );
         if (
-          (opts.prepare || opts.confirm || opts.cancel || opts.cancelPreparation) &&
+          (opts.prepare || opts.confirm || opts.cancel || opts.cancelPreparation || retiring) &&
           (!/^[a-zA-Z0-9-]{1,64}$/.test(opts.requestId ?? '') ||
             !/^[a-f0-9]{64}$/.test(opts.binding ?? ''))
         )
           throw new Error('Supply --request-id and the exact --binding from the daemon preview.');
         if ((opts.prepare || opts.cancelPreparation) && !opts.source)
           throw new Error('--prepare requires explicit --source from inspection.');
-        if ((opts.confirm || opts.cancel) && opts.source !== undefined)
-          throw new Error('Confirmation uses the prepared selection; omit --source.');
+        if ((opts.confirm || opts.cancel || retiring) && opts.source !== undefined)
+          throw new Error('Use the prepared selection; omit --source.');
         const client = getClient();
         try {
           const value = opts.cancelPreparation
@@ -82,10 +97,11 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
                 expectedBinding: opts.binding ?? '',
                 sourceId: opts.source ?? '',
               })
-            : opts.cancel
+            : opts.cancel || retiring
               ? await client.cancelSavedWorkDraft(podId, {
                   requestId: opts.requestId ?? '',
                   expectedBinding: opts.binding ?? '',
+                  ...(retiring ? { retireUncertainReason: reason } : {}),
                 })
               : opts.observe
                 ? await client.observeSavedWorkDraft(podId, opts.requestId!)
@@ -104,6 +120,12 @@ export function registerSavedWorkDraftPrCommand(program: Command, getClient: () 
                     : await client.inspectSavedWorkDraft(podId);
           withJsonOutput(opts, value, (result) => {
             console.log(JSON.stringify(result, null, 2));
+            if ((result as { state?: string }).state === 'retired-uncertain') {
+              console.log(
+                'Draft lock released. Remote outcome remains unknown. Nothing was retried or deleted.',
+              );
+              return;
+            }
             const scan = (result as { publicationScan?: SavedWorkDraftPublicationScan })
               .publicationScan;
             if (scan) for (const line of publicationScanLines(scan)) console.log(line);
