@@ -97,6 +97,30 @@ describe('saved-work draft CLI exact confirmation', () => {
       body: { requestId: 'stable-request', expectedBinding: binding },
     });
   });
+  it('requires an exact explicit retirement request and sends no confirmation', async () => {
+    const f = fixture();
+    const reason = 'Saved source was delivered manually.';
+    await f.run(
+      '--retire-uncertain',
+      reason,
+      '--request-id',
+      'stable-request',
+      '--binding',
+      binding,
+      '--json',
+    );
+    expect(f.calls).toEqual([
+      {
+        method: 'POST',
+        url: 'http://fixture.invalid/pods/polite-tarsier/saved-work-draft/cancel',
+        body: {
+          requestId: 'stable-request',
+          expectedBinding: binding,
+          retireUncertainReason: reason,
+        },
+      },
+    ]);
+  });
   it('revokes pending preparation with the original preview binding and source selection', async () => {
     const f = fixture();
     await f.run(
@@ -119,6 +143,17 @@ describe('saved-work draft CLI exact confirmation', () => {
     ['--confirm'],
     ['--cancel'],
     ['--cancel', '--confirm'],
+    ['--retire-uncertain', 'Saved source was delivered manually.'],
+    ['--retire-uncertain', 'short', '--request-id', 'stable', '--binding', binding],
+    [
+      '--retire-uncertain',
+      'Saved source was delivered manually.',
+      '--confirm',
+      '--request-id',
+      'stable',
+      '--binding',
+      binding,
+    ],
     ['--prepare', '--request-id', 'stable', '--binding', binding],
     ['--source', 'checkpoint-1'],
     ['--prepare', '--confirm'],

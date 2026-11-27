@@ -96,3 +96,40 @@ it('upgrades applied v253 without skipping draft tables or changing reviewer/pub
     rmSync(root, { recursive: true, force: true });
   }
 }, 15_000);
+
+it('reopens a pre-retirement database without releasing a draft lock or letting it replay', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'saved-draft-retirement-upgrade-'));
+  const db = createHistoricalDiskDatabase(path.join(root, 'existing.db'), [
+    { dir: MIGRATIONS_DIR, through: 286 },
+  ]);
+  try {
+    const draft = {
+      generation: 1,
+      repository: 'https://github.com/org/repo',
+      baseBranch: 'main',
+      source: { commit: 'a'.repeat(40), tree: 'b'.repeat(40) },
+      state: 'create-uncertain',
+    };
+    const insert = db.prepare('INSERT INTO saved_work_draft_pr_operations VALUES(?,?,?,?,?)');
+    insert.run('operation', 'pod', 'request', 'human', JSON.stringify(draft));
+    runMigrations(db, MIGRATIONS_DIR, logger);
+    expect(db.prepare('SELECT body FROM saved_work_draft_pr_operations').get()).toEqual({
+      body: JSON.stringify(draft),
+    });
+    const different = { ...draft, source: { commit: 'c'.repeat(40), tree: 'd'.repeat(40) } };
+    expect(() => insert.run('new', 'pod', 'new', 'human', JSON.stringify(different))).toThrow(
+      /UNIQUE/,
+    );
+    db.prepare('UPDATE saved_work_draft_pr_operations SET body=? WHERE id=?').run(
+      JSON.stringify({ ...draft, state: 'retired-uncertain' }),
+      'operation',
+    );
+    expect(() => insert.run('replay', 'pod', 'replay', 'human', JSON.stringify(draft))).toThrow(
+      /UNIQUE/,
+    );
+    expect(() => insert.run('new', 'pod', 'new', 'human', JSON.stringify(different))).not.toThrow();
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15_000);

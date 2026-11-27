@@ -96,11 +96,10 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       request: import('@autopod/shared').SavedWorkDraftCancel,
       actor: OperatorActor,
     ) {
-      return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).cancel(
-        podId,
-        request,
-        actor,
-      );
+      const drafts = captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable');
+      return request.retireUncertainReason === undefined
+        ? drafts.cancel(podId, request, actor)
+        : drafts.retireUncertain(podId, request, actor);
     },
     inspectSavedWorkDraft(podId: string, actor: OperatorActor) {
       return (captured.savedWorkDraft ?? checkpointError('Saved-work draft unavailable')).inspect(

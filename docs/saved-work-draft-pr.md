@@ -58,8 +58,24 @@ wrong-source or wrong-base results remain blocked.
 
 If observation proves `pushed`, no PR create has been admitted: a fresh explicit
 confirmation of the same operation can continue to draft creation. If it remains
-`create-uncertain`, observe only. Never reopen/replace a PR, overwrite a branch,
-use a new request ID to escape uncertainty or clear source custody.
+`create-uncertain`, do not replay publication. If the work was handled elsewhere
+and no PR appears in observation, the original human can explicitly retire that
+exact draft attempt:
+
+```sh
+ap draft-pr POD --observe --request-id REQUEST_ID --json
+ap draft-pr POD --retire-uncertain 'Why this exact draft is no longer needed' \
+  --request-id REQUEST_ID --binding CONFIRMATION_BINDING --json
+```
+
+Retirement requires an idle operation, an authenticated provider read returning
+no PR, and the exact saved commit still present on the operation branch. A
+negative read does not prove absence; `retired-uncertain` preserves that fact.
+The receipt releases only this draft’s cleanup lock. It does not touch the
+operation branch, any PR, the original pod or its files, and it still forbids
+republication of the same saved selection. Inspect the pod separately; normal
+Kill/Delete guards still apply. If retirement’s response is lost, observe the
+same request rather than sending another publication request.
 
 Active worker/validation, deletion, source rewrite, recovery preparation and
 unreconciled publication ownership block this workflow. Permanent historical
@@ -98,8 +114,9 @@ any external admission. A human can explicitly cancel an interrupted or prepared
 operation using its exact confirmation binding. Cancellation releases only this
 operation's temporary fence; all original resources and independent preparation
 files remain retained. A new selection needs a new request ID. Once a push is
-admitted, cancellation is refused: uncertain effects require observation and
-reconciliation, with no cleanup or replacement authority.
+admitted, cancellation is refused. Only the separate, explicitly acknowledged
+retirement above can release the lock on an unresolved draft create; it is not
+an alternative for an uncertain push.
 
 If a locally journaled preparation never becomes observable, a negative lookup
 does not allow discarding it. Explicitly **Cancel pending preparation — prevent

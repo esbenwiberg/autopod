@@ -53,6 +53,8 @@ export function createSavedWorkDraftPr(deps: {
   const pods = deps.podRepo;
   const ledger = pods.savedWorkDrafts ?? draftError('Draft operation ledger unavailable.');
   const now = deps.now ?? Date.now;
+  const inFlight = new Map<string, number>();
+  const retiring = new Set<string>();
   const human = (actor: OperatorActor) => {
     if (actor.type !== 'human' || !actor.userId?.trim())
       draftError(
@@ -221,8 +223,9 @@ export function createSavedWorkDraftPr(deps: {
     };
   }
   async function current(op: SavedWorkDraftOperation) {
-    if (ledger.get(op.podId, op.requestId)?.state === 'cancelled')
-      draftError('Draft operation cancelled; no publication is authorized.');
+    const state = ledger.get(op.podId, op.requestId)?.state;
+    if (state === 'cancelled' || state === 'retired-uncertain')
+      draftError('Draft operation closed; no publication is authorized.');
     const p = policy(pods.getOrThrow(op.podId));
     const preview = await inspect(op.podId, { type: 'human', userId: op.actorId });
     if (
@@ -331,7 +334,8 @@ export function createSavedWorkDraftPr(deps: {
       request.expectedBinding !== op.confirmationBinding
     )
       draftError('Exact human draft-only confirmation required.');
-    if (op.state === 'published' || op.state === 'cancelled') return op;
+    if (op.state === 'published' || op.state === 'cancelled' || op.state === 'retired-uncertain')
+      return op;
     if (op.state === 'preparing')
       draftError('Preparation is unsettled; retain source and observe the same operation.');
     const p = await current(op);
@@ -469,6 +473,7 @@ export function createSavedWorkDraftPr(deps: {
     if (
       op.state === 'published' ||
       op.state === 'cancelled' ||
+      op.state === 'retired-uncertain' ||
       op.state === 'preparing' ||
       op.state === 'prepared' ||
       op.state === 'pushed'
@@ -524,5 +529,71 @@ export function createSavedWorkDraftPr(deps: {
     pods.getOrThrow(podId);
     return ledger.cancelPreparation(podId, request, actorId);
   }
-  return { inspect, prepare, confirm, observe, cancel, cancelPreparation };
+  async function retireUncertain(
+    podId: string,
+    request: SavedWorkDraftCancel,
+    actor: OperatorActor,
+  ) {
+    const actorId = human(actor);
+    const reason = request.retireUncertainReason?.trim();
+    const op = ledger.get(podId, request.requestId) ?? draftError('No saved operation.');
+    if (op.actorId !== actorId || op.confirmationBinding !== request.expectedBinding)
+      draftError('Exact actor-bound retirement required.');
+    if (!reason || reason.length < 10 || reason.length > 1000)
+      draftError('An explicit retirement reason of 10–1000 characters is required.');
+    if (op.state === 'retired-uncertain' && op.retirement?.reason === reason) return op;
+    if (op.state !== 'create-uncertain')
+      draftError('Only an unresolved draft create can be retired.');
+    if (inFlight.has(podId) || retiring.has(podId))
+      draftError('A draft operation is still in progress; observe its result first.');
+    retiring.add(podId);
+    try {
+      const p = await current(op);
+      if (await p.provider.find(target(op)))
+        draftError(
+          'The provider returned a PR. Observe the existing operation instead of retiring it.',
+        );
+      const observedRemoteHead = await deps.worktreeManager.observeSourceBranch?.(
+        checkout(op),
+        op.repository,
+        op.branch,
+      );
+      if (observedRemoteHead !== op.source.commit)
+        draftError(
+          'The exact saved commit was not verified on the operation branch; retirement refused.',
+        );
+      await current(op);
+      // A negative provider lookup is not proof of absence. Retire only our
+      // ability to act, without replay, remote deletion, or a publication receipt.
+      return ledger.retireUncertainCreate(op, {
+        reason,
+        retiredAt: new Date(now()).toISOString(),
+        observedRemoteHead,
+      });
+    } finally {
+      retiring.delete(podId);
+    }
+  }
+  function track<Args extends unknown[], T>(run: (podId: string, ...args: Args) => Promise<T>) {
+    return async (podId: string, ...args: Args): Promise<T> => {
+      if (retiring.has(podId)) draftError('Draft retirement is in progress.');
+      inFlight.set(podId, (inFlight.get(podId) ?? 0) + 1);
+      try {
+        return await run(podId, ...args);
+      } finally {
+        const remaining = (inFlight.get(podId) ?? 1) - 1;
+        if (remaining) inFlight.set(podId, remaining);
+        else inFlight.delete(podId);
+      }
+    };
+  }
+  return {
+    inspect,
+    prepare: track(prepare),
+    confirm: track(confirm),
+    observe: track(observe),
+    cancel,
+    cancelPreparation,
+    retireUncertain,
+  };
 }

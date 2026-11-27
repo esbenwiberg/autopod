@@ -20,7 +20,7 @@ export function assertSavedDraftAvailable(db: Database.Database, podId: string):
     db
       .prepare(`SELECT 1 FROM saved_work_draft_pr_operations WHERE
     (pod_id=? OR json_extract(body,'$.taskId')=(SELECT task_id FROM task_executions WHERE pod_id=?))
-    AND json_extract(body,'$.state') NOT IN ('published','cancelled')`)
+    AND json_extract(body,'$.state') NOT IN ('published','cancelled','retired-uncertain')`)
       .get(podId, podId)
   )
     draftError('Saved-work draft publication owns this source; observe the existing operation.');
@@ -29,7 +29,7 @@ export function assertSavedDraftResourceAvailable(db: Database.Database, contain
   if (
     db
       .prepare(
-        `SELECT 1 FROM saved_work_draft_pr_operations WHERE json_extract(body,'$.originalContainerId')=? AND json_extract(body,'$.state') NOT IN ('published','cancelled')`,
+        `SELECT 1 FROM saved_work_draft_pr_operations WHERE json_extract(body,'$.originalContainerId')=? AND json_extract(body,'$.state') NOT IN ('published','cancelled','retired-uncertain')`,
       )
       .get(containerId)
   )
@@ -48,7 +48,7 @@ export function assertSavedDraftPathAvailable(db: Database.Database, location: s
   const candidate = identity(location);
   const rows = db
     .prepare(
-      `SELECT value AS location FROM saved_work_draft_pr_operations,json_each(body,'$.sourceLocations') WHERE json_extract(body,'$.state') NOT IN ('published','cancelled')`,
+      `SELECT value AS location FROM saved_work_draft_pr_operations,json_each(body,'$.sourceLocations') WHERE json_extract(body,'$.state') NOT IN ('published','cancelled','retired-uncertain')`,
     )
     .all() as { location: string }[];
   for (const row of rows) {
@@ -214,6 +214,27 @@ export function createSavedWorkDraftRepository(db: Database.Database) {
       message?: string,
     ) {
       const next = { ...op, state, receipt, ...(message ? { message } : {}) };
+      const result = db
+        .prepare('UPDATE saved_work_draft_pr_operations SET body=? WHERE id=? AND body=?')
+        .run(JSON.stringify(next), op.id, JSON.stringify(op));
+      if (result.changes !== 1) draftError('Operation changed; observe it without resubmitting.');
+      return next;
+    },
+    retireUncertainCreate(
+      op: SavedWorkDraftOperation,
+      retirement: NonNullable<SavedWorkDraftOperation['retirement']>,
+    ): SavedWorkDraftOperation {
+      if (op.state !== 'create-uncertain' || retirement.observedRemoteHead !== op.source.commit)
+        draftError(
+          'Only an unresolved draft create with preserved exact remote source can be retired.',
+        );
+      const next: SavedWorkDraftOperation = {
+        ...op,
+        state: 'retired-uncertain',
+        retirement,
+        message:
+          'Human retired the draft request without resolving its remote outcome. The operation branch and local source were not removed. This is not a PR receipt or authorization to retry publication.',
+      };
       const result = db
         .prepare('UPDATE saved_work_draft_pr_operations SET body=? WHERE id=? AND body=?')
         .run(JSON.stringify(next), op.id, JSON.stringify(op));
