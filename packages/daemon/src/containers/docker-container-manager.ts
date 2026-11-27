@@ -72,7 +72,11 @@ import {
   createContainerWithStaleRetry,
   isExpectedDockerError,
 } from './docker-helpers.js';
-import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
+import {
+  ExecInterruptedError,
+  isObservedExitCode,
+  unverifiedExecExit,
+} from './exec-exit-evidence.js';
 import { isExcludedPath, mirrorStagedDirectory } from './staged-directory-mirror.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -1726,16 +1730,19 @@ function collectDemuxedOutput(
 
     if (timeout && timeout > 0) {
       timer = setTimeout(() => {
-        // Attempt to destroy the stream to abort the exec
-        const destroyableStream = stream as NodeJS.ReadableStream & { destroy?: () => void };
-        if (typeof destroyableStream.destroy === 'function') {
-          destroyableStream.destroy();
-        }
+        // Closing the attach stream does not prove the Docker exec process stopped.
         const partialOutput = boundOutput([stdoutBuf, stderrBuf].filter(Boolean).join('\n'));
-        const err = Object.assign(new Error(`Exec timed out after ${timeout}ms`), {
-          partialOutput,
-        });
-        settle(err);
+        settle(
+          Object.assign(
+            new ExecInterruptedError({
+              cause: 'timeout',
+              timeoutMs: timeout,
+              cleanup: 'unverified',
+            }),
+            { partialOutput },
+          ),
+        );
+        (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
       }, timeout);
     }
   });

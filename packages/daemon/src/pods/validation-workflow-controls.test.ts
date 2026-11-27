@@ -450,6 +450,7 @@ describe('validation workflow controls', () => {
   });
   it('re-evaluates real queued dismissals against cached validation without engine dispatch', async () => {
     const f = fixture('review_required');
+    f.podRepo.update('controls', { options: { ...f.pod().options, output: 'artifact' } });
     f.pending.enqueue('controls', {
       findingId: findingId('task_review', 'Review finding'),
       description: 'Review finding',
@@ -478,7 +479,11 @@ describe('validation workflow controls', () => {
   it('applies a failed skip decision using the supplied actor/waiver and consumes its pending base-update intent', () => {
     const f = fixture();
     const actor: OperatorActor = { type: 'human', userId: 'operator' };
-    f.podRepo.update('controls', { skipValidation: true, skipValidationActor: actor });
+    f.podRepo.update('controls', {
+      options: { ...f.pod().options, output: 'artifact' },
+      skipValidation: true,
+      skipValidationActor: actor,
+    });
     f.state.pendingUpdateFromBaseIntents.add('controls');
     const input = f.pod().lastValidationResult;
     if (!input) throw new Error('Missing result');
@@ -499,7 +504,10 @@ describe('validation workflow controls', () => {
       response: null,
     };
     f.escalationRepo.insert(escalation);
-    f.podRepo.update('controls', { pendingEscalation: escalation });
+    f.podRepo.update('controls', {
+      options: { ...f.pod().options, output: 'artifact' },
+      pendingEscalation: escalation,
+    });
     const actor: OperatorActor = { type: 'human', userId: 'operator' };
     f.owner.setSkipValidation('controls', true, actor);
     expect(f.dependent).toHaveBeenCalledOnce();
@@ -513,8 +521,44 @@ describe('validation workflow controls', () => {
     });
     expect(reopened.escalations[0]?.response).toMatchObject({ respondedBy: 'human', actor });
   });
+  it.each([
+    'pr',
+    'branch',
+  ] as const)('cannot bypass %s checks at runtime, even with a legacy flag', (output) => {
+    const f = fixture();
+    f.podRepo.update('controls', { options: { ...f.pod().options, output } });
+    const before = f.pod();
+    expect(() => f.owner.setSkipValidation('controls', true)).toThrowError(
+      expect.objectContaining({ code: 'CHECKED_DELIVERY_REQUIRED' }),
+    );
+    expect(f.pod()).toEqual(before);
+    f.podRepo.update('controls', { skipValidation: true });
+    const input = f.pod().lastValidationResult;
+    if (!input) throw new Error('Missing fixture result');
+    expect(f.owner.applySkipValidationDecision(f.pod(), input)).toBeNull();
+    expect(f.owner.applySkipValidationDecision(f.pod(), { ...input, overall: 'pass' })).toBeNull();
+    expect(f.buildWaiver).not.toHaveBeenCalled();
+    expect(f.dependent).not.toHaveBeenCalled();
+    f.owner.setSkipValidation('controls', false);
+    expect(f.pod().skipValidation).toBe(false);
+  });
+  it('records PR overrides without turning the cached failure into a pass', async () => {
+    const f = fixture('review_required', true);
+    const result = f.pod().lastValidationResult;
+    f.pending.enqueue('controls', {
+      findingId: findingId('task_review', 'Review finding'),
+      description: 'Review finding',
+      action: 'dismiss',
+    });
+    expect(await f.owner.applyOverridesInstant('controls')).toEqual({ advanced: false });
+    const reopened = f.reopen();
+    expect(reopened.pod.status).toBe('review_required');
+    expect(reopened.pod.lastValidationResult).toEqual(result);
+    expect(reopened.pod.validationOverrides).toHaveLength(1);
+  });
   it('flushes persisted pending overrides and retains the advanced cached result through reopen', async () => {
     const f = fixture('review_required', true);
+    f.podRepo.update('controls', { options: { ...f.pod().options, output: 'artifact' } });
     f.pending.enqueue('controls', {
       findingId: findingId('task_review', 'Review finding'),
       description: 'Review finding',

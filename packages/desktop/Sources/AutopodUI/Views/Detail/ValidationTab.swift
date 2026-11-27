@@ -872,7 +872,9 @@ public struct ValidationTab: View {
           .controlSize(.small)
           .disabled(isOpeningApp)
         }
-        if pod.status == .validating || pod.status == .running {
+        let checkedDelivery = pod.pod.output == .pr || pod.pod.output == .branch
+        if (!checkedDelivery && (pod.status == .validating || pod.status == .running))
+          || (checkedDelivery && pod.skipValidation && [.running, .validating, .failed, .reviewRequired, .validated].contains(pod.status)) {
           Button {
             isSkippingValidation = true
             let newSkip = !pod.skipValidation
@@ -887,7 +889,7 @@ public struct ValidationTab: View {
                 Text("Updating…").lineLimit(1)
               }
             } else if pod.skipValidation {
-              Label("Skipping", systemImage: "forward.fill").lineLimit(1)
+              Label(checkedDelivery ? "Clear Skip Validation" : "Skipping", systemImage: "forward.fill").lineLimit(1)
             } else {
               Label("Skip Validation", systemImage: "forward").lineLimit(1)
             }
@@ -943,7 +945,7 @@ public struct ValidationTab: View {
           .tint(.orange)
           .disabled(isInterrupting)
         }
-        if pod.status == .failed || pod.status == .reviewRequired || pod.hasOrphanedValidationDecision {
+        if !checkedDelivery && (pod.status == .failed || pod.status == .reviewRequired || pod.hasOrphanedValidationDecision) {
           Button {
             showForceApprovePopover = true
           } label: {

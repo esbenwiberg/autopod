@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture, pendingStatus } from '../test-utils/delivery-helpers.js';
+import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
@@ -19,6 +20,20 @@ async function input(
   };
 }
 describe('approval delivery stages', () => {
+  it('refuses approval of a legacy validated label backed by failed checks', async () => {
+    const f = createDeliveryFixture();
+    f.validated();
+    f.podRepo.update('prepare', { lastValidationResult: createFailingValidationResult('prepare') });
+    const before = f.pod();
+    await expect(
+      f.workflow().approveSession('prepare', { reason: 'Legacy force approval' }),
+    ).rejects.toMatchObject({
+      code: 'CHECKED_DELIVERY_REQUIRED',
+    });
+    expect(f.pod()).toEqual(before);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+  });
   it.each([
     'permitted',
     'default-provider',

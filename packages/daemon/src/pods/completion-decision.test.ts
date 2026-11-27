@@ -93,8 +93,10 @@ function fixture(target: Pod['executionTarget'] = 'local', scheduled = false, li
   const transition = vi.fn(
     (
       pod: Pod,
-      to: 'failed' | 'complete' | 'validating' | 'validated',
-      updates?: Partial<Pick<PodUpdates, 'completedAt' | 'lastCorrectionMessage'>>,
+      to: 'failed' | 'complete' | 'validating' | 'validated' | 'review_required',
+      updates?: Partial<
+        Pick<PodUpdates, 'completedAt' | 'lastCorrectionMessage' | 'failureReason'>
+      >,
     ) => {
       validateTransition(pod.id, pod.status, to);
       repo.update(pod.id, { status: to, ...updates });
@@ -201,7 +203,10 @@ describe('completion decision persisted effects', () => {
       const updates: PodUpdates = {};
       if (mode === 'failed' || mode === 'scheduled-rework')
         updates.lastCorrectionMessage = '[REWORK IN PROGRESS] repair';
-      if (mode === 'validated') updates.skipValidation = true;
+      if (mode === 'validated') {
+        updates.skipValidation = true;
+        updates.options = { ...f.repo.getOrThrow('worker').options, output: 'artifact' };
+      }
       if (mode === 'validate') updates.filesChanged = 2;
       if (mode === 'branch') updates.baseBranch = 'release';
       if (mode === 'default' || mode === 'missing-default') updates.baseBranch = 'main';
@@ -223,7 +228,7 @@ describe('completion decision persisted effects', () => {
         'sandbox-changed-off',
       ].includes(mode)
         ? 'running'
-        : ['validated', 'sandbox-unchanged-off'].includes(mode)
+        : mode === 'validated'
           ? 'validated'
           : mode === 'failed'
             ? 'failed'
@@ -253,6 +258,27 @@ describe('completion decision persisted effects', () => {
         expect(f.completed).toHaveBeenCalledWith(f.transition.mock.results[0]?.value, 0);
         expect(f.dependents.mock.calls[0]?.[0]).toBe(f.transition.mock.results[0]?.value);
       }
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each([
+    'off',
+    'legacy-flag',
+  ] as const)('does not make changed PR source ready with %s', async (mode) => {
+    const f = fixture();
+    try {
+      const pod = f.repo.getOrThrow('worker');
+      f.repo.update('worker', {
+        filesChanged: 1,
+        skipValidation: true,
+        options: mode === 'off' ? { ...pod.options, validationSuite: 'off' } : pod.options,
+      });
+      await f.run();
+      expect(f.order).toEqual(mode === 'off' ? ['validating', 'review_required'] : ['validate']);
+      expect(f.dependents).not.toHaveBeenCalled();
+      expect(f.cleanup).not.toHaveBeenCalled();
     } finally {
       f.close();
     }
@@ -298,7 +324,12 @@ describe('completion decision persisted effects', () => {
     const f = fixture();
     try {
       const original = f.repo.getOrThrow('worker');
-      f.repo.update('worker', { filesChanged: 3, skipValidation: true, task: 'fresh decision' });
+      f.repo.update('worker', {
+        filesChanged: 3,
+        skipValidation: true,
+        task: 'fresh decision',
+        options: { ...original.options, output: 'artifact' },
+      });
       const body = f.transition.getMockImplementation();
       if (!body) throw new Error('Missing transition');
       f.transition.mockImplementationOnce((pod, to, updates) => {
@@ -341,21 +372,19 @@ describe('completion decision persisted effects', () => {
         f.repo.update('worker', { worktreePath: '/private/new' });
       if (mode === 'refreshed-worktree-missing') f.repo.update('worker', { worktreePath: null });
       if (mode === 'original-local-refreshed-sandbox') {
-        f.repo.update('worker', { executionTarget: 'sandbox', skipValidation: true });
+        f.repo.update('worker', { executionTarget: 'sandbox' });
         f.source.sandboxCanonicalOutcome = 'changed';
       }
       if (mode === 'original-sandbox-refreshed-local') {
-        f.repo.update('worker', { executionTarget: 'local', skipValidation: true });
+        f.repo.update('worker', { executionTarget: 'local' });
         f.source.sandboxCanonicalOutcome = 'changed';
       }
       await f.run(original);
-      // Original local zero files wins the later no-change bypass even when force is true.
+      // Original local zero files wins the no-change decision even when force is true.
       const expected =
-        mode === 'original-worktree-missing'
+        mode === 'original-worktree-missing' || mode === 'original-sandbox-refreshed-local'
           ? 'running'
-          : mode.includes('refreshed-local') || mode.includes('refreshed-sandbox')
-            ? 'validated'
-            : 'complete';
+          : 'complete';
       expect(f.reopen().status).toBe(expected);
     } finally {
       f.close();
@@ -377,7 +406,11 @@ describe('completion decision persisted effects', () => {
     const fault = new Error(`${stage} fault`);
     try {
       if (stage === 'validate') f.repo.update('worker', { filesChanged: 2 });
-      if (stage.startsWith('bypass')) f.repo.update('worker', { skipValidation: true });
+      if (stage.startsWith('bypass'))
+        f.repo.update('worker', {
+          skipValidation: true,
+          options: { ...f.repo.getOrThrow('worker').options, output: 'artifact' },
+        });
       const pod = f.repo.getOrThrow('worker');
       if (stage === 'read')
         vi.spyOn(f.repo, 'getOrThrow').mockImplementationOnce(() => {

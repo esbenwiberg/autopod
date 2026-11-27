@@ -93,6 +93,7 @@ export function createApprovalFixture(disk = false) {
   } satisfies ApprovalWorkflowCaptured;
   const controlsCaptured = {
     podRepo: f.podRepo,
+    executionForPod: mainCaptured.executionForPod,
     resolveApprovalReadiness: context.resolveApprovalReadiness,
     logger: f.deps.logger,
     nudgeRepo: f.deps.nudgeRepo,

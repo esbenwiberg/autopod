@@ -1249,7 +1249,7 @@ describe('PodManager', () => {
     });
   });
 
-  it('applies audited finding overrides instantly when a healthy review parked as failed', async () => {
+  it('records audited finding overrides without passing an old PR validation failure', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
@@ -1276,13 +1276,13 @@ describe('PodManager', () => {
       reason: 'Verified against the current diff and focused tests.',
     });
 
-    await expect(manager.applyOverridesInstant(pod.id)).resolves.toEqual({ advanced: true });
+    await expect(manager.applyOverridesInstant(pod.id)).resolves.toEqual({ advanced: false });
 
     expect(manager.getSession(pod.id)).toMatchObject({
-      status: 'validated',
+      status: 'failed',
       lastValidationResult: {
-        overall: 'pass',
-        taskReview: { status: 'pass', issues: [] },
+        overall: 'fail',
+        taskReview: { status: 'fail' },
       },
       validationOverrides: [expect.objectContaining({ findingId: semanticId })],
     });
@@ -9969,7 +9969,11 @@ describe('PodManager', () => {
       const skipContext = createTestContext();
       const skipManager = createPodManager(skipContext.deps);
       const skipPod = skipManager.createSession(
-        { profileName: 'test-profile', task: 'Deferred skip actor' },
+        {
+          profileName: 'test-profile',
+          task: 'Deferred skip actor',
+          options: { output: 'artifact' },
+        },
         'user-1',
       );
       const skipActor = cases[2]?.actor;
@@ -10886,14 +10890,16 @@ describe('PodManager', () => {
       ctx.podRepo.update(parent.id, { status: 'failed', worktreePath: '/tmp/wt' });
       ctx.enqueuedSessions.length = 0;
 
-      await manager.forceApprove(parent.id, 'waive infrastructure-only validation issue');
+      await expect(
+        manager.forceApprove(parent.id, 'waive infrastructure-only validation issue'),
+      ).rejects.toMatchObject({
+        code: 'CHECKED_DELIVERY_REQUIRED',
+      });
 
       expect(ctx.enqueuedSessions).not.toContain(child.id);
       expect(manager.getSession(child.id).status).toBe('queued');
 
-      await expect(
-        manager.approveSession(parent.id, { reason: 'Force-approved parent is acceptable' }),
-      ).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
+      expect(manager.getSession(parent.id).status).toBe('failed');
       expect(ctx.enqueuedSessions).not.toContain(child.id);
       expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
       // A projection waiver is not committed-source proof. Model fresh passing
@@ -23300,7 +23306,11 @@ describe('PodManager', () => {
     function setupFailedFactPod(ctx: TestContext) {
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Migrate frontend WorkPackage reads' },
+        {
+          profileName: 'test-profile',
+          task: 'Migrate frontend WorkPackage reads',
+          options: { output: 'artifact' },
+        },
         'user-1',
       );
       const validationResult: ValidationResult = {
@@ -23411,6 +23421,14 @@ describe('PodManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((event) => events.push(event));
 
+      const checkedPod = manager.getSession(pod.id);
+      if (!checkedPod.lastValidationResult) throw new Error('Missing fixture result');
+      seedCheckedValidationSource(
+        ctx.podRepo,
+        checkedPod,
+        ctx.profileStore.get(pod.profileName),
+        checkedPod.lastValidationResult,
+      );
       await manager.forceApprove(pod.id, 'post-validation push failed', {
         type: 'human',
         userId: 'human',

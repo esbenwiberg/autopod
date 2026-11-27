@@ -178,6 +178,18 @@ stopped; it never stops, wakes or deletes it. Historical Docker failures without
 maintained dispatch evidence remain blocked. See `docs/approval-rewrite-repair.md`
 for independent checkout selection, targeted retry permission and fresh approval.
 
+### Validation bypass and checked delivery
+
+Ordinary branch and PR publication requires an immutable passing result tied to
+exact source. Runtime Skip Validation is not available for these outputs. A
+legacy skip flag does not replace a completed check result, and a cached finding
+override is recorded without changing the original failed result to a pass.
+Force Approve can reuse a certified pass after a delivery failure; it cannot
+manufacture one. Use fresh checks, or saved-work draft publication if an eligible
+PR task only needs review. A Docker buffered exec timeout does not prove the
+command exited. Preserve partial output and treat unknown cleanup as unsettled
+rather than sending the timeout back for agent rework.
+
 ### Saved-work review-only draft publication
 
 `saved-work-draft-pr.ts` owns a distinct human inspect/prepare/confirm workflow.

@@ -1289,6 +1289,22 @@ describe('DockerContainerManager', () => {
       expect(result.exitCode).toBe(0);
     });
 
+    it('preserves buffered timeout and partial output without claiming command exit', async () => {
+      const stream = Object.assign(new PassThrough(), { _mockStdout: 'test runner started' });
+      const exec = { start: vi.fn().mockResolvedValue(stream), inspect: vi.fn() };
+      container.exec.mockResolvedValue(exec);
+      await expect(
+        manager.execInContainer('abc123', ['test-runner'], { timeout: 10 }),
+      ).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        execution: { cause: 'timeout', timeoutMs: 10, cleanup: 'unverified' },
+        partialOutput: 'test runner started',
+      });
+      expect(stream.destroyed).toBe(true);
+      expect(exec.inspect).not.toHaveBeenCalled();
+      expect(container.stop).not.toHaveBeenCalled();
+    });
+
     it('bounds combined buffered output without claiming remote termination', async () => {
       const muxStream = createMockMuxStream('hello', 'world');
       const mockExec = { start: vi.fn().mockResolvedValue(muxStream), inspect: vi.fn() };
