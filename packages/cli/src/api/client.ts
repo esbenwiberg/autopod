@@ -87,7 +87,9 @@ import {
   retainedCleanupRequestIdSchema,
   retainedCleanupRequestSchema,
   ValidationError,
+  validationHeldStopRequestSchema,
 } from '@autopod/shared';
+import { heldDockerViewSchema } from './validation-held-docker.js';
 
 export type CreateSeriesRequest = import('@autopod/shared').SeriesLaunchRequest;
 
@@ -1499,6 +1501,53 @@ export class AutopodClient {
         return cleanupInspection(value, podId);
       },
     );
+  }
+
+  async validationHeldDocker(
+    podId: string,
+    input?: import('@autopod/shared').ValidationHeldStopRequest | string,
+  ) {
+    const path = cleanupPodPath(podId).replace('/retained-cleanup', '/validation-held-docker');
+    const decode = (value: unknown) => {
+      const parsed = heldDockerViewSchema.parse(value);
+      if (
+        parsed.podId !== podId ||
+        (input !== undefined &&
+          parsed.requestKey !== (typeof input === 'string' ? input : input.requestKey)) ||
+        (typeof input === 'object' &&
+          (parsed.generation !== input.expectedGeneration ||
+            parsed.binding !== input.expectedBinding))
+      )
+        throw new Error('Held Docker reply does not match the exact selection.');
+      return parsed;
+    };
+    if (typeof input !== 'object')
+      return this.request(
+        'GET',
+        input ? `${path}/${retainedCleanupRequestIdSchema.parse(input)}` : path,
+        undefined,
+        false,
+        'error',
+        decode,
+      );
+    const request = validationHeldStopRequestSchema.parse(input);
+    const token = await this.getToken();
+    const response = await sendHttp(`${this.cleanupDaemonIdentity}${path}`, {
+      method: 'POST',
+      idempotent: false,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300)
+      await this.handleError(
+        { status: response.statusCode, json: () => response.body.json() },
+        path,
+      );
+    const result = decode(await response.body.json());
+    if (response.statusCode !== (['unknown', 'pending'].includes(result.state) ? 202 : 200))
+      throw new Error('Unexpected held Docker submission HTTP status.');
+    return result;
   }
 
   async observeRetainedCleanup(podId: string, expected: string | RetainedCleanupRequest) {

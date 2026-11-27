@@ -43,7 +43,7 @@ struct RecoveryHubCard: View {
             .controlSize(.small).accessibilityIdentifier("recovery-hub-open")
         }.padding(.horizontal, 16).padding(.vertical, 6)
       }
-      if pod.usesRetainedDockerControls {
+      if pod.usesRetainedDockerControls || pod.usesValidationHeldDockerControls {
         HStack {
           if pod.status != .killed {
             Button("Stop and retain…") { destinationRoute = .finalization }
@@ -140,7 +140,10 @@ struct RecoveryHubSheet: View {
     case .recoverFiles:
       FileRecoveryView(actions: actions, model: model.files, sandbox: model.sandbox, onOpenEvidence: evidenceAction)
     case .freeStorage:
-      if pod.usesRetainedDockerControls || model.cleanup.needsObservation {
+      if pod.usesValidationHeldDockerControls && model.heldDocker.snapshot?.state != "stopped" && !model.cleanup.needsObservation {
+        ValidationHeldDockerControlView(actions: actions.validationHeldDocker, model: model.heldDocker,
+          discard: { route = .freeStorage })
+      } else if pod.usesRetainedDockerControls || pod.usesValidationHeldDockerControls || model.cleanup.needsObservation {
         RetainedCleanupView(actions: actions.retainedCleanup, model: model.cleanup)
           .id("\(actions.retainedCleanup.scope):\(pod.id)")
       } else if actions.sandboxRecovery.available && RecoveryHubModel.canInspectSandbox(pod) {
@@ -162,7 +165,10 @@ struct RecoveryHubSheet: View {
       StalledWorkerRecoverySheet(podId: pod.id, actions: actions.stalledWorkerRecovery, embedded: true,
         model: model.stalled, onOpenValidation: openValidation)
     case .finalization:
-      if actions.retainedFinalization.available {
+      if pod.usesValidationHeldDockerControls {
+        ValidationHeldDockerControlView(actions: actions.validationHeldDocker, model: model.heldDocker,
+          discard: { route = .freeStorage })
+      } else if actions.retainedFinalization.available {
         RetainedFinalizationSheet(podId: pod.id, actions: actions.retainedFinalization, model: model.finalization, embedded: true)
       } else {
         RecoveryNotice(title: "Stop and retain unavailable", message: "Use a compatible daemon to inspect Stop and retain. Do not substitute Kill; stopping does not reclaim storage.")

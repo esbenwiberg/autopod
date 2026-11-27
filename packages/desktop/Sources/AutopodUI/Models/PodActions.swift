@@ -51,6 +51,7 @@ public struct PodActions: Sendable {
   public var stalledWorkerRecovery: StalledWorkerRecoveryActions = .unavailable
   public var retainedFinalization: RetainedFinalizationActions = .unavailable
   public var retainedCleanup: RetainedCleanupActions = .unavailable
+  public var validationHeldDocker = ValidationHeldDockerActions()
   public var repairContinuation: RepairContinuationActions = .unavailable
   public var memoryChecks: MemoryChecksActions = .unavailable
   public var retainedChecks: RetainedChecksActions = .unavailable

@@ -71,6 +71,7 @@ export async function gitWorktreeIdentity(
   location: string,
   ownership: GitWorktreeIdentity['commonStoreOwnership'],
   expectedCommon?: string,
+  expectedBranch?: string,
 ): Promise<GitWorktreeIdentity> {
   const worktree = await physicalIdentity(location, 'directory');
   const gitlink = await physicalIdentity(path.join(location, '.git'), 'file');
@@ -119,6 +120,14 @@ export async function gitWorktreeIdentity(
     !samePhysical(gitlink, await physicalIdentity(gitlink.path, 'file')) ||
     !samePhysical(registration, await physicalIdentity(registration.path, 'directory')) ||
     !samePhysical(commonStore, await physicalIdentity(commonStore.path, 'directory'))
+  )
+    throw unavailable();
+  if (
+    expectedBranch &&
+    !entries.some(
+      ([entry, ...fields]) =>
+        entry === `worktree ${location}` && fields.includes(`branch refs/heads/${expectedBranch}`),
+    )
   )
     throw unavailable();
   return { worktree, gitlink, registration, commonStore, commonStoreOwnership: ownership };

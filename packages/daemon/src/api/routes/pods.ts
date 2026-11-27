@@ -69,6 +69,7 @@ import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
 import { savedWorkDraftRoutes } from './saved-work-draft-pr.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
 import { stalledWorkerRecoveryRoutes } from './stalled-worker-recovery.js';
+import { validationHeldDockerRoutes } from './validation-held-docker-control.js';
 import { validationRecoveryRoutes } from './validation-recovery.js';
 
 function humanActor(request: FastifyRequest): OperatorActor {
@@ -863,6 +864,7 @@ export function podRoutes(
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
   retainedCleanupRoutes(app, podManager);
+  validationHeldDockerRoutes(app, podManager);
   savedWorkDraftRoutes(app, podManager);
   recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);

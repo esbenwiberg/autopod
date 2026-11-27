@@ -377,6 +377,20 @@ public final class ActionHandler {
         guard let self, self.podStore.isCurrent(self.ownership), receipt.state == .deleted else { return }
         self.podStore.removeSession(receipt.podId)
       })
+    result.validationHeldDocker.scope = replyContextID.uuidString
+    result.validationHeldDocker.connection = "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)"
+    result.validationHeldDocker.journalDirectory = journalRoot?.appendingPathComponent("validation-held-docker-v1", isDirectory: true)
+    result.validationHeldDocker.isCurrent = { [weak self] in self.map { $0.podStore.isCurrent($0.ownership) } ?? false }
+    result.validationHeldDocker.inspect = { [weak self] id, key in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform { try await self.api.inspectValidationHeldDocker(id, key: key) }
+    }
+    result.validationHeldDocker.submit = { [weak self] id, input in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      try self.requireCurrent()
+      return try await self.perform { try await self.api.stopValidationHeldDocker(id, input: input,
+        isCurrent: { [weak self] in await self?.retainedCleanupOwnerIsCurrent() == true }) }
+    }
     result.repairContinuation = RepairContinuationActions(
       scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
@@ -610,7 +624,8 @@ public final class ActionHandler {
   }
 
   private func permitsOrdinaryDestruction(_ podId: String) -> Bool {
-    guard podStore.pods.first(where: { $0.id == podId })?.usesRetainedDockerControls != true else {
+    let pod = podStore.pods.first(where: { $0.id == podId })
+    guard pod?.usesRetainedDockerControls != true && pod?.usesValidationHeldDockerControls != true else {
       lastError = "Open Recovery to inspect Stop and retain or Delete & free resources. Do not use ordinary Kill or Delete for this pod."
       return false
     }

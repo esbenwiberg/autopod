@@ -239,6 +239,25 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         podId,
       );
     },
+    inspectValidationHeldDocker(podId: string) {
+      return (
+        captured.validationHeldDocker ?? checkpointError('Held Docker control unavailable')
+      ).inspect(podId);
+    },
+    observeValidationHeldDocker(podId: string, key: string) {
+      return (
+        captured.validationHeldDocker ?? checkpointError('Held Docker control unavailable')
+      ).receipt(podId, key);
+    },
+    stopValidationHeldDocker(
+      podId: string,
+      request: import('@autopod/shared').ValidationHeldStopRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.validationHeldDocker ?? checkpointError('Held Docker control unavailable')
+      ).submit(podId, request, actor);
+    },
     observeRetainedCleanup(podId: string, requestId: string) {
       return (captured.retainedCleanup ?? checkpointError('Retained cleanup unavailable')).receipt(
         podId,

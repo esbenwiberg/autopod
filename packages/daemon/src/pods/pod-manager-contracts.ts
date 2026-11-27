@@ -214,6 +214,18 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  inspectValidationHeldDocker(
+    podId: string,
+  ): Promise<import('@autopod/shared').ValidationHeldStopView>;
+  observeValidationHeldDocker(
+    podId: string,
+    key: string,
+  ): import('@autopod/shared').ValidationHeldStopView;
+  stopValidationHeldDocker(
+    podId: string,
+    request: import('@autopod/shared').ValidationHeldStopRequest,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').ValidationHeldStopView>;
   inspectStalledWorkerRecovery(podId: string): import('@autopod/shared').StalledWorkerRecoveryView;
   recoverStalledWorker(
     podId: string,

@@ -967,6 +967,13 @@ public struct Pod: Identifiable, Sendable {
     public var usesRetainedDockerControls: Bool {
         !isWorkspace && executionTarget == "local" && retainedDockerCustody == true
     }
+    public var usesValidationHeldDockerControls: Bool {
+        !isWorkspace && retainedDockerCustody != true && executionTarget == "local" && status == .reviewRequired &&
+          validationChecks?.infrastructureFailure?.code == "EXEC_EXIT_UNVERIFIED"
+    }
+    public var usesDedicatedDockerControls: Bool {
+        usesRetainedDockerControls || usesValidationHeldDockerControls
+    }
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 

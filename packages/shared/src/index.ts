@@ -739,6 +739,7 @@ export type {
   ValidationRecoveryBudgetReceipt,
   ValidationSettlementReceipt,
 } from './types/validation-execution-recovery.js';
+export * from './types/validation-held-docker-control.js';
 export type {
   ValidationRecoveryAction,
   ValidationRecoveryAvailability,
