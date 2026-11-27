@@ -90,13 +90,22 @@ export function createOperatorDisposal(deps: {
           pods.retainedCleanup!.assertForeignClaims(id, [cid], []);
         };
         try {
-          const observed = await docker.stopOwned(id, cid, stopGuard, (target) =>
-            store.admitEffect(id, key, 'stop:' + target.id, { target }),
+          const knownNamespace = store
+            .receipt(id, key)
+            ?.resources?.find((t) => t.kind === 'docker_container' && t.id === cid)?.namespace;
+          const observed = await docker.stopOwned(
+            id,
+            cid,
+            stopGuard,
+            (target) => store.admitEffect(id, key, 'stop:' + target.id, { target }),
+            knownNamespace,
           );
           stopGuard();
           if (!observed.stopped)
             pending('Exact stop is unconfirmed; any prior dispatch is not replayed.');
           store.event(id, key, 'stopped:' + observed.id, { target: observed });
+          if ('absent' in observed && observed.absent)
+            store.event(id, key, 'absent:' + observed.id, { target: observed.id });
         } catch {
           unconfirmedStop = true;
           store.event(id, key, 'diagnostic', {

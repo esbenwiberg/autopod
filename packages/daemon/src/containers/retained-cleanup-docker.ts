@@ -426,6 +426,7 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
       namespace: string;
       name: string;
     }) => boolean,
+    expectedNamespace?: string,
   ) {
     if (!/^[a-f0-9]{64}$/.test(id))
       block('IDENTITY_CHANGED', 'A full recorded Docker ID is required.');
@@ -435,6 +436,23 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
     if (!info.ID || (await endpoint(guard)) !== socket)
       block('OBSERVATION_UNAVAILABLE', 'Local Docker Engine identity is unavailable.');
     const namespace = info.ID!;
+    if (expectedNamespace && namespace !== expectedNamespace)
+      block('IDENTITY_CHANGED', 'The recorded stop target belongs to another Docker Engine.');
+    if (expectedNamespace) {
+      const prior = await inspect(docker.getContainer(id).inspect());
+      guard();
+      if (!prior) {
+        await engine(namespace, guard);
+        return {
+          kind: 'docker_container' as const,
+          id,
+          namespace,
+          name: '',
+          stopped: true,
+          absent: true,
+        };
+      }
+    }
     async function owned() {
       await engine(namespace, guard);
       const live = await inspect(docker.getContainer(id).inspect());

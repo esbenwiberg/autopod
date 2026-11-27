@@ -85,7 +85,8 @@ async function fixture(podId = 'ordinary-fixture') {
     removes = 0,
     lostStop = false,
     lostRemove = false,
-    blockRemove = false;
+    blockRemove = false,
+    blockNetworkRemove = false;
   const predecessors = new Map<string, typeof guest>();
   const absent = () => {
     throw Object.assign(new Error('fixture absent'), { statusCode: 404 });
@@ -119,6 +120,7 @@ async function fixture(podId = 'ordinary-fixture') {
       inspect: async () => (network ? bridge : absent()),
       remove: async () => {
         removes++;
+        if (blockNetworkRemove) throw new Error('network removal outcome unknown');
         network = false;
       },
     }),
@@ -164,6 +166,12 @@ async function fixture(podId = 'ordinary-fixture') {
     },
     blockRemove: () => {
       blockRemove = true;
+    },
+    blockNetworkRemove: () => {
+      blockNetworkRemove = true;
+    },
+    confirmNetworkAbsent: () => {
+      network = false;
     },
     stops: () => stops,
     removes: () => removes,
@@ -417,5 +425,18 @@ describe('exact operator disposal', () => {
     expect((await f.service().observe(f.podId, 'delete')).state).toBe('cleanup_pending');
     expect(f.removes()).toBe(1);
     expect(await readFile(path.join(f.worktree, 'README'), 'utf8')).toBe('unpublished fixture');
+  });
+  it('reconciles a removed guest across restart using its journaled Engine identity without replay', async () => {
+    const f = await fixture();
+    f.blockNetworkRemove();
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect((await f.service().observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.removes()).toBe(2);
+    f.confirmNetworkAbsent();
+    const r = await f.service().observe(f.podId, 'delete');
+    expect(r.state, JSON.stringify(r)).toBe('discarded');
+    expect(f.removes()).toBe(2);
   });
 });
