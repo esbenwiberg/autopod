@@ -31,6 +31,17 @@ export class RepositoryPreparationError extends AutopodError {
   }
 }
 
+// Leave time to observe a real exit below the Sandbox bounded-exec ceiling (30 s).
+const SOURCE_PROBE_BUDGET_MS = 24_000;
+const SOURCE_PROBE_TRANSPORT_MS = 28_000;
+const SOURCE_PROBE_EXIT = {
+  deadline: 20,
+  git: 21,
+  invalidInput: 22,
+  unstableFile: 23,
+  gitDeadline: 24,
+} as const;
+
 /** Read bytes without invoking repository programs, Git filters, hooks or a status refresh.
  * Ignored installation/build artifacts are deliberately excluded. All tracked files
  * and nonignored untracked inputs (including new lockfiles) contribute to the hash.
@@ -39,47 +50,69 @@ export class RepositoryPreparationError extends AutopodError {
  */
 export const PREPARATION_SOURCE_PROBE = `
 const fs=require('node:fs'), path=require('node:path'), cp=require('node:child_process'), crypto=require('node:crypto');
-const root='/workspace', real=fs.realpathSync(root), env={...process.env}, deadline=Date.now()+12000;
-const checkDeadline=()=>{if(Date.now()>=deadline) process.exit(2);};
+const root='/workspace', real=fs.realpathSync(root), env={...process.env}, deadline=performance.now()+${SOURCE_PROBE_BUDGET_MS};
+const exit=${JSON.stringify(SOURCE_PROBE_EXIT)};
+const checkDeadline=()=>{if(performance.now()>=deadline) process.exit(exit.deadline);};
 for(const key of Object.keys(env)) if(key.startsWith('GIT_')) delete env[key];
 Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_NO_REPLACE_OBJECTS:'1',GIT_NO_LAZY_FETCH:'1'});
-const git=args=>cp.execFileSync('/usr/bin/git',['--no-replace-objects','--no-optional-locks','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',...args],{cwd:root,env,encoding:'utf8',timeout:5000,maxBuffer:4*1024*1024});
+const git=args=>{
+ checkDeadline();
+ try { return cp.execFileSync('/usr/bin/git',['--no-replace-objects','--no-optional-locks','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',...args],{cwd:root,env,encoding:'utf8',timeout:Math.min(8000,Math.max(1,Math.floor(deadline-performance.now()))),maxBuffer:4*1024*1024}); }
+ catch(e){process.exit(e.code==='ETIMEDOUT'?exit.gitDeadline:exit.git);}
+};
 const head=git(['rev-parse','--verify','HEAD']).trim();
-if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) process.exit(2);
+if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) process.exit(exit.git);
 const names=[...new Set(git(['ls-files','-z','--cached','--others','--exclude-standard']).split(String.fromCharCode(0)).filter(Boolean))].sort();
-if(names.length>30000) process.exit(2);
+if(names.length>30000) process.exit(exit.invalidInput);
 const hash=crypto.createHash('sha256'), buffer=Buffer.allocUnsafe(64*1024);
 const sameFile=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.mode===b.mode&&a.size===b.size&&a.mtimeMs===b.mtimeMs&&a.ctimeMs===b.ctimeMs;
 for(const name of names){
  checkDeadline();
- if(path.isAbsolute(name)||name.split('/').some(p=>p==='..'||p==='.'||!p)) process.exit(2);
+ if(path.isAbsolute(name)||name.split('/').some(p=>p==='..'||p==='.'||!p)) process.exit(exit.invalidInput);
  const file=path.join(root,name); let stat;
- try { const parent=fs.realpathSync(path.dirname(file)); if(parent!==real&&!parent.startsWith(real+'/')) process.exit(2); stat=fs.lstatSync(file); }
+ try { const parent=fs.realpathSync(path.dirname(file)); if(parent!==real&&!parent.startsWith(real+'/')) process.exit(exit.invalidInput); stat=fs.lstatSync(file); }
  catch(e){ if(e.code==='ENOENT'){hash.update(JSON.stringify([name,'missing']));continue;} throw e; }
  if(stat.isSymbolicLink()){
   const content=Buffer.from(fs.readlinkSync(file));
   hash.update(JSON.stringify([name,'link',content.length])); hash.update(content);
  } else {
-  if(!stat.isFile()) process.exit(2);
+  if(!stat.isFile()) process.exit(exit.invalidInput);
   const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
   try {
    const opened=fs.fstatSync(fd);
-   if(!opened.isFile()||!sameFile(stat,opened)) process.exit(2);
+   if(!opened.isFile()||!sameFile(stat,opened)) process.exit(exit.unstableFile);
    hash.update(JSON.stringify([name,stat.mode&0o111,stat.size]));
    let offset=0;
    while(offset<stat.size){
     checkDeadline();
     const count=fs.readSync(fd,buffer,0,Math.min(buffer.length,stat.size-offset),null);
-    if(count<=0) process.exit(2);
+    if(count<=0) process.exit(exit.unstableFile);
     hash.update(buffer.subarray(0,count)); offset+=count;
    }
-   if(!sameFile(stat,fs.fstatSync(fd))) process.exit(2);
+   if(!sameFile(stat,fs.fstatSync(fd))) process.exit(exit.unstableFile);
   } finally {fs.closeSync(fd);}
  }
- if(!sameFile(stat,fs.lstatSync(file))) process.exit(2);
+ if(!sameFile(stat,fs.lstatSync(file))) process.exit(exit.unstableFile);
 }
+checkDeadline();
 process.stdout.write(JSON.stringify({head,fingerprint:hash.digest('hex')}));
 `;
+
+// Never include probe stdout/stderr in diagnostics; it can contain paths or secrets.
+class PreparationSourceProbeError extends Error {}
+
+const SOURCE_PROBE_FAILURES: Readonly<Record<number, string>> = {
+  [SOURCE_PROBE_EXIT.deadline]: `source fingerprint exceeded its ${SOURCE_PROBE_BUDGET_MS / 1000}s read budget`,
+  [SOURCE_PROBE_EXIT.git]: 'Git could not verify HEAD or enumerate source paths',
+  [SOURCE_PROBE_EXIT.invalidInput]:
+    'source inventory has an unsupported path or exceeds its file-count bound',
+  [SOURCE_PROBE_EXIT.unstableFile]: 'a source file changed while being read',
+  [SOURCE_PROBE_EXIT.gitDeadline]: 'Git source inventory exceeded its read budget',
+};
+
+function describeSourceProbeFailure(error: unknown): string {
+  return error instanceof PreparationSourceProbeError ? error.message : 'source probe unavailable';
+}
 
 export async function inspectPreparationSource(
   cm: ContainerManager,
@@ -87,24 +120,44 @@ export async function inspectPreparationSource(
   assertCurrent: () => void = () => {},
 ): Promise<NonNullable<RepositoryPreparationEvidence['source']>> {
   assertCurrent();
-  const result = await cm.execInContainer(containerId, ['node', '-e', PREPARATION_SOURCE_PROBE], {
-    cwd: '/workspace',
-    timeout: 15000,
-    assertCurrent,
-    requireObservedExit: true,
-    maxOutputBytes: 4096,
-  });
+  let result: Awaited<ReturnType<ContainerManager['execInContainer']>>;
+  try {
+    result = await cm.execInContainer(containerId, ['node', '-e', PREPARATION_SOURCE_PROBE], {
+      cwd: '/workspace',
+      timeout: SOURCE_PROBE_TRANSPORT_MS,
+      assertCurrent,
+      requireObservedExit: true,
+      maxOutputBytes: 4096,
+    });
+  } catch (error) {
+    assertCurrent();
+    throw new PreparationSourceProbeError(
+      error instanceof ExecInterruptedError && error.execution?.cause === 'timeout'
+        ? `source probe transport timed out (${SOURCE_PROBE_TRANSPORT_MS / 1000}s)`
+        : 'source probe execution or exit could not be verified',
+    );
+  }
   assertCurrent();
-  if (result.exitCode !== 0 || result.stdout.length > 1024)
-    throw new Error('Source inputs unverified');
-  const source = JSON.parse(result.stdout) as { head?: unknown; fingerprint?: unknown };
+  if (result.exitCode !== 0)
+    throw new PreparationSourceProbeError(
+      SOURCE_PROBE_FAILURES[result.exitCode] ?? 'source probe failed to read the workspace',
+    );
+  let source: { head?: unknown; fingerprint?: unknown } | null = null;
+  if (result.stdout.length <= 1024) {
+    try {
+      source = JSON.parse(result.stdout);
+    } catch {
+      // Do not report parser excerpts of untrusted output.
+    }
+  }
   if (
+    !source ||
     typeof source.head !== 'string' ||
     !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(source.head) ||
     typeof source.fingerprint !== 'string' ||
     !/^[a-f0-9]{64}$/.test(source.fingerprint)
   )
-    throw new Error('Source inputs unverified');
+    throw new PreparationSourceProbeError('source probe returned invalid evidence');
   return { head: source.head, fingerprint: source.fingerprint };
 }
 
@@ -452,9 +505,11 @@ export async function prepareLaunchRepository(
   if (!setup || !command) return finish();
   try {
     evidence.source = await probeSource();
-  } catch {
+  } catch (error) {
     assertCurrent();
-    return fail('Source/dependency inputs could not be verified before preparation.');
+    return fail(
+      `Source inputs unverified before preparation: ${describeSourceProbeFailure(error)}.`,
+    );
   }
   const workDir = setup.buildWorkDir ? `/workspace/${setup.buildWorkDir}` : '/workspace';
   {
@@ -580,14 +635,18 @@ export async function prepareLaunchRepository(
     writeMarker,
   );
   assertCurrent();
-  let after: RepositoryPreparationEvidence['source'] = null;
+  let after: NonNullable<RepositoryPreparationEvidence['source']>;
   try {
     after = await probeSource();
-  } catch {
+  } catch (error) {
     assertCurrent();
+    return fail(
+      `Source inputs unverified after preparation: ${describeSourceProbeFailure(error)}.`,
+    );
   }
-  if (!after || JSON.stringify(after) !== JSON.stringify(evidence.source))
-    return fail('Source/dependency inputs changed or became unverified during preparation.');
+  if (after.head !== evidence.source.head) return fail('Git HEAD changed during preparation.');
+  if (after.fingerprint !== evidence.source.fingerprint)
+    return fail('Source/dependency file fingerprint changed during preparation.');
   evidence.status = 'passed';
   return finish();
 }

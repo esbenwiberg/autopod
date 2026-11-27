@@ -482,6 +482,62 @@ describe('repository preparation', () => {
     expect(cm.execInContainer).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'deadline',
+      'Source inputs unverified after preparation: source fingerprint exceeded its 24s read budget.',
+    ],
+    [
+      'transport',
+      'Source inputs unverified after preparation: source probe transport timed out (28s).',
+    ],
+    [
+      'malformed',
+      'Source inputs unverified after preparation: source probe returned invalid evidence.',
+    ],
+    ['changed-head', 'Git HEAD changed during preparation.'],
+    ['changed-files', 'Source/dependency file fingerprint changed during preparation.'],
+  ] as const)('records post-command %s without admitting source or exposing probe output', async (scenario, detail) => {
+    const f = await fixture('npm ci');
+    const original = vi.mocked(f.cm.execInContainer).getMockImplementation();
+    if (!original) throw new Error('Missing fixture exec');
+    const record = vi.fn();
+    let probes = 0;
+    vi.mocked(f.cm.execInContainer).mockImplementation(async (...args) => {
+      if (args[1][2] !== PREPARATION_SOURCE_PROBE || ++probes === 1) return original(...args);
+      expect(args[2]).toMatchObject({
+        timeout: 28_000,
+        requireObservedExit: true,
+        maxOutputBytes: 4096,
+      });
+      if (scenario === 'transport')
+        throw new ExecInterruptedError({
+          cause: 'timeout',
+          timeoutMs: 28_000,
+          cleanup: 'unverified',
+        });
+      if (scenario === 'deadline' || scenario === 'malformed')
+        return {
+          exitCode: scenario === 'deadline' ? 20 : 0,
+          stdout: 'private fixture stdout',
+          stderr: 'private fixture stderr',
+        };
+      const after =
+        scenario === 'changed-head'
+          ? { ...source, head: 'e'.repeat(40) }
+          : { ...source, fingerprint: 'e'.repeat(64) };
+      return { exitCode: 0, stdout: JSON.stringify(after), stderr: '' };
+    });
+    await expect(
+      prepareLaunchRepository(f.config, f.cm, 'candidate', {}, { record }),
+    ).rejects.toThrow(detail);
+    expect(probes).toBe(2);
+    expect(record).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ status: 'unverified', detail, source, exitCode: 0 }),
+    );
+    expect(JSON.stringify(record.mock.calls)).not.toContain('private fixture');
+  });
+
   it('fingerprints native source and lock changes', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'preparation-inputs-'));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -507,6 +563,17 @@ describe('repository preparation', () => {
     const probe = async () =>
       JSON.parse((await exec(process.execPath, ['-e', script])).stdout) as typeof source;
     const before = await probe();
+    const slowProbe = script
+      .replaceAll('performance.now()', 'fixtureNow')
+      .replace('const fs=', 'let fixtureNow=0; const fs=')
+      .replace('const hash=', 'fixtureNow=Number(process.argv[1]); const hash=');
+    // A real read of the same files with a simulated slow Git/inventory phase.
+    const slow = await exec(process.execPath, ['-e', slowProbe, '13000']);
+    expect(JSON.parse(slow.stdout)).toEqual(before);
+    await expect(exec(process.execPath, ['-e', slowProbe, '24000'])).rejects.toMatchObject({
+      code: 20,
+      stdout: '',
+    });
     await writeFile(path.join(root, 'lock.json'), 'second');
     expect((await probe()).fingerprint).not.toBe(before.fingerprint);
     await writeFile(path.join(root, 'lock.json'), 'first');
