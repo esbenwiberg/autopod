@@ -41,6 +41,7 @@ export function generateSystemInstructions(
   options?: SystemInstructionsOptions,
 ): string {
   const lines: string[] = [];
+  const findingsOnly = pod.completionPolicy === 'accept-findings';
 
   lines.push('# Autopod Pod');
   lines.push('');
@@ -112,6 +113,17 @@ export function generateSystemInstructions(
         `- ${JSON.stringify(`/autopod/inputs/files/${file.path}`)} (${file.mediaType}, ${file.byteLength} bytes, SHA-256 ${file.sha256})`,
       );
     lines.push('');
+  }
+
+  if (findingsOnly) {
+    lines.push('## Private research closeout', '');
+    lines.push(
+      '- Report the outcome with the MCP tool `report_task_summary` even if a probe fails or the findings are inconclusive. Final chat text and a report file do not replace the stored summary.',
+      '- If a report file is requested, use the requested path (default `/workspace/research-output.md`). Leave the report uncommitted unless the brief specifically needs local commits. Reporting findings does not publish a branch or create a PR.',
+      '- Human acceptance acknowledges receipt of the investigation, not a passing check. Report failed diagnostics as findings; use `report_blocker` for actual infrastructure or capability blockers that prevent the investigation.',
+      '- A bare agent shell may not inherit the scoped environment used by repository preparation and configured checks. Keep those results separate, and do not copy credentials, change environment policy or rerun a one-shot probe to force a pass.',
+      '',
+    );
   }
 
   // Wrap the user-supplied task in explicit boundary markers so the LLM can distinguish
@@ -207,7 +219,8 @@ export function generateSystemInstructions(
   // Placed before Operating Environment so the agent sees it immediately after
   // the task, not buried in the MCP server catalogue.
   generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
-  if (profile.outputMode !== 'artifact') generateFileEditingRules(lines, pod.runtime);
+  if (!findingsOnly && profile.outputMode !== 'artifact')
+    generateFileEditingRules(lines, pod.runtime);
   generateBackgroundWorkRules(lines, pod.runtime);
 
   // Operating Environment section (adapts to profile config)
@@ -218,6 +231,7 @@ export function generateSystemInstructions(
     pod.executionTarget,
     !!pod.referenceRepos?.length,
     pod.startCommitSha,
+    findingsOnly,
   );
 
   // MCP Servers section
@@ -353,7 +367,7 @@ export function generateSystemInstructions(
   }
 
   // Build & Run (adapts for artifact mode)
-  if (profile.outputMode === 'artifact') {
+  if (!findingsOnly && profile.outputMode === 'artifact') {
     lines.push('## Output');
     lines.push('');
     lines.push('- Write your findings to `research-output.md` in the workspace root.');
@@ -364,7 +378,7 @@ export function generateSystemInstructions(
       '- Web search and browsing are available via built-in Claude tools. Write all output files to `/workspace/` — they will be collected as artifacts on completion. Disclose requested and actual output paths when using a permitted alternative. A fallback path does not satisfy a mandatory exact-path contract; report a genuinely unavailable required output/input rather than silently waiving it.',
     );
     lines.push('');
-  } else {
+  } else if (!findingsOnly) {
     lines.push('## Build & Run');
     lines.push('');
     lines.push(`- Build: \`${profile.buildCommand}\``);
@@ -583,30 +597,37 @@ export function generateSystemInstructions(
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
   );
-  lines.push('3. **Commit your work — properly**:');
-  lines.push(
-    '   - Commit after each coherent, reviewable unit of work: a finished subsystem change, ' +
-      'a testable behavior slice, or a cleanup after a passing check. Run ' +
-      '`git add -A && git commit -m "<conventional-commit subject>"`. ' +
-      'Do not save everything for the end, but also do not make one commit per tiny file edit.',
-  );
-  lines.push(
-    '   - Use conventional-commit format: `type(scope): subject`. ' +
-      'Types: feat, fix, refactor, chore, test, docs, style, perf. ' +
-      'Subject in imperative mood, ≤72 chars, no trailing period. ' +
-      'Examples: `feat(auth): add MSAL token refresh`, ' +
-      '`refactor(graph): consolidate request adapters into single facade`, ' +
-      '`fix(profiles): handle missing defaultBranch gracefully`.',
-  );
-  lines.push(
-    '   - **Before calling `report_task_summary`, commit any remaining changes.** ' +
-      'If you leave uncommitted work behind, the daemon will auto-commit it with ' +
-      'a generic `chore: auto-commit ...` message that pollutes the PR history. ' +
-      'Owning your commits is part of the task. Keep scratch notes and other files that must not ' +
-      'ship outside `/workspace` (for example under `/tmp`), or delete them before finishing: ' +
-      '`.git/info/exclude` in this container is not shared with Autopod, so excluding a path ' +
-      'there does not hide it from delivery.',
-  );
+  if (!findingsOnly) {
+    lines.push('3. **Commit your work — properly**:');
+    lines.push(
+      '   - Commit after each coherent, reviewable unit of work: a finished subsystem change, ' +
+        'a testable behavior slice, or a cleanup after a passing check. Run ' +
+        '`git add -A && git commit -m "<conventional-commit subject>"`. ' +
+        'Do not save everything for the end, but also do not make one commit per tiny file edit.',
+    );
+    lines.push(
+      '   - Use conventional-commit format: `type(scope): subject`. ' +
+        'Types: feat, fix, refactor, chore, test, docs, style, perf. ' +
+        'Subject in imperative mood, ≤72 chars, no trailing period. ' +
+        'Examples: `feat(auth): add MSAL token refresh`, ' +
+        '`refactor(graph): consolidate request adapters into single facade`, ' +
+        '`fix(profiles): handle missing defaultBranch gracefully`.',
+    );
+    lines.push(
+      '   - **Before calling `report_task_summary`, commit any remaining changes.** ' +
+        'If you leave uncommitted work behind, the daemon will auto-commit it with ' +
+        'a generic `chore: auto-commit ...` message that pollutes the PR history. ' +
+        'Owning your commits is part of the task. Keep scratch notes and other files that must not ' +
+        'ship outside `/workspace` (for example under `/tmp`), or delete them before finishing: ' +
+        '`.git/info/exclude` in this container is not shared with Autopod, so excluding a path ' +
+        'there does not hide it from delivery.',
+    );
+  } else {
+    lines.push(
+      '3. **Preserve the private report**: Save requested evidence in the workspace; do not stage or commit it just to be able to call `report_task_summary`.',
+    );
+  }
+
   lines.push(
     '   - Do not edit `.husky/**`, `.githooks/**`, `.git/hooks/**`, `.claude/**`, `.codex/**`, or `.mcp.json` to bypass sandbox, permission, or hook execution failures unless the task explicitly asks you to change those operational files. If a hook or environment policy blocks you, report the blocker and commit only the task-scoped code changes.',
   );
@@ -752,10 +773,12 @@ export function generateSystemInstructions(
       'Explicit task and contract checks still apply; scoped verification does not waive them. ' +
       'Use configured preparation and the supported build path when dependencies or native bindings need preparation. ' +
       'Report exact commands, results, scope rationale and deferred checks; never conceal known failures or relabel them as passes. ' +
-      'Fix failures and recheck affected work; report infrastructure or credential blockers with evidence.',
+      (findingsOnly
+        ? 'Preserve negative results as findings rather than changing source or retrying beyond the brief.'
+        : 'Fix failures and recheck affected work; report infrastructure or credential blockers with evidence.'),
   );
 
-  if (profile.outputMode === 'artifact') {
+  if (findingsOnly || profile.outputMode === 'artifact') {
     lines.push('- Focus on research quality and comprehensiveness');
     lines.push('- Structure your output clearly with headings and sections');
     lines.push('- Use ask_human when uncertain about scope or direction');
@@ -841,20 +864,22 @@ export function generateSystemInstructions(
       'Do not try to replicate MCP calls via curl/HTTP. ' +
       'Report persistent failures via `report_blocker`.',
   );
-  lines.push(
-    '- **Independent daemon acceptance**: after you finish, the daemon runs its configured enabled validation gates and independent review. ' +
-      'Worker self-checks do not replace or disable those gates. ' +
-      'For contract-based pods, preserve every required fact command from `contract.yaml`. ' +
-      'Run relevant affected-work verification first and report failures and deferred checks honestly. ' +
-      '`validate_in_browser` remains available for browser-based self-checks.',
-  );
-  lines.push(
-    '- **Reproducible validation setup**: approval-time rebases and validation-only recovery can use a fresh container without a coding agent. ' +
-      'Dependencies installed only in this worker (including `/tmp`) are not carried over. ' +
-      'Required checks must be reproducible through the frozen project setup/build commands and declared environment. ' +
-      'If those commands cannot prepare a required dependency, call `report_blocker` with the missing prerequisite and exact failing check; ' +
-      'do not claim fresh validation readiness, change frozen configuration or weaken the check.',
-  );
+  if (!findingsOnly) {
+    lines.push(
+      '- **Independent daemon acceptance**: after you finish, the daemon runs its configured enabled validation gates and independent review. ' +
+        'Worker self-checks do not replace or disable those gates. ' +
+        'For contract-based pods, preserve every required fact command from `contract.yaml`. ' +
+        'Run relevant affected-work verification first and report failures and deferred checks honestly. ' +
+        '`validate_in_browser` remains available for browser-based self-checks.',
+    );
+    lines.push(
+      '- **Reproducible validation setup**: approval-time rebases and validation-only recovery can use a fresh container without a coding agent. ' +
+        'Dependencies installed only in this worker (including `/tmp`) are not carried over. ' +
+        'Required checks must be reproducible through the frozen project setup/build commands and declared environment. ' +
+        'If those commands cannot prepare a required dependency, call `report_blocker` with the missing prerequisite and exact failing check; ' +
+        'do not claim fresh validation readiness, change frozen configuration or weaken the check.',
+    );
+  }
   lines.push(
     '- **Do not retry identical failing commands more than twice.** ' +
       'Diagnose the root cause or try a different approach.',
@@ -883,6 +908,7 @@ function generateOperatingEnvironment(
   executionTarget: ExecutionTarget,
   hasReferenceRepos: boolean,
   startCommitSha: Pod['startCommitSha'],
+  findingsOnly: boolean,
 ): void {
   lines.push('## Operating Environment');
   lines.push('');
@@ -1096,7 +1122,9 @@ function generateOperatingEnvironment(
         'but do not bypass source checks or assert freshness without evidence. This is not permission to skip validation or source checks.',
     );
   }
-  if (!profile.repoUrl || profileOutputTarget === 'none') {
+  if (findingsOnly) {
+    lines.push('- Do not push or create PRs; the daemon retains findings privately.');
+  } else if (!profile.repoUrl || profileOutputTarget === 'none') {
     lines.push('- There is no remote repository for this session.');
     lines.push(
       '- You CAN use git locally for version tracking if useful (commits stay in container).',

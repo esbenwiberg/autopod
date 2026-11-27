@@ -18,6 +18,13 @@ The task-wide worker, validation execution, deletion ownership and source custod
 checks still apply. Missing summaries, ambiguous termination, corrupt snapshots or
 failed cleanup do not expose acceptance. Resources remain retained for recovery.
 
+The worker must call `report_task_summary` even when an experiment or diagnostic
+fails. Final chat text and report files are not substitutes. A private report
+may remain uncommitted when the brief does not ask for a commit. A bare worker
+shell probe can differ from configured repository preparation because they do
+not necessarily share the same scoped build environment. Record each result
+separately; do not change the environment to force a passing witness.
+
 After snapshot verification and worker cleanup, the task enters **Research ready**.
 It stays in Attention until a human accepts findings. Native validation is **Not
 required for this research task**; other security and safety evidence remains visible.
@@ -78,7 +85,11 @@ uncollected guidance or an infrastructure blocker, it captures the root
 `research-output.md` as bounded UTF-8 text (up to 5 MiB, no links). For a sandbox,
 only the verified checkpoint's Git blob is eligible; an ignored or unmatched host
 file is not evidence. This separate
-capture is labeled **incomplete / unreviewed**. It is tied to the exact pod,
+capture is labeled **incomplete / unreviewed**. When finalization preserved an
+artifact snapshot but the worker omitted its summary, Autopod also captures the
+root report as incomplete, using only bytes verified against that generation's
+and cycle's artifact receipt. This does not create findings or authorize acceptance.
+Each partial capture is tied to the exact pod,
 lifecycle generation and settlement cycle; the reader checks the saved bytes
 against their recorded SHA-256 digest. The text CLI prints provenance to stderr
 and the file to stdout. JSON includes both.
