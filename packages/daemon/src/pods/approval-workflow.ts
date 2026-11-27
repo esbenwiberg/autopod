@@ -9,6 +9,10 @@ import {
 import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';
+import {
+  checkedDeliveryRequiredMessage,
+  requiresCheckedDelivery,
+} from './checked-delivery-policy.js';
 import { assertOperatorTarget } from './operator-target.js';
 import { validateTransition } from './state-machine.js';
 import { validationSourceError } from './validation-source-evidence.js';
@@ -88,7 +92,6 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         409,
       );
     validateTransition(pod.id, pod.status, 'approved');
-    emitActivityStatus(podId, 'Preparing approval…');
     const publication = podRepo.sourcePublications;
     const pending = publication?.pending?.(pod);
     if (publication && pending) {
@@ -111,6 +114,13 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         'Original publication observed; current checks and approval authority remain unchanged.',
       );
     }
+    if (
+      requiresCheckedDelivery(pod) &&
+      podRepo.getOrThrow(podId).lastValidationResult?.overall !== 'pass'
+    ) {
+      throw new AutopodError(checkedDeliveryRequiredMessage, 'CHECKED_DELIVERY_REQUIRED', 409);
+    }
+    emitActivityStatus(podId, 'Preparing approval…');
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
     assertOperatorTarget(podRepo.getOrThrow(podId), options.expectedTarget);
     const recovery = podRepo.recoveryForks?.child(podId);

@@ -13,6 +13,10 @@ import {
   readinessSkipReason,
   taskSummaryWithApprovedFactWaiver,
 } from './approval-policy.js';
+import {
+  assertValidationBypassAllowed,
+  requiresCheckedDelivery,
+} from './checked-delivery-policy.js';
 import type { PodUpdates } from './pod-repository.js';
 
 export function createApprovalControls(captured: ApprovalControlsCaptured) {
@@ -166,6 +170,11 @@ export function createApprovalControls(captured: ApprovalControlsCaptured) {
         'WORKTREE_COMPROMISED',
         409,
       );
+    }
+    if (requiresCheckedDelivery(pod)) {
+      if (pod.lastValidationResult?.overall !== 'pass' || !podRepo.validationSources)
+        assertValidationBypassAllowed(pod);
+      podRepo.validationSources?.checked(pod, captured.executionForPod(pod));
     }
     let decision = pod.pendingEscalation;
     if (pendingDecisionId && decision?.id !== pendingDecisionId) {

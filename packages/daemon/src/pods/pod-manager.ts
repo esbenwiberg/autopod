@@ -1276,6 +1276,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const approvalControls = createApprovalControls({
     podRepo,
+    executionForPod,
     resolveApprovalReadiness,
     logger,
     nudgeRepo,

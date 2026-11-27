@@ -239,7 +239,7 @@ describe('Pod Lifecycle E2E', () => {
   });
 
   describe('skipValidation path', () => {
-    it('skips validation and goes straight to validated', async () => {
+    it('preserves changed PR source for review without treating skipped checks as a pass', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
 
@@ -251,9 +251,12 @@ describe('Pod Lifecycle E2E', () => {
       await manager.processPod(pod.id);
 
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe('validated');
-      // Validation engine should NOT have been called
+      expect(result.status).toBe('review_required');
+      expect(result.failureReason).toContain('passing checks tied to the exact source');
+      expect(result.lastValidationResult).toBeNull();
+      expect(result.prUrl).toBeNull();
       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
     });
   });
 
@@ -375,7 +378,7 @@ describe('Pod Lifecycle E2E', () => {
       await manager.sendMessage(pod.id, 'Use PostgreSQL');
 
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe(collectReply ? 'validated' : 'failed'); // skipValidation=true
+      expect(result.status).toBe(collectReply ? 'review_required' : 'failed');
       expect(result.pendingEscalation).toBeNull();
       expect(ctx.nudgeRepo.hasPending(pod.id)).toBe(!collectReply);
 
@@ -445,7 +448,7 @@ describe('Pod Lifecycle E2E', () => {
         expect(manager.getSession(pod.id).failureReason).toContain('uncollected human guidance');
         expect(manager.getSession(pod.id).finalization?.sourcePreservedAt).toBeNull();
       }
-      expect(manager.getSession(pod.id).status).toBe(collectReply ? 'validated' : 'failed');
+      expect(manager.getSession(pod.id).status).toBe(collectReply ? 'review_required' : 'failed');
     });
 
     it('fails the pod when the worker crashes while awaiting human input', async () => {
@@ -715,7 +718,7 @@ describe('Pod Lifecycle E2E', () => {
       );
 
       await manager.processPod(pod.id);
-      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(manager.getSession(pod.id).status).toBe('review_required');
     });
   });
 
@@ -889,8 +892,8 @@ describe('Pod Lifecycle E2E', () => {
       await manager.processPod(s1.id);
       await manager.processPod(s2.id);
 
-      expect(manager.getSession(s1.id).status).toBe('validated');
-      expect(manager.getSession(s2.id).status).toBe('validated');
+      expect(manager.getSession(s1.id).status).toBe('review_required');
+      expect(manager.getSession(s2.id).status).toBe('review_required');
       expect(manager.getSession(s1.id).task).toBe('Task A');
       expect(manager.getSession(s2.id).task).toBe('Task B');
 

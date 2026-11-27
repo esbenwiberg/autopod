@@ -135,6 +135,7 @@ export interface ApprovalWorkflowCaptured {
 
 export interface ApprovalControlsCaptured {
   podRepo: PodRepository;
+  executionForPod: (pod: Pod) => PodExecutionSettings;
   resolveApprovalReadiness: ReturnType<typeof createApprovalReadiness>['resolveApprovalReadiness'];
   logger: Logger;
   nudgeRepo: NudgeRepository;

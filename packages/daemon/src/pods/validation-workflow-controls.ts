@@ -1,6 +1,10 @@
 import type { OperatorActor, Pod, UpdateFromBaseResponse, ValidationResult } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { applyOverrides } from '../validation/override-applicator.js';
+import {
+  assertValidationBypassAllowed,
+  requiresCheckedDelivery,
+} from './checked-delivery-policy.js';
 import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { captureValidationOwnership } from './validation-ownership.js';
 import {
@@ -117,10 +121,14 @@ export function createValidationWorkflowControls(
   }
 
   function applySkipValidationDecision(pod: Pod, result: ValidationResult): Pod | null {
+    // Older launches may already have the flag. Do not use it to replace a
+    // failed result or divert a genuine pass from checked delivery.
     if (!pod.skipValidation) return null;
     assertNoInfrastructureBlocker(podRepo, pod.id);
     assertValidationExecutionSettled({ ...pod, lastValidationResult: result });
     assertValidationMutationSettled(podRepo, pod.id);
+
+    if (requiresCheckedDelivery(pod)) return null;
 
     const skipActor = pod.skipValidationActor ?? {
       type: 'automation' as const,
@@ -253,6 +261,14 @@ export function createValidationWorkflowControls(
 
     podRepo.update(podId, { validationOverrides: currentOverrides });
 
+    if (requiresCheckedDelivery(pod)) {
+      emitActivityStatus(
+        podId,
+        'Human overrides recorded — run fresh checks on the source before delivery',
+      );
+      return { advanced: false };
+    }
+
     // Re-evaluate the cached result with overrides applied
     const patched = applyOverrides(pod.lastValidationResult, currentOverrides);
     podRepo.update(podId, { lastValidationResult: patched });
@@ -381,6 +397,7 @@ export function createValidationWorkflowControls(
     if (skip) {
       assertNoInfrastructureBlocker(podRepo, podId);
       assertValidationMutationSettled(podRepo, podId);
+      assertValidationBypassAllowed(pod);
     }
     podRepo.update(podId, {
       skipValidation: skip,

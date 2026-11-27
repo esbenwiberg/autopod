@@ -1,6 +1,10 @@
 import type { Pod, PodOptions } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import {
+  checkedDeliveryRequiredMessage,
+  requiresCheckedDelivery,
+} from './checked-delivery-policy.js';
 import type { CompletionSourcePreparation } from './completion-source.js';
 import type { PodRepository, PodUpdates } from './pod-repository.js';
 
@@ -13,8 +17,10 @@ interface CompletionDecisionDependencies {
   cleanupContainer(pod: Pod, label: 'no-changes-complete'): Promise<void>;
   transition(
     pod: Pod,
-    to: 'failed' | 'complete' | 'validating' | 'validated',
-    extraUpdates?: Partial<Pick<PodUpdates, 'completedAt' | 'lastCorrectionMessage'>>,
+    to: 'failed' | 'complete' | 'validating' | 'validated' | 'review_required',
+    extraUpdates?: Partial<
+      Pick<PodUpdates, 'completedAt' | 'lastCorrectionMessage' | 'failureReason'>
+    >,
   ): Pod;
   emitPodCompletedEvent(pod: Pod, filesChanged: number): void;
   maybeTriggerDependents(pod: Pod): void;
@@ -67,7 +73,10 @@ export function createCompletionDecision(deps: CompletionDecisionDependencies): 
     const isScheduledSession = refreshed.scheduledJobId !== null;
     const noChangesAfterRework =
       noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
-    const validationDisabled = isPodValidationDisabled(refreshed);
+    const checkedDelivery = requiresCheckedDelivery(refreshed);
+    const validationDisabled = isPodValidationDisabled(
+      checkedDelivery ? { ...refreshed, skipValidation: false } : refreshed,
+    );
     // A sandbox checkpoint is source-delivery authority. A non-empty
     // canonical snapshot must always receive blocking validation; the
     // skip-validation preference cannot turn verified deliverable work into
@@ -112,7 +121,7 @@ export function createCompletionDecision(deps: CompletionDecisionDependencies): 
       });
       return;
     }
-    if (noChanges && !isForkSession && !validationDisabled) {
+    if (noChanges && !isForkSession && (!validationDisabled || checkedDelivery)) {
       logger.info({ podId }, 'Completing pod directly — no files changed');
       emitActivityStatus(podId, 'No files changed — completing pod');
       await cleanupContainer(refreshed, 'no-changes-complete');
@@ -122,6 +131,13 @@ export function createCompletionDecision(deps: CompletionDecisionDependencies): 
       });
       emitPodCompletedEvent(completedPod, 0);
       maybeTriggerDependents(completedPod);
+      return;
+    }
+
+    if (checkedDelivery && validationDisabled && !forceSandboxValidation) {
+      emitActivityStatus(podId, checkedDeliveryRequiredMessage);
+      const checking = transition(refreshed, 'validating');
+      transition(checking, 'review_required', { failureReason: checkedDeliveryRequiredMessage });
       return;
     }
 

@@ -24,6 +24,7 @@ function fixture() {
   f.deps.escalationRepo.insert(question);
   f.podRepo.update('prepare', {
     status: 'awaiting_input',
+    options: { ...f.pod().options, output: 'artifact' },
     pendingEscalation: question,
     lastValidationResult: createFailingValidationResult('prepare'),
   });

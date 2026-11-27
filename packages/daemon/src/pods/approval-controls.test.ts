@@ -104,9 +104,37 @@ describe('approval controls', () => {
     });
     expect(f.calls.revalidateSession).not.toHaveBeenCalled();
   });
+  it.each([
+    'pr',
+    'branch',
+  ] as const)('refuses to force approve failed %s delivery', async (output) => {
+    const f = fixture();
+    f.validated();
+    f.podRepo.update('prepare', {
+      status: 'failed',
+      options: { ...f.pod().options, output },
+      lastValidationResult: createFailingValidationResult('prepare'),
+    });
+    const before = f.pod();
+    await expect(f.controls().forceApprove('prepare', 'skip failing tests')).rejects.toMatchObject({
+      code: 'CHECKED_DELIVERY_REQUIRED',
+    });
+    expect(f.pod()).toEqual(before);
+    expect(f.mainCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+  });
+
+  it('accepts an existing immutable pass after a PR delivery failure', async () => {
+    const f = fixture();
+    f.checked();
+    f.podRepo.update('prepare', { status: 'failed' });
+    await f.controls().forceApprove('prepare', 'recover delivery with passing source proof');
+    expect(f.pod()).toMatchObject({ status: 'validated', validationWaiver: null });
+  });
+
   it('retains force approval waiver and escalation actor audit through actual SQLite reopen', async () => {
     const f = fixture(true);
     f.validated();
+    f.podRepo.update('prepare', { options: { ...f.pod().options, output: 'artifact' } });
     const escalation = {
       id: 'question',
       podId: 'prepare',
