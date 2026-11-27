@@ -7,6 +7,7 @@ import {
   assertArtifactChecksResourceAvailable,
 } from './artifact-checks-recovery-repository.js';
 import { codexFinalProofHeld, readCodexFinalProofHold } from './codex-final-proof-hold.js';
+import { assertNoOperatorDisposal } from './operator-disposal-repository.js';
 import {
   assertRecoveryForkResourceAvailable,
   createRecoveryForkRepository,
@@ -37,6 +38,7 @@ export function assertPublicationResourceReleasable(
     );
 }
 export function assertPublicationMutationAllowed(db: Database.Database, podId: string): void {
+  assertNoOperatorDisposal(db, podId);
   if (
     db
       .prepare(`SELECT 1 FROM source_publication_intents i LEFT JOIN source_publication_receipts r ON r.intent_id=i.id
@@ -85,6 +87,7 @@ export function assertSourceAvailable(
   owner = sourceOwnerScope(db).getStore(),
   initialInsert = false,
 ): void {
+  assertNoOperatorDisposal(db, podId);
   assertNoRewriteAbandonment(db, podId);
   assertSavedDraftAvailable(db, podId);
   assertArtifactChecksAvailable(db, podId);
@@ -130,6 +133,7 @@ function assertSourceDeliveryEligibility(
   initialInsert = false,
   approvalEntry = false,
 ): void {
+  assertNoOperatorDisposal(db, podId);
   assertNoRewriteAbandonment(db, podId);
   assertArtifactChecksAvailable(db, podId);
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);

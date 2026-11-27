@@ -5,6 +5,7 @@ import { dockerNetworkCapacityWait } from './execution-capacity-retry.js';
 export function createAdmissionDependents(captured: AdmissionDependentsCaptured) {
   const { podRepo, logger, eventBus, enqueueSession } = captured;
   function maybeTriggerDependents(completedPod: Pod): void {
+    if (podRepo.operatorDisposals?.receipt(completedPod.id)) return;
     const dependents = podRepo.getPodsDependingOn(completedPod.id);
     for (const dep of dependents) {
       // Also heal pods that were cascade-failed when this parent was previously killed.
@@ -32,6 +33,7 @@ export function createAdmissionDependents(captured: AdmissionDependentsCaptured)
           // Missing parent — treat as not ready rather than crashing.
           return false;
         }
+        if (parent.operatorDisposal) return false;
         if (isSinglePrSeriesPod(dep)) {
           return parent.status === 'complete';
         }
@@ -136,6 +138,7 @@ export function createAdmissionDependents(captured: AdmissionDependentsCaptured)
       const allParentsDone = parentIds.every((pid) => {
         try {
           const parent = podRepo.getOrThrow(pid);
+          if (parent.operatorDisposal) return false;
           if (isSinglePrSeriesPod(dep)) {
             return parent.status === 'complete';
           }

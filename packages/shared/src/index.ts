@@ -399,6 +399,7 @@ export type {
   PodNeedsInputNotification,
   PodValidatedNotification,
 } from './types/notification.js';
+export * from './types/operator-disposal.js';
 export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
 export type { GuardedOperatorAction, OperatorTarget } from './types/operator-target.js';
 export type { PartialResearchReport } from './types/partial-research.js';

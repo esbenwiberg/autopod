@@ -156,6 +156,7 @@ public final class PodStore {
   ) -> Pod {
     guard var current else { return incoming }
     current.fleetArchivedAt = incoming.fleetArchivedAt
+    current.operatorDisposal = incoming.operatorDisposal
     // Once observed, immutable retained custody cannot be cleared by an older REST snapshot.
     if current.retainedDockerCustody != true { current.retainedDockerCustody = incoming.retainedDockerCustody }
     // Configuration availability can change without an execution updatedAt change.
@@ -232,6 +233,7 @@ public final class PodStore {
     // Fleet visibility is independent of the execution's updatedAt timestamp.
     var hydrated = hydrated
     hydrated.fleetArchivedAt = incoming.fleetArchivedAt
+    hydrated.operatorDisposal = incoming.operatorDisposal
     if hydrated.retainedDockerCustody != true { hydrated.retainedDockerCustody = incoming.retainedDockerCustody }
     hydrated.profileDisplay = incoming.profileDisplay ?? hydrated.profileDisplay
     hydrated.createdAt = hydrated.createdAt ?? incoming.createdAt

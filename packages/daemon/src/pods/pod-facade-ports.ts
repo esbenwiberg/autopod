@@ -43,6 +43,7 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  operatorDisposal: ReturnType<typeof import('./operator-disposal.js').createOperatorDisposal>;
   validationHeldDocker?: ReturnType<
     typeof import('./validation-held-docker-control.js').createValidationHeldDockerControl
   >;

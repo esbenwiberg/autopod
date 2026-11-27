@@ -26,6 +26,7 @@ export function createCompletionGuards(captured: CompletionGuardsCaptured) {
   function ownsLifecycle(podId: string, generation: number, containerId: string | null): boolean {
     const current = podRepo.getOrThrow(podId);
     return (
+      !current.operatorDisposal &&
       current.lifecycleGeneration === generation &&
       (containerId === null || current.containerId === containerId)
     );

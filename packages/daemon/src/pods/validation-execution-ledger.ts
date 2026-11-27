@@ -12,6 +12,7 @@ import type Database from 'better-sqlite3';
 import { createSandboxWakeupJournal } from '../containers/sandbox-wakeup-journal.js';
 import { assertNoValidationRecovery, createDeletionOwnership } from './deletion-ownership.js';
 import { createExternalDeliveryRepository } from './external-delivery-repository.js';
+import { assertNoOperatorDisposal } from './operator-disposal-repository.js';
 import { createSourceAdoptionRepository } from './source-adoption-repository.js';
 import { ownsValidationAbandonment } from './validation-abandonment-authority.js';
 import {
@@ -378,6 +379,7 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
       return false;
     },
     dispatch(pod: Pod, admissionId: string, attempt: number, resourceScope?: string) {
+      assertNoOperatorDisposal(db, pod.id);
       if (
         !resourceScope ||
         !pod.containerId ||

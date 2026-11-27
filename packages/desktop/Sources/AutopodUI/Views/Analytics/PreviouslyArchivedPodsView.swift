@@ -2,12 +2,12 @@ import SwiftUI
 
 /// Discovery from loaded fleet archive flags only, independent of the normal History filters.
 enum PreviouslyArchivedPods {
-    static let title = "Previously archived"
+    static let title = "History / Recovery"
 
     static func exactMatch(_ pods: [Pod], query: String) -> Pod? {
         let id = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return nil }
-        return pods.first { $0.id == id && $0.fleetArchivedAt != nil }
+        return pods.first { $0.id == id && ($0.fleetArchivedAt != nil || $0.operatorDisposal != nil) }
     }
 
     static func matches(_ pods: [Pod], query: String, repositories: [String: DesktopRepository] = [:]) -> [Pod] {
@@ -15,7 +15,7 @@ enum PreviouslyArchivedPods {
 
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return pods.filter { pod in
-            guard pod.fleetArchivedAt != nil else { return false }
+            guard pod.fleetArchivedAt != nil || pod.operatorDisposal != nil else { return false }
             return needle.isEmpty || [
                 pod.id, pod.desktopTitle, pod.task, pod.profileName, pod.profileLabel, repositories[pod.id]?.label ?? ""
             ].contains { $0.localizedStandardContains(needle) }
@@ -59,7 +59,7 @@ struct PreviouslyArchivedPodsView: View {
                                 Text("\(pod.id) · \(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder)")
                                     .foregroundStyle(.secondary)
                                 HStack {
-                                    Text(pod.status.label).foregroundStyle(pod.status.color)
+                                    Text(pod.operatorDisposal.map { "\($0.intent.capitalized) · \($0.state)" } ?? pod.status.label).foregroundStyle(pod.status.color)
                                     Text("Started \(pod.startedAt, style: .date)").foregroundStyle(.secondary)
                                 }
                             }

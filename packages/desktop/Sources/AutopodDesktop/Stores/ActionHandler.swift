@@ -97,8 +97,8 @@ public final class ActionHandler {
       decisionReply: decisionReplyActions,
       nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
       pendingControl: { [weak self] id in self?.pendingControl(id) },
-      killAndDelete: { [weak self] id in await self?.killAndDelete(id) },
-      kill: { [weak self] id in await self?.kill(id) },
+      killAndDelete: { [weak self] id in await self?.requestDisposal(id, intent: "delete") },
+      kill: { [weak self] id in await self?.requestDisposal(id, intent: "kill") },
       complete: { [weak self] id in await self?.complete(id) },
       pause: { [weak self] id in await self?.pause(id) },
       rework: { [weak self] id in await self?.rework(id) },
@@ -130,7 +130,7 @@ public final class ActionHandler {
       extendPrAttempts: { [weak self] id, count in await self?.extendPrAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
       unarchive: { [weak self] id in await self?.restoreFleetVisibility(id) },
-      delete: { [weak self] id in await self?.deletePod(id) },
+      delete: { [weak self] id in await self?.requestDisposal(id, intent: "delete") },
       deleteSeries: { [weak self] id in await self?.deleteSeries(id) },
       openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
       interruptValidation: { [weak self] id in await self?.interruptValidation(id) },
@@ -621,6 +621,28 @@ public final class ActionHandler {
   public func kill(_ podId: String) async {
     guard permitsOrdinaryDestruction(podId) else { return }
     _ = await controlTask(podId, kind: .kill)?.value
+  }
+
+  private var disposalKeys: [String: String] = [:]
+  public func requestDisposal(_ podId: String, intent: String) async {
+    do {
+      try requireCurrent()
+      let pod = try await api.getPod(podId)
+      guard let generation = pod.lifecycleGeneration else {
+        lastError = "Daemon does not provide exact disposal generation. Upgrade daemon; no action sent."
+        return
+      }
+      let binding = "\(podId):\(pod.lifecycleGeneration ?? 0):\(intent)"
+      let key = disposalKeys[binding] ?? UUID().uuidString
+      disposalKeys[binding] = key
+      let receipt = try await api.requestOperatorDisposal(podId, generation: generation, intent: intent, requestKey: key)
+      await podStore.refreshSession(podId)
+      if receipt.state == "cleanup_pending" {
+        lastError = "\(intent.capitalized) accepted for \(podId). Cleanup pending; physical completion is unconfirmed. Read History/Recovery. Request \(key)."
+      }
+    } catch {
+      lastError = "Disposal reply unknown or rejected for \(podId): \(error.localizedDescription). Read History/Recovery before retrying; retain the same request key."
+    }
   }
 
   private func permitsOrdinaryDestruction(_ podId: String) -> Bool {

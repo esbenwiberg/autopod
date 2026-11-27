@@ -107,6 +107,7 @@ public struct SessionCardFinal: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            OperatorDisposalControls(pod: pod, actions: actions).padding(10)
             if pod.fleetArchivedAt != nil {
                 Label("Archived · resources retained", systemImage: "archivebox")
                     .font(.caption).foregroundStyle(.secondary).padding(10)

@@ -558,6 +558,18 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/kill")
   }
 
+  public func requestOperatorDisposal(_ id: String, generation: Int, intent: String, requestKey: String) async throws -> OperatorDisposalReceipt {
+    struct Body: Encodable {
+      let expectedGeneration: Int
+      let intent: String
+      let requestKey: String
+      let acknowledgeDataLoss: Bool?
+    }
+    return try await request("POST", "/pods/\(id)/operator-disposal", body: try encode(Body(
+      expectedGeneration: generation, intent: intent, requestKey: requestKey,
+      acknowledgeDataLoss: intent == "delete" ? true : nil)))
+  }
+
   /// Commit + push a running workspace's branch without changing pod state.
   /// Best-effort — daemon returns ok=false with an error string on failure
   /// rather than throwing, so callers can fall through (e.g. open the Create

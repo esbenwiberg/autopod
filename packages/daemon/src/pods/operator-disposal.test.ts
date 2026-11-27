@@ -1,0 +1,287 @@
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type Dockerode from 'dockerode';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createRetainedCleanupDocker } from '../containers/retained-cleanup-docker.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { fixtureGit } from '../test-utils/retained-cleanup-fixture.js';
+import { createRetainedCleanupHost } from '../worktrees/retained-cleanup-host.js';
+import { createOperatorDisposal } from './operator-disposal.js';
+import { createPodRepository } from './pod-repository.js';
+import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
+
+const closes: (() => Promise<void> | void)[] = [];
+afterEach(async () => {
+  for (const close of closes.splice(0).reverse()) await close();
+});
+const actor = { type: 'human', userId: 'fixture-operator' } as const;
+async function fixture(podId = 'ordinary-fixture') {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'operator-disposal-')));
+  closes.push(() => rm(root, { recursive: true, force: true }));
+  const db = createTestDb();
+  closes.push(() => {
+    if (db.open) db.close();
+  });
+  insertTestProfile(db);
+  const pods = createPodRepository(db);
+  pods.insert({
+    id: podId,
+    profileName: 'test-profile',
+    task: 'fixture',
+    status: 'queued',
+    branch: podId,
+    model: 'fixture',
+    runtime: 'codex',
+    executionTarget: 'local',
+    userId: actor.userId,
+    maxValidationAttempts: 1,
+    skipValidation: false,
+    outputMode: 'pr',
+  });
+  const seed = path.join(root, 'seed'),
+    bare = path.join(root, 'shared.git'),
+    worktree = path.join(root, 'worktree');
+  await mkdir(seed);
+  await fixtureGit(seed, 'init', '-b', 'main');
+  await writeFile(path.join(seed, 'README'), 'unpublished fixture');
+  await fixtureGit(seed, 'add', 'README');
+  await fixtureGit(seed, 'commit', '-m', 'fixture');
+  await fixtureGit(root, 'clone', '--bare', '--no-local', seed, bare);
+  await fixtureGit(bare, 'worktree', 'add', '-b', podId, worktree, 'main');
+  const id = 'a'.repeat(64),
+    net = 'b'.repeat(64),
+    name = 'fixture-bridge';
+  db.prepare("UPDATE pods SET status='running',container_id=?,worktree_path=? WHERE id=?").run(
+    id,
+    worktree,
+    podId,
+  );
+  const guest = {
+    Id: id,
+    Name: '/autopod-' + podId,
+    Config: { Env: ['POD_ID=' + podId] },
+    HostConfig: { NetworkMode: name, RestartPolicy: { Name: 'no' } },
+    State: { Running: true, Paused: false, Restarting: false, Status: 'running' },
+    Mounts: [
+      { Type: 'bind', Source: worktree, Destination: '/mnt/worktree' },
+      { Type: 'bind', Source: bare, Destination: bare },
+    ],
+    NetworkSettings: { Networks: { [name]: { NetworkID: net } } },
+  };
+  const bridge = {
+    Id: net,
+    Name: name,
+    Scope: 'local',
+    Driver: 'bridge',
+    Ingress: false,
+    Labels: { 'com.autopod.pod-id': podId, 'com.autopod.pod-network': 'true' },
+    Containers: {},
+  };
+  let present = true,
+    network = true,
+    stops = 0,
+    removes = 0,
+    lostStop = false,
+    lostRemove = false;
+  const absent = () => {
+    throw Object.assign(new Error('fixture absent'), { statusCode: 404 });
+  };
+  const docker = createRetainedCleanupDocker({
+    info: async () => ({ ID: 'fixture-engine' }),
+    listContainers: async () => (present ? [{ ...guest, Names: [guest.Name] }] : []),
+    listNetworks: async () => (network ? [bridge] : []),
+    getContainer: (cid: string) => ({
+      inspect: async () => (cid === id && present ? guest : absent()),
+      stop: async () => {
+        stops++;
+        if (lostStop) throw new Error('lost stop reply');
+        guest.State.Running = false;
+        guest.State.Status = 'exited';
+      },
+      remove: async () => {
+        removes++;
+        present = false;
+        if (lostRemove) throw new Error('lost remove reply');
+      },
+    }),
+    getNetwork: () => ({
+      inspect: async () => (network ? bridge : absent()),
+      remove: async () => {
+        removes++;
+        network = false;
+      },
+    }),
+  } as unknown as Dockerode);
+  const service = (repo = pods) =>
+    createOperatorDisposal({
+      pods: repo,
+      docker,
+      host: createRetainedCleanupHost(async () => [{ point: '/', root: '/', device: 'fixture' }]),
+    });
+  const request = (intent: 'kill' | 'delete' = 'kill', key = intent) => ({
+    requestKey: key,
+    expectedGeneration: 1,
+    intent,
+    ...(intent === 'delete' ? { acknowledgeDataLoss: true as const } : {}),
+  });
+  return {
+    db,
+    pods,
+    podId,
+    worktree,
+    bare,
+    guest,
+    service,
+    request,
+    stops: () => stops,
+    removes: () => removes,
+    loseStop: () => {
+      lostStop = true;
+    },
+    loseRemove: () => {
+      lostRemove = true;
+    },
+  };
+}
+
+describe('exact operator disposal', () => {
+  it('journals before effects, clears attention, fences late callbacks and preserves outcome/files for Kill', async () => {
+    const f = await fixture();
+    const s = f.service();
+    expect(s.submit(f.podId, f.request(), actor).state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(0);
+    expect(f.pods.list({ archive: 'exclude' })).toHaveLength(0);
+    expect((await s.observe(f.podId, 'kill')).state).toBe('stopped');
+    expect(f.stops()).toBe(1);
+    expect(f.removes()).toBe(0);
+    expect(await readFile(path.join(f.worktree, 'README'), 'utf8')).toBe('unpublished fixture');
+    expect(f.pods.getOrThrow(f.podId).status).toBe('running');
+    expect(() => assertSourceAvailable(f.db, f.podId)).toThrow(/disposal/);
+    expect(() => assertSourceDeliveryAllowed(f.db, f.podId)).toThrow(/disposal/);
+    expect(() => f.pods.update(f.podId, { status: 'validated' })).toThrow(/disposal/);
+  });
+  it('supports explicit Delete upgrade, lost removal reply and actual Git worktree removal without branch mutation', async () => {
+    const f = await fixture();
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    await s.observe(f.podId, 'kill');
+    f.loseRemove();
+    s.submit(f.podId, f.request('delete'), actor);
+    const result = await s.observe(f.podId, 'delete');
+    expect(result.state, JSON.stringify(result)).toBe('discarded');
+    expect(f.removes()).toBe(2);
+    await expect(readFile(path.join(f.worktree, 'README'))).rejects.toThrow();
+    expect(await fixtureGit(f.bare, 'show-ref', '--verify', 'refs/heads/' + f.podId)).toContain(
+      f.podId,
+    );
+    expect(f.pods.operatorDisposals!.receipt(f.podId, 'kill')?.intent).toBe('kill');
+  });
+  it.each([
+    'queued',
+    'running',
+    'complete',
+    'killed',
+    'failed',
+    'review_required',
+    'validating',
+    'merge_pending',
+  ])('accepts %s and persists fences after repository restart', async (status) => {
+    const f = await fixture();
+    f.db.prepare('UPDATE pods SET status=? WHERE id=?').run(status, f.podId);
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    await s.observe(f.podId, 'kill');
+    const restarted = createPodRepository(f.db);
+    expect(restarted.operatorDisposals!.receipt(f.podId)?.actor.userId).toBe(actor.userId);
+    expect(() => restarted.assertRerunSourceAvailable(f.podId)).toThrow(/disposal/);
+    expect(restarted.getOrThrow(f.podId).status).toBe(status);
+  });
+  it('refuses stale, missing exact subject, missing actor and unacknowledged Delete before journaling', async () => {
+    const f = await fixture();
+    const s = f.service();
+    expect(() => s.submit(f.podId, { ...f.request(), expectedGeneration: 2 }, actor)).toThrow(
+      /Stale/,
+    );
+    expect(() => s.submit('missing', f.request(), actor)).toThrow();
+    expect(() => s.submit(f.podId, { ...f.request(), intent: 'delete' }, actor)).toThrow(
+      /data loss/,
+    );
+    expect(() => s.submit(f.podId, f.request(), { type: 'human', userId: '' })).toThrow();
+    expect(f.stops()).toBe(0);
+    expect(f.pods.operatorDisposals!.receipt(f.podId)).toBeNull();
+  });
+  it('keeps lost stop pending without replay after restart or duplicate acceptance', async () => {
+    const f = await fixture();
+    f.loseStop();
+    const s = f.service();
+    s.submit(f.podId, f.request(), actor);
+    expect((await s.observe(f.podId, 'kill')).state).toBe('cleanup_pending');
+    const restart = f.service(createPodRepository(f.db));
+    restart.submit(f.podId, f.request(), actor);
+    expect((await restart.observe(f.podId, 'kill')).state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(1);
+    expect(() => s.submit(f.podId, f.request(), { type: 'human', userId: 'another' })).toThrow(
+      /Idempotency/,
+    );
+  });
+  it.each([
+    'favourite-salmon',
+    'statutory-tortoise',
+  ])('accounts for generation-1 %s original worker on earlier Docker ID (#715)', async (podId) => {
+    const f = await fixture(podId);
+    const result = {
+      overall: 'fail',
+      infrastructureFailure: {
+        code: 'EXEC_EXIT_UNVERIFIED',
+        phase: 'test',
+        retryable: false,
+        message: 'ordinary Docker validation exit unknown',
+      },
+    };
+    f.db
+      .prepare("UPDATE pods SET status='review_required',last_validation_result=? WHERE id=?")
+      .run(JSON.stringify(result), podId);
+    f.db
+      .prepare(
+        'INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at,ended_at) VALUES (?,?,1,1,?,?,?)',
+      )
+      .run(
+        'original-worker',
+        podId,
+        JSON.stringify({
+          runtime: 'codex',
+          resource: { executionTarget: 'local', containerId: 'c'.repeat(64) },
+        }),
+        '2026-01-01',
+        '2026-01-02',
+      );
+    expect(
+      f.db.prepare('SELECT 1 FROM validation_dispatches WHERE pod_id=?').get(podId),
+    ).toBeUndefined();
+    const s = f.service();
+    s.submit(podId, f.request('delete'), actor);
+    expect((await s.observe(podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.pods.list({ archive: 'exclude' })).toHaveLength(0);
+    expect(f.stops()).toBe(0);
+    expect(f.removes()).toBe(0);
+    expect(f.pods.getOrThrow(podId).lastValidationResult).toEqual(result);
+  });
+  it('accepts unsupported Sandbox but never reports physical completion', async () => {
+    const f = await fixture();
+    f.db.prepare("UPDATE pods SET execution_target='sandbox' WHERE id=?").run(f.podId);
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(0);
+  });
+  it('refuses effects on foreign live identity while retaining intent', async () => {
+    const f = await fixture();
+    f.guest.Config.Env = ['POD_ID=foreign'];
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.removes()).toBe(0);
+    expect(f.stops()).toBe(0);
+  });
+});

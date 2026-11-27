@@ -178,6 +178,7 @@ public enum PodMapper {
     result.profileDisplay = response.profileDisplay
     result.executionTarget = response.executionTarget
     result.fleetArchivedAt = response.fleetArchivedAt
+    result.operatorDisposal = response.operatorDisposal
     result.retainedDockerCustody = response.retainedDockerCustody
     result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
@@ -641,6 +642,7 @@ public enum PodMapper {
     }
     result.profileDisplay = response.profileDisplay
     result.fleetArchivedAt = response.fleetArchivedAt
+    result.operatorDisposal = response.operatorDisposal
     result.retainedDockerCustody = response.retainedDockerCustody
     return result
   }
