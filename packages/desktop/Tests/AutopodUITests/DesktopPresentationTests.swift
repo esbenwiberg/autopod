@@ -62,6 +62,17 @@ private func presentationPod(_ id: String, status: PodStatus = .complete,
     #expect(pod.desktopMilestoneToken == nil)
 }
 
+@Test func reviewRequiredDoesNotImplyValidationPassed() {
+    var pod = presentationPod("needs-review", status: .reviewRequired)
+    pod.pod = PodConfig(output: .pr, validate: true)
+    #expect(pod.desktopLifecycleLabel == "Needs Review")
+    #expect(pod.desktopLifecycleStage == .validating)
+
+    pod.status = .validated
+    #expect(pod.desktopLifecycleLabel == "Validated")
+    #expect(pod.desktopLifecycleStage == .validated)
+}
+
 @Test func artifactLifecycleDoesNotImplyValidationOrPrApproval() {
     var pod = presentationPod("artifact")
     pod.pod = PodConfig(output: .artifact, validate: false)
