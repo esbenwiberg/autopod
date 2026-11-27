@@ -104,6 +104,8 @@ export interface ExecOptions {
   maxOutputBytes?: number;
   /** Return only a positively observed stopped process and valid exit code, never a synthetic failure. */
   requireObservedExit?: boolean;
+  /** Use a dedicated process session and bounded cleanup for local Docker validation tests. */
+  superviseDockerTest?: boolean;
   /** Run the command as this user inside the container (e.g. 'root'). */
   user?: string;
   /**

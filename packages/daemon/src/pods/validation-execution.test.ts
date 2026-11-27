@@ -75,7 +75,12 @@ function result(kind: 'pass' | 'fail' | 'infra' | 'review' = 'pass'): Validation
     ...(kind === 'review' ? { reviewSkipKind: 'review-timeout' as const } : {}),
   };
 }
-function fixture(sandbox = false) {
+function fixture(sandbox = false, exactDocker = false) {
+  const containerId = sandbox
+    ? '11111111-1111-4111-8111-111111111111'
+    : exactDocker
+      ? 'a'.repeat(64)
+      : 'execution-container';
   const directory = mkdtempSync(join(tmpdir(), 'validation-execution-'));
   const file = join(directory, 'state.db');
   const seed = createTestDb();
@@ -103,7 +108,7 @@ function fixture(sandbox = false) {
     options: { agentMode: 'auto', output: 'pr', validate: true, validationSuite: 'full' },
   });
   repo.update('worker', {
-    containerId: sandbox ? '11111111-1111-4111-8111-111111111111' : 'execution-container',
+    containerId,
     worktreePath: '/private/execution-tree',
   });
   const pod = repo.getOrThrow('worker');
@@ -121,11 +126,13 @@ function fixture(sandbox = false) {
   const controller = new AbortController();
   const cm = createMockContainerManager();
   if (sandbox) Object.assign(cm, { executionResourceScope: 'test-scope' });
+  if (exactDocker)
+    cm.getResourceKey = vi.fn(async () => JSON.stringify(['docker', 'engine', containerId]));
   const containerFactory = { get: vi.fn(() => cm) };
   const profile = createMockProfileStore(db).get('test-profile');
   const config: ValidationEngineConfig = {
     podId: 'worker',
-    containerId: sandbox ? '11111111-1111-4111-8111-111111111111' : 'execution-container',
+    containerId,
     executionTarget: sandbox ? 'sandbox' : 'local',
     previewUrl: 'http://preview',
     buildCommand: 'build',
@@ -384,6 +391,70 @@ describe('validation execution durable effects', () => {
       expect(f.engine).not.toHaveBeenCalled();
       expect(f.ledger.state('worker').executedCount).toBe(0);
       expect(f.config.testTimeout).toBe(900000);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('binds ordinary Docker validation before checks and preserves an unknown exit across restart', async () => {
+    const f = fixture(false, true);
+    try {
+      f.engine.mockImplementationOnce(async () => {
+        const dispatch = f.db().prepare('SELECT binding FROM validation_dispatches').get() as {
+          binding: string;
+        };
+        expect(JSON.parse(dispatch.binding)).toMatchObject({
+          executionTarget: 'local',
+          containerId: f.config.containerId,
+          resourceScope: JSON.stringify(['docker', 'engine', f.config.containerId]),
+        });
+        return {
+          ...result('fail'),
+          infrastructureFailure: {
+            phase: 'test',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            message: 'Test timed out without cleanup proof',
+            retryable: false,
+          },
+        };
+      });
+      const output = await f.run();
+      expect(output.executionDispatchId).toBeDefined();
+      expect(f.engine).toHaveBeenCalledOnce();
+      expect(f.ledger.state('worker').latest?.outcome).toBe('nonretryable');
+      const reopened = f.reopen();
+      expect(reopened.repo.validationExecutions?.unsettled('worker')?.id).toBe(
+        output.executionDispatchId,
+      );
+    } finally {
+      f.close();
+    }
+  });
+
+  it('publishes an ordinary Docker pass without retaining execution custody', async () => {
+    const f = fixture(false, true);
+    try {
+      const output = await f.run();
+      expect(output.overall).toBe('pass');
+      expect(output.executionDispatchId).toBeDefined();
+      expect(f.repo.validationExecutions?.unsettled('worker')).toBeNull();
+      expect(() => f.repo.validationExecutions?.assertTaskSettled('worker')).not.toThrow();
+      expect(f.db().prepare('SELECT * FROM validation_dispatch_results').all()).toHaveLength(1);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('refuses ordinary Docker validation before dispatch if engine identity changes', async () => {
+    const f = fixture(false, true);
+    try {
+      if (!f.cm.getResourceKey) throw new Error('Missing Docker identity fixture');
+      vi.mocked(f.cm.getResourceKey).mockResolvedValueOnce(
+        JSON.stringify(['docker', 'old-engine', f.config.containerId]),
+      );
+      await expect(f.run()).rejects.toThrow('Docker engine/resource changed');
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.db().prepare('SELECT * FROM validation_dispatches').all()).toHaveLength(0);
     } finally {
       f.close();
     }
