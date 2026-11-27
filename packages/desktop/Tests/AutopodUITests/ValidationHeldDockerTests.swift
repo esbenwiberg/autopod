@@ -4,6 +4,17 @@ import Testing
 @testable import AutopodUI
 
 @MainActor @Suite(.serialized) struct ValidationHeldDockerTests {
+  @Test func retainedContinuationKeepsItsExistingControlRoute() throws {
+    let failure = try JSONDecoder().decode(ValidationInfrastructureFailureResponse.self,
+      from: Data(#"{"phase":"test","code":"EXEC_EXIT_UNVERIFIED","message":"fixture unknown exit","retryable":false}"#.utf8))
+    var pod = Pod(id: "held-fixture", status: .reviewRequired, branch: "fixture", profileName: "fixture",
+      model: "fixture", startedAt: .distantPast, validationChecks: ValidationChecks(smoke: false, infrastructureFailure: failure))
+    pod.executionTarget = "local"
+    #expect(pod.usesValidationHeldDockerControls)
+    pod.retainedDockerCustody = true
+    #expect(!pod.usesValidationHeldDockerControls && pod.usesRetainedDockerControls)
+    #expect(pod.usesDedicatedDockerControls)
+  }
   private func reply(_ state: String, request: RetainedFinalizationRequest? = nil) throws -> ValidationHeldDockerView {
     var json: [String: Any] = ["podId": "held-fixture", "state": state, "generation": 1,
       "binding": String(repeating: "a", count: 64), "message": "Validation hold retained", "blockers": [],
