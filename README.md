@@ -153,6 +153,7 @@ ap reject <pod-id> "The selected theme should survive a page refresh"
 | [Mobile access](docs/mobile.md) | [Authentication, deployment & operations](docs/reference/operations.md) |
 | [Architecture](ARCHITECTURE.md) | [Azure Container Apps Sandboxes](docs/azure-container-apps-sandboxes.md) |
 | [Contributing](CONTRIBUTING.md) | [Security boundaries & limitations](docs/security-overview.md) |
+| [Operator Kill and Delete](docs/operator-disposal.md) | Exact intent, cleanup and recovery receipts |
 
 ## Development
 

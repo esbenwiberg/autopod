@@ -629,6 +629,7 @@ public final class ActionHandler {
       try requireCurrent()
       let pod = try await perform { try await api.getPod(podId) }
       if let existing = pod.operatorDisposal, existing.intent == intent || existing.intent == "delete" {
+        podStore.recordOperatorDisposal(existing)
         await podStore.refreshSession(podId)
         lastError = "\(existing.intent.capitalized) already accepted for \(podId): \(existing.state). Read History/Recovery. Request \(existing.requestKey)."
         return

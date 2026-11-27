@@ -58,8 +58,25 @@ export function createOperatorDisposal(deps: {
         );
       const history = pods.retainedCleanup.heldHistory(id);
       const context = pods.retainedCleanup.context(id);
+      // Stop independently of publication, source preservation and discard eligibility.
+      // Missing evidence for other resources leaves the overall receipt pending.
+      if (p.containerId) {
+        const stopGuard = () => {
+          guard();
+          store.assertStopUnshared(id, p.containerId!);
+          pods.validationExecutions!.assertResourceUnshared(id, p.containerId!);
+          pods.rewriteAbandonments!.assertUnshared(id, p.containerId!, []);
+          pods.retainedCleanup!.assertForeignClaims(id, [p.containerId!], []);
+        };
+        const observed = await docker.stopOwned(id, p.containerId, stopGuard, (target) =>
+          store.admitEffect(id, key, 'stop:' + target.id, { target }),
+        );
+        stopGuard();
+        if (!observed.stopped)
+          pending('Exact stop is unconfirmed; any prior dispatch is not replayed.');
+        store.event(id, key, 'stopped:' + observed.id, { target: observed });
+      }
       if (
-        context.unsettled ||
         history.extra.length ||
         context.incompatible ||
         context.lineage.length ||
@@ -149,6 +166,7 @@ export function createOperatorDisposal(deps: {
       }
       const exact = () => {
         guard();
+        store.assertPublicationSettled(id);
         if (JSON.stringify(pods.retainedCleanup!.heldHistory(id)) !== JSON.stringify(history))
           pending('Historical allocation or execution inventory changed during cleanup.');
         if (
@@ -198,7 +216,13 @@ export function createOperatorDisposal(deps: {
           if (!(await docker.stopped(targets, exact, t.id)))
             pending('Execution stop is not independently confirmed.');
         }
+        exact();
+        store.event(id, key, 'stopped:' + t.id, { target: t.id });
       }
+      if (pods.retainedCleanup.context(id).unsettled)
+        pending(
+          'Exact guest stop was observed, but an admitted worker, retry or reviewer still lacks settlement. Overall cleanup remains pending.',
+        );
       if (receipt.intent === 'kill') {
         store.event(id, key, 'complete', { state: 'stopped' });
       } else {
@@ -215,7 +239,11 @@ export function createOperatorDisposal(deps: {
           const absent = t.kind.startsWith('docker_')
             ? await docker.proof(targets, exact)
             : await host.proof(targets, exact, true);
-          if (absent.has(t.id)) continue;
+          if (absent.has(t.id)) {
+            exact();
+            store.event(id, key, 'absent:' + t.id, { target: t.id });
+            continue;
+          }
           const dispatch = () => {
             exact();
             return store.admitEffect(id, key, 'remove:' + t.id, { target: t });
@@ -232,6 +260,8 @@ export function createOperatorDisposal(deps: {
             : await host.proof(targets, exact, true);
           if (!after.has(t.id))
             pending('Partial or unknown discard; inspect recorded exact dispatches. No replay.');
+          exact();
+          store.event(id, key, 'absent:' + t.id, { target: t.id });
         }
         store.event(id, key, 'complete', { state: 'discarded' });
       }

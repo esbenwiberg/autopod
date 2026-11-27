@@ -39,8 +39,9 @@ targets and dispatches. It never repeats an uncertain stop/removal. Already admi
 publication/merge or other external effects cannot be undone or promised prevented:
 their owning ledgers require reconciliation, without replay or inferred approval.
 
-Physical cleanup currently uses the existing exact local Docker Engine/topology and
-reciprocal physical Git worktree proofs. Foreign/shared claims, incomplete allocation
+Execution stop uses positive exact local Docker ownership and namespace evidence,
+independently of publication settlement or branch/worktree availability. Discard uses
+the existing Docker topology and reciprocal physical Git worktree proofs. Foreign/shared claims, incomplete allocation
 history, additional linkage/recovery resources and unsupported Sandbox cleanup remain
 pending. Missing pod resource fields are not proof of absence. An earlier worker Docker
 ID is accounted for even if validation-only retry reused the same task/worktree and

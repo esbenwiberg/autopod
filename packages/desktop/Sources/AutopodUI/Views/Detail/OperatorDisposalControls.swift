@@ -16,6 +16,10 @@ struct OperatorDisposalControls: View {
                 Text("History/Recovery · \(receipt.intent.capitalized) · \(receipt.state)")
                     .font(.caption).textSelection(.enabled)
                 Text("Request \(receipt.requestKey) · generation \(receipt.generation)").font(.caption)
+                ForEach(Array((receipt.resources ?? []).enumerated()), id: \.offset) { _, resource in
+                    Text("\(resource.kind) \(resource.id) · \(resource.observedAbsent ? "confirmed absent" : resource.observedStopped ? "confirmed stopped" : "cleanup pending")")
+                        .font(.caption).textSelection(.enabled)
+                }
                 ForEach(Array(receipt.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                     Text(diagnostic).font(.caption).textSelection(.enabled)
                 }

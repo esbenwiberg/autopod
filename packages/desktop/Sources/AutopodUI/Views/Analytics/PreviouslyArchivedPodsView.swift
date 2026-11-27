@@ -32,9 +32,9 @@ struct PreviouslyArchivedPodsView: View {
     var body: some View {
         let matches = PreviouslyArchivedPods.matches(pods, query: query, repositories: repositories)
         VStack(alignment: .leading, spacing: 12) {
-            Text("Archived pods may still hold resources. Archive status does not indicate resource release or current billing.")
+            Text("Disposal receipts remain cleanup pending until physical closure is confirmed. Archived records retain their separate visibility-only meaning.")
                 .font(.callout)
-            Text("Search loaded archived records from any date or repository. Open a pod to see its details and any available recovery options.")
+            Text("Search loaded disposal and archived records from any date or repository. Open a pod for retained history and cleanup diagnostics.")
                 .font(.caption).foregroundStyle(.secondary)
             TextField("Search archived pods by ID, task, or repository", text: $query)
                 .textFieldStyle(.roundedBorder)

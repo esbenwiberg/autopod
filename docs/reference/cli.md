@@ -180,11 +180,13 @@ ap approve <id>                             # Create PR and merge
 ap approve <id> --squash                    # Squash merge
 ap approve <id> --reason "reviewed risk"    # Required for risky/waived readiness approvals
 ap reject <id> "<feedback>"                 # Reject — agent retries with your feedback
-ap kill <id>                                # Kill pod, discard work
+ap kill <exact-id>                          # Request stop; retain files
+ap delete <exact-id> --acknowledge-data-loss # Request permanent discard
+ap disposal <exact-id>                      # Read History/Recovery receipt
 
 # Bulk operations
 ap approve --all-validated                  # Approve everything that passed
-ap kill --all-failed                        # Clean up all failures
+ap disposal <exact-id> --observe            # Reconcile physical cleanup; no replay
 
 # Stats
 ap stats                                    # Aggregate counts by status, avg duration, total cost

@@ -27,4 +27,13 @@ export interface OperatorDisposalReceipt {
   scope: 'exact-pod-unpublished-resources';
   state: 'cleanup_pending' | 'stopped' | 'discarded';
   diagnostics: string[];
+  resources?: Array<{
+    kind: string;
+    id: string;
+    namespace: string;
+    stopDispatched: boolean;
+    discardDispatched: boolean;
+    observedStopped: boolean;
+    observedAbsent: boolean;
+  }>;
 }

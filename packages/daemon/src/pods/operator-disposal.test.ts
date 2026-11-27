@@ -84,25 +84,34 @@ async function fixture(podId = 'ordinary-fixture') {
     stops = 0,
     removes = 0,
     lostStop = false,
-    lostRemove = false;
+    lostRemove = false,
+    blockRemove = false;
+  const predecessors = new Map<string, typeof guest>();
   const absent = () => {
     throw Object.assign(new Error('fixture absent'), { statusCode: 404 });
   };
   const docker = createRetainedCleanupDocker({
     info: async () => ({ ID: 'fixture-engine' }),
-    listContainers: async () => (present ? [{ ...guest, Names: [guest.Name] }] : []),
+    listContainers: async () =>
+      [...(present ? [guest] : []), ...predecessors.values()].map((g) => ({
+        ...g,
+        Names: [g.Name],
+      })),
     listNetworks: async () => (network ? [bridge] : []),
     getContainer: (cid: string) => ({
-      inspect: async () => (cid === id && present ? guest : absent()),
+      inspect: async () => (cid === id && present ? guest : (predecessors.get(cid) ?? absent())),
       stop: async () => {
         stops++;
         if (lostStop) throw new Error('lost stop reply');
-        guest.State.Running = false;
-        guest.State.Status = 'exited';
+        const selected = cid === id ? guest : predecessors.get(cid)!;
+        selected.State.Running = false;
+        selected.State.Status = 'exited';
       },
       remove: async () => {
         removes++;
-        present = false;
+        if (blockRemove) throw new Error('removal outcome unknown');
+        if (cid === id) present = false;
+        else predecessors.delete(cid);
         if (lostRemove) throw new Error('lost remove reply');
       },
     }),
@@ -135,6 +144,27 @@ async function fixture(podId = 'ordinary-fixture') {
     guest,
     service,
     request,
+    addPredecessor() {
+      const prior = structuredClone(guest);
+      prior.Id = 'c'.repeat(64);
+      prior.Name += '-previous';
+      predecessors.set(prior.Id, prior);
+      db.prepare(
+        'INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at,ended_at) VALUES (?,?,1,1,?,?,?)',
+      ).run(
+        'original-worker',
+        podId,
+        JSON.stringify({
+          runtime: 'codex',
+          resource: { executionTarget: 'local', containerId: prior.Id },
+        }),
+        '2026-01-01',
+        '2026-01-02',
+      );
+    },
+    blockRemove: () => {
+      blockRemove = true;
+    },
     stops: () => stops,
     removes: () => removes,
     loseStop: () => {
@@ -276,7 +306,8 @@ describe('exact operator disposal', () => {
     s.submit(podId, f.request('delete'), actor);
     expect((await s.observe(podId, 'delete')).state).toBe('cleanup_pending');
     expect(f.pods.list({ archive: 'exclude' })).toHaveLength(0);
-    expect(f.stops()).toBe(0);
+    // Independently owned replacement is stopped; predecessor closure is still unknown.
+    expect(f.stops()).toBe(1);
     expect(f.removes()).toBe(0);
     expect(f.pods.getOrThrow(podId).lastValidationResult).toEqual(result);
   });
@@ -287,6 +318,32 @@ describe('exact operator disposal', () => {
     s.submit(f.podId, f.request('delete'), actor);
     expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
     expect(f.stops()).toBe(0);
+  });
+  it('stops exact owned execution without branch/worktree evidence and keeps discard pending', async () => {
+    const f = await fixture();
+    f.db.prepare("UPDATE pods SET worktree_path=NULL,branch='' WHERE id=?").run(f.podId);
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    const r = await s.observe(f.podId, 'delete');
+    expect(r.state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(1);
+    expect(f.removes()).toBe(0);
+    expect(r.resources?.some((t) => t.observedStopped)).toBe(true);
+  });
+  it('stops owned execution during an unconfirmed publication without replaying or discarding it', async () => {
+    const f = await fixture();
+    f.db
+      .prepare(`INSERT INTO source_publication_intents(id,identity,pod_id,task_id,generation,source_identity,admitted_at)
+      SELECT 'publication','publication-identity',pod_id,task_id,1,'{}','2026-01-01' FROM task_executions WHERE pod_id=?`)
+      .run(f.podId);
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    const r = await s.observe(f.podId, 'delete');
+    expect(r.state).toBe('cleanup_pending');
+    expect(f.stops()).toBe(1);
+    expect(f.removes()).toBe(0);
+    expect(f.db.prepare('SELECT 1 FROM source_publication_receipts').get()).toBeUndefined();
+    expect(r.diagnostics.join(' ')).toMatch(/publication/);
   });
   it('never replays an uncertain Kill stop when explicitly upgrading to Delete', async () => {
     const f = await fixture();
@@ -338,5 +395,25 @@ describe('exact operator disposal', () => {
     expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
     expect(f.removes()).toBe(0);
     expect(f.stops()).toBe(0);
+  });
+  it('disposes an owned replacement only after positively accounting for its present predecessor', async () => {
+    const f = await fixture();
+    f.addPredecessor();
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    const result = await s.observe(f.podId, 'delete');
+    expect(result.state, JSON.stringify(result)).toBe('discarded');
+    expect(f.stops()).toBe(2);
+    expect(f.removes()).toBe(3);
+  });
+  it('retains a partial discard and never repeats an uncertain removal', async () => {
+    const f = await fixture();
+    f.blockRemove();
+    const s = f.service();
+    s.submit(f.podId, f.request('delete'), actor);
+    expect((await s.observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect((await f.service().observe(f.podId, 'delete')).state).toBe('cleanup_pending');
+    expect(f.removes()).toBe(1);
+    expect(await readFile(path.join(f.worktree, 'README'), 'utf8')).toBe('unpublished fixture');
   });
 });

@@ -55,6 +55,20 @@ export function createOperatorDisposalRepository(db: Database.Database) {
       )
       .all(id, r.request_key) as { kind: string; evidence: string }[];
     const complete = [...events].reverse().find((e) => e.kind === 'complete');
+    const selected = events.find((e) => e.kind === 'targets');
+    const selectedTargets = selected
+      ? (JSON.parse(selected.evidence) as { kind: string; id: string; namespace: string }[])
+      : [];
+    const stopTargets = events
+      .filter((e) => e.kind.startsWith('stop:') || e.kind.startsWith('stopped:'))
+      .map((e) => JSON.parse(e.evidence).target)
+      .filter(
+        (t) =>
+          t && typeof t === 'object' && typeof t.id === 'string' && typeof t.namespace === 'string',
+      ) as { kind: string; id: string; namespace: string }[];
+    const targets = [...selectedTargets, ...stopTargets].filter(
+      (t, i, all) => all.findIndex((q) => q.kind === t.kind && q.id === t.id) === i,
+    );
     return {
       contract: 'operator-disposal-v1',
       podId: id,
@@ -68,6 +82,15 @@ export function createOperatorDisposalRepository(db: Database.Database) {
       diagnostics: events
         .filter((e) => e.kind === 'diagnostic')
         .map((e) => JSON.parse(e.evidence).message),
+      resources: targets.map((t) => ({
+        kind: t.kind,
+        id: t.id,
+        namespace: t.namespace,
+        stopDispatched: events.some((e) => e.kind === 'stop:' + t.id),
+        discardDispatched: events.some((e) => e.kind === 'remove:' + t.id),
+        observedStopped: events.some((e) => e.kind === 'stopped:' + t.id),
+        observedAbsent: events.some((e) => e.kind === 'absent:' + t.id),
+      })),
     };
   }
   function event(id: string, key: string, kind: string, evidence: unknown) {
@@ -78,6 +101,27 @@ export function createOperatorDisposalRepository(db: Database.Database) {
   return {
     receipt,
     event,
+    assertStopUnshared(id: string, containerId: string) {
+      if (
+        db
+          .prepare(`SELECT 1 FROM task_agent_runs WHERE pod_id<>? AND json_extract(binding,'$.resource.containerId')=?
+        UNION ALL SELECT 1 FROM retained_allocation_attempts a JOIN retained_allocation_facts f ON f.attempt_id=a.id
+        WHERE a.pod_id<>? AND a.role='container' AND json_extract(f.evidence,'$.id')=?`)
+          .get(id, containerId, id, containerId)
+      )
+        conflict('A foreign historical worker or allocation claims this exact execution.');
+    },
+    assertPublicationSettled(id: string) {
+      if (
+        db
+          .prepare(`SELECT 1 FROM source_publication_intents i LEFT JOIN source_publication_receipts r ON r.intent_id=i.id
+        WHERE i.pod_id=? AND r.intent_id IS NULL`)
+          .get(id)
+      )
+        conflict(
+          'An already admitted publication remains unconfirmed. Reconcile its original outcome; disposal cannot replay it or classify its resources unpublished.',
+        );
+    },
     admitEffect(id: string, key: string, kind: string, evidence: unknown): boolean {
       return db
         .transaction(() => {

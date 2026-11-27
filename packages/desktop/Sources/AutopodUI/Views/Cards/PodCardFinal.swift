@@ -83,17 +83,15 @@ public struct SessionCardFinal: View {
     }
 
     private var deleteDialogTitle: String {
-        isDeletableNow ? "Delete pod \(pod.id)?" : "Kill and delete pod \(pod.id)?"
+        "Request Delete for \(pod.id)?"
     }
 
     private var deleteButtonTitle: String {
-        isDeletableNow ? "Delete" : "Kill and delete"
+        "Acknowledge data loss and request Delete"
     }
 
     private var deleteDialogMessage: String {
-        isDeletableNow
-            ? "This permanently deletes this pod’s execution resources and working source if the daemon’s safety checks allow it."
-            : "The pod is still active. It will be killed and then permanently removed."
+        "Request stop and permanent discard of this exact pod’s unpublished resources and files. History remains. Acceptance clears attention; physical cleanup may remain pending."
     }
 
     private var launchWorkerErrorPresented: Binding<Bool> {
