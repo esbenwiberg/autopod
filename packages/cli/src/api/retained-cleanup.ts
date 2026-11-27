@@ -28,6 +28,9 @@ const resource = z
         return role === 'private_prepared_source' && id.startsWith('/');
     }
   });
+
+export { resource as cleanupResourceSchema };
+
 const plan = z.object({
   version: z.literal(1),
   generation: retainedCleanupRequestSchema.shape.expectedGeneration,

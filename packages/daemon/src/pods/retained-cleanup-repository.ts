@@ -263,9 +263,28 @@ export function createRetainedCleanupRepository(db: Database.Database) {
       const extra = db
         .prepare(`SELECT 1 FROM approval_source_rewrites WHERE pod_id=?
         UNION ALL SELECT 1 FROM retained_checkpoint_recoveries WHERE pod_id=?
-        UNION ALL SELECT 1 FROM artifact_checks_recoveries WHERE pod_id=?`)
-        .all(podId, podId, podId);
-      return { members, dispatches, extra };
+        UNION ALL SELECT 1 FROM artifact_checks_recoveries WHERE pod_id=?
+        UNION ALL SELECT 1 FROM sandbox_recovery_requests WHERE pod_id=?
+        UNION ALL SELECT 1 FROM action_audit WHERE pod_id=? AND action_name='ado.run_test_pipeline'`)
+        .all(podId, podId, podId, podId, podId);
+      const allocations = db
+        .prepare(`SELECT a.role,a.locator,a.generation,f.kind,f.evidence
+        FROM retained_allocation_attempts a LEFT JOIN retained_allocation_facts f
+        ON f.attempt_id=a.id AND f.kind<>'create-reply' WHERE a.pod_id=? ORDER BY a.sequence`)
+        .all(podId) as {
+        role: string;
+        locator: string;
+        generation: number;
+        kind: string | null;
+        evidence: string | null;
+      }[];
+      const workers = db
+        .prepare('SELECT generation,binding FROM task_agent_runs WHERE pod_id=? ORDER BY id')
+        .all(podId) as { generation: number; binding: string }[];
+      const admissions = db
+        .prepare('SELECT generation,stage FROM task_retry_attempts WHERE pod_id=? ORDER BY id')
+        .all(podId) as { generation: number; stage: string }[];
+      return { members, dispatches, extra, allocations, workers, admissions };
     },
     assertForeignClaims(podId: string, containers: string[], locations: string[]) {
       const ids = JSON.stringify(containers);

@@ -1573,10 +1573,11 @@ public actor DaemonAPI {
     guard input.mode == .stopRetain, RetainedCleanupRequest.validId(input.requestKey),
       (10...4000).contains(input.reason.utf16.count) else { throw RetainedCleanupError.invalidReply }
     let path = try cleanupPath(id).replacingOccurrences(of: "/retained-cleanup", with: "/validation-held-docker")
-    let (result, _): (ValidationHeldDockerView, Int) = try await retainedCleanupRequest("POST", path,
+    let (result, status): (ValidationHeldDockerView, Int) = try await retainedCleanupRequest("POST", path,
       body: encode(input), isCurrent: isCurrent)
     try result.validate(podId: id, key: input.requestKey)
-    guard result.binding == input.expectedBinding, result.generation == input.expectedGeneration
+    guard result.binding == input.expectedBinding, result.generation == input.expectedGeneration,
+      status == (["unknown", "pending"].contains(result.state) ? 202 : 200)
       else { throw RetainedCleanupError.invalidReply }
     return result
   }

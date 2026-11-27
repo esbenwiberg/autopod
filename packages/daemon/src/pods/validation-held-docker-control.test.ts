@@ -4,6 +4,7 @@ import path from 'node:path';
 import type Dockerode from 'dockerode';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRetainedCleanupDocker } from '../containers/retained-cleanup-docker.js';
+import { openTestDiskDatabase } from '../test-utils/disk-database.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { fixtureGit } from '../test-utils/retained-cleanup-fixture.js';
 import { createRetainedCleanupHost } from '../worktrees/retained-cleanup-host.js';
@@ -21,7 +22,9 @@ async function fixture() {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'held-docker-')));
   closes.push(() => rm(root, { recursive: true, force: true }));
   const db = createTestDb();
-  closes.push(() => db.close());
+  closes.push(() => {
+    if (db.open) db.close();
+  });
   insertTestProfile(db);
   const pods = createPodRepository(db);
   const podId = 'held-fixture';
@@ -96,6 +99,7 @@ async function fixture() {
     stops = 0,
     removes = 0,
     uncertain = false,
+    uncertainRemove = false,
     idle = true;
   const absent = () => {
     throw Object.assign(new Error('fixture absent'), { statusCode: 404 });
@@ -114,6 +118,7 @@ async function fixture() {
       },
       remove: async () => {
         removes++;
+        if (uncertainRemove) throw new Error('lost removal reply');
         present = false;
       },
     }),
@@ -125,8 +130,13 @@ async function fixture() {
       },
     }),
   } as unknown as Dockerode);
-  const service = () =>
-    createValidationHeldDockerControl({ pods, docker, isIdle: () => idle, isGoal: () => false });
+  const service = (repo = pods) =>
+    createValidationHeldDockerControl({
+      pods: repo,
+      docker,
+      isIdle: () => idle,
+      isGoal: () => false,
+    });
   const cleanup = () =>
     createRetainedCleanup({
       pods,
@@ -159,6 +169,20 @@ async function fixture() {
     worktree,
     stops: () => stops,
     removes: () => removes,
+    absent: () => {
+      present = false;
+    },
+    uncertainRemove: () => {
+      uncertainRemove = true;
+    },
+    reopen: async () => {
+      const file = path.join(root, 'restart.db');
+      await db.backup(file);
+      db.close();
+      const reopened = openTestDiskDatabase(file);
+      closes.push(() => reopened.close());
+      return createPodRepository(reopened);
+    },
     uncertain: () => {
       uncertain = true;
     },
@@ -210,17 +234,16 @@ describe('exact validation-held Docker human controls', () => {
       body = await f.request();
     f.uncertain();
     expect(await f.service().submit(f.podId, body, actor)).toMatchObject({ state: 'unknown' });
-    expect(await f.service().submit(f.podId, body, actor)).toMatchObject({ state: 'unknown' });
+    const restarted = f.service(await f.reopen());
+    expect(await restarted.submit(f.podId, body, actor)).toMatchObject({ state: 'unknown' });
     expect(f.stops()).toBe(1);
+    await expect(restarted.submit(f.podId, body, { ...actor, userId: 'other' })).rejects.toThrow();
     await expect(
-      f.service().submit(f.podId, body, { ...actor, userId: 'other' }),
-    ).rejects.toThrow();
-    await expect(
-      f.service().submit(f.podId, { ...body, requestKey: 'other' }, actor),
+      restarted.submit(f.podId, { ...body, requestKey: 'other' }, actor),
     ).rejects.toThrow();
     f.guest.State.Running = false;
     f.guest.State.Status = 'exited';
-    expect(await f.service().submit(f.podId, body, actor)).toMatchObject({ state: 'stopped' });
+    expect(await restarted.submit(f.podId, body, actor)).toMatchObject({ state: 'stopped' });
     expect(f.stops()).toBe(1);
     expect(f.removes()).toBe(0);
   });
@@ -246,6 +269,93 @@ describe('exact validation-held Docker human controls', () => {
       state: 'blocked',
       blockers: [{ code: 'IDENTITY_CHANGED' }],
     });
+    expect(f.stops()).toBe(0);
+    expect(f.removes()).toBe(0);
+  });
+  it('can Stop without destructive tree readiness and keeps the card on blocked Discard', async () => {
+    const f = await fixture(),
+      request = await f.request();
+    await mkdir(path.join(f.worktree, 'nested', '.git'), { recursive: true });
+    expect(await f.service().submit(f.podId, request, actor)).toMatchObject({ state: 'stopped' });
+    expect(await f.cleanup().inspect(f.podId)).toMatchObject({
+      state: 'blocked',
+      blockers: [{ code: 'HOST_PROOF_UNAVAILABLE' }],
+    });
+    expect(f.pods.getOrThrow(f.podId).status).toBe('review_required');
+    expect(f.removes()).toBe(0);
+  });
+  it('keeps partial Discard owned and reconciles positive absence without repeating removal', async () => {
+    const f = await fixture();
+    await f.service().submit(f.podId, await f.request(), actor);
+    const preview = await f.cleanup().inspect(f.podId);
+    if (preview.state !== 'eligible') throw new Error(JSON.stringify(preview));
+    const request = {
+      id: 'discard-once',
+      expectedGeneration: preview.plan.generation,
+      expectedBinding: preview.plan.binding,
+      expectedSessionId: preview.plan.sessionId,
+      reason: 'Explicitly discard this local experiment',
+      acknowledgeDataLoss: true as const,
+    };
+    f.uncertainRemove();
+    expect(await f.cleanup().submit(f.podId, request, actor)).toMatchObject({ state: 'partial' });
+    expect(await f.cleanup().submit(f.podId, request, actor)).toMatchObject({ state: 'partial' });
+    expect(f.removes()).toBe(1);
+    expect(f.pods.getOrThrow(f.podId).status).toBe('review_required');
+    f.absent();
+    expect(await f.cleanup().submit(f.podId, request, actor)).toMatchObject({ state: 'deleted' });
+    expect(f.removes()).toBe(2);
+  });
+  it.each([
+    'dependent',
+    'unresolved-allocation',
+    'foreign-claim',
+    'engine-dispatch',
+  ])('blocks %s historical custody without effects', async (kind) => {
+    const f = await fixture();
+    if (kind === 'dependent')
+      f.db.prepare('UPDATE pods SET depends_on_pod_id=? WHERE id=?').run(f.podId, f.podId);
+    if (kind === 'unresolved-allocation')
+      f.pods.retainedAllocations!.scope(f.podId)!.begin('container', 'unobserved-create');
+    if (kind === 'foreign-claim') {
+      f.pods.insert({
+        id: 'foreign',
+        profileName: 'test-profile',
+        task: 'foreign fixture',
+        status: 'queued',
+        branch: 'foreign',
+        model: 'fixture',
+        runtime: 'codex',
+        executionTarget: 'local',
+        userId: 'other',
+        maxValidationAttempts: 1,
+        skipValidation: false,
+        outputMode: 'pr',
+      });
+      f.db.prepare('UPDATE pods SET container_id=? WHERE id=?').run(f.guest.Id, 'foreign');
+    }
+    if (kind === 'engine-dispatch') {
+      const taskId = f.pods.taskExecutions!.snapshot(f.podId).taskId;
+      f.db.prepare('INSERT INTO validation_dispatches VALUES (?,?,?,?,?,?,?,?)').run(
+        'historical',
+        f.podId,
+        taskId,
+        1,
+        1,
+        'historical-admission',
+        JSON.stringify({
+          podId: f.podId,
+          taskId,
+          generation: 1,
+          executionTarget: 'local',
+          containerId: f.guest.Id,
+          worktreePath: f.worktree,
+          resourceScope: JSON.stringify(['docker', 'foreign-engine', f.guest.Id]),
+        }),
+        new Date().toISOString(),
+      );
+    }
+    expect((await f.service().inspect(f.podId)).state).toBe('blocked');
     expect(f.stops()).toBe(0);
     expect(f.removes()).toBe(0);
   });

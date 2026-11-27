@@ -61,7 +61,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   static func scope(_ actions: PodActions) -> String {
     [actions.retainedChecks.scope, actions.memoryChecks.scope, actions.sandboxRecovery.scope, actions.repairContinuation.scope,
      actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope,
-     actions.recoveryFork.scope, actions.retainedCleanup.scope]
+     actions.recoveryFork.scope, actions.retainedCleanup.scope, actions.validationHeldDocker.scope]
       .map { "\($0.utf8.count):\($0)" }.joined()
   }
 
@@ -78,6 +78,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
 
   var pendingRoute: RecoveryRoute? {
     if cleanup.needsObservation { return .freeStorage }
+    if heldDocker.needsObservation { return .finalization }
     if memoryChecks.needsObservation { return .memoryChecks }
     if retainedChecks.needsObservation { return .retainedChecks }
     if fork.needsObservation || fork.invalidJournal { return .freshPod }

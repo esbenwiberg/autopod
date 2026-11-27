@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cleanupResourceSchema } from './retained-cleanup.js';
 export const heldDockerViewSchema = z
   .object({
     podId: z.string().min(1),
@@ -12,16 +13,7 @@ export const heldDockerViewSchema = z
       .string()
       .regex(/^[A-Za-z0-9-]{1,64}$/)
       .optional(),
-    resources: z
-      .array(
-        z.object({
-          kind: z.string(),
-          role: z.string(),
-          id: z.string().min(1),
-          namespace: z.string().min(1),
-        }),
-      )
-      .optional(),
+    resources: z.array(cleanupResourceSchema).optional(),
     observedStopped: z.boolean().optional(),
     blockers: z.array(
       z.object({ code: z.string(), message: z.string(), resourceId: z.string().optional() }),

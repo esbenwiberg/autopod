@@ -113,7 +113,7 @@ public struct SessionCardFinal: View {
                     .help("Visibility only: execution may still be active and resources may incur costs.")
             }
             if redesign { redesignedCard } else { legacyCard }
-            if pod.usesRetainedDockerControls {
+            if pod.usesDedicatedDockerControls {
                 RetainedCardControls(pod: pod, actions: actions, disabled: pendingControl != nil)
                     .id(RecoveryHubModel.scope(actions) + ":" + pod.id)
             }
@@ -238,7 +238,7 @@ public struct SessionCardFinal: View {
                     Task { await actions.unarchive(pod.id) }
                 }
             }
-            if !pod.usesRetainedDockerControls && !pod.isInCompletedFleet && pod.status != .killing && pod.status != .researchReady {
+            if !pod.usesDedicatedDockerControls && !pod.isInCompletedFleet && pod.status != .killing && pod.status != .researchReady {
                 Button(role: .destructive) {
                     Task { await actions.kill(pod.id) }
                 } label: {
@@ -247,7 +247,7 @@ public struct SessionCardFinal: View {
                 .disabled(pendingControl != nil)
                 .accessibilityIdentifier("pod-control-kill-\(pod.id)")
             }
-            if !pod.usesRetainedDockerControls && pod.status != .researchReady {
+            if !pod.usesDedicatedDockerControls && pod.status != .researchReady {
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
@@ -1054,7 +1054,7 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-                if !pod.usesRetainedDockerControls {
+                if !pod.usesDedicatedDockerControls {
                     Button {
                         Task { await actions.kill(pod.id) }
                     } label: {
@@ -1135,7 +1135,7 @@ public struct SessionCardFinal: View {
                             .controlSize(.small)
                     }
                 }
-                if !pod.usesRetainedDockerControls { deleteButton }
+                if !pod.usesDedicatedDockerControls { deleteButton }
             }
 
         case .validating:
@@ -1219,7 +1219,7 @@ public struct SessionCardFinal: View {
             }
 
         case .killed:
-            if !pod.usesRetainedDockerControls { deleteButton }
+            if !pod.usesDedicatedDockerControls { deleteButton }
 
         default:
             EmptyView()

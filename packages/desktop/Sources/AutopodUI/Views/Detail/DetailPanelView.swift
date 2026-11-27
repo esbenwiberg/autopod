@@ -351,7 +351,7 @@ public struct DetailPanelView: View {
             detailHeader
 
             if RecoveryHubModel.available(actions, workspace: pod.isWorkspace) &&
-                (pod.usesRetainedDockerControls || [.running, .failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)) {
+                (pod.usesDedicatedDockerControls || [.running, .failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)) {
                 RecoveryHubCard(pod: pod, actions: actions,
                     onOpenValidation: { selectedTab = .validation },
                     onOpenEvidence: isEvidenceAvailable ? { selectedTab = .evidence } : nil)
@@ -1141,7 +1141,7 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 forkButton
-                if !pod.usesRetainedDockerControls {
+                if !pod.usesDedicatedDockerControls {
                     Button {
                         Task { await actions.kill(pod.id) }
                     } label: {
@@ -1260,7 +1260,7 @@ public struct DetailPanelView: View {
                     .tint(.red)
                     .help("Admin override — mark this pod complete without pushing/PR/merge. May unblock dependent pods.")
                 }
-                if !pod.usesRetainedDockerControls {
+                if !pod.usesDedicatedDockerControls {
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
@@ -1286,7 +1286,7 @@ public struct DetailPanelView: View {
                     ? "Spin up a fresh container against the same worktree. No agent runs, no tokens spent."
                     : "Re-run the agent from scratch with feedback. Spends tokens.")
                 forkButton
-                if !pod.usesRetainedDockerControls {
+                if !pod.usesDedicatedDockerControls {
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {

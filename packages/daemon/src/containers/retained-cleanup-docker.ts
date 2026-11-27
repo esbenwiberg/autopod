@@ -229,6 +229,28 @@ export function createRetainedCleanupDocker(docker: Dockerode, requireLocalSocke
         if (checkout?.kind !== 'host_worktree')
           block('IDENTITY_CHANGED', 'No exact checkout covers the source mount.', t.id);
         const common = checkout.git.commonStore.path;
+        if (
+          t.observedPodId &&
+          ((hc.CapAdd?.length ?? 0) > 0 ||
+            (hc.Devices?.length ?? 0) > 0 ||
+            live.Mounts.some(
+              (m) =>
+                m.Type !== 'bind' ||
+                ![
+                  '/mnt/worktree',
+                  common,
+                  '/autopod/spec',
+                  '/autopod/inputs',
+                  '/home/autopod/.claude/projects',
+                  '/home/autopod/.codex/sessions',
+                ].includes(m.Destination),
+            ))
+        )
+          block(
+            'UNSUPPORTED_TOPOLOGY',
+            'Independent legacy ownership does not cover additional capabilities, devices or mount destinations.',
+            t.id,
+          );
         const source = live.Mounts.filter((m) => m.Destination === '/mnt/worktree');
         const git = live.Mounts.filter((m) => m.Destination === common);
         if (

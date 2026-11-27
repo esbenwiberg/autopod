@@ -40,7 +40,7 @@ export function requiresValidationFailureSettlement(
 export function assertValidationExecutionSettled(pod: Pod, settled = false): void {
   if (requiresValidationSettlement(pod) && !settled)
     throw new AutopodError(
-      `Validation execution termination is unverified. Inspect ap reconcile-validation ${pod.id} --json; retain original source and reports. The current provider cannot safely reconcile an unknown mutable execution; retry and repair remain blocked. A stopped sandbox is not termination proof. Open Recovery to inspect what remains held. Execution and resource costs may continue.`,
+      `Validation execution termination is unverified. Inspect ap reconcile-validation ${pod.id} --json; retain original source and reports. The current provider cannot safely reconcile an unknown mutable execution; retry and repair remain blocked. A stopped sandbox is not termination proof. Open Recovery to inspect what remains held.${pod.executionTarget === 'local' && pod.status === 'review_required' ? ` Preview ap stop-validation-held ${pod.id} --json for an independently qualified Stop and retain, followed by separately confirmed Discard.` : ''} Execution and resource costs may continue.`,
       'VALIDATION_EXECUTION_UNVERIFIED',
       409,
     );

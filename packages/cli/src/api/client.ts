@@ -1544,7 +1544,10 @@ export class AutopodClient {
         { status: response.statusCode, json: () => response.body.json() },
         path,
       );
-    return decode(await response.body.json());
+    const result = decode(await response.body.json());
+    if (response.statusCode !== (['unknown', 'pending'].includes(result.state) ? 202 : 200))
+      throw new Error('Unexpected held Docker submission HTTP status.');
+    return result;
   }
 
   async observeRetainedCleanup(podId: string, expected: string | RetainedCleanupRequest) {
