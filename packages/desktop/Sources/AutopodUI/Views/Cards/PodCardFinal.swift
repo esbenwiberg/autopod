@@ -335,7 +335,7 @@ public struct SessionCardFinal: View {
             VStack(spacing: 6) {
                 PodLifecycleRail(pod: pod)
                 HStack {
-                    Text("Autopod · \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label.capitalized)")
+                    Text("Autopod · \(pod.desktopLifecycleLabel)")
                         .lineLimit(1)
                     Spacer(minLength: 2)
                     Text(pod.desktopMilestoneToken ?? "No report").fontDesign(.monospaced)

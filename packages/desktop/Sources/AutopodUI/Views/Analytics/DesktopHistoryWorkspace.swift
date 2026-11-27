@@ -159,7 +159,7 @@ public struct DesktopHistoryWorkspace: View {
                 }.buttonStyle(.plain).font(.callout).foregroundStyle(DesktopTheme.accent)
                 if repositories[pod.id]?.isSnapshot == false { Text("Repository from current profile; snapshot unavailable.").font(.caption2).foregroundStyle(.secondary) }
                 PodLifecycleRail(pod: pod)
-                Text("Autopod lifecycle · \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label)").font(.caption2).foregroundStyle(.secondary)
+                Text("Autopod lifecycle · \(pod.desktopLifecycleLabel)").font(.caption2).foregroundStyle(.secondary)
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 16) {
                     GridRow { fact("Profile", pod.profileLabel); fact("Recorded cost", String(format: "$%.2f", pod.costUsd)) }
                     GridRow { fact("Milestones", pod.desktopMilestoneToken ?? "Not recorded"); fact("Validation attempt", pod.attempts.map { "\($0.current) of \($0.max)" } ?? "Not recorded") }

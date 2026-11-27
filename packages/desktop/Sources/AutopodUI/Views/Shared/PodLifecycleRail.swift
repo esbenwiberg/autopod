@@ -6,11 +6,12 @@ struct PodLifecycleRail: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(pod.desktopLifecycleStages.enumerated()), id: \.offset) { index, stage in
-                Capsule().fill(color(index)).frame(height: 3).help(stage.rawValue)
+                Capsule().fill(color(index)).frame(height: 3)
+                    .help(index == current ? pod.desktopLifecycleLabel : stage.rawValue)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Autopod lifecycle: \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label)")
+        .accessibilityLabel("Autopod lifecycle: \(pod.desktopLifecycleLabel)")
     }
     private func color(_ index: Int) -> Color {
         guard let current else { return DesktopTheme.line }

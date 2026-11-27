@@ -113,14 +113,18 @@ extension Pod {
         guard let phase, phase.total > 0, phase.current >= 0, phase.current <= phase.total else { return nil }
         return "M\(phase.current)/\(phase.total)"
     }
+    var desktopLifecycleLabel: String {
+        if status == .reviewRequired { return status.label.capitalized }
+        return desktopLifecycleStage?.rawValue ?? status.label.capitalized
+    }
     var desktopLifecycleStage: DesktopLifecycleStage? {
         switch status {
         case .queued: .queued
         case .provisioning: .provisioning
         case .running, .paused, .awaitingInput, .handoff: .running
-        case .validating: .validating
+        case .validating, .reviewRequired: .validating
         case .researchReady: .researchReady
-        case .validated, .reviewRequired: .validated
+        case .validated: .validated
         case .approved: .approved
         case .merging, .mergePending: .merging
         case .complete: .complete
