@@ -192,6 +192,37 @@ async function fixture() {
   };
 }
 describe('exact validation-held Docker human controls', () => {
+  it.each([
+    'facts',
+    'pages',
+    'review',
+  ])('refuses unqualified %s execution topology', async (phase) => {
+    const f = await fixture();
+    const result = f.pods.getOrThrow(f.podId).lastValidationResult!;
+    f.db.prepare('UPDATE pods SET last_validation_result=? WHERE id=?').run(
+      JSON.stringify({
+        ...result,
+        infrastructureFailure: { ...result.infrastructureFailure, phase },
+      }),
+      f.podId,
+    );
+    expect(await f.service().inspect(f.podId)).toMatchObject({
+      state: 'blocked',
+      blockers: [{ code: 'UNSUPPORTED_TOPOLOGY' }],
+    });
+    expect(f.stops()).toBe(0);
+  });
+  it('distinguishes an authoritative missing receipt from an uncertain native outcome', async () => {
+    const f = await fixture();
+    expect(() => f.service().receipt(f.podId, 'never-admitted')).toThrowError(
+      expect.objectContaining({ code: 'POD_NOT_FOUND' }),
+    );
+    const request = await f.request();
+    expect(await f.service().submit(f.podId, request, actor)).toMatchObject({ state: 'stopped' });
+    expect(() => f.service().receipt(f.podId, 'wrong-key')).toThrowError(
+      expect.objectContaining({ code: 'RETAINED_CLEANUP_CONFLICT' }),
+    );
+  });
   it('stops legacy execution while retaining the validation fence, then separately discards', async () => {
     const f = await fixture(),
       body = await f.request();

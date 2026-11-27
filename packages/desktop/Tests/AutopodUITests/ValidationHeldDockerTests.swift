@@ -52,4 +52,28 @@ import Testing
     let eligible = try reply("eligible")
     #expect(throws: RetainedCleanupError.self) { try eligible.validate(podId: "different-pod") }
   }
+
+  @Test func missingReceiptAllowsOnlyExplicitSameRequestReconciliation() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var sent: [RetainedFinalizationRequest] = []
+    var actions = ValidationHeldDockerActions()
+    actions.scope = "fixture"; actions.connection = "fixture-daemon"; actions.journalDirectory = directory
+    actions.isCurrent = { true }
+    actions.inspect = { _, key in
+      if key != nil { throw RetainedCleanupError.notFound }
+      return try self.reply("eligible")
+    }
+    actions.submit = { _, request in sent.append(request); throw URLError(.networkConnectionLost) }
+    let model = ValidationHeldDockerModel(podId: "held-fixture", actions: actions)
+    await model.refresh(actions)
+    model.reason = "Stop the exact selected execution and retain evidence"
+    await model.apply(actions)
+    #expect(sent.count == 1)
+    let reopened = ValidationHeldDockerModel(podId: "held-fixture", actions: actions)
+    await reopened.refresh(actions)
+    #expect(reopened.observed && !reopened.canSubmit && sent.count == 1)
+    await reopened.reconcile(actions)
+    #expect(sent.count == 2 && sent[0] == sent[1])
+  }
 }

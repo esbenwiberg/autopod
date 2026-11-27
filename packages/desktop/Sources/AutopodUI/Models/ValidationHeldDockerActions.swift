@@ -61,6 +61,10 @@ public struct ValidationHeldDockerActions: Sendable {
       guard current(actions), !Task.isCancelled else { return }
       try accept(value)
       observed = true
+    } catch RetainedCleanupError.notFound where saved != nil {
+      guard current(actions), !Task.isCancelled else { return }
+      observed = true
+      error = "No receipt is visible for the exact saved key. This does not prove failure. You may explicitly reconcile only the same request as the original operator."
     } catch { self.error = error.localizedDescription }
   }
   func apply(_ actions: ValidationHeldDockerActions) async {

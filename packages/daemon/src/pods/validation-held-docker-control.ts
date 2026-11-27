@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   type OperatorActor,
+  PodNotFoundError,
   type ValidationHeldStopView,
   validationHeldStopRequestSchema,
 } from '@autopod/shared';
@@ -93,7 +94,7 @@ export function createValidationHeldDockerControl(deps: {
     const failure = p.lastValidationResult?.infrastructureFailure;
     if (
       failure?.code !== 'EXEC_EXIT_UNVERIFIED' ||
-      !['setup', 'lint', 'sast', 'build', 'test', 'facts'].includes(failure.phase)
+      !['setup', 'lint', 'sast', 'build', 'test'].includes(failure.phase)
     )
       block(
         'UNSUPPORTED_TOPOLOGY',
@@ -264,6 +265,11 @@ export function createValidationHeldDockerControl(deps: {
       'shared-cache',
       undefined,
       d.pod.branch,
+    ).catch(() =>
+      block(
+        'HOST_PROOF_UNAVAILABLE',
+        'The recorded checkout cannot prove reciprocal physical Git registration and the recorded branch.',
+      ),
     );
     guard();
     qualifyRetainedGit(git);
@@ -314,7 +320,8 @@ export function createValidationHeldDockerControl(deps: {
   }
   function receipt(podId: string, key: string): ValidationHeldStopView {
     const r = ledger.get(podId);
-    if (!r || r.receipt.request.requestKey !== key || !heldDockerEvidence(r.evidence))
+    if (!r) throw new PodNotFoundError(podId);
+    if (r.receipt.request.requestKey !== key || !heldDockerEvidence(r.evidence))
       cleanupConflict('No matching validation-held Stop receipt.');
     return {
       podId,
@@ -416,7 +423,11 @@ export function createValidationHeldDockerControl(deps: {
       }
       if (await docker!.stopped(evidence.targets, guard)) {
         guard();
-        pods.atomically!(() => ledger.terminal(podId, () => ledger.finish(podId, evidence)));
+        pods.atomically!(() =>
+          ledger.terminal(podId, () => {
+            if (ledger.get(podId)?.receipt.state !== 'finalized') ledger.finish(podId, evidence);
+          }),
+        );
       }
       return receipt(podId, request.requestKey);
     } catch (e) {

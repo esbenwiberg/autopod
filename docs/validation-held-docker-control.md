@@ -37,10 +37,11 @@ branches and PRs are not reclaimed. Validation evidence and both receipts remain
 ## Exact limits
 
 Only ordinary automatic local Docker PR/branch tasks at `review_required` with
-`EXEC_EXIT_UNVERIFIED` in an ordinary in-container setup/lint/SAST/build/test/facts
+`EXEC_EXIT_UNVERIFIED` in an ordinary in-container setup/lint/SAST/build/test
 phase are qualified. Azure, Goals, linked/dependent tasks, retained continuations,
 rewrites, recovery forks, external test pipelines, sidecars, unknown host/browser
 or reviewer execution topology and conflicting source/delivery custody block.
+The facts phase is excluded because browser facts may execute on the host.
 
 Legacy qualification does not invent an old validation dispatch. It requires the
 recorded full Docker ID **present on the observed Linux local-socket Engine**,
