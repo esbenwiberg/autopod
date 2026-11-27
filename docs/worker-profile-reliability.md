@@ -23,10 +23,15 @@ source-byte cutoff. In particular, a checkout larger than 64 MiB is not itself
 unverifiable. Ignored installation/build output remains excluded.
 
 This is bounded work, not an unrestricted scan: the 30,000-file and 4 MiB Git
-manifest bounds remain, along with a 12-second in-process deadline and the
-existing 15-second container-exec timeout. Unreadable/nonregular inputs, paths
-escaping the checkout, changing files, timeout or unverified execution still
-fail closed. Symlink target strings are hashed without reading their targets.
+manifest bounds remain, along with a 24-second monotonic read budget within a
+28-second container-exec timeout. Unreadable/nonregular inputs, paths escaping
+the checkout, changing files, timeout or unverified execution still fail closed.
+In `ap execution-provenance <pod> --json`, read `repositoryPreparation.detail`
+with `exitCode`: the latter belongs to the preparation command, not the source
+probe. An exit of zero can coexist with an unverified post-command probe. The
+allowlisted diagnostic distinguishes a probe failure from observed HEAD or
+file-fingerprint changes without exposing filenames or probe output. Symlink
+target strings are hashed without reading their targets.
 Stable source retains the existing fingerprint framing; no receipt migration or
 live preparation-policy override is needed. A source probe alone does not prove
 that preparation or the project's browser/module checks passed.
