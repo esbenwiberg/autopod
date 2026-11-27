@@ -223,6 +223,70 @@ describe('exact validation-held Docker human controls', () => {
       expect.objectContaining({ code: 'RETAINED_CLEANUP_CONFLICT' }),
     );
   });
+  it('qualifies the current exact-dispatch equivalent without settling validation or delivering', async () => {
+    const f = await fixture();
+    const taskId = f.pods.taskExecutions!.snapshot(f.podId).taskId;
+    const binding = {
+      podId: f.podId,
+      taskId,
+      generation: 1,
+      cycle: 1,
+      attempt: 1,
+      admissionId: 'exact-admission',
+      executionTarget: 'local',
+      containerId: f.guest.Id,
+      worktreePath: f.worktree,
+      resourceScope: JSON.stringify(['docker', 'fixture-engine', f.guest.Id]),
+      providerBinding: 'fixture-provider',
+    };
+    f.db
+      .prepare('INSERT INTO validation_dispatches VALUES (?,?,?,?,?,?,?,?)')
+      .run(
+        'exact-dispatch',
+        f.podId,
+        taskId,
+        1,
+        1,
+        'exact-admission',
+        JSON.stringify(binding),
+        new Date().toISOString(),
+      );
+    expect(await f.service().submit(f.podId, await f.request(), actor)).toMatchObject({
+      state: 'stopped',
+    });
+    expect(() => assertValidationMutationSettled(f.pods, f.podId)).toThrow();
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM validation_recovery_intents').get()).toEqual({
+      n: 0,
+    });
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM source_publication_intents').get()).toEqual({
+      n: 0,
+    });
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM delivery_intents').get()).toEqual({ n: 0 });
+    expect(f.stops()).toBe(1);
+    expect(f.removes()).toBe(0);
+  });
+  it('refuses an unresolved durable worker admission even when no in-process worker is active', async () => {
+    const f = await fixture();
+    f.db
+      .prepare(`INSERT INTO task_agent_runs(id,pod_id,generation,cycle,binding,started_at)
+      VALUES (?,?,1,1,?,?)`)
+      .run(
+        'unsettled-worker',
+        f.podId,
+        JSON.stringify({
+          runtime: 'codex',
+          model: 'fixture',
+          providerAccountId: null,
+          resource: { containerId: f.guest.Id, executionTarget: 'local' },
+        }),
+        new Date().toISOString(),
+      );
+    expect(await f.service().inspect(f.podId)).toMatchObject({
+      state: 'blocked',
+      blockers: [{ code: 'NOT_SETTLED' }],
+    });
+    expect(f.stops()).toBe(0);
+  });
   it('stops legacy execution while retaining the validation fence, then separately discards', async () => {
     const f = await fixture(),
       body = await f.request();
